@@ -6,6 +6,8 @@ from typing import Literal
 import numpy as np
 import warp as wp
 
+from .heightmap import FlatGroundFootprint
+from .heightmap import FootprintConfig
 from .heightmap import HeightMapBuilder
 from .heightmap import gaussian_smooth
 from .heightmap import multigrid_inpaint
@@ -101,6 +103,7 @@ class TerrainPipeline:
         outlier: OutlierFilterConfig | RadiusOutlierFilterConfig | None = None,
         traversability: TraversabilityConfig | None = None,
         filter: FilterConfig | None = None,
+        footprint: FootprintConfig | None = None,
         layers: tuple[str, ...] | None = None,
         device: str | wp.context.Device | None = None,
     ):
@@ -165,6 +168,17 @@ class TerrainPipeline:
         elif isinstance(outlier, OutlierFilterConfig):
             self.outlier_filter = StatisticalOutlierFilter(config=outlier, device=self.device)
 
+        self.footprint_stamp: FlatGroundFootprint | None = None
+        if footprint is not None:
+            self.footprint_stamp = FlatGroundFootprint(
+                resolution=resolution,
+                bounds=bounds,
+                height=self.height,
+                width=self.width,
+                config=footprint,
+                device=self.device,
+            )
+
         self.analyzer: GeometricTraversabilityAnalyzer | None = None
         if traversability is not None:
             self.analyzer = GeometricTraversabilityAnalyzer(
@@ -195,7 +209,12 @@ class TerrainPipeline:
                 device=self.device,
             )
 
-    def process(self, points: np.ndarray) -> TerrainMap:
+    def process(
+        self,
+        points: np.ndarray,
+        *,
+        footprint_plane: tuple[float, float, float] | None = None,
+    ) -> TerrainMap:
         if self.z_max is not None:
             points = points[points[:, 2] <= self.z_max]
 
@@ -204,9 +223,13 @@ class TerrainPipeline:
         # without an explicit device= argument would land on Warp's global
         # default, which can differ from self.device.
         with wp.ScopedDevice(self.device):
-            return self._process(points)
+            return self._process(points, footprint_plane)
 
-    def _process(self, points: np.ndarray) -> TerrainMap:
+    def _process(
+        self,
+        points: np.ndarray,
+        footprint_plane: tuple[float, float, float] | None = None,
+    ) -> TerrainMap:
         # Single upload to the active device — every stage below consumes wp.array.
         pts_wp = wp.array(
             np.ascontiguousarray(points, dtype=np.float32), dtype=wp.vec3,
@@ -216,6 +239,13 @@ class TerrainPipeline:
 
         layers = self.builder.build(pts_wp)
         primary_layer = layers[self.primary]  # wp.array
+
+        # Force a flat ground patch under the robot, in-place on the primary
+        # reduction. Done BEFORE the raw_primary snapshot so the footprint reads
+        # as "measured" to the support mask, and before inpaint so the patch acts
+        # as a known boundary.
+        if self.footprint_stamp is not None:
+            self.footprint_stamp.apply(primary_layer, footprint_plane)
 
         # multigrid_inpaint mutates its input buffer. The support mask needs the
         # ORIGINAL NaN-bearing primary to know which cells were really measured,

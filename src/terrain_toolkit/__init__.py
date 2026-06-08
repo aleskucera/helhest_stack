@@ -1,4 +1,6 @@
 from .heightmap import (
+    FlatGroundFootprint,
+    FootprintConfig,
     HeightMapBuilder,
     HeightMapLayers,
     diffuse_inpaint,
@@ -25,6 +27,8 @@ from .traversability import (
 
 __all__ = [
     "FilterConfig",
+    "FlatGroundFootprint",
+    "FootprintConfig",
     "GeometricTraversabilityAnalyzer",
     "HeightMapBuilder",
     "HeightMapLayers",
