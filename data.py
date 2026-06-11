@@ -1,7 +1,7 @@
 """Rosbag loading + sim/real alignment for the kinematic twin.
 
 The remap/sign/align logic is copied (not imported) from
-examples/helhest_junior/replay_real.py to keep this package free of Newton/Axion.
+examples/helhest_junior/replay_real.py to keep this package free of Newton/Ostrich.
 See that file and the project memory for why each reconciliation is needed.
 """
 import pathlib

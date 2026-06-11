@@ -1,7 +1,7 @@
 """Helhest Junior geometry / mass constants for the kinematic simulator.
 
 Values copied from examples/helhest_junior/common.py (HelhestJuniorConfig) so the
-kinematic twin matches the dynamic model without importing Newton/Axion.
+kinematic twin matches the dynamic model without importing Newton/Ostrich.
 
 Body frame: X forward, Y left, Z up. Origin = chassis link origin; wheel hubs lie
 in the Z=0 plane. Wheel order is [left, right, rear] == dynamic-sim DOFs 6,7,8.

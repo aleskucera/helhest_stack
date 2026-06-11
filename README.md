@@ -1,7 +1,7 @@
 # Helhest Junior — kinematic differentiable simulator
 
 A fast, differentiable, **purely kinematic** twin of the Helhest Junior for
-planning. No Newton/Axion, no dynamics. The robot is a rigid tripod:
+planning. No Newton/Ostrich, no dynamics. The robot is a rigid tripod:
 
 - **Controlled DOF** `(x, y, yaw)` — driven by the 3 wheels via no-slip
   differential-drive kinematics, with friction-dependent turning captured by two
@@ -25,7 +25,7 @@ each independently verifiable:
 | 4 | per-cell `mu` field + moment-centroid turning map | uniform→`1+k·mu`/CoM_x; slippery rear turns more; signs correct | ✅ |
 | 5 | implicit gradients (`d/dh`, `d/dmu`, `d/dk`), BPTT | finite-diff check < 1e-2 | ⬜ |
 | 6 | calibration vs rosbags | RMSE ≤ full-physics bar; cross-run | ⬜ |
-| 7 | speed benchmark | orders faster than Axion replay | ⬜ |
+| 7 | speed benchmark | orders faster than Ostrich replay | ⬜ |
 | 8 | planning demo (MPPI / gradient) | reaches goal, avoids high-center | ⬜ |
 
 Geometry/masses are pulled from `examples/helhest_junior/common.py`
