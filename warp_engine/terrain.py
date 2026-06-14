@@ -67,6 +67,31 @@ def sample_height(H: wp.array2d(dtype=wp.float32), g: GridMeta, x: float, y: flo
 
 
 @wp.func
+def sample_height_grad(H: wp.array2d(dtype=wp.float32), g: GridMeta, x: float, y: float):
+    """Bilinear height AND its exact in-cell gradient, from one 4-corner fetch.
+
+    Returns vec3(h, dH/dx, dH/dy). The gradient is the analytic derivative of the
+    bilinear `sample_height` (NOT the wider central-difference of sample_normal),
+    so it is exactly d(sample_height)/d(x,y) -- what the settle Jacobian needs.
+    """
+    fx = (x - g.x0) / g.cell
+    fy = (y - g.y0) / g.cell
+    ix = wp.clamp(int(wp.floor(fx)), 0, g.nx - 2)
+    iy = wp.clamp(int(wp.floor(fy)), 0, g.ny - 2)
+    tx = wp.clamp(fx - float(ix), 0.0, 1.0)
+    ty = wp.clamp(fy - float(iy), 0.0, 1.0)
+    h00 = H[iy, ix]
+    h10 = H[iy, ix + 1]
+    h01 = H[iy + 1, ix]
+    h11 = H[iy + 1, ix + 1]
+    h = ((1.0 - tx) * (1.0 - ty) * h00 + tx * (1.0 - ty) * h10
+         + (1.0 - tx) * ty * h01 + tx * ty * h11)
+    gx = ((1.0 - ty) * (h10 - h00) + ty * (h11 - h01)) / g.cell
+    gy = ((1.0 - tx) * (h01 - h00) + tx * (h11 - h10)) / g.cell
+    return wp.vec3(h, gx, gy)
+
+
+@wp.func
 def sample_normal(H: wp.array2d(dtype=wp.float32), g: GridMeta, x: float, y: float):
     e = g.cell
     dhdx = (sample_height(H, g, x + e, y) - sample_height(H, g, x - e, y)) / (2.0 * e)

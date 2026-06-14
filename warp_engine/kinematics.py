@@ -18,6 +18,7 @@ from .solver import Robot
 from .solver import SolverC
 from .terrain import GridMeta
 from .terrain import sample_height
+from .terrain import sample_height_grad
 from .terrain import sample_normal
 
 # Warp 1.13/1.14 ptxas MISCOMPILES this module's large combined `step` kernel at
@@ -83,25 +84,50 @@ def clearances(H: wp.array2d(dtype=wp.float32), g: GridMeta, robot: Robot,
 @wp.func
 def settle(H: wp.array2d(dtype=wp.float32), g: GridMeta, robot: Robot, sp: SolverC,
            x: float, y: float, yaw: float, u_init: wp.vec3):
-    """Solve (z, pitch, roll). Returns the solved u = vec3(z, pitch, roll)."""
-    eps = 1.0e-6
+    """Solve (z, pitch, roll) with an ANALYTIC 3x3 Newton Jacobian.
+
+    c_i = hub_iz - H(hub_ixy) - R, hub_i = (x,y,z) + Rz Ry Rx wheel_i.
+    dc_i/dz = 1; dc_i/dpitch and dc_i/droll come from dR/dpitch, dR/droll applied
+    to wheel_i, combined with the terrain gradient (gx,gy) at the hub. One
+    euler + one value+grad sample per wheel per iter (vs 4 evals numerically).
+    """
+    cz = wp.cos(yaw)
+    sz = wp.sin(yaw)
+    Rz = wp.mat33(cz, -sz, 0.0, sz, cz, 0.0, 0.0, 0.0, 1.0)
+    w0 = robot.wheel_pos[0]
+    w1 = robot.wheel_pos[1]
+    w2 = robot.wheel_pos[2]
     u = u_init
     for _ in range(sp.newton_iters):
-        c = clearances(H, g, robot, x, y, yaw, u[0], u[1], u[2])
-        # numerical 3x3 Jacobian dc/d(z,pitch,roll), columns = perturbations
-        jz = (clearances(H, g, robot, x, y, yaw, u[0] + eps, u[1], u[2]) - c) / eps
-        jp = (clearances(H, g, robot, x, y, yaw, u[0], u[1] + eps, u[2]) - c) / eps
-        jr = (clearances(H, g, robot, x, y, yaw, u[0], u[1], u[2] + eps) - c) / eps
-        J = wp.mat33(jz[0], jp[0], jr[0],
-                     jz[1], jp[1], jr[1],
-                     jz[2], jp[2], jr[2])
+        cy = wp.cos(u[1])
+        sy = wp.sin(u[1])
+        cx = wp.cos(u[2])
+        sx = wp.sin(u[2])
+        Ry = wp.mat33(cy, 0.0, sy, 0.0, 1.0, 0.0, -sy, 0.0, cy)
+        Rx = wp.mat33(1.0, 0.0, 0.0, 0.0, cx, -sx, 0.0, sx, cx)
+        Rot = Rz * Ry * Rx
+        dRp = Rz * wp.mat33(-sy, 0.0, cy, 0.0, 0.0, 0.0, -cy, 0.0, -sy) * Rx  # d/dpitch
+        dRr = Rz * Ry * wp.mat33(0.0, 0.0, 0.0, 0.0, -sx, -cx, 0.0, cx, -sx)  # d/droll
+        p = wp.vec3(x, y, u[0])
+        hub0 = p + Rot * w0
+        hub1 = p + Rot * w1
+        hub2 = p + Rot * w2
+        s0 = sample_height_grad(H, g, hub0[0], hub0[1])  # (h, gx, gy)
+        s1 = sample_height_grad(H, g, hub1[0], hub1[1])
+        s2 = sample_height_grad(H, g, hub2[0], hub2[1])
+        c = wp.vec3(hub0[2] - s0[0] - robot.wheel_radius,
+                    hub1[2] - s1[0] - robot.wheel_radius,
+                    hub2[2] - s2[0] - robot.wheel_radius)
+        dp0 = dRp * w0; dp1 = dRp * w1; dp2 = dRp * w2
+        dr0 = dRr * w0; dr1 = dRr * w1; dr2 = dRr * w2
+        J = wp.mat33(
+            1.0, dp0[2] - s0[1] * dp0[0] - s0[2] * dp0[1], dr0[2] - s0[1] * dr0[0] - s0[2] * dr0[1],
+            1.0, dp1[2] - s1[1] * dp1[0] - s1[2] * dp1[1], dr1[2] - s1[1] * dr1[0] - s1[2] * dr1[1],
+            1.0, dp2[2] - s2[1] * dp2[0] - s2[2] * dp2[1], dr2[2] - s2[1] * dr2[0] - s2[2] * dr2[1])
         step = solve3(J, c)
-        sz = wp.clamp(step[0], -sp.max_step, sp.max_step)
-        sp_ = wp.clamp(step[1], -sp.max_step, sp.max_step)
-        sr = wp.clamp(step[2], -sp.max_step, sp.max_step)
-        u = wp.vec3(u[0] - sz,
-                    wp.clamp(u[1] - sp_, -sp.tilt_clamp, sp.tilt_clamp),
-                    wp.clamp(u[2] - sr, -sp.tilt_clamp, sp.tilt_clamp))
+        u = wp.vec3(u[0] - wp.clamp(step[0], -sp.max_step, sp.max_step),
+                    wp.clamp(u[1] - wp.clamp(step[1], -sp.max_step, sp.max_step), -sp.tilt_clamp, sp.tilt_clamp),
+                    wp.clamp(u[2] - wp.clamp(step[2], -sp.max_step, sp.max_step), -sp.tilt_clamp, sp.tilt_clamp))
     return u
 
 
@@ -133,37 +159,49 @@ def adj_settle(H: wp.array2d(dtype=wp.float32), g: GridMeta, robot: Robot, sp: S
     With residual c(u*, x, y, yaw, H) = 0 and J = dc/du at u*:
         lambda = J^-T adj_ret
         adj_theta = -(dc/dtheta)^T lambda   for theta in {x, y, yaw, H}
-    J and the pose derivatives are numerical (matching the forward); the H term is
-    the analytic bilinear stencil. d/du_init = 0 (root independent of warm start).
+    Everything analytic (same J as the forward + closed-form pose derivatives from
+    the rotation derivatives and the terrain gradient). d/du_init = 0 (root
+    independent of warm start).
     """
-    e = 1.0e-4
     u = settle(H, g, robot, sp, x, y, yaw, u_init)  # recompute converged u*
-    c = clearances(H, g, robot, x, y, yaw, u[0], u[1], u[2])
-    jz = (clearances(H, g, robot, x, y, yaw, u[0] + e, u[1], u[2]) - c) / e
-    jp = (clearances(H, g, robot, x, y, yaw, u[0], u[1] + e, u[2]) - c) / e
-    jr = (clearances(H, g, robot, x, y, yaw, u[0], u[1], u[2] + e) - c) / e
-    J = wp.mat33(jz[0], jp[0], jr[0],
-                 jz[1], jp[1], jr[1],
-                 jz[2], jp[2], jr[2])
+    cz = wp.cos(yaw); sz = wp.sin(yaw)
+    cy = wp.cos(u[1]); sy = wp.sin(u[1])
+    cx = wp.cos(u[2]); sx = wp.sin(u[2])
+    Rz = wp.mat33(cz, -sz, 0.0, sz, cz, 0.0, 0.0, 0.0, 1.0)
+    Ry = wp.mat33(cy, 0.0, sy, 0.0, 1.0, 0.0, -sy, 0.0, cy)
+    Rx = wp.mat33(1.0, 0.0, 0.0, 0.0, cx, -sx, 0.0, sx, cx)
+    Rot = Rz * Ry * Rx
+    dRp = Rz * wp.mat33(-sy, 0.0, cy, 0.0, 0.0, 0.0, -cy, 0.0, -sy) * Rx
+    dRr = Rz * Ry * wp.mat33(0.0, 0.0, 0.0, 0.0, -sx, -cx, 0.0, cx, -sx)
+    dRyaw = wp.mat33(-sz, -cz, 0.0, cz, -sz, 0.0, 0.0, 0.0, 0.0) * Ry * Rx
+    w0 = robot.wheel_pos[0]; w1 = robot.wheel_pos[1]; w2 = robot.wheel_pos[2]
+    p = wp.vec3(x, y, u[0])
+    hub0 = p + Rot * w0; hub1 = p + Rot * w1; hub2 = p + Rot * w2
+    s0 = sample_height_grad(H, g, hub0[0], hub0[1])  # (h, gx, gy)
+    s1 = sample_height_grad(H, g, hub1[0], hub1[1])
+    s2 = sample_height_grad(H, g, hub2[0], hub2[1])
+
+    dp0 = dRp * w0; dp1 = dRp * w1; dp2 = dRp * w2
+    dr0 = dRr * w0; dr1 = dRr * w1; dr2 = dRr * w2
+    J = wp.mat33(
+        1.0, dp0[2] - s0[1] * dp0[0] - s0[2] * dp0[1], dr0[2] - s0[1] * dr0[0] - s0[2] * dr0[1],
+        1.0, dp1[2] - s1[1] * dp1[0] - s1[2] * dp1[1], dr1[2] - s1[1] * dr1[0] - s1[2] * dr1[1],
+        1.0, dp2[2] - s2[1] * dp2[0] - s2[2] * dp2[1], dr2[2] - s2[1] * dr2[0] - s2[2] * dr2[1])
     lam = solve3(wp.transpose(J), adj_ret)
 
-    # pose adjoints: -(dc/dtheta) . lambda  (numerical dc/dtheta)
-    cx = (clearances(H, g, robot, x + e, y, yaw, u[0], u[1], u[2]) - c) / e
-    cy = (clearances(H, g, robot, x, y + e, yaw, u[0], u[1], u[2]) - c) / e
-    cw = (clearances(H, g, robot, x, y, yaw + e, u[0], u[1], u[2]) - c) / e
-    wp.adjoint[x] += -wp.dot(cx, lam)
-    wp.adjoint[y] += -wp.dot(cy, lam)
-    wp.adjoint[yaw] += -wp.dot(cw, lam)
+    # pose adjoints: adj_x = sum gx_i lam_i, adj_y = sum gy_i lam_i (since dc_i/dx = -gx_i)
+    wp.adjoint[x] += s0[1] * lam[0] + s1[1] * lam[1] + s2[1] * lam[2]
+    wp.adjoint[y] += s0[2] * lam[0] + s1[2] * lam[1] + s2[2] * lam[2]
+    dy0 = dRyaw * w0; dy1 = dRyaw * w1; dy2 = dRyaw * w2
+    cw0 = dy0[2] - s0[1] * dy0[0] - s0[2] * dy0[1]
+    cw1 = dy1[2] - s1[1] * dy1[0] - s1[2] * dy1[1]
+    cw2 = dy2[2] - s2[1] * dy2[0] - s2[2] * dy2[1]
+    wp.adjoint[yaw] += -(cw0 * lam[0] + cw1 * lam[1] + cw2 * lam[2])
 
     # H adjoint: adj_H[node] += lambda_i * (stencil of hub_i)  (per wheel)
-    R = euler_zyx(yaw, u[1], u[2])
-    p = wp.vec3(x, y, u[0])
-    h0 = p + R * robot.wheel_pos[0]
-    h1 = p + R * robot.wheel_pos[1]
-    h2 = p + R * robot.wheel_pos[2]
-    _scatter_h(wp.adjoint[H], g, h0[0], h0[1], lam[0])
-    _scatter_h(wp.adjoint[H], g, h1[0], h1[1], lam[1])
-    _scatter_h(wp.adjoint[H], g, h2[0], h2[1], lam[2])
+    _scatter_h(wp.adjoint[H], g, hub0[0], hub0[1], lam[0])
+    _scatter_h(wp.adjoint[H], g, hub1[0], hub1[1], lam[1])
+    _scatter_h(wp.adjoint[H], g, hub2[0], hub2[1], lam[2])
 
 
 @wp.func
