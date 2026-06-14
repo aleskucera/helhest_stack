@@ -328,7 +328,7 @@ def step(t: int,
 
 
 def rollout_device(scene, mu_field, setpoints, init_pose, params,
-                   robot_params=None, device="cpu", resid_tol=1e-2):
+                   robot_params=None, device="cpu", resid_tol=1e-2, clear_margin=0.0):
     """Single-rollout (B=1) device rollout. Returns numpy logs to match the oracle."""
     from .. import heightmap as hmmod
     from .solver import RobotParams
@@ -361,7 +361,7 @@ def rollout_device(scene, mu_field, setpoints, init_pose, params,
                   inputs=[t, te.H, tr.H, te.g, tm.H, tm.g, robot, sp, omega],
                   outputs=[planar, tilt, loads, turn, clear, resid], device=device)
     clear_np, resid_np = clear.numpy()[:, 0], resid.numpy()[:, 0]
-    bad = (clear_np < 0.0) | (resid_np > resid_tol)
+    bad = (clear_np < clear_margin) | (resid_np > resid_tol)
     return {
         "planar": planar.numpy()[:, 0, :], "tilt": tilt.numpy()[:, 0, :],
         "loads": loads.numpy()[:, 0, :], "turn": turn.numpy()[:, 0, :],
