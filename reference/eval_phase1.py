@@ -12,8 +12,8 @@ import pathlib
 
 import numpy as np
 
-from . import data
-from . import heightmap
+from .. import data
+from .. import heightmap
 from . import rollout
 
 

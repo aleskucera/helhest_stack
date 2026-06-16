@@ -19,7 +19,7 @@ import numpy as np
 
 from . import friction
 from . import heightmap as hmmod
-from . import state as stmod
+from .reference import state as stmod
 from .model import WHEEL_POS
 from .model import WHEEL_RADIUS
 

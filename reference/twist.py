@@ -15,8 +15,8 @@ Conventions: body X fwd, Y left, yaw CCW+. Arrays may carry a leading batch dim.
 """
 import numpy as np
 
-from .model import HALF_TRACK
-from .model import WHEEL_RADIUS
+from ..model import HALF_TRACK
+from ..model import WHEEL_RADIUS
 
 
 def wheel_twist(omega, alpha=1.0, x_icr=0.0, R=WHEEL_RADIUS, b=HALF_TRACK):

@@ -5,8 +5,8 @@ applies the physics step for each recorded wheel-speed command.
 """
 import numpy as np
 
-from .model import HALF_TRACK
-from .model import WHEEL_RADIUS
+from ..model import HALF_TRACK
+from ..model import WHEEL_RADIUS
 
 
 def rollout_terrain(setpoints, dt, hm, alpha=1.0, x_icr=0.0, init_pose=(0.0, 0.0, 0.0),
@@ -31,7 +31,7 @@ def rollout_terrain(setpoints, dt, hm, alpha=1.0, x_icr=0.0, init_pose=(0.0, 0.0
     alpha [T], x_icr [T], pitch/roll/residual [T]; plus scalars
     valid (bool) and first_high_center (int). Single rollout (no batch).
     """
-    from . import heightmap as _hm
+    from .. import heightmap as _hm
     from . import state as _state
     setpoints = np.asarray(setpoints, dtype=np.float64)
     T = setpoints.shape[0]

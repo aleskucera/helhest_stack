@@ -11,14 +11,14 @@ Run:  python -m kinematic_helhest.eval_phase4
 """
 import numpy as np
 
-from . import data
-from . import friction
-from . import heightmap
-from . import placement
+from .. import data
+from .. import friction
+from .. import heightmap
+from .. import placement
 from . import rollout
 from . import turning
-from .model import COM
-from .model import GRAVITY
+from ..model import COM
+from ..model import GRAVITY
 
 
 def _flat_loads():

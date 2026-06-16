@@ -488,7 +488,7 @@ def _selftest_loads():
 def _selftest_step():
     from .. import friction
     from .. import heightmap as hmmod
-    from .. import rollout as rollout_np
+    from ..reference import rollout as rollout_np
     from .solver import SolverParams
 
     wp.init()

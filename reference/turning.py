@@ -14,9 +14,9 @@ finding), and pulls x_ICR toward the front axle (rear kicks out).
 """
 import numpy as np
 
-from .model import GRAVITY
-from .model import MASS
-from .model import WHEEL_X
+from ..model import GRAVITY
+from ..model import MASS
+from ..model import WHEEL_X
 
 
 def turning_params(mu, N, k, wheel_x=WHEEL_X, mass=MASS, g=GRAVITY):

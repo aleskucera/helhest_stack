@@ -18,11 +18,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import placement
+from .. import placement
 from . import turning
 from . import twist
-from .model import HALF_TRACK
-from .model import WHEEL_RADIUS
+from ..model import HALF_TRACK
+from ..model import WHEEL_RADIUS
 
 
 @dataclass

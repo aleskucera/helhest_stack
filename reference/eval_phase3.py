@@ -14,11 +14,11 @@ Run:  python -m kinematic_helhest.eval_phase3
 """
 import numpy as np
 
-from . import data
-from . import heightmap
-from . import placement
+from .. import data
+from .. import heightmap
+from .. import placement
 from . import rollout
-from .model import WHEEL_RADIUS
+from ..model import WHEEL_RADIUS
 
 
 def check_box_benign():
