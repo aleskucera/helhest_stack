@@ -9,58 +9,17 @@ No gradients -- pure forward sampling. The validity flags (high-center /
 infeasible settle, with the tunable resid_tol / clear_margin / tilt_clamp) are
 what steer the robot around the wall.
 
-Demo:  python -m kinematic_helhest.mppi [--device cuda] [--out plan.png]
+Demo:  python -m kinematic_helhest.planning.mppi [--device cuda] [--out plan.png]
 """
 import argparse
 
 import numpy as np
-import warp as wp
 
-from . import friction
-from . import heightmap as hmmod
-from .drive import demo_terrain
-from .warp_engine.kinematics import init_state
-from .warp_engine.kinematics import step as wstep
-from .warp_engine.solver import RobotParams
-from .warp_engine.solver import SolverParams
-from .warp_engine.terrain import to_terrain
-
-
-class BatchRollout:
-    """Persistent device buffers for B rollouts of horizon T on a fixed scene."""
-
-    def __init__(self, scene, mu, B, T, params, device="cuda", robot_params=None):
-        wp.init()
-        rp = robot_params or RobotParams()
-        self.robot = rp.build(device)
-        self.sp = params.build()
-        Rw = rp.wheel_radius
-        self.te = to_terrain(hmmod.wheel_envelope(scene, Rw), device)
-        self.tr = to_terrain(scene, device)
-        self.tm = to_terrain(mu, device)
-        self.B, self.T, self.dev = B, T, device
-        self.planar = wp.zeros((T + 1, B), dtype=wp.vec3, device=device)
-        self.tilt = wp.zeros((T + 1, B), dtype=wp.vec3, device=device)
-        self.loads = wp.zeros((T, B), dtype=wp.vec3, device=device)
-        self.turn = wp.zeros((T, B), dtype=wp.vec2, device=device)
-        self.clear = wp.zeros((T, B), dtype=float, device=device)
-        self.resid = wp.zeros((T, B), dtype=float, device=device)
-
-    def rollout(self, omega_np, init_pose):
-        """omega_np [T, B, 3], init_pose (x,y,yaw) shared by all rollouts.
-        Returns planar [T+1, B, 3], clear [T, B], resid [T, B] (numpy)."""
-        B, T, dev = self.B, self.T, self.dev
-        omega = wp.array(np.ascontiguousarray(omega_np, np.float32), dtype=wp.vec3, device=dev)
-        pose0 = wp.array(np.tile(np.asarray(init_pose, np.float32), (B, 1)), dtype=wp.vec3, device=dev)
-        wp.launch(init_state, B, inputs=[self.te.H, self.te.g, self.robot, self.sp, pose0],
-                  outputs=[self.planar, self.tilt], device=dev)
-        for t in range(T):
-            wp.launch(wstep, B,
-                      inputs=[t, self.te.H, self.tr.H, self.te.g, self.tm.H, self.tm.g,
-                              self.robot, self.sp, omega],
-                      outputs=[self.planar, self.tilt, self.loads, self.turn, self.clear, self.resid],
-                      device=dev)
-        return self.planar.numpy(), self.clear.numpy(), self.resid.numpy()
+from .. import friction
+from .. import heightmap as hmmod
+from ..engine import RobotParams
+from ..engine import Simulator
+from ..engine import SolverParams
 
 
 def _to_omega(Ub):
@@ -70,14 +29,28 @@ def _to_omega(Ub):
     return np.concatenate([bt, rear], axis=2).astype(np.float32)
 
 
-def _cost(planar, clear, resid, Ub, goal, clear_margin, resid_tol, w):
-    """Per-rollout cost [B]. goal [2]."""
+def _cost(planar, tilt, clear, resid, Ub, goal, clear_margin, resid_tol, w):
+    """Per-rollout cost [B]. goal [2]. `tilt` is [T+1, B, 3] = (z, pitch, roll).
+
+    `w["tilt"]` (optional) penalizes the robot's total tilt from vertical along the
+    rollout — the traversability term. The settle gives the true body pitch/roll for
+    each candidate trajectory, so this is trajectory-aware (a diagonal slope crossing
+    rolls differently than a straight climb), not a static per-cell terrain slope.
+    """
     xy = planar[:, :, :2]                                  # [T+1, B, 2]
     d = np.linalg.norm(xy - goal[None, None, :], axis=2)   # [T+1, B]
     invalid = (clear < clear_margin).any(0) | (resid > resid_tol).any(0)  # [B]
     eff = (Ub ** 2).sum((1, 2))
     smooth = (np.diff(Ub, axis=1) ** 2).sum((1, 2))
     J = w["term"] * d[-1] ** 2 + w["run"] * (d ** 2).mean(0) + w["eff"] * eff + w["smooth"] * smooth
+    if w.get("tilt", 0.0) > 0.0:
+        # total tilt from vertical: angle of body-z off world-z = arccos(cos p cos r)
+        cpr = np.cos(tilt[:, :, 1]) * np.cos(tilt[:, :, 2])
+        ang = np.arccos(np.clip(cpr, -1.0, 1.0))          # [T+1, B] radians
+        # deadzone: tilt below `tilt_free` is free (drivable ramps), so the robot
+        # still climbs gentle slopes to reach a goal; only steep tilt is penalized.
+        over = np.maximum(ang - w.get("tilt_free", 0.0), 0.0)
+        J = J + w["tilt"] * (over ** 2).mean(0)
     return J + invalid.astype(np.float64) * w["invalid"], invalid
 
 
@@ -85,7 +58,7 @@ def plan(scene, mu, start, goal, T=70, B=2048, n_refine=3, max_steps=260, dt=0.0
          sigma=2.5, lam=0.5, wmax=4.0, goal_tol=0.3, resid_tol=1e-2, clear_margin=0.05,
          device="cuda", seed=0, weights=None, record=False, n_show=60):
     params = SolverParams(dt=dt, k_turn=2.0, newton_iters=12)
-    br = BatchRollout(scene, mu, B, T, params, device=device)
+    sim = Simulator.for_scene(RobotParams(), params, scene, mu, B, T, device=device)
     w = weights or dict(term=3.0, run=0.3, invalid=1e5, eff=2e-3, smooth=2e-3)
     goal = np.asarray(goal[:2], np.float64)
     rng = np.random.default_rng(seed)
@@ -105,15 +78,15 @@ def plan(scene, mu, start, goal, T=70, B=2048, n_refine=3, max_steps=260, dt=0.0
             eps = rng.normal(0.0, sigma, (B, T, 2)).astype(np.float32)
             eps[0] = 0.0                          # keep the nominal as a sample
             Ub = np.clip(U[None] + eps, -wmax, wmax)
-            planar, clear, resid = br.rollout(_to_omega(Ub), state)
-            J, _ = _cost(planar, clear, resid, Ub, goal, clear_margin, resid_tol, w)
+            planar, tilt, clear, resid = sim.rollout(_to_omega(Ub), state)
+            J, _ = _cost(planar, tilt, clear, resid, Ub, goal, clear_margin, resid_tol, w)
             beta = np.exp(-(J - J.min()) / lam)
             beta /= beta.sum()
             U = np.clip(np.einsum("b,btc->tc", beta, Ub), -wmax, wmax).astype(np.float32)
             samp = planar[:, idx, :2].copy()      # last refine's fan [T+1, n_show, 2]
             badstep = ((clear[:, idx] < clear_margin) | (resid[:, idx] > resid_tol)).copy()  # [T, n_show]
         # execute first control: roll the nominal out and take the step-1 pose
-        planar, clear, resid = br.rollout(_to_omega(np.tile(U, (B, 1, 1))), state)
+        planar, _, _, _ = sim.rollout(_to_omega(np.tile(U, (B, 1, 1))), state)
         if record:
             frames.append({"state": state.copy(), "samples": samp,
                            "stepbad": badstep, "chosen": planar[:, 0, :2].copy()})
@@ -192,7 +165,7 @@ def main():
     ap.add_argument("--animate", action="store_true", help="save a GIF of the planning")
     args = ap.parse_args()
 
-    scene = demo_terrain()
+    scene = hmmod.demo_terrain()
     mu = friction.uniform(0.8, xlim=(-3.0, 10.0), ylim=(-4.0, 4.0), cell=0.06)
     start = np.array([0.0, 0.0, 0.0], np.float32)
     goal = np.array([args.gx, args.gy], np.float64)

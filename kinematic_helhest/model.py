@@ -41,6 +41,22 @@ COM = (_MASSES[:, :3] * _MASSES[:, 3:4]).sum(0) / MASS   # body-frame CoM (x≈-
 # (Phase 2+), where a nonzero CoM_z can be set if the data demands it.
 
 
+def euler_zyx(yaw, pitch, roll):
+    """Rotation matrix R = Rz(yaw) @ Ry(pitch) @ Rx(roll)  (Z-Y-X intrinsic).
+
+    Pitch nose-up is negative (rotation about +Y tilts +X toward -Z). Shared by
+    the numpy reference (placement) and the viewers; the Warp engine has its own
+    `wp.func` version in engine/step.py.
+    """
+    cz, sz = np.cos(yaw), np.sin(yaw)
+    cy, sy = np.cos(pitch), np.sin(pitch)
+    cx, sx = np.cos(roll), np.sin(roll)
+    Rz = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]])
+    Ry = np.array([[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]])
+    Rx = np.array([[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]])
+    return Rz @ Ry @ Rx
+
+
 def chassis_sample_points(nx=3, ny=3):
     """Bottom-face sample grid of the two chassis boxes, body frame [Np, 3].
 

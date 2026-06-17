@@ -14,16 +14,16 @@ bilinear-stencil scatter into Henv.grad. No Newton, no max on the tape.
 import numpy as np
 import warp as wp
 
-from .kinematics import clearances
-from .kinematics import settle
-from .solver import Robot
-from .solver import SolverC
-from .terrain import GridMeta
-from .terrain import sample_height
+from kinematic_helhest.engine import clearances
+from kinematic_helhest.engine import settle
+from kinematic_helhest.engine import Robot
+from kinematic_helhest.engine import Solver
+from kinematic_helhest.engine import Grid
+from kinematic_helhest.engine import sample_height
 
 
 @wp.kernel
-def _settle_only(Henv: wp.array2d(dtype=wp.float32), g: GridMeta, robot: Robot, sp: SolverC,
+def _settle_only(Henv: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot, sp: Solver,
                  pose: wp.array(dtype=wp.vec3), u_out: wp.array(dtype=wp.vec3)):
     tid = wp.tid()
     x = pose[tid][0]
@@ -34,7 +34,7 @@ def _settle_only(Henv: wp.array2d(dtype=wp.float32), g: GridMeta, robot: Robot, 
 
 
 @wp.kernel
-def _settle_jac(Henv: wp.array2d(dtype=wp.float32), g: GridMeta, robot: Robot,
+def _settle_jac(Henv: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot,
                 pose: wp.array(dtype=wp.vec3), u_star: wp.array(dtype=wp.vec3),
                 eps: float, Jout: wp.array(dtype=wp.mat33)):
     tid = wp.tid()
@@ -60,7 +60,7 @@ def _solve_jt(Jin: wp.array(dtype=wp.mat33), adj_u: wp.array(dtype=wp.vec3),
 
 
 @wp.kernel
-def _residual(Henv: wp.array2d(dtype=wp.float32), g: GridMeta, robot: Robot,
+def _residual(Henv: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot,
               pose: wp.array(dtype=wp.vec3), u_star: wp.array(dtype=wp.vec3),
               c: wp.array(dtype=wp.vec3)):
     tid = wp.tid()
@@ -73,8 +73,8 @@ def _residual(Henv: wp.array2d(dtype=wp.float32), g: GridMeta, robot: Robot,
 
 def dsettle_dHenv(env_hm, poses, adj_u, params, jac_eps=1e-4, device="cpu"):
     """Implicit grad d(sum_p adj_u_p . u*_p)/dHenv. Returns (grad_Henv, u_star)."""
-    from .solver import RobotParams
-    from .terrain import to_terrain
+    from kinematic_helhest.engine import RobotParams
+    from kinematic_helhest.engine import to_terrain
 
     te = to_terrain(env_hm, device, requires_grad=True)
     robot = RobotParams().build(device)
@@ -84,9 +84,9 @@ def dsettle_dHenv(env_hm, poses, adj_u, params, jac_eps=1e-4, device="cpu"):
 
     # forward settle (detached) + Jacobian + transpose solve
     u_star = wp.zeros(B, dtype=wp.vec3, device=device)
-    wp.launch(_settle_only, B, inputs=[te.H, te.g, robot, sp, pose, u_star], device=device)
+    wp.launch(_settle_only, B, inputs=[te.elevation, te.g, robot, sp, pose, u_star], device=device)
     J = wp.zeros(B, dtype=wp.mat33, device=device)
-    wp.launch(_settle_jac, B, inputs=[te.H, te.g, robot, pose, u_star, float(jac_eps), J],
+    wp.launch(_settle_jac, B, inputs=[te.elevation, te.g, robot, pose, u_star, float(jac_eps), J],
               device=device)
     adj = wp.array(np.asarray(adj_u, np.float32), dtype=wp.vec3, device=device)
     minus_lam = wp.zeros(B, dtype=wp.vec3, device=device)
@@ -96,18 +96,18 @@ def dsettle_dHenv(env_hm, poses, adj_u, params, jac_eps=1e-4, device="cpu"):
     c = wp.zeros(B, dtype=wp.vec3, device=device, requires_grad=True)
     tape = wp.Tape()
     with tape:
-        wp.launch(_residual, B, inputs=[te.H, te.g, robot, pose, u_star], outputs=[c],
+        wp.launch(_residual, B, inputs=[te.elevation, te.g, robot, pose, u_star], outputs=[c],
                   device=device)
     tape.backward(grads={c: minus_lam})
-    return te.H.grad.numpy(), u_star.numpy()
+    return te.elevation.grad.numpy(), u_star.numpy()
 
 
 def _selftest():
     """Implicit d/dHenv vs finite differences (numpy settle oracle), on the
     nonzero (contact) cells only."""
-    from .. import heightmap as hmmod
-    from .. import placement
-    from .solver import SolverParams
+    from kinematic_helhest import heightmap as hmmod
+    from kinematic_helhest.reference import placement
+    from kinematic_helhest.engine import SolverParams
 
     wp.init()
     params = SolverParams(newton_iters=12)
@@ -137,8 +137,8 @@ def _selftest():
 
 
 def _fd_loss(env, poses, adj_u, i, j, delta):
-    from .. import heightmap as hmmod
-    from .. import placement
+    from kinematic_helhest import heightmap as hmmod
+    from kinematic_helhest.reference import placement
 
     Hp = env.H.copy()
     Hp[i, j] += delta
@@ -159,8 +159,8 @@ def _row_loss(planar: wp.array2d(dtype=wp.vec3), tilt: wp.array2d(dtype=wp.vec3)
 
 
 def _gmeta(hm):
-    from .terrain import GridMeta
-    g = GridMeta()
+    from kinematic_helhest.engine import Grid
+    g = Grid()
     g.x0, g.y0, g.cell = float(hm.x0), float(hm.y0), float(hm.cell)
     g.nx, g.ny = int(hm.nx), int(hm.ny)
     return g
@@ -169,7 +169,7 @@ def _gmeta(hm):
 def _fwd(envH, rawH, muH, g, gmu, robot, sp, omega_np, init_pose, wpv, wtv, grad=False):
     """Forward init + T steps + loss on the FINAL state (B=1). If grad, taped
     backward -> (loss, gHenv, gHmu). T inferred from omega_np."""
-    from .kinematics import init_state, step
+    from kinematic_helhest.engine import init_state, step
 
     dev = "cpu"
     T = omega_np.shape[0]
@@ -206,9 +206,9 @@ def _fwd(envH, rawH, muH, g, gmu, robot, sp, omega_np, init_pose, wpv, wtv, grad
 
 def _selftest_step_grad():
     """One full step on the tape: d(loss)/dHenv and d(loss)/dHmu vs finite diff."""
-    from .. import friction
-    from .. import heightmap as hmmod
-    from .solver import RobotParams, SolverParams
+    from kinematic_helhest import friction
+    from kinematic_helhest import heightmap as hmmod
+    from kinematic_helhest.engine import RobotParams, SolverParams
 
     wp.init()
     scene = hmmod.flat()
@@ -256,8 +256,8 @@ def _fd_grid(envH, rawH, muH, g, gmu, robot, sp, omega_np, init_pose, wpv, wtv, 
 def _fwd_h(rawH, muH, g, gmu, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, grad=False):
     """Like _fwd but the leaf is the RAW heightmap: Henv = wheel_envelope(rawH) is
     computed on the tape, so backward yields d(loss)/d(raw h)."""
-    from .envelope import wheel_envelope
-    from .kinematics import init_state, step
+    from kinematic_helhest.engine.envelope import wheel_envelope
+    from kinematic_helhest.engine import init_state, step
 
     dev = "cpu"
     T = omega_np.shape[0]
@@ -294,9 +294,9 @@ def _fwd_h(rawH, muH, g, gmu, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, 
 
 def _selftest_dh():
     """End-to-end d(loss)/d(raw h) through the envelope dilation + rollout vs FD."""
-    from .. import friction
-    from .. import heightmap as hmmod
-    from .solver import RobotParams, SolverParams
+    from kinematic_helhest import friction
+    from kinematic_helhest import heightmap as hmmod
+    from kinematic_helhest.engine import RobotParams, SolverParams
 
     wp.init()
     T, R = 8, 0.35
@@ -342,7 +342,7 @@ def _fd_cells(rawH, muH, g_an, which, eps, fwd):
 def _fwd_batch(envH, rawH, muH, g, gmu, robot, sp, omega_np, poses, wpv, wtv, grad=False):
     """Batched (B>1) forward init + T steps + summed loss over all rollouts.
     omega_np: [T, B, 3]; poses: [B, 3]. Grads accumulate into shared Henv/Hmu."""
-    from .kinematics import init_state, step
+    from kinematic_helhest.engine import init_state, step
 
     dev = "cpu"
     T, B = omega_np.shape[0], omega_np.shape[1]
@@ -379,9 +379,9 @@ def _fwd_batch(envH, rawH, muH, g, gmu, robot, sp, omega_np, poses, wpv, wtv, gr
 
 def _selftest_batch():
     """Batched B rollouts == sum of B solo rollouts (forward loss + grads)."""
-    from .. import friction
-    from .. import heightmap as hmmod
-    from .solver import RobotParams, SolverParams
+    from kinematic_helhest import friction
+    from kinematic_helhest import heightmap as hmmod
+    from kinematic_helhest.engine import RobotParams, SolverParams
 
     wp.init()
     T, B = 5, 4
@@ -423,9 +423,9 @@ def _selftest_batch():
 
 def _selftest_bptt():
     """BPTT over a T-step rollout: d(loss on final state)/dHenv,dHmu vs finite diff."""
-    from .. import friction
-    from .. import heightmap as hmmod
-    from .solver import RobotParams, SolverParams
+    from kinematic_helhest import friction
+    from kinematic_helhest import heightmap as hmmod
+    from kinematic_helhest.engine import RobotParams, SolverParams
 
     wp.init()
     T = 8

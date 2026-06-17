@@ -1,3 +1,9 @@
+"""Robot model: geometry + mass, host params and the device-side `Robot` struct.
+
+`RobotParams` (host dataclass, what you tune) builds into `Robot` (a `@wp.struct`
+of read-only constants passed into the kernels). The numpy geometry/mass also live
+in the top-level `model.py` for the reference/viz paths; these are the device twin.
+"""
 from dataclasses import dataclass
 
 import numpy as np
@@ -71,58 +77,3 @@ class RobotParams:  # host-side robot knobs — what you nudge
             for sy in np.linspace(-1, 1, self.chassis_ny)
         ]
         return np.array(pts, np.float32)
-
-
-@wp.struct
-class SolverC:
-    """Device-side settle/integration numerics. All scalars -> safe as a struct.
-
-    `k_turn` (the friction->alpha turning gain) rides along here as a non-diff
-    scalar; promote it to a plain length-1 array only if d/dk is ever needed.
-    """
-
-    newton_iters: wp.int32
-    max_step: wp.float32
-    tilt_clamp: wp.float32
-    dt: wp.float32
-    k_turn: wp.float32
-
-
-@dataclass
-class SolverParams:  # settle/integration numerics — tuning, separate from the robot
-    dt: float = 0.05
-    newton_iters: int = 8
-    max_step: float = 0.2
-    tilt_clamp: float = 1.2
-    k_turn: float = 2.0
-
-    def build(self) -> SolverC:
-        s = SolverC()
-        s.newton_iters = self.newton_iters
-        s.max_step = self.max_step
-        s.tilt_clamp = self.tilt_clamp
-        s.dt = self.dt
-        s.k_turn = self.k_turn
-        return s
-
-
-class Solver:
-    def __init__(
-        self, robot: RobotParams, params: SolverParams = SolverParams(), device="cuda"
-    ) -> None:
-        self.robot = robot.build(device)  # device Robot struct
-        self.solver = params.build()  # device SolverC struct
-        self.p = params  # host params (dt etc. for host-side loops)
-        self.device = device
-
-
-class State:
-    def __init__(self) -> None:
-        self.q: wp.array | None = None  # (x, y, z, roll, pitch, yaw)
-
-        self.contacts: wp.array | None = None  # contacts
-        self.normals: wp.array | None = None  # contact normals
-        self.loads: wp.array | None = None  # contact normal loads [3]
-
-        self.chassis_clearance: wp.float32 | None = None  # Chassis clearance vs raw terrain
-        self.valid: bool | None = None  # not hight-centered (chassis clears)

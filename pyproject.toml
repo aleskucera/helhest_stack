@@ -14,6 +14,11 @@ dependencies = [
 viz = ["matplotlib>=3.8", "glfw>=2.6", "PyOpenGL>=3.1", "pillow>=10.0"]
 # Rosbag loading for calibration / eval (reference/eval_phase*, data.py).
 data = ["h5py>=3.0"]
+# Real perception source for the rolling planner (planning/navigate.py --perception).
+perception = ["terrain-toolkit"]
+
+[tool.uv.sources]
+terrain-toolkit = { path = "../terrain_toolkit", editable = true }
 
 [build-system]
 requires = ["hatchling"]

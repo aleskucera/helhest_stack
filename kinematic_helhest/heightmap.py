@@ -123,6 +123,22 @@ def ramp_scene(angle_deg=11.3, length=5.0, xlim=(-2.0, 8.0), ylim=(-3.0, 3.0), c
     return Heightmap(H, (xlim[0], ylim[0]), cell)
 
 
+def demo_terrain(cell=0.06):
+    """Flat ground with a curb, a wall, a ramp+plateau, and a smooth hill.
+
+    The interactive-viewer scene (drive into the wall and the robot turns red on
+    the infeasible settle). Lives here with the other scene builders.
+    """
+    xlim, ylim = (-3.0, 10.0), (-4.0, 4.0)
+    XX, YY = _grid(xlim, ylim, cell)
+    H = np.zeros_like(XX)
+    H[(np.abs(XX - 1.3) <= 0.35) & (np.abs(YY) <= 1.0)] = 0.12        # curb
+    H[(np.abs(XX - 2.2) <= 0.15) & (np.abs(YY) <= 1.0)] = 1.0         # wall: drive straight in -> robot turns red (infeasible settle)
+    H += np.clip(XX - 3.0, 0.0, 3.0) / 3.0 * 0.5                       # ramp+plateau
+    H += 0.6 * np.exp(-((XX - 8.0) ** 2 + (YY + 2.0) ** 2) / (2 * 1.2 ** 2))  # hill
+    return Heightmap(H, (xlim[0], ylim[0]), cell)
+
+
 if __name__ == "__main__":
     # Phase-0 smoke test: height under a wheel matches the analytic scene.
     hm = box_scene()

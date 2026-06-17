@@ -21,3 +21,19 @@ def with_strip(base, low, ywidth=0.18):
     ys = base.y0 + np.arange(base.ny) * base.cell
     fm.H[np.abs(ys) < ywidth, :] = float(low)
     return fm
+
+
+def uniform_mu_device(g, value, device="cpu"):
+    """Device mu grid (uniform `value`) sharing the terrain's Grid `g`.
+
+    The runtime default friction field: a flat mu on the same grid as the
+    heightmap, so it samples with the terrain's Grid directly. Per-cell
+    calibrated mu replaces it later (Phase 6). Warp is imported lazily so this
+    module stays usable without Warp on the numpy reference path.
+    """
+    import warp as wp
+
+    from .engine.terrain import Terrain
+
+    H = wp.full((int(g.ny), int(g.nx)), float(value), dtype=wp.float32, device=device)
+    return Terrain(H, g)

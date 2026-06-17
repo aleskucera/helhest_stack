@@ -8,8 +8,8 @@ or wedge into the wall.
 
 Keys:  I fwd  K back  J left  L right   ESC/Q quit ; mouse orbit, scroll zoom.
 
-Run:        python -m kinematic_helhest.follow [--device cuda] [--gx 4 --gy 1.5]
-Shot test:  python -m kinematic_helhest.follow --shot /tmp/follow.png
+Run:        python -m kinematic_helhest.viz.follow [--device cuda] [--gx 4 --gy 1.5]
+Shot test:  python -m kinematic_helhest.viz.follow --shot /tmp/follow.png
 """
 import argparse
 import time
@@ -17,22 +17,22 @@ import time
 import numpy as np
 import warp as wp
 
-from . import friction
-from . import heightmap as hmmod
-from .drive import DT
-from .drive import WIN_H
-from .drive import WIN_W
-from .drive import _commands
-from .drive import _init_gl
-from .drive import _render
-from .drive import build_robot
-from .drive import build_terrain
-from .drive import demo_terrain
-from .drive_warp import WarpDriver
-from .mppi import BatchRollout
-from .mppi import _cost
-from .mppi import _to_omega
-from .warp_engine.solver import SolverParams
+from .. import friction
+from .. import heightmap as hmmod
+from ..engine import RobotParams
+from ..engine import Simulator
+from ..engine import SolverParams
+from ..planning.mppi import _cost
+from ..planning.mppi import _to_omega
+from .drive import WarpDriver
+from .render import DT
+from .render import WIN_H
+from .render import WIN_W
+from .render import _commands
+from .render import _init_gl
+from .render import _render
+from .render import build_robot
+from .render import build_terrain
 
 
 class Planner:
@@ -41,7 +41,7 @@ class Planner:
     def __init__(self, scene, mu, goal, device="cpu", T=90, B=1024, n_refine=3,
                  sigma=2.5, lam=0.5, wmax=4.0, clear_margin=0.05, resid_tol=1e-2, seed=0):
         params = SolverParams(dt=DT, k_turn=2.0, newton_iters=12)
-        self.br = BatchRollout(scene, mu, B, T, params, device=device)
+        self.sim = Simulator.for_scene(RobotParams(), params, scene, mu, B, T, device=device)
         self.scene, self.goal = scene, np.asarray(goal[:2], np.float64)
         self.T, self.B, self.n_refine = T, B, n_refine
         self.sigma, self.lam, self.wmax = sigma, lam, wmax
@@ -57,12 +57,12 @@ class Planner:
             eps = self.rng.normal(0.0, self.sigma, (B, T, 2)).astype(np.float32)
             eps[0] = 0.0
             Ub = np.clip(self.U[None] + eps, -self.wmax, self.wmax)
-            planar, clear, resid = self.br.rollout(_to_omega(Ub), state)
-            J, _ = _cost(planar, clear, resid, Ub, self.goal, self.cm, self.rt, self.w)
+            planar, tilt, clear, resid = self.sim.rollout(_to_omega(Ub), state)
+            J, _ = _cost(planar, tilt, clear, resid, Ub, self.goal, self.cm, self.rt, self.w)
             beta = np.exp(-(J - J.min()) / self.lam)
             beta /= beta.sum()
             self.U = np.clip(np.einsum("b,btc->tc", beta, Ub), -self.wmax, self.wmax).astype(np.float32)
-        planar, _, _ = self.br.rollout(_to_omega(np.tile(self.U, (B, 1, 1))), state)
+        planar, _, _, _ = self.sim.rollout(_to_omega(np.tile(self.U, (B, 1, 1))), state)
         return planar[:, 0, :2].copy()
 
 
@@ -101,7 +101,7 @@ def run(shot=None, device="cpu", goal=(4.0, 1.5), replan_every=4, record=None):
     import glfw
     from OpenGL import GL as gl
 
-    hm = demo_terrain()
+    hm = hmmod.demo_terrain()
     mu = friction.uniform(0.8, xlim=(-3.0, 10.0), ylim=(-4.0, 4.0), cell=0.06)
     drv = WarpDriver(hm, mu, init_pose=(0.0, 0.0, 0.0), device=device)
     planner = Planner(hm, mu, goal, device=device)

@@ -16,7 +16,7 @@ import numpy as np
 
 from .. import data
 from .. import heightmap
-from .. import placement
+from . import placement
 from . import rollout
 from ..model import WHEEL_RADIUS
 
