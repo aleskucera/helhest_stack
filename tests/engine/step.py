@@ -20,7 +20,7 @@ from kinematic_helhest.engine import Solver
 from kinematic_helhest.engine import SolverParams
 from kinematic_helhest.engine import step
 from kinematic_helhest.engine.step import chassis_clearance
-from kinematic_helhest.engine.step import euler_zyx
+from kinematic_helhest.engine.rotations import euler_zyx
 from kinematic_helhest.engine.step import normal_loads
 from kinematic_helhest.reference import placement
 from kinematic_helhest.reference import rollout as rollout_np
