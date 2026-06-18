@@ -49,7 +49,8 @@ class Solver:
     scalar; promote it to a plain length-1 array only if d/dk is ever needed.
     """
 
-    newton_iters: wp.int32
+    newton_iters: wp.int32  # max Newton iterations (cap)
+    atol: wp.float32  # stop early once |residual| < atol
     max_step: wp.vec3  # per-iter Newton cap (z[m], pitch[rad], roll[rad])
     tilt_clamp: wp.float32
     dt: wp.float32
@@ -60,6 +61,7 @@ class Solver:
 class SolverParams:  # settle/integration numerics — tuning, separate from the robot
     dt: float = 0.05
     newton_iters: int = 8
+    atol: float = 1e-6  # stop the settle early once |residual| < atol
     max_step: tuple = (0.1, 0.2, 0.2)  # per-iter Newton cap (z[m], pitch[rad], roll[rad])
     tilt_clamp: float = 1.2
     k_turn: float = 2.0
@@ -67,6 +69,7 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     def build(self) -> Solver:
         s = Solver()
         s.newton_iters = self.newton_iters
+        s.atol = self.atol
         s.max_step = wp.vec3(self.max_step[0], self.max_step[1], self.max_step[2])
         s.tilt_clamp = self.tilt_clamp
         s.dt = self.dt
@@ -151,6 +154,8 @@ def settle(
             J[st_i, 1] = dp[2] - gx * dp[0] - gy * dp[1]
             J[st_i, 2] = dr[2] - gx * dr[0] - gy * dr[1]
 
+        if wp.dot(res, res) < sp.atol * sp.atol:
+            break  # converged: the current derived is the root (skip the rest)
         delta = solve3(J, res)  # Newton step: J @ delta = res
         # damped Newton step on every DOF...
         for i in range(wp.static(3)):
