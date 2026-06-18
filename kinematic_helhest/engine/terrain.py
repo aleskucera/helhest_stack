@@ -21,11 +21,11 @@ class GridParams:
     origin_y: float
 
     def build(self) -> Grid:
-        g = Grid()
-        g.cells_x, g.cells_y = int(self.cells_x), int(self.cells_y)
-        g.cell_size = float(self.cell_size)
-        g.origin_x, g.origin_y = float(self.origin_x), float(self.origin_y)
-        return g
+        grid = Grid()
+        grid.cells_x, grid.cells_y = int(self.cells_x), int(self.cells_y)
+        grid.cell_size = float(self.cell_size)
+        grid.origin_x, grid.origin_y = float(self.origin_x), float(self.origin_y)
+        return grid
 
 
 @wp.struct
@@ -39,15 +39,15 @@ class _Cell:
 
 
 @wp.func
-def _locate(g: Grid, x: wp.float32, y: wp.float32):
+def _locate(grid: Grid, x: wp.float32, y: wp.float32):
     """World (x, y) -> bilinear stencil. The ONE place the cell-center mapping
     `(x - origin)/cell_size - 0.5` lives -- shared by sample_height, its analytic
     gradient, and the d/dH adjoint scatter so the convention can never drift."""
-    fx = (x - g.origin_x) / g.cell_size - 0.5
-    fy = (y - g.origin_y) / g.cell_size - 0.5
+    fx = (x - grid.origin_x) / grid.cell_size - 0.5
+    fy = (y - grid.origin_y) / grid.cell_size - 0.5
     c = _Cell()
-    c.x_idx = wp.clamp(int(wp.floor(fx)), 0, g.cells_x - 2)
-    c.y_idx = wp.clamp(int(wp.floor(fy)), 0, g.cells_y - 2)
+    c.x_idx = wp.clamp(int(wp.floor(fx)), 0, grid.cells_x - 2)
+    c.y_idx = wp.clamp(int(wp.floor(fy)), 0, grid.cells_y - 2)
     c.frac_x = wp.clamp(fx - float(c.x_idx), 0.0, 1.0)
     c.frac_y = wp.clamp(fy - float(c.y_idx), 0.0, 1.0)
     return c

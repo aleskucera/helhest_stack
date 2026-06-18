@@ -65,13 +65,13 @@ class Planner:
             eps = self.rng.normal(0.0, self.sigma, (B, T, 2)).astype(np.float32)
             eps[0] = 0.0
             Ub = np.clip(self.U[None] + eps, -self.wmax, self.wmax)
-            planar, tilt, clear, resid = self.sim.rollout(_to_omega(Ub), state)
-            J, _ = _cost(planar, tilt, clear, resid, Ub, self.goal, self.cm, self.rt, self.w)
+            controlled, derived, clear, resid = self.sim.rollout(_to_omega(Ub), state)
+            J, _ = _cost(controlled, derived, clear, resid, Ub, self.goal, self.cm, self.rt, self.w)
             beta = np.exp(-(J - J.min()) / self.lam)
             beta /= beta.sum()
             self.U = np.clip(np.einsum("b,btc->tc", beta, Ub), -self.wmax, self.wmax).astype(np.float32)
-        planar, _, _, _ = self.sim.rollout(_to_omega(np.tile(self.U, (B, 1, 1))), state)
-        return planar[:, 0, :2].copy()
+        controlled, _, _, _ = self.sim.rollout(_to_omega(np.tile(self.U, (B, 1, 1))), state)
+        return controlled[:, 0, :2].copy()
 
 
 def _draw_plan(plan_xy, scene, goal):

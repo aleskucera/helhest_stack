@@ -48,23 +48,23 @@ class WarpDriver:
         self.sim.set_friction(mu)
 
         # frame 0: settle at the start pose (zero control)
-        planar, tilt, _, _ = self.sim.rollout(np.zeros((1, 1, 3), np.float32), init_pose)
-        self.planar = planar[0, 0].copy()  # (x, y, yaw)
-        self.tilt = tilt[0, 0].copy()       # (z, pitch, roll)
+        controlled, derived, _, _ = self.sim.rollout(np.zeros((1, 1, 3), np.float32), init_pose)
+        self.controlled = controlled[0, 0].copy()  # (x, y, yaw)
+        self.derived = derived[0, 0].copy()       # (z, pitch, roll)
         self.clear, self.alpha, self.resid = 1.0, 1.0, 0.0
 
     def step(self, omega3):
         omega = np.asarray(omega3, np.float32).reshape(1, 1, 3)
-        planar, tilt, clear, resid = self.sim.rollout(omega, self.planar)
-        self.planar = planar[1, 0].copy()
-        self.tilt = tilt[1, 0].copy()
+        controlled, derived, clear, resid = self.sim.rollout(omega, self.controlled)
+        self.controlled = controlled[1, 0].copy()
+        self.derived = derived[1, 0].copy()
         self.clear = float(clear[0, 0])
         self.resid = float(resid[0, 0])
         self.alpha = float(self.sim.turning.numpy()[0, 0][0])
 
     def render_state(self):
-        x, y, yaw = (float(v) for v in self.planar)
-        z, pitch, roll = (float(v) for v in self.tilt)
+        x, y, yaw = (float(v) for v in self.controlled)
+        z, pitch, roll = (float(v) for v in self.derived)
         R = euler_zyx(yaw, pitch, roll)
         valid = self.clear >= self.clear_margin and self.resid < self.resid_tol
         return SimpleNamespace(
@@ -157,7 +157,7 @@ def main():
     ap.add_argument("--device", default="cpu", help="warp device: cpu or cuda")
     ap.add_argument("--resid-tol", type=float, default=1e-2, help="settle residual above which the pose is invalid (lower = stricter)")
     ap.add_argument("--clear-margin", type=float, default=0.0, help="min belly-terrain gap [m] (higher = stricter)")
-    ap.add_argument("--tilt-clamp", type=float, default=1.2, help="max settle tilt [rad] (lower = refuses steeper slopes)")
+    ap.add_argument("--derived-clamp", type=float, default=1.2, help="max settle derived [rad] (lower = refuses steeper slopes)")
     args = ap.parse_args()
     run(shot=args.shot, device=args.device, resid_tol=args.resid_tol,
         clear_margin=args.clear_margin, tilt_clamp=args.tilt_clamp)

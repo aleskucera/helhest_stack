@@ -59,8 +59,8 @@ class Simulator:
             self._cap = wp.zeros((ny, nx), dtype=wp.float32)
 
             # rollout buffers + control inputs, allocated ONCE.
-            self.planar = wp.zeros((T + 1, B), dtype=wp.vec3f)
-            self.tilt = wp.zeros((T + 1, B), dtype=wp.vec3f)
+            self.controlled = wp.zeros((T + 1, B), dtype=wp.vec3f)
+            self.derived = wp.zeros((T + 1, B), dtype=wp.vec3f)
             self.loads = wp.zeros((T, B), dtype=wp.vec3f)
             self.turning = wp.zeros((T, B), dtype=wp.vec2f)
             self.clearance = wp.zeros((T, B), dtype=wp.float32)
@@ -111,7 +111,7 @@ class Simulator:
 
     def rollout(self, omega_np, init_pose):
         """omega_np [T, B, 3], init_pose (x,y,yaw) shared by all rollouts. Returns
-        planar [T+1,B,3] (x,y,yaw), tilt [T+1,B,3] (z,pitch,roll), clear/resid [T,B]."""
+        controlled [T+1,B,3] (x,y,yaw), derived [T+1,B,3] (z,pitch,roll), clear/resid [T,B]."""
         self.omega.assign(np.ascontiguousarray(omega_np, np.float32))
         self.start_pose.assign(
             np.ascontiguousarray(
@@ -123,7 +123,7 @@ class Simulator:
             init_state,
             self.B,
             inputs=[self.envelope, self.grid, self.robot, self.solver, self.start_pose],
-            outputs=[self.planar, self.tilt],
+            outputs=[self.controlled, self.derived],
             device=self.device,
         )
 
@@ -143,8 +143,8 @@ class Simulator:
                     self.omega,
                 ],
                 outputs=[
-                    self.planar,
-                    self.tilt,
+                    self.controlled,
+                    self.derived,
                     self.loads,
                     self.turning,
                     self.clearance,
@@ -152,4 +152,4 @@ class Simulator:
                 ],
                 device=self.device,
             )
-        return self.planar.numpy(), self.tilt.numpy(), self.clearance.numpy(), self.residual.numpy()
+        return self.controlled.numpy(), self.derived.numpy(), self.clearance.numpy(), self.residual.numpy()

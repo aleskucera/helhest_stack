@@ -9,13 +9,14 @@ Arg convention (Option 2): the differentiated grids (height, friction) are plain
 `Grid` (terrain.py), `Robot` (robot.py), `Solver` (this module).
 
 State across timesteps is two vec3s (avoids the length-6 spatial_vector type):
-planar = (x, y, yaw) controlled DOF; tilt = (z, pitch, roll) derived DOF.
+controlled = (x, y, yaw) the wheel-driven DOF; derived = (z, pitch, roll) the terrain-settled DOF.
 """
 from dataclasses import dataclass
 
 import numpy as np
 import warp as wp
 
+from .linalg import solve3
 from .robot import Robot
 from .rotations import drot_x
 from .rotations import drot_y
@@ -74,44 +75,9 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
 
 
 @wp.func
-def solve3(A: wp.mat33, b: wp.vec3):
-    """Solve A x = b (3x3) via cofactors.
-
-    Used instead of wp.inverse: Warp 1.13 miscompiles wp.inverse(mat33) on CUDA
-    when two inverse call sites share a kernel (e.g. settle + normal_loads),
-    causing illegal memory access. An explicit solve has a single code path.
-    """
-    a = A[0, 0]
-    b1 = A[0, 1]
-    c1 = A[0, 2]
-    d = A[1, 0]
-    e = A[1, 1]
-    f = A[1, 2]
-    g = A[2, 0]
-    h = A[2, 1]
-    i = A[2, 2]
-    c00 = e * i - f * h
-    c01 = -(d * i - f * g)
-    c02 = d * h - e * g
-    det = a * c00 + b1 * c01 + c1 * c02
-    inv = 1.0 / det
-    c10 = -(b1 * i - c1 * h)
-    c11 = a * i - c1 * g
-    c12 = -(a * h - b1 * g)
-    c20 = b1 * f - c1 * e
-    c21 = -(a * f - c1 * d)
-    c22 = a * e - b1 * d
-    return wp.vec3(
-        (c00 * b[0] + c10 * b[1] + c20 * b[2]) * inv,
-        (c01 * b[0] + c11 * b[1] + c21 * b[2]) * inv,
-        (c02 * b[0] + c12 * b[1] + c22 * b[2]) * inv,
-    )
-
-
-@wp.func
 def clearances(
-    elevation: wp.array2d(dtype=wp.float32),
-    g: Grid,
+    envelope: wp.array2d(dtype=wp.float32),
+    grid: Grid,
     robot: Robot,
     x: float,
     y: float,
@@ -120,54 +86,58 @@ def clearances(
     pitch: float,
     roll: float,
 ):
-    """Signed wheel clearances c_i = hub_z - H_env(hub_xy) - R for the 3 wheels."""
+    """Signed wheel clearances c_i = hub_z - H_env(hub_xy) - r_wheel for the 3 wheels."""
     R = euler_zyx(yaw, pitch, roll)
     p = wp.vec3(x, y, z)
-    h0 = p + R * robot.wheel_pos[0]
-    h1 = p + R * robot.wheel_pos[1]
-    h2 = p + R * robot.wheel_pos[2]
-    c0 = h0[2] - sample_height(elevation, g, h0[0], h0[1]) - robot.wheel_radius
-    c1 = h1[2] - sample_height(elevation, g, h1[0], h1[1]) - robot.wheel_radius
-    c2 = h2[2] - sample_height(elevation, g, h2[0], h2[1]) - robot.wheel_radius
-    return wp.vec3(c0, c1, c2)
+
+    c = wp.vec3()
+    for i in range(wp.static(3)):
+        st_i = wp.static(i)
+        wheel_center = p + R * robot.wheel_pos[st_i]
+        height = sample_height(envelope, grid, wheel_center[0], wheel_center[1])
+        c[st_i] = wheel_center[2] - height - robot.wheel_radius
+
+    return c
 
 
 @wp.func
 def settle(
-    elevation: wp.array2d(dtype=wp.float32),
-    g: Grid,
+    envelope: wp.array2d(dtype=wp.float32),
+    grid: Grid,
     robot: Robot,
     sp: Solver,
-    x: float,
-    y: float,
-    yaw: float,
-    u_init: wp.vec3,
+    controlled: wp.vec3,
+    derived_init: wp.vec3,
 ):
     """Solve (z, pitch, roll) with an ANALYTIC 3x3 Newton Jacobian.
 
-    c_i = hub_iz - elevation(hub_ixy) - R, hub_i = (x,y,z) + Rz Ry Rx wheel_i.
+    `controlled` = (x, y, yaw) the fixed planar pose; solve `derived` = (z, pitch, roll).
+    c_i = hub_iz - envelope(hub_ixy) - R, hub_i = (x,y,z) + Rz Ry Rx wheel_i.
     dc_i/dz = 1; dc_i/dpitch and dc_i/droll come from dR/dpitch, dR/droll applied
     to wheel_i, combined with the terrain gradient (gx,gy) at the hub. One
     euler + one value+grad sample per wheel per iter (vs 4 evals numerically).
     """
+    x = controlled[0]
+    y = controlled[1]
+    yaw = controlled[2]
     Rz = rot_z(yaw)
     w0 = robot.wheel_pos[0]
     w1 = robot.wheel_pos[1]
     w2 = robot.wheel_pos[2]
-    u = u_init
+    derived = derived_init
     for _ in range(sp.newton_iters):
-        Ry = rot_y(u[1])
-        Rx = rot_x(u[2])
+        Ry = rot_y(derived[1])
+        Rx = rot_x(derived[2])
         Rot = Rz * Ry * Rx
-        dRp = Rz * drot_y(u[1]) * Rx  # d(Rot)/dpitch
-        dRr = Rz * Ry * drot_x(u[2])  # d(Rot)/droll
-        p = wp.vec3(x, y, u[0])
+        dRp = Rz * drot_y(derived[1]) * Rx  # d(Rot)/dpitch
+        dRr = Rz * Ry * drot_x(derived[2])  # d(Rot)/droll
+        p = wp.vec3(x, y, derived[0])
         hub0 = p + Rot * w0
         hub1 = p + Rot * w1
         hub2 = p + Rot * w2
-        s0 = sample_height_grad(elevation, g, hub0[0], hub0[1])  # (h, gx, gy)
-        s1 = sample_height_grad(elevation, g, hub1[0], hub1[1])
-        s2 = sample_height_grad(elevation, g, hub2[0], hub2[1])
+        s0 = sample_height_grad(envelope, grid, hub0[0], hub0[1])  # (h, gx, gy)
+        s1 = sample_height_grad(envelope, grid, hub1[0], hub1[1])
+        s2 = sample_height_grad(envelope, grid, hub2[0], hub2[1])
         c = wp.vec3(
             hub0[2] - s0[0] - robot.wheel_radius,
             hub1[2] - s1[0] - robot.wheel_radius,
@@ -191,74 +161,75 @@ def settle(
             dr2[2] - s2[1] * dr2[0] - s2[2] * dr2[1],
         )
         step = solve3(J, c)
-        u = wp.vec3(
-            u[0] - wp.clamp(step[0], -sp.max_step, sp.max_step),
+        derived = wp.vec3(
+            derived[0] - wp.clamp(step[0], -sp.max_step, sp.max_step),
             wp.clamp(
-                u[1] - wp.clamp(step[1], -sp.max_step, sp.max_step), -sp.tilt_clamp, sp.tilt_clamp
+                derived[1] - wp.clamp(step[1], -sp.max_step, sp.max_step), -sp.tilt_clamp, sp.tilt_clamp
             ),
             wp.clamp(
-                u[2] - wp.clamp(step[2], -sp.max_step, sp.max_step), -sp.tilt_clamp, sp.tilt_clamp
+                derived[2] - wp.clamp(step[2], -sp.max_step, sp.max_step), -sp.tilt_clamp, sp.tilt_clamp
             ),
         )
-    return u
+    return derived
 
 
 @wp.func
 def _scatter_h(
-    adj_elevation: wp.array2d(dtype=wp.float32), g: Grid, x: float, y: float, coef: float
+    adj_envelope: wp.array2d(dtype=wp.float32), grid: Grid, x: float, y: float, coef: float
 ):
-    """Accumulate coef * (bilinear weights of (x,y)) into the elevation adjoint array.
+    """Accumulate coef * (bilinear weights of (x,y)) into the envelope adjoint array.
 
     This is d(sample_height)/dH at (x,y): the same 4-node stencil sample_height
     reads (via the shared `_locate`), scattered with atomics (many output cells may
     hit the same node).
     """
-    c = _locate(g, x, y)
-    wp.atomic_add(adj_elevation, c.y_idx, c.x_idx, coef * (1.0 - c.frac_x) * (1.0 - c.frac_y))
-    wp.atomic_add(adj_elevation, c.y_idx, c.x_idx + 1, coef * c.frac_x * (1.0 - c.frac_y))
-    wp.atomic_add(adj_elevation, c.y_idx + 1, c.x_idx, coef * (1.0 - c.frac_x) * c.frac_y)
-    wp.atomic_add(adj_elevation, c.y_idx + 1, c.x_idx + 1, coef * c.frac_x * c.frac_y)
+    c = _locate(grid, x, y)
+    wp.atomic_add(adj_envelope, c.y_idx, c.x_idx, coef * (1.0 - c.frac_x) * (1.0 - c.frac_y))
+    wp.atomic_add(adj_envelope, c.y_idx, c.x_idx + 1, coef * c.frac_x * (1.0 - c.frac_y))
+    wp.atomic_add(adj_envelope, c.y_idx + 1, c.x_idx, coef * (1.0 - c.frac_x) * c.frac_y)
+    wp.atomic_add(adj_envelope, c.y_idx + 1, c.x_idx + 1, coef * c.frac_x * c.frac_y)
 
 
 @wp.func_grad(settle)
 def adj_settle(
-    elevation: wp.array2d(dtype=wp.float32),
-    g: Grid,
+    envelope: wp.array2d(dtype=wp.float32),
+    grid: Grid,
     robot: Robot,
     sp: Solver,
-    x: float,
-    y: float,
-    yaw: float,
-    u_init: wp.vec3,
+    controlled: wp.vec3,
+    derived_init: wp.vec3,
     adj_ret: wp.vec3,
 ):
-    """Implicit (IFT) adjoint of the settle. adj_ret = cotangent on u*.
+    """Implicit (IFT) adjoint of the settle. adj_ret = cotangent on the settled `derived`.
 
-    With residual c(u*, x, y, yaw, elevation) = 0 and J = dc/du at u*:
+    With residual c(derived, controlled, envelope) = 0 and J = dc/d(derived) at the root:
         lambda = J^-T adj_ret
-        adj_theta = -(dc/dtheta)^T lambda   for theta in {x, y, yaw, elevation}
+        adj_theta = -(dc/dtheta)^T lambda   for theta in {controlled, envelope}
     Everything analytic (same J as the forward + closed-form pose derivatives from
-    the rotation derivatives and the terrain gradient). d/du_init = 0 (root
+    the rotation derivatives and the terrain gradient). d/d(derived_init) = 0 (root
     independent of warm start).
     """
-    u = settle(elevation, g, robot, sp, x, y, yaw, u_init)  # recompute converged u*
+    x = controlled[0]
+    y = controlled[1]
+    yaw = controlled[2]
+    derived = settle(envelope, grid, robot, sp, controlled, derived_init)  # recompute the converged derived
     Rz = rot_z(yaw)
-    Ry = rot_y(u[1])
-    Rx = rot_x(u[2])
+    Ry = rot_y(derived[1])
+    Rx = rot_x(derived[2])
     Rot = Rz * Ry * Rx
-    dRp = Rz * drot_y(u[1]) * Rx
-    dRr = Rz * Ry * drot_x(u[2])
+    dRp = Rz * drot_y(derived[1]) * Rx
+    dRr = Rz * Ry * drot_x(derived[2])
     dRyaw = drot_z(yaw) * Ry * Rx
     w0 = robot.wheel_pos[0]
     w1 = robot.wheel_pos[1]
     w2 = robot.wheel_pos[2]
-    p = wp.vec3(x, y, u[0])
+    p = wp.vec3(x, y, derived[0])
     hub0 = p + Rot * w0
     hub1 = p + Rot * w1
     hub2 = p + Rot * w2
-    s0 = sample_height_grad(elevation, g, hub0[0], hub0[1])  # (h, gx, gy)
-    s1 = sample_height_grad(elevation, g, hub1[0], hub1[1])
-    s2 = sample_height_grad(elevation, g, hub2[0], hub2[1])
+    s0 = sample_height_grad(envelope, grid, hub0[0], hub0[1])  # (h, gx, gy)
+    s1 = sample_height_grad(envelope, grid, hub1[0], hub1[1])
+    s2 = sample_height_grad(envelope, grid, hub2[0], hub2[1])
 
     dp0 = dRp * w0
     dp1 = dRp * w1
@@ -279,40 +250,41 @@ def adj_settle(
     )
     lam = solve3(wp.transpose(J), adj_ret)
 
-    # pose adjoints: adj_x = sum gx_i lam_i, adj_y = sum gy_i lam_i (since dc_i/dx = -gx_i)
-    wp.adjoint[x] += s0[1] * lam[0] + s1[1] * lam[1] + s2[1] * lam[2]
-    wp.adjoint[y] += s0[2] * lam[0] + s1[2] * lam[1] + s2[2] * lam[2]
+    # pose adjoints w.r.t. controlled = (x, y, yaw); dc_i/dx = -gx_i, dc_i/dy = -gy_i
+    adj_x = s0[1] * lam[0] + s1[1] * lam[1] + s2[1] * lam[2]
+    adj_y = s0[2] * lam[0] + s1[2] * lam[1] + s2[2] * lam[2]
     dy0 = dRyaw * w0
     dy1 = dRyaw * w1
     dy2 = dRyaw * w2
     cw0 = dy0[2] - s0[1] * dy0[0] - s0[2] * dy0[1]
     cw1 = dy1[2] - s1[1] * dy1[0] - s1[2] * dy1[1]
     cw2 = dy2[2] - s2[1] * dy2[0] - s2[2] * dy2[1]
-    wp.adjoint[yaw] += -(cw0 * lam[0] + cw1 * lam[1] + cw2 * lam[2])
+    adj_yaw = -(cw0 * lam[0] + cw1 * lam[1] + cw2 * lam[2])
+    wp.adjoint[controlled] += wp.vec3(adj_x, adj_y, adj_yaw)
 
-    # elevation adjoint: adj_H[node] += lambda_i * (stencil of hub_i)  (per wheel)
-    _scatter_h(wp.adjoint[elevation], g, hub0[0], hub0[1], lam[0])
-    _scatter_h(wp.adjoint[elevation], g, hub1[0], hub1[1], lam[1])
-    _scatter_h(wp.adjoint[elevation], g, hub2[0], hub2[1], lam[2])
+    # envelope adjoint: adj_H[node] += lambda_i * (stencil of hub_i)  (per wheel)
+    _scatter_h(wp.adjoint[envelope], grid, hub0[0], hub0[1], lam[0])
+    _scatter_h(wp.adjoint[envelope], grid, hub1[0], hub1[1], lam[1])
+    _scatter_h(wp.adjoint[envelope], grid, hub2[0], hub2[1], lam[2])
 
 
 @wp.func
 def normal_loads(
-    elevation: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot, R: wp.mat33, p: wp.vec3
+    envelope: wp.array2d(dtype=wp.float32), grid: Grid, robot: Robot, R: wp.mat33, p: wp.vec3
 ):
     """Quasi-static contact normal loads N_i from gravity (3x3 force/torque solve).
 
     Row 0: vertical force balance Sum N_i n_iz = m g.
     Rows 1-2: horizontal torque balance about the CoM. Returns N = vec3(N0,N1,N2).
-    `elevation` is the wheel-envelope grid (same surface the contacts sit on).
+    `envelope` is the wheel-envelope grid (same surface the contacts sit on).
     """
     com_world = p + R * robot.com
     hub0 = p + R * robot.wheel_pos[0]
     hub1 = p + R * robot.wheel_pos[1]
     hub2 = p + R * robot.wheel_pos[2]
-    n0 = sample_normal(elevation, g, hub0[0], hub0[1])
-    n1 = sample_normal(elevation, g, hub1[0], hub1[1])
-    n2 = sample_normal(elevation, g, hub2[0], hub2[1])
+    n0 = sample_normal(envelope, grid, hub0[0], hub0[1])
+    n1 = sample_normal(envelope, grid, hub1[0], hub1[1])
+    n2 = sample_normal(envelope, grid, hub2[0], hub2[1])
     r0 = (hub0 - robot.wheel_radius * n0) - com_world
     r1 = (hub1 - robot.wheel_radius * n1) - com_world
     r2 = (hub2 - robot.wheel_radius * n2) - com_world
@@ -326,7 +298,7 @@ def normal_loads(
 
 @wp.func
 def chassis_clearance(
-    elevation: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot, R: wp.mat33, p: wp.vec3
+    elevation: wp.array2d(dtype=wp.float32), grid: Grid, robot: Robot, R: wp.mat33, p: wp.vec3
 ):
     """Min signed clearance of the chassis bottom-face points above RAW terrain.
 
@@ -335,7 +307,7 @@ def chassis_clearance(
     cmin = float(1.0e9)
     for i in range(robot.n_chassis):
         w = p + R * robot.chassis_pts[i]
-        c = w[2] - sample_height(elevation, g, w[0], w[1])
+        c = w[2] - sample_height(elevation, grid, w[0], w[1])
         cmin = wp.min(cmin, c)
     return cmin
 
@@ -345,20 +317,20 @@ def chassis_clearance(
 # ----------------------------------------------------------------------------
 @wp.kernel
 def init_state(
-    elevation: wp.array2d(dtype=wp.float32),
-    g: Grid,
+    envelope: wp.array2d(dtype=wp.float32),
+    grid: Grid,
     robot: Robot,
     sp: Solver,
     pose: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw)
-    planar: wp.array2d(dtype=wp.vec3),  # [T+1, B] -> writes row 0
-    tilt: wp.array2d(dtype=wp.vec3),
+    controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] -> writes row 0
+    derived: wp.array2d(dtype=wp.vec3),
 ):  # [T+1, B] -> writes row 0
     tid = wp.tid()
     pc = pose[tid]
-    z0 = sample_height(elevation, g, pc[0], pc[1]) + robot.wheel_radius
-    u = settle(elevation, g, robot, sp, pc[0], pc[1], pc[2], wp.vec3(z0, 0.0, 0.0))
-    planar[0, tid] = pc
-    tilt[0, tid] = u  # (z, pitch, roll)
+    z0 = sample_height(envelope, grid, pc[0], pc[1]) + robot.wheel_radius
+    settled = settle(envelope, grid, robot, sp, pc, wp.vec3(z0, 0.0, 0.0))
+    controlled[0, tid] = pc
+    derived[0, tid] = settled  # (z, pitch, roll)
 
 
 @wp.kernel
@@ -366,22 +338,22 @@ def step(
     t: int,
     envelope: wp.array2d(dtype=wp.float32),
     elevation: wp.array2d(dtype=wp.float32),
-    g: Grid,
+    grid: Grid,
     friction: wp.array2d(dtype=wp.float32),
-    gmu: Grid,
+    grid_mu: Grid,
     robot: Robot,
     sp: Solver,
     omega: wp.array2d(dtype=wp.vec3),  # [T, B] (wL, wR, w_rear)
-    planar: wp.array2d(dtype=wp.vec3),  # [T+1, B] (x, y, yaw)
-    tilt: wp.array2d(dtype=wp.vec3),  # [T+1, B] (z, pitch, roll)
+    controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] (x, y, yaw)
+    derived: wp.array2d(dtype=wp.vec3),  # [T+1, B] (z, pitch, roll)
     loads_out: wp.array2d(dtype=wp.vec3),  # [T, B] N_i of the NEW state
     turn_out: wp.array2d(dtype=wp.vec2),  # [T, B] (alpha, x_icr) used this step
     clear_out: wp.array2d(dtype=float),  # [T, B] belly clearance of the NEW state
     resid_out: wp.array2d(dtype=float),
 ):  # [T, B] settle residual (max|c|) of NEW state
     tid = wp.tid()
-    pc = planar[t, tid]
-    tc = tilt[t, tid]
+    pc = controlled[t, tid]
+    tc = derived[t, tid]
     x = pc[0]
     y = pc[1]
     yaw = pc[2]
@@ -389,19 +361,19 @@ def step(
     p = wp.vec3(x, y, tc[0])
 
     # --- turning params from the CURRENT pose (loads + friction at contacts) ---
-    N = normal_loads(envelope, g, robot, R, p)
+    N = normal_loads(envelope, grid, robot, R, p)
     w0v = robot.wheel_pos[0]
     w1v = robot.wheel_pos[1]
     w2v = robot.wheel_pos[2]
     h0 = p + R * w0v
     h1 = p + R * w1v
     h2 = p + R * w2v
-    ct0 = h0 - robot.wheel_radius * sample_normal(envelope, g, h0[0], h0[1])
-    ct1 = h1 - robot.wheel_radius * sample_normal(envelope, g, h1[0], h1[1])
-    ct2 = h2 - robot.wheel_radius * sample_normal(envelope, g, h2[0], h2[1])
-    mw0 = sample_height(friction, gmu, ct0[0], ct0[1]) * N[0]
-    mw1 = sample_height(friction, gmu, ct1[0], ct1[1]) * N[1]
-    mw2 = sample_height(friction, gmu, ct2[0], ct2[1]) * N[2]
+    ct0 = h0 - robot.wheel_radius * sample_normal(envelope, grid, h0[0], h0[1])
+    ct1 = h1 - robot.wheel_radius * sample_normal(envelope, grid, h1[0], h1[1])
+    ct2 = h2 - robot.wheel_radius * sample_normal(envelope, grid, h2[0], h2[1])
+    mw0 = sample_height(friction, grid_mu, ct0[0], ct0[1]) * N[0]
+    mw1 = sample_height(friction, grid_mu, ct1[0], ct1[1]) * N[1]
+    mw2 = sample_height(friction, grid_mu, ct2[0], ct2[1]) * N[2]
     sw = mw0 + mw1 + mw2
     x_icr = (mw0 * w0v[0] + mw1 * w1v[0] + mw2 * w2v[0]) / sw
     alpha = 1.0 + sp.k_turn * sw / (robot.gravity * robot.mass)
@@ -416,15 +388,16 @@ def step(
     yn = y + vw[1] * sp.dt
     yawn = yaw + wz * sp.dt
 
-    # --- project: settle the new pose (warm-started from current tilt) ---
-    u = settle(envelope, g, robot, sp, xn, yn, yawn, tc)
-    planar[t + 1, tid] = wp.vec3(xn, yn, yawn)
-    tilt[t + 1, tid] = u
+    # --- project: settle the new pose (warm-started from current derived) ---
+    controlled_next = wp.vec3(xn, yn, yawn)
+    settled = settle(envelope, grid, robot, sp, controlled_next, tc)
+    controlled[t + 1, tid] = controlled_next
+    derived[t + 1, tid] = settled
 
-    Rn = euler_zyx(yawn, u[1], u[2])
-    pn = wp.vec3(xn, yn, u[0])
-    loads_out[t, tid] = normal_loads(envelope, g, robot, Rn, pn)
+    Rn = euler_zyx(yawn, settled[1], settled[2])
+    pn = wp.vec3(xn, yn, settled[0])
+    loads_out[t, tid] = normal_loads(envelope, grid, robot, Rn, pn)
     turn_out[t, tid] = wp.vec2(alpha, x_icr)
-    clear_out[t, tid] = chassis_clearance(elevation, g, robot, Rn, pn)
-    cres = clearances(envelope, g, robot, xn, yn, yawn, u[0], u[1], u[2])
+    clear_out[t, tid] = chassis_clearance(elevation, grid, robot, Rn, pn)
+    cres = clearances(envelope, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
     resid_out[t, tid] = wp.max(wp.max(wp.abs(cres[0]), wp.abs(cres[1])), wp.abs(cres[2]))

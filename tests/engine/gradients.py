@@ -52,7 +52,7 @@ def _settle_only(Henv: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot, sp: 
     y = pose[tid][1]
     yaw = pose[tid][2]
     z0 = sample_height(Henv, g, x, y) + robot.wheel_radius
-    u_out[tid] = settle(Henv, g, robot, sp, x, y, yaw, wp.vec3(z0, 0.0, 0.0))
+    u_out[tid] = settle(Henv, g, robot, sp, wp.vec3(x, y, yaw), wp.vec3(z0, 0.0, 0.0))
 
 
 @wp.kernel
@@ -175,10 +175,10 @@ def _fd_loss(env, poses, adj_u, i, j, delta):
 
 
 @wp.kernel
-def _row_loss(planar: wp.array2d(dtype=wp.vec3), tilt: wp.array2d(dtype=wp.vec3),
+def _row_loss(controlled: wp.array2d(dtype=wp.vec3), derived: wp.array2d(dtype=wp.vec3),
               wpv: wp.vec3, wtv: wp.vec3, row: int, loss: wp.array(dtype=float)):
     tid = wp.tid()
-    wp.atomic_add(loss, 0, wp.dot(wpv, planar[row, tid]) + wp.dot(wtv, tilt[row, tid]))
+    wp.atomic_add(loss, 0, wp.dot(wpv, controlled[row, tid]) + wp.dot(wtv, derived[row, tid]))
 
 
 def _gmeta(hm):
@@ -201,8 +201,8 @@ def _fwd(envH, rawH, muH, g, gmu, robot, sp, omega_np, init_pose, wpv, wtv, grad
     Hmu = wp.array(muH, dtype=wp.float32, device=dev, requires_grad=grad)
     omega = wp.array(omega_np, dtype=wp.vec3, device=dev)
     pose0 = wp.array(np.asarray([init_pose], np.float32), dtype=wp.vec3, device=dev)
-    planar = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
-    tilt = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
+    controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
+    derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
     loads = wp.zeros((T, 1), dtype=wp.vec3, device=dev)
     turn = wp.zeros((T, 1), dtype=wp.vec2, device=dev)
     clear = wp.zeros((T, 1), dtype=float, device=dev)
@@ -211,11 +211,11 @@ def _fwd(envH, rawH, muH, g, gmu, robot, sp, omega_np, init_pose, wpv, wtv, grad
 
     def launches():
         wp.launch(init_state, 1, inputs=[Henv, g, robot, sp, pose0],
-                  outputs=[planar, tilt], device=dev)
+                  outputs=[controlled, derived], device=dev)
         for t in range(T):
             wp.launch(step, 1, inputs=[t, Henv, Hraw, g, Hmu, gmu, robot, sp, omega],
-                      outputs=[planar, tilt, loads, turn, clear, resid], device=dev)
-        wp.launch(_row_loss, 1, inputs=[planar, tilt, wpv, wtv, T], outputs=[loss], device=dev)
+                      outputs=[controlled, derived, loads, turn, clear, resid], device=dev)
+        wp.launch(_row_loss, 1, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev)
 
     if not grad:
         launches()
@@ -287,8 +287,8 @@ def _fwd_h(rawH, muH, g, gmu, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, 
     Hmu = wp.array(muH, dtype=wp.float32, device=dev, requires_grad=grad)
     omega = wp.array(omega_np, dtype=wp.vec3, device=dev)
     pose0 = wp.array(np.asarray([init_pose], np.float32), dtype=wp.vec3, device=dev)
-    planar = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
-    tilt = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
+    controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
+    derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
     loads = wp.zeros((T, 1), dtype=wp.vec3, device=dev)
     turn = wp.zeros((T, 1), dtype=wp.vec2, device=dev)
     clear = wp.zeros((T, 1), dtype=float, device=dev)
@@ -298,11 +298,11 @@ def _fwd_h(rawH, muH, g, gmu, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, 
     def launches():
         Henv = wheel_envelope(Hraw, g.cell_size, Rwheel, dev)  # raw h -> envelope, on the tape
         wp.launch(init_state, 1, inputs=[Henv, g, robot, sp, pose0],
-                  outputs=[planar, tilt], device=dev)
+                  outputs=[controlled, derived], device=dev)
         for t in range(T):
             wp.launch(step, 1, inputs=[t, Henv, Hraw, g, Hmu, gmu, robot, sp, omega],
-                      outputs=[planar, tilt, loads, turn, clear, resid], device=dev)
-        wp.launch(_row_loss, 1, inputs=[planar, tilt, wpv, wtv, T], outputs=[loss], device=dev)
+                      outputs=[controlled, derived, loads, turn, clear, resid], device=dev)
+        wp.launch(_row_loss, 1, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev)
 
     if not grad:
         launches()
@@ -373,8 +373,8 @@ def _fwd_batch(envH, rawH, muH, g, gmu, robot, sp, omega_np, poses, wpv, wtv, gr
     Hmu = wp.array(muH, dtype=wp.float32, device=dev, requires_grad=grad)
     omega = wp.array(omega_np, dtype=wp.vec3, device=dev)
     pose0 = wp.array(np.asarray(poses, np.float32), dtype=wp.vec3, device=dev)
-    planar = wp.zeros((T + 1, B), dtype=wp.vec3, device=dev, requires_grad=grad)
-    tilt = wp.zeros((T + 1, B), dtype=wp.vec3, device=dev, requires_grad=grad)
+    controlled = wp.zeros((T + 1, B), dtype=wp.vec3, device=dev, requires_grad=grad)
+    derived = wp.zeros((T + 1, B), dtype=wp.vec3, device=dev, requires_grad=grad)
     loads = wp.zeros((T, B), dtype=wp.vec3, device=dev)
     turn = wp.zeros((T, B), dtype=wp.vec2, device=dev)
     clear = wp.zeros((T, B), dtype=float, device=dev)
@@ -383,11 +383,11 @@ def _fwd_batch(envH, rawH, muH, g, gmu, robot, sp, omega_np, poses, wpv, wtv, gr
 
     def launches():
         wp.launch(init_state, B, inputs=[Henv, g, robot, sp, pose0],
-                  outputs=[planar, tilt], device=dev)
+                  outputs=[controlled, derived], device=dev)
         for t in range(T):
             wp.launch(step, B, inputs=[t, Henv, Hraw, g, Hmu, gmu, robot, sp, omega],
-                      outputs=[planar, tilt, loads, turn, clear, resid], device=dev)
-        wp.launch(_row_loss, B, inputs=[planar, tilt, wpv, wtv, T], outputs=[loss], device=dev)
+                      outputs=[controlled, derived, loads, turn, clear, resid], device=dev)
+        wp.launch(_row_loss, B, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev)
 
     if not grad:
         launches()

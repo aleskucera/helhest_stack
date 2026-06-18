@@ -31,15 +31,15 @@ def _to_omega(Ub):
     return np.concatenate([bt, rear], axis=2).astype(np.float32)
 
 
-def _cost(planar, tilt, clear, resid, Ub, goal, clear_margin, resid_tol, w):
-    """Per-rollout cost [B]. goal [2]. `tilt` is [T+1, B, 3] = (z, pitch, roll).
+def _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, w):
+    """Per-rollout cost [B]. goal [2]. `derived` is [T+1, B, 3] = (z, pitch, roll).
 
     `w["tilt"]` (optional) penalizes the robot's total tilt from vertical along the
     rollout — the traversability term. The settle gives the true body pitch/roll for
     each candidate trajectory, so this is trajectory-aware (a diagonal slope crossing
     rolls differently than a straight climb), not a static per-cell terrain slope.
     """
-    xy = planar[:, :, :2]                                  # [T+1, B, 2]
+    xy = controlled[:, :, :2]                                  # [T+1, B, 2]
     d = np.linalg.norm(xy - goal[None, None, :], axis=2)   # [T+1, B]
     invalid = (clear < clear_margin).any(0) | (resid > resid_tol).any(0)  # [B]
     eff = (Ub ** 2).sum((1, 2))
@@ -47,7 +47,7 @@ def _cost(planar, tilt, clear, resid, Ub, goal, clear_margin, resid_tol, w):
     J = w["term"] * d[-1] ** 2 + w["run"] * (d ** 2).mean(0) + w["eff"] * eff + w["smooth"] * smooth
     if w.get("tilt", 0.0) > 0.0:
         # total tilt from vertical: angle of body-z off world-z = arccos(cos p cos r)
-        cpr = np.cos(tilt[:, :, 1]) * np.cos(tilt[:, :, 2])
+        cpr = np.cos(derived[:, :, 1]) * np.cos(derived[:, :, 2])
         ang = np.arccos(np.clip(cpr, -1.0, 1.0))          # [T+1, B] radians
         # deadzone: tilt below `tilt_free` is free (drivable ramps), so the robot
         # still climbs gentle slopes to reach a goal; only steep tilt is penalized.
@@ -87,19 +87,19 @@ def plan(scene, mu, start, goal, T=70, B=2048, n_refine=3, max_steps=260, dt=0.0
             eps = rng.normal(0.0, sigma, (B, T, 2)).astype(np.float32)
             eps[0] = 0.0                          # keep the nominal as a sample
             Ub = np.clip(U[None] + eps, -wmax, wmax)
-            planar, tilt, clear, resid = sim.rollout(_to_omega(Ub), state)
-            J, _ = _cost(planar, tilt, clear, resid, Ub, goal, clear_margin, resid_tol, w)
+            controlled, derived, clear, resid = sim.rollout(_to_omega(Ub), state)
+            J, _ = _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, w)
             beta = np.exp(-(J - J.min()) / lam)
             beta /= beta.sum()
             U = np.clip(np.einsum("b,btc->tc", beta, Ub), -wmax, wmax).astype(np.float32)
-            samp = planar[:, idx, :2].copy()      # last refine's fan [T+1, n_show, 2]
+            samp = controlled[:, idx, :2].copy()      # last refine's fan [T+1, n_show, 2]
             badstep = ((clear[:, idx] < clear_margin) | (resid[:, idx] > resid_tol)).copy()  # [T, n_show]
         # execute first control: roll the nominal out and take the step-1 pose
-        planar, _, _, _ = sim.rollout(_to_omega(np.tile(U, (B, 1, 1))), state)
+        controlled, _, _, _ = sim.rollout(_to_omega(np.tile(U, (B, 1, 1))), state)
         if record:
             frames.append({"state": state.copy(), "samples": samp,
-                           "stepbad": badstep, "chosen": planar[:, 0, :2].copy()})
-        state = planar[1, 0].astype(np.float32).copy()
+                           "stepbad": badstep, "chosen": controlled[:, 0, :2].copy()})
+        state = controlled[1, 0].astype(np.float32).copy()
         path.append(state.copy())
         U = np.roll(U, -1, axis=0)
         U[-1] = U[-2]

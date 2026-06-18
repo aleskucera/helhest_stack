@@ -94,14 +94,14 @@ class Navigator:
             eps = self.rng.normal(0.0, cfg.sigma, (cfg.B, cfg.T, 2)).astype(np.float32)
             eps[0] = 0.0
             Ub = np.clip(U[None] + eps, -cfg.wmax, cfg.wmax)
-            planar, tilt, clear, resid = self.sim.rollout(_to_omega(Ub), state)
-            J, _ = _cost(planar, tilt, clear, resid, Ub, goal_local, cfg.clear_margin,
+            controlled, derived, clear, resid = self.sim.rollout(_to_omega(Ub), state)
+            J, _ = _cost(controlled, derived, clear, resid, Ub, goal_local, cfg.clear_margin,
                          cfg.resid_tol, w)
             beta = np.exp(-(J - J.min()) / cfg.lam)
             beta /= beta.sum()
             U = np.clip(np.einsum("b,btc->tc", beta, Ub), -cfg.wmax, cfg.wmax).astype(np.float32)
-        planar, _, _, _ = self.sim.rollout(_to_omega(np.tile(U, (cfg.B, 1, 1))), state)
-        return U, planar[:, 0, :2].copy()
+        controlled, _, _, _ = self.sim.rollout(_to_omega(np.tile(U, (cfg.B, 1, 1))), state)
+        return U, controlled[:, 0, :2].copy()
 
 
 class WorldRobot:
@@ -125,8 +125,8 @@ class WorldRobot:
     def step(self, state, ctrl):
         """Advance world `state` (x,y,yaw) by wheel control `ctrl` (wL, wR)."""
         Ub = np.asarray(ctrl[:2], np.float32).reshape(1, 1, 2)
-        planar, tilt, clear, resid = self.sim.rollout(_to_omega(Ub), state)
-        return planar[1, 0].copy(), tilt[1, 0].copy(), float(clear[0, 0]), float(resid[0, 0])
+        controlled, derived, clear, resid = self.sim.rollout(_to_omega(Ub), state)
+        return controlled[1, 0].copy(), derived[1, 0].copy(), float(clear[0, 0]), float(resid[0, 0])
 
 
 def drive(world_hm, start, goal, cfg, device="cpu", max_cycles=300, seed=0, record=False):

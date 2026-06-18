@@ -49,23 +49,23 @@ def rollout_device(scene, mu_field, setpoints, init_pose, params,
 
     omega = wp.array(setpoints.reshape(T, 1, 3), dtype=wp.vec3, device=device)
     pose0 = wp.array(np.asarray([init_pose], np.float32), dtype=wp.vec3, device=device)
-    planar = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
-    tilt = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
+    controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
+    derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
     loads = wp.zeros((T, 1), dtype=wp.vec3, device=device)
     turn = wp.zeros((T, 1), dtype=wp.vec2, device=device)
     clear = wp.zeros((T, 1), dtype=float, device=device)
     resid = wp.zeros((T, 1), dtype=float, device=device)
 
     wp.launch(init_state, 1, inputs=[te, g, robot, sp, pose0],
-              outputs=[planar, tilt], device=device)
+              outputs=[controlled, derived], device=device)
     for t in range(T):
         wp.launch(step, 1,
                   inputs=[t, te, tr, g, tm, g, robot, sp, omega],
-                  outputs=[planar, tilt, loads, turn, clear, resid], device=device)
+                  outputs=[controlled, derived, loads, turn, clear, resid], device=device)
     clear_np, resid_np = clear.numpy()[:, 0], resid.numpy()[:, 0]
     bad = (clear_np < clear_margin) | (resid_np > resid_tol)
     return {
-        "planar": planar.numpy()[:, 0, :], "tilt": tilt.numpy()[:, 0, :],
+        "controlled": controlled.numpy()[:, 0, :], "derived": derived.numpy()[:, 0, :],
         "loads": loads.numpy()[:, 0, :], "turn": turn.numpy()[:, 0, :],
         "clear": clear_np, "residual": resid_np,
         "valid": not bool(bad.any()),
@@ -83,7 +83,7 @@ def _settle_probe(H: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot, sp: So
     y = pose[tid][1]
     yaw = pose[tid][2]
     z0 = sample_height(H, g, x, y) + robot.wheel_radius
-    u = settle(H, g, robot, sp, x, y, yaw, wp.vec3(z0, 0.0, 0.0))
+    u = settle(H, g, robot, sp, wp.vec3(x, y, yaw), wp.vec3(z0, 0.0, 0.0))
     u_out[tid] = u
     R = euler_zyx(yaw, u[1], u[2])
     p = wp.vec3(x, y, u[0])
@@ -105,7 +105,7 @@ def _loads_probe(Henv: wp.array2d(dtype=wp.float32), Hraw: wp.array2d(dtype=wp.f
     y = pose[tid][1]
     yaw = pose[tid][2]
     z0 = sample_height(Henv, g, x, y) + robot.wheel_radius
-    u = settle(Henv, g, robot, sp, x, y, yaw, wp.vec3(z0, 0.0, 0.0))
+    u = settle(Henv, g, robot, sp, wp.vec3(x, y, yaw), wp.vec3(z0, 0.0, 0.0))
     R = euler_zyx(yaw, u[1], u[2])
     p = wp.vec3(x, y, u[0])
     loads[tid] = normal_loads(Henv, g, robot, R, p)
@@ -187,8 +187,8 @@ def selftest_step():
     for name, scene, init_pose, sp in cases:
         out = rollout_device(scene, mu, sp, init_pose, params)
         ref = rollout_np.rollout_terrain(sp, dt, scene, init_pose=init_pose, mu_field=mu, k=k)
-        d_xy = np.abs(out["planar"][1:, :2] - ref["pose2"][:, :2]).max()
-        d_yaw = np.abs(out["planar"][1:, 2] - ref["pose2"][:, 2]).max()
+        d_xy = np.abs(out["controlled"][1:, :2] - ref["pose2"][:, :2]).max()
+        d_yaw = np.abs(out["controlled"][1:, 2] - ref["pose2"][:, 2]).max()
         d_N = np.abs(out["loads"] - ref["loads"]).max()
         d_a = np.abs(out["turn"][:, 0] - ref["alpha"]).max()
         d_x = np.abs(out["turn"][:, 1] - ref["x_icr"]).max()
