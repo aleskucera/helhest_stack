@@ -39,8 +39,8 @@ def check_static_high_center(block_h=0.30):
     """Robot level on flat ground (z=R); a tall block sits under the belly."""
     hm = heightmap.flat()
     # Raise a small patch under the front-box belly center (x≈-0.13, y≈0).
-    XX = hm.x0 + np.arange(hm.nx) * hm.cell
-    YY = hm.y0 + np.arange(hm.ny) * hm.cell
+    XX = hm.x0 + (np.arange(hm.nx) + 0.5) * hm.cell  # cell centers
+    YY = hm.y0 + (np.arange(hm.ny) + 0.5) * hm.cell
     gx, gy = np.meshgrid(XX, YY)
     patch = (np.abs(gx - (-0.13)) <= 0.08) & (np.abs(gy - 0.0) <= 0.08)
     hm.H[patch] = block_h

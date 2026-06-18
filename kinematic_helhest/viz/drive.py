@@ -18,13 +18,11 @@ import warp as wp
 
 from .. import friction
 from .. import heightmap as hmmod
-from ..engine import init_state
+from ..engine import GridParams
 from ..engine import RobotParams
+from ..engine import Simulator
 from ..engine import SolverParams
-from ..engine import step as wstep
-from ..engine import to_terrain
 from ..model import euler_zyx
-from ..model import WHEEL_RADIUS
 from .render import DT
 from .render import WIN_H
 from .render import WIN_W
@@ -36,48 +34,33 @@ from .render import build_terrain
 
 
 class WarpDriver:
-    """Holds the device terrain/robot/solver and the current (B=1) state; steps it."""
+    """Wraps a B=1, T=1 `Simulator` and the current pose; steps one frame per call."""
 
     def __init__(self, hm, mu, init_pose=(0.0, 0.0, 0.0), device="cpu", dt=DT, k_turn=2.0,
                  resid_tol=1e-2, clear_margin=0.0, tilt_clamp=1.2):
         wp.init()
-        self.dev = device
         self.resid_tol, self.clear_margin = resid_tol, clear_margin
-        self.te = to_terrain(hmmod.wheel_envelope(hm, WHEEL_RADIUS), device)
-        self.tr = to_terrain(hm, device)
-        self.tm = to_terrain(mu, device)
-        self.robot = RobotParams().build(device)
-        self.sp = SolverParams(dt=dt, k_turn=k_turn, newton_iters=12, tilt_clamp=tilt_clamp).build()
+        sp = SolverParams(dt=dt, k_turn=k_turn, newton_iters=12, tilt_clamp=tilt_clamp)
+        self.sim = Simulator(RobotParams(), sp,
+                             GridParams(hm.nx, hm.ny, hm.cell, hm.x0, hm.y0), 1, 1, device)
+        self.sim.set_terrain(wp.array(np.ascontiguousarray(hm.H, np.float32),
+                                      dtype=wp.float32, device=device))
+        self.sim.set_friction(mu)
 
-        planar = wp.zeros((2, 1), dtype=wp.vec3, device=device)
-        tilt = wp.zeros((2, 1), dtype=wp.vec3, device=device)
-        pose0 = wp.array(np.asarray([init_pose], np.float32), dtype=wp.vec3, device=device)
-        wp.launch(init_state, 1, inputs=[self.te.elevation, self.te.g, self.robot, self.sp, pose0],
-                  outputs=[planar, tilt], device=device)
-        self.planar = planar.numpy()[0, 0].copy()  # (x, y, yaw)
-        self.tilt = tilt.numpy()[0, 0].copy()       # (z, pitch, roll)
+        # frame 0: settle at the start pose (zero control)
+        planar, tilt, _, _ = self.sim.rollout(np.zeros((1, 1, 3), np.float32), init_pose)
+        self.planar = planar[0, 0].copy()  # (x, y, yaw)
+        self.tilt = tilt[0, 0].copy()       # (z, pitch, roll)
         self.clear, self.alpha, self.resid = 1.0, 1.0, 0.0
 
     def step(self, omega3):
-        dev = self.dev
-        pn = np.zeros((2, 1, 3), np.float32); pn[0, 0] = self.planar
-        tn = np.zeros((2, 1, 3), np.float32); tn[0, 0] = self.tilt
-        planar = wp.array(pn, dtype=wp.vec3, device=dev)
-        tilt = wp.array(tn, dtype=wp.vec3, device=dev)
-        omega = wp.array(np.asarray([[omega3]], np.float32), dtype=wp.vec3, device=dev)
-        loads = wp.zeros((1, 1), dtype=wp.vec3, device=dev)
-        turn = wp.zeros((1, 1), dtype=wp.vec2, device=dev)
-        clear = wp.zeros((1, 1), dtype=float, device=dev)
-        resid = wp.zeros((1, 1), dtype=float, device=dev)
-        wp.launch(wstep, 1,
-                  inputs=[0, self.te.elevation, self.tr.elevation, self.te.g, self.tm.elevation, self.tm.g,
-                          self.robot, self.sp, omega],
-                  outputs=[planar, tilt, loads, turn, clear, resid], device=dev)
-        self.planar = planar.numpy()[1, 0].copy()
-        self.tilt = tilt.numpy()[1, 0].copy()
-        self.clear = float(clear.numpy()[0, 0])
-        self.resid = float(resid.numpy()[0, 0])
-        self.alpha = float(turn.numpy()[0, 0][0])
+        omega = np.asarray(omega3, np.float32).reshape(1, 1, 3)
+        planar, tilt, clear, resid = self.sim.rollout(omega, self.planar)
+        self.planar = planar[1, 0].copy()
+        self.tilt = tilt[1, 0].copy()
+        self.clear = float(clear[0, 0])
+        self.resid = float(resid[0, 0])
+        self.alpha = float(self.sim.turning.numpy()[0, 0][0])
 
     def render_state(self):
         x, y, yaw = (float(v) for v in self.planar)

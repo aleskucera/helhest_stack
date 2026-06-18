@@ -9,6 +9,7 @@ from kinematic_helhest import friction
 from kinematic_helhest import heightmap as hmmod
 from kinematic_helhest.engine import clearances
 from kinematic_helhest.engine import Grid
+from kinematic_helhest.engine import GridParams
 from kinematic_helhest.engine import init_state
 from kinematic_helhest.engine import Robot
 from kinematic_helhest.engine import RobotParams
@@ -18,12 +19,18 @@ from kinematic_helhest.engine import settle
 from kinematic_helhest.engine import Solver
 from kinematic_helhest.engine import SolverParams
 from kinematic_helhest.engine import step
-from kinematic_helhest.engine import to_terrain
 from kinematic_helhest.engine.step import chassis_clearance
 from kinematic_helhest.engine.step import euler_zyx
 from kinematic_helhest.engine.step import normal_loads
 from kinematic_helhest.reference import placement
 from kinematic_helhest.reference import rollout as rollout_np
+
+
+def _upload(hm, device, requires_grad=False):
+    """Verification-only: numpy Heightmap -> (device elevation array, Grid)."""
+    elev = wp.array(np.ascontiguousarray(hm.H, np.float32), dtype=wp.float32,
+                    device=device, requires_grad=requires_grad)
+    return elev, GridParams(hm.nx, hm.ny, hm.cell, hm.x0, hm.y0).build()
 
 
 def rollout_device(scene, mu_field, setpoints, init_pose, params,
@@ -34,9 +41,9 @@ def rollout_device(scene, mu_field, setpoints, init_pose, params,
     sp = params.build()
     Rw = robot_params.wheel_radius
 
-    te = to_terrain(hmmod.wheel_envelope(scene, Rw), device)
-    tr = to_terrain(scene, device)
-    tm = to_terrain(mu_field, device)
+    te, g = _upload(hmmod.wheel_envelope(scene, Rw), device)
+    tr, _ = _upload(scene, device)
+    tm, _ = _upload(mu_field, device)
     setpoints = np.asarray(setpoints, np.float32)
     T = setpoints.shape[0]
 
@@ -49,11 +56,11 @@ def rollout_device(scene, mu_field, setpoints, init_pose, params,
     clear = wp.zeros((T, 1), dtype=float, device=device)
     resid = wp.zeros((T, 1), dtype=float, device=device)
 
-    wp.launch(init_state, 1, inputs=[te.elevation, te.g, robot, sp, pose0],
+    wp.launch(init_state, 1, inputs=[te, g, robot, sp, pose0],
               outputs=[planar, tilt], device=device)
     for t in range(T):
         wp.launch(step, 1,
-                  inputs=[t, te.elevation, tr.elevation, te.g, tm.elevation, tm.g, robot, sp, omega],
+                  inputs=[t, te, tr, g, tm, g, robot, sp, omega],
                   outputs=[planar, tilt, loads, turn, clear, resid], device=device)
     clear_np, resid_np = clear.numpy()[:, 0], resid.numpy()[:, 0]
     bad = (clear_np < clear_margin) | (resid_np > resid_tol)
@@ -120,14 +127,14 @@ def selftest_settle():
     worst = 0.0
     for name, scene, poses in cases:
         env = hmmod.wheel_envelope(scene, 0.35)
-        te = to_terrain(env, "cpu")
+        te, g = _upload(env, "cpu")
         B = len(poses)
         pose = wp.array(np.asarray(poses, np.float32), dtype=wp.vec3, device="cpu")
         u_out = wp.zeros(B, dtype=wp.vec3, device="cpu")
         contacts = wp.zeros(B * 3, dtype=wp.vec3, device="cpu")
         normals = wp.zeros(B * 3, dtype=wp.vec3, device="cpu")
         resid = wp.zeros(B, dtype=float, device="cpu")
-        wp.launch(_settle_probe, B, inputs=[te.elevation, te.g, robot, sp, pose],
+        wp.launch(_settle_probe, B, inputs=[te, g, robot, sp, pose],
                   outputs=[u_out, contacts, normals, resid], device="cpu")
         uo = u_out.numpy()
         co = contacts.numpy().reshape(B, 3, 3)
@@ -149,12 +156,13 @@ def selftest_loads():
     worst = 0.0
     for name, scene, poses in cases:
         env, raw = hmmod.wheel_envelope(scene, 0.35), scene
-        te, tr = to_terrain(env, "cpu"), to_terrain(raw, "cpu")
+        te, g = _upload(env, "cpu")
+        tr, _ = _upload(raw, "cpu")
         B = len(poses)
         pose = wp.array(np.asarray(poses, np.float32), dtype=wp.vec3, device="cpu")
         loads = wp.zeros(B, dtype=wp.vec3, device="cpu")
         clear = wp.zeros(B, dtype=float, device="cpu")
-        wp.launch(_loads_probe, B, inputs=[te.elevation, tr.elevation, te.g, robot, sp, pose],
+        wp.launch(_loads_probe, B, inputs=[te, tr, g, robot, sp, pose],
                   outputs=[loads, clear], device="cpu")
         lo, cl = loads.numpy(), clear.numpy()
         for i, (x, y, yaw) in enumerate(poses):

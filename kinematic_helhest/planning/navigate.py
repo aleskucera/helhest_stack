@@ -17,9 +17,9 @@ import argparse
 from dataclasses import dataclass
 
 import numpy as np
+import warp as wp
 
 from .. import heightmap as hmmod
-from ..engine import bounds_to_origin
 from ..engine import GridParams
 from ..engine import RobotParams
 from ..engine import Simulator
@@ -78,11 +78,12 @@ class Navigator:
         """local_map: DeviceMap-shaped (.elevation/.resolution/.bounds). Returns the
         updated nominal control U [T,2] and the predicted local path xy [T+1,2]."""
         cfg = self.cfg
-        x0, y0 = bounds_to_origin(local_map.bounds, local_map.resolution)
+        # one cell-center convention end-to-end: the grid origin IS the bounds min corner.
+        x0, y0 = local_map.bounds[0], local_map.bounds[2]
         raw_H, cell = local_map.elevation, local_map.resolution
         if self.sim is None:  # fixed window dims -> build the preallocated sim once
             ny, nx = raw_H.shape
-            grid = GridParams(nx, ny, cell, x0, y0, R=self.rp.wheel_radius)
+            grid = GridParams(nx, ny, cell, x0, y0)
             self.sim = Simulator(self.rp, self.params, grid, cfg.B, cfg.T, self.dev)
         self.sim.set_terrain(raw_H)            # borrow + dilate, no alloc
         self.sim.set_uniform_friction(cfg.mu_value)
@@ -112,7 +113,14 @@ class WorldRobot:
         mu = hmmod.Heightmap(np.full((ny, nx), cfg.mu_value), (world_hm.x0, world_hm.y0), c)
         params = SolverParams(dt=cfg.dt, k_turn=2.0, newton_iters=12)
         rp = robot_params or RobotParams()
-        self.sim = Simulator.for_scene(rp, params, world_hm, mu, 1, 1, device=device)
+        self.sim = Simulator(
+            rp, params,
+            GridParams(world_hm.nx, world_hm.ny, world_hm.cell, world_hm.x0, world_hm.y0),
+            1, 1, device,
+        )
+        self.sim.set_terrain(wp.array(np.ascontiguousarray(world_hm.H, np.float32),
+                                      dtype=wp.float32, device=device))
+        self.sim.set_friction(mu)
 
     def step(self, state, ctrl):
         """Advance world `state` (x,y,yaw) by wheel control `ctrl` (wL, wR)."""

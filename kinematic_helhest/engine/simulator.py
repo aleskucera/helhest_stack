@@ -6,7 +6,7 @@ Replaces the old planning-side `BatchRollout`: the engine now owns the simulatio
 state (the rollout buffers + the terrain/envelope/friction grids), and the planner
 just feeds controls in.
 
-The grid (nx, ny, cell, origin) is FIXED at construction. In the robot-centered
+The grid (cells_x, cells_y, cell_size, origin) is FIXED at construction. In the robot-centered
 rolling map the window dimensions never change — only the terrain *values* do — so
 each cycle overwrites the owned buffers in place.
 
@@ -45,9 +45,9 @@ class Simulator:
         self.robot = robot_params.build(device)  # device Robot struct
         self.solver = solver_params.build()  # device Solver struct
         self.grid = grid_params.build()  # Grid (fixed)
-        self.wheel_radius = grid_params.R
-        self.env_radius = int(np.ceil(grid_params.R / grid_params.cell))
-        ny, nx = grid_params.ny, grid_params.nx
+        self.wheel_radius = robot_params.wheel_radius
+        self.env_radius = int(np.ceil(robot_params.wheel_radius / grid_params.cell_size))
+        ny, nx = grid_params.cells_y, grid_params.cells_x
 
         with wp.ScopedDevice(self.device):
             # terrain: owned envelope + friction, plus the arg-max scratch; raw is borrowed.
@@ -76,7 +76,7 @@ class Simulator:
             dim=self.elevation.shape,
             inputs=[
                 self.elevation,
-                self.grid.cell,
+                self.grid.cell_size,
                 self.wheel_radius,
                 self.env_radius,
             ],
@@ -101,31 +101,13 @@ class Simulator:
             device=self.device,
         )
 
-    def set_uniform_friction(self, value):
+    def set_uniform_friction(self, value: float):
         """Uniform friction: overwrite the owned friction grid in place."""
         self.friction.fill_(float(value))
 
-    def set_friction(self, friction_hm):
+    def set_friction(self, friction_hm: np.ndarray):
         """Per-cell friction from a numpy Heightmap matching the grid (copied in place)."""
         self.friction.assign(np.ascontiguousarray(friction_hm.H, np.float32))
-
-    @classmethod
-    def for_scene(cls, robot_params, solver_params, scene, mu, B, T, device="cuda"):
-        """Convenience for a static numpy scene: size the grid from `scene`, upload it,
-        dilate, set friction. (The non-preallocated, build-once use.)"""
-        sim = cls(
-            robot_params,
-            solver_params,
-            GridParams.from_heightmap(scene, R=robot_params.wheel_radius),
-            B,
-            T,
-            device,
-        )
-        sim.set_terrain(
-            wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
-        )
-        sim.set_friction(mu)
-        return sim
 
     def rollout(self, omega_np, init_pose):
         """omega_np [T, B, 3], init_pose (x,y,yaw) shared by all rollouts. Returns
@@ -136,6 +118,7 @@ class Simulator:
                 np.tile(np.asarray(init_pose, np.float32), (self.B, 1)), np.float32
             )
         )
+
         wp.launch(
             init_state,
             self.B,
@@ -143,6 +126,7 @@ class Simulator:
             outputs=[self.planar, self.tilt],
             device=self.device,
         )
+
         for t in range(self.T):
             wp.launch(
                 kernel=wstep,

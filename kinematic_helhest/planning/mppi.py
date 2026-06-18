@@ -14,9 +14,11 @@ Demo:  python -m kinematic_helhest.planning.mppi [--device cuda] [--out plan.png
 import argparse
 
 import numpy as np
+import warp as wp
 
 from .. import friction
 from .. import heightmap as hmmod
+from ..engine import GridParams
 from ..engine import RobotParams
 from ..engine import Simulator
 from ..engine import SolverParams
@@ -58,7 +60,14 @@ def plan(scene, mu, start, goal, T=70, B=2048, n_refine=3, max_steps=260, dt=0.0
          sigma=2.5, lam=0.5, wmax=4.0, goal_tol=0.3, resid_tol=1e-2, clear_margin=0.05,
          device="cuda", seed=0, weights=None, record=False, n_show=60):
     params = SolverParams(dt=dt, k_turn=2.0, newton_iters=12)
-    sim = Simulator.for_scene(RobotParams(), params, scene, mu, B, T, device=device)
+    sim = Simulator(
+        RobotParams(), params,
+        GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
+        B, T, device,
+    )
+    sim.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32),
+                             dtype=wp.float32, device=device))
+    sim.set_friction(mu)
     w = weights or dict(term=3.0, run=0.3, invalid=1e5, eff=2e-3, smooth=2e-3)
     goal = np.asarray(goal[:2], np.float64)
     rng = np.random.default_rng(seed)
@@ -103,7 +112,7 @@ def _plot(scene, path, start, goal, out):
     import matplotlib.pyplot as plt
 
     nx, ny = scene.nx, scene.ny
-    ext = [scene.x0, scene.x0 + (nx - 1) * scene.cell, scene.y0, scene.y0 + (ny - 1) * scene.cell]
+    ext = [scene.x0, scene.x0 + nx * scene.cell, scene.y0, scene.y0 + ny * scene.cell]  # cell edges
     fig, ax = plt.subplots(figsize=(9, 6))
     ax.imshow(scene.H, origin="lower", extent=ext, cmap="terrain", alpha=0.9)
     ax.plot(path[:, 0], path[:, 1], "-", color="orange", lw=2.5, label="MPPI path")
@@ -123,7 +132,7 @@ def _animate(scene, frames, path, start, goal, out, stride=3, fps=12):
     from matplotlib.animation import FuncAnimation, PillowWriter
 
     nx, ny = scene.nx, scene.ny
-    ext = [scene.x0, scene.x0 + (nx - 1) * scene.cell, scene.y0, scene.y0 + (ny - 1) * scene.cell]
+    ext = [scene.x0, scene.x0 + nx * scene.cell, scene.y0, scene.y0 + ny * scene.cell]  # cell edges
     sel = list(range(0, len(frames), stride))
     fig, ax = plt.subplots(figsize=(9, 6))
 

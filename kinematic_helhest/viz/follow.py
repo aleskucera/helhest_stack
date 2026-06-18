@@ -19,6 +19,7 @@ import warp as wp
 
 from .. import friction
 from .. import heightmap as hmmod
+from ..engine import GridParams
 from ..engine import RobotParams
 from ..engine import Simulator
 from ..engine import SolverParams
@@ -41,7 +42,14 @@ class Planner:
     def __init__(self, scene, mu, goal, device="cpu", T=90, B=1024, n_refine=3,
                  sigma=2.5, lam=0.5, wmax=4.0, clear_margin=0.05, resid_tol=1e-2, seed=0):
         params = SolverParams(dt=DT, k_turn=2.0, newton_iters=12)
-        self.sim = Simulator.for_scene(RobotParams(), params, scene, mu, B, T, device=device)
+        self.sim = Simulator(
+            RobotParams(), params,
+            GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
+            B, T, device,
+        )
+        self.sim.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32),
+                                      dtype=wp.float32, device=device))
+        self.sim.set_friction(mu)
         self.scene, self.goal = scene, np.asarray(goal[:2], np.float64)
         self.T, self.B, self.n_refine = T, B, n_refine
         self.sigma, self.lam, self.wmax = sigma, lam, wmax

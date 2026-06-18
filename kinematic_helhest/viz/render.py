@@ -84,8 +84,8 @@ def build_robot():
 def build_terrain(hm):
     from matplotlib import cm
     ny, nx = hm.H.shape
-    xs = hm.x0 + np.arange(nx) * hm.cell
-    ys = hm.y0 + np.arange(ny) * hm.cell
+    xs = hm.x0 + (np.arange(nx) + 0.5) * hm.cell  # cell centers
+    ys = hm.y0 + (np.arange(ny) + 0.5) * hm.cell
     XX, YY = np.meshgrid(xs, ys)
     V = np.stack([XX, YY, hm.H], -1).reshape(-1, 3).astype(np.float32)
     gy, gx = np.gradient(hm.H, hm.cell)

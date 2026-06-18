@@ -20,6 +20,28 @@ from kinematic_helhest.engine import Robot
 from kinematic_helhest.engine import Solver
 from kinematic_helhest.engine import Grid
 from kinematic_helhest.engine import sample_height
+from kinematic_helhest.engine.envelope import _contact_kernel
+from kinematic_helhest.engine.envelope import _gather_kernel
+
+
+def wheel_envelope(elevation, cell_size, wheel_radius, device="cpu"):
+    """Verification-only: allocate scratch + run the two engine envelope passes
+    (raw elevation -> dilated). Carries elevation.requires_grad so the backward tape
+    routes d(loss)/d(raw elevation) to the contact cell."""
+    ny, nx = elevation.shape
+    env_radius = int(np.ceil(wheel_radius / cell_size))
+    contact_iy = wp.zeros((ny, nx), dtype=wp.int32, device=device)
+    contact_ix = wp.zeros((ny, nx), dtype=wp.int32, device=device)
+    contact_cap = wp.zeros((ny, nx), dtype=wp.float32, device=device)
+    envelope = wp.zeros((ny, nx), dtype=wp.float32, device=device,
+                        requires_grad=elevation.requires_grad)
+    wp.launch(_contact_kernel, dim=elevation.shape,
+              inputs=[elevation, float(cell_size), float(wheel_radius), env_radius],
+              outputs=[contact_iy, contact_ix, contact_cap], device=device)
+    wp.launch(_gather_kernel, dim=elevation.shape,
+              inputs=[elevation, contact_iy, contact_ix, contact_cap],
+              outputs=[envelope], device=device)
+    return envelope
 
 
 @wp.kernel
@@ -73,10 +95,11 @@ def _residual(Henv: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot,
 
 def dsettle_dHenv(env_hm, poses, adj_u, params, jac_eps=1e-4, device="cpu"):
     """Implicit grad d(sum_p adj_u_p . u*_p)/dHenv. Returns (grad_Henv, u_star)."""
-    from kinematic_helhest.engine import RobotParams
-    from kinematic_helhest.engine import to_terrain
+    from kinematic_helhest.engine import GridParams, RobotParams
 
-    te = to_terrain(env_hm, device, requires_grad=True)
+    elev = wp.array(np.ascontiguousarray(env_hm.H, np.float32), dtype=wp.float32,
+                    device=device, requires_grad=True)
+    g = GridParams(env_hm.nx, env_hm.ny, env_hm.cell, env_hm.x0, env_hm.y0).build()
     robot = RobotParams().build(device)
     sp = params.build()
     B = len(poses)
@@ -84,9 +107,9 @@ def dsettle_dHenv(env_hm, poses, adj_u, params, jac_eps=1e-4, device="cpu"):
 
     # forward settle (detached) + Jacobian + transpose solve
     u_star = wp.zeros(B, dtype=wp.vec3, device=device)
-    wp.launch(_settle_only, B, inputs=[te.elevation, te.g, robot, sp, pose, u_star], device=device)
+    wp.launch(_settle_only, B, inputs=[elev, g, robot, sp, pose, u_star], device=device)
     J = wp.zeros(B, dtype=wp.mat33, device=device)
-    wp.launch(_settle_jac, B, inputs=[te.elevation, te.g, robot, pose, u_star, float(jac_eps), J],
+    wp.launch(_settle_jac, B, inputs=[elev, g, robot, pose, u_star, float(jac_eps), J],
               device=device)
     adj = wp.array(np.asarray(adj_u, np.float32), dtype=wp.vec3, device=device)
     minus_lam = wp.zeros(B, dtype=wp.vec3, device=device)
@@ -96,10 +119,10 @@ def dsettle_dHenv(env_hm, poses, adj_u, params, jac_eps=1e-4, device="cpu"):
     c = wp.zeros(B, dtype=wp.vec3, device=device, requires_grad=True)
     tape = wp.Tape()
     with tape:
-        wp.launch(_residual, B, inputs=[te.elevation, te.g, robot, pose, u_star], outputs=[c],
+        wp.launch(_residual, B, inputs=[elev, g, robot, pose, u_star], outputs=[c],
                   device=device)
     tape.backward(grads={c: minus_lam})
-    return te.elevation.grad.numpy(), u_star.numpy()
+    return elev.grad.numpy(), u_star.numpy()
 
 
 def _selftest():
@@ -161,8 +184,8 @@ def _row_loss(planar: wp.array2d(dtype=wp.vec3), tilt: wp.array2d(dtype=wp.vec3)
 def _gmeta(hm):
     from kinematic_helhest.engine import Grid
     g = Grid()
-    g.x0, g.y0, g.cell = float(hm.x0), float(hm.y0), float(hm.cell)
-    g.nx, g.ny = int(hm.nx), int(hm.ny)
+    g.origin_x, g.origin_y, g.cell_size = float(hm.x0), float(hm.y0), float(hm.cell)
+    g.cells_x, g.cells_y = int(hm.nx), int(hm.ny)
     return g
 
 
@@ -256,7 +279,6 @@ def _fd_grid(envH, rawH, muH, g, gmu, robot, sp, omega_np, init_pose, wpv, wtv, 
 def _fwd_h(rawH, muH, g, gmu, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, grad=False):
     """Like _fwd but the leaf is the RAW heightmap: Henv = wheel_envelope(rawH) is
     computed on the tape, so backward yields d(loss)/d(raw h)."""
-    from kinematic_helhest.engine.envelope import wheel_envelope
     from kinematic_helhest.engine import init_state, step
 
     dev = "cpu"
@@ -274,7 +296,7 @@ def _fwd_h(rawH, muH, g, gmu, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, 
     loss = wp.zeros(1, dtype=float, device=dev, requires_grad=grad)
 
     def launches():
-        Henv = wheel_envelope(Hraw, g.cell, Rwheel, dev)  # raw h -> envelope, on the tape
+        Henv = wheel_envelope(Hraw, g.cell_size, Rwheel, dev)  # raw h -> envelope, on the tape
         wp.launch(init_state, 1, inputs=[Henv, g, robot, sp, pose0],
                   outputs=[planar, tilt], device=dev)
         for t in range(T):

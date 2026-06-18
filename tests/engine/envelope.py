@@ -6,7 +6,28 @@ import numpy as np
 import warp as wp
 
 from kinematic_helhest import heightmap as hmmod
-from kinematic_helhest.engine.envelope import wheel_envelope
+from kinematic_helhest.engine.envelope import _contact_kernel
+from kinematic_helhest.engine.envelope import _gather_kernel
+
+
+def wheel_envelope(elevation, cell_size, wheel_radius, device="cpu"):
+    """Verification-only: allocate scratch + run the two engine envelope passes
+    (raw elevation -> dilated). Carries elevation.requires_grad so the backward tape
+    routes d(loss)/d(raw elevation) to the contact cell."""
+    ny, nx = elevation.shape
+    env_radius = int(np.ceil(wheel_radius / cell_size))
+    contact_iy = wp.zeros((ny, nx), dtype=wp.int32, device=device)
+    contact_ix = wp.zeros((ny, nx), dtype=wp.int32, device=device)
+    contact_cap = wp.zeros((ny, nx), dtype=wp.float32, device=device)
+    envelope = wp.zeros((ny, nx), dtype=wp.float32, device=device,
+                        requires_grad=elevation.requires_grad)
+    wp.launch(_contact_kernel, dim=elevation.shape,
+              inputs=[elevation, float(cell_size), float(wheel_radius), env_radius],
+              outputs=[contact_iy, contact_ix, contact_cap], device=device)
+    wp.launch(_gather_kernel, dim=elevation.shape,
+              inputs=[elevation, contact_iy, contact_ix, contact_cap],
+              outputs=[envelope], device=device)
+    return envelope
 
 
 @wp.kernel

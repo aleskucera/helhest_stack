@@ -17,6 +17,7 @@ import numpy as np
 import warp as wp
 
 from .robot import Robot
+from .terrain import _locate
 from .terrain import Grid
 from .terrain import sample_height
 from .terrain import sample_height_grad
@@ -173,18 +174,14 @@ def _scatter_h(adj_elevation: wp.array2d(dtype=wp.float32), g: Grid,
     """Accumulate coef * (bilinear weights of (x,y)) into the elevation adjoint array.
 
     This is d(sample_height)/dH at (x,y): the same 4-node stencil sample_height
-    reads, scattered with atomics (many output cells may hit the same node).
+    reads (via the shared `_locate`), scattered with atomics (many output cells may
+    hit the same node).
     """
-    fx = (x - g.x0) / g.cell
-    fy = (y - g.y0) / g.cell
-    ix = wp.clamp(int(wp.floor(fx)), 0, g.nx - 2)
-    iy = wp.clamp(int(wp.floor(fy)), 0, g.ny - 2)
-    tx = wp.clamp(fx - float(ix), 0.0, 1.0)
-    ty = wp.clamp(fy - float(iy), 0.0, 1.0)
-    wp.atomic_add(adj_elevation, iy, ix, coef * (1.0 - tx) * (1.0 - ty))
-    wp.atomic_add(adj_elevation, iy, ix + 1, coef * tx * (1.0 - ty))
-    wp.atomic_add(adj_elevation, iy + 1, ix, coef * (1.0 - tx) * ty)
-    wp.atomic_add(adj_elevation, iy + 1, ix + 1, coef * tx * ty)
+    c = _locate(g, x, y)
+    wp.atomic_add(adj_elevation, c.y_idx, c.x_idx, coef * (1.0 - c.frac_x) * (1.0 - c.frac_y))
+    wp.atomic_add(adj_elevation, c.y_idx, c.x_idx + 1, coef * c.frac_x * (1.0 - c.frac_y))
+    wp.atomic_add(adj_elevation, c.y_idx + 1, c.x_idx, coef * (1.0 - c.frac_x) * c.frac_y)
+    wp.atomic_add(adj_elevation, c.y_idx + 1, c.x_idx + 1, coef * c.frac_x * c.frac_y)
 
 
 @wp.func_grad(settle)

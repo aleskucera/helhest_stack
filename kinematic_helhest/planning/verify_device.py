@@ -1,13 +1,13 @@
 """Phase-1 verification: device terrain ingest + on-device wheel envelope.
 
 Three checks (CPU by default; pass --device cuda for the GPU path):
-  1. half-cell alignment of `bounds_to_origin` + `terrain_from_device` — a
-     cell-center raster sampled at known world points matches the analytic plane,
-     and the naive `x0=xmin` origin shows the expected half-cell bias;
+  1. cell-center alignment — a cell-center raster (terrain_toolkit-style) sampled
+     at known world points matches the analytic plane with the grid origin set to
+     the bounds min corner directly (one convention end-to-end, no half-cell shift);
   2. on-device `engine.envelope.wheel_envelope` == numpy `heightmap.wheel_envelope`
      oracle on the real scenes;
-  3. a device-fed `Simulator` reproduces the host `Simulator.for_scene` path
-     rollout-for-rollout on the same node grid.
+  3. a device-fed `Simulator` reproduces the host (numpy-scene) path
+     rollout-for-rollout on the same cell grid.
 
 Run:  python -m kinematic_helhest.planning.verify_device [--device cuda]
 """
@@ -18,31 +18,60 @@ import warp as wp
 
 from .. import friction
 from .. import heightmap as hmmod
-from ..engine import bounds_to_origin
+from ..engine import Grid
 from ..engine import GridParams
 from ..engine import RobotParams
+from ..engine import sample_height
 from ..engine import Simulator
 from ..engine import SolverParams
-from ..engine import terrain_from_device
-from ..engine.envelope import wheel_envelope
-from ..engine.terrain import _probe
+from ..engine.envelope import _contact_kernel
+from ..engine.envelope import _gather_kernel
 from .mppi import _to_omega
 
 
-def _sample(terrain, xs, ys, device):
+def wheel_envelope(elevation, cell_size, wheel_radius, device="cpu"):
+    """Verification-only: allocate scratch + run the two engine envelope passes
+    (raw elevation -> dilated). Mirrors what `Simulator.set_terrain` does into its
+    owned buffers."""
+    ny, nx = elevation.shape
+    env_radius = int(np.ceil(wheel_radius / cell_size))
+    contact_iy = wp.zeros((ny, nx), dtype=wp.int32, device=device)
+    contact_ix = wp.zeros((ny, nx), dtype=wp.int32, device=device)
+    contact_cap = wp.zeros((ny, nx), dtype=wp.float32, device=device)
+    envelope = wp.zeros((ny, nx), dtype=wp.float32, device=device)
+    wp.launch(_contact_kernel, dim=elevation.shape,
+              inputs=[elevation, float(cell_size), float(wheel_radius), env_radius],
+              outputs=[contact_iy, contact_ix, contact_cap], device=device)
+    wp.launch(_gather_kernel, dim=elevation.shape,
+              inputs=[elevation, contact_iy, contact_ix, contact_cap],
+              outputs=[envelope], device=device)
+    return envelope
+
+
+@wp.kernel
+def _probe_h(elevation: wp.array2d(dtype=wp.float32), g: Grid,
+             xs: wp.array(dtype=wp.float32), ys: wp.array(dtype=wp.float32),
+             out_h: wp.array(dtype=wp.float32)):
+    """Verification-only: launch the engine height sampler from host code."""
+    i = wp.tid()
+    out_h[i] = sample_height(elevation, g, xs[i], ys[i])
+
+
+def _sample(elevation, g, xs, ys, device):
     """Bilinear height at world (xs, ys) via the engine's device sampler."""
     wx = wp.array(xs.astype(np.float32), dtype=wp.float32, device=device)
     wy = wp.array(ys.astype(np.float32), dtype=wp.float32, device=device)
     oh = wp.zeros(len(xs), dtype=wp.float32, device=device)
-    on = wp.zeros(len(xs), dtype=wp.vec3, device=device)
-    wp.launch(_probe, len(xs), inputs=[terrain.elevation, terrain.g, wx, wy],
-              outputs=[oh, on], device=device)
+    wp.launch(_probe_h, len(xs), inputs=[elevation, g, wx, wy],
+              outputs=[oh], device=device)
     return oh.numpy()
 
 
 def check_alignment(device):
-    """Cell-center raster of a tilted plane f = a*x + b*y; bilinear is exact for a
-    plane, so the correct origin recovers f and the xmin origin is off by ~half a cell."""
+    """Cell-center raster (terrain_toolkit-style) of a tilted plane f = a*x + b*y.
+    The engine sampler uses the cell-center convention, so the grid origin is the
+    bounds min corner directly -- no half-cell shift -- and bilinear (exact for a
+    plane) recovers f at arbitrary world points."""
     a, b, res = 0.3, 0.2, 0.05
     bounds = (-1.0, 1.0, -1.0, 1.0)  # (xmin, xmax, ymin, ymax)
     xmin, xmax, ymin, ymax = bounds
@@ -54,20 +83,13 @@ def check_alignment(device):
     H = (a * XX + b * YY).astype(np.float32)
     H_wp = wp.array(np.ascontiguousarray(H), dtype=wp.float32, device=device)
 
-    x0, y0 = bounds_to_origin(bounds, res)
-    good = terrain_from_device(H_wp, x0, y0, res)
-    bad = terrain_from_device(H_wp, xmin, ymin, res)  # naive: node origin = corner
-
+    g = GridParams(nx, ny, res, xmin, ymin).build()  # origin = min corner, no shift
     xs = np.array([-0.3, 0.1, 0.42], np.float64)
     ys = np.array([0.2, -0.15, 0.05], np.float64)
     f = a * xs + b * ys
-    err_good = np.abs(_sample(good, xs, ys, device) - f).max()
-    err_bad = np.abs(_sample(bad, xs, ys, device) - f).max()
-    bias = (abs(a) + abs(b)) * 0.5 * res
-    print(f"  alignment: correct-origin err={err_good:.2e}  "
-          f"xmin-origin err={err_bad:.2e}  (expected half-cell bias ~{bias:.3f})")
-    assert err_good < 1e-5, err_good
-    assert err_bad > 0.4 * bias, err_bad
+    err = np.abs(_sample(H_wp, g, xs, ys, device) - f).max()
+    print(f"  alignment: cell-center origin err={err:.2e}")
+    assert err < 1e-5, err
     print("  alignment OK")
 
 
@@ -94,13 +116,19 @@ def check_end_to_end(device, B=16, T=25):
     start = (-1.0, 0.0, 0.0)
     omega = _to_omega(np.full((B, T, 2), 2.0, np.float32))
 
-    host = Simulator.for_scene(RobotParams(), params, scene, mu, B, T, device=device)
+    host = Simulator(
+        RobotParams(), params,
+        GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
+        B, T, device,
+    )
+    host.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32),
+                              dtype=wp.float32, device=device))
+    host.set_friction(mu)
     ph, _, ch, rh = host.rollout(omega, start)
 
     H_wp = wp.array(np.ascontiguousarray(scene.H, np.float32),
                     dtype=wp.float32, device=device)
-    grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0,
-                    R=RobotParams().wheel_radius)
+    grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
     dev = Simulator(RobotParams(), params, grid, B, T, device)
     dev.set_terrain(H_wp)
     dev.set_uniform_friction(0.8)

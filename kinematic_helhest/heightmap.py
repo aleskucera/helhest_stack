@@ -1,7 +1,10 @@
 """Heightmap terrain: analytic-scene rasterization + differentiable sampling.
 
 A heightmap is a regular grid H[ny, nx] of heights with a world origin (x0, y0)
-and uniform cell size. World->grid: col = (x-x0)/cell, row = (y-y0)/cell.
+and uniform cell size. Values sit at CELL CENTERS: H[i,j] is the height at world
+(x0 + (j+0.5)*cell, y0 + (i+0.5)*cell) -- matching terrain_toolkit's raster, so a
+device grid handed over from perception needs no half-cell shift. World->grid:
+col = (x-x0)/cell - 0.5, row = (y-y0)/cell - 0.5.
 
 For Phase 0 this is a plain numpy reference (bilinear value + central-difference
 normal). The Warp port (Phase 2/5) mirrors this exactly so the numpy version
@@ -20,8 +23,8 @@ class Heightmap:
         self.cell = float(cell)
 
     def _grid_coords(self, x, y):
-        fx = (np.asarray(x, dtype=np.float64) - self.x0) / self.cell
-        fy = (np.asarray(y, dtype=np.float64) - self.y0) / self.cell
+        fx = (np.asarray(x, dtype=np.float64) - self.x0) / self.cell - 0.5
+        fy = (np.asarray(y, dtype=np.float64) - self.y0) / self.cell - 0.5
         ix = np.clip(np.floor(fx).astype(int), 0, self.nx - 2)
         iy = np.clip(np.floor(fy).astype(int), 0, self.ny - 2)
         tx = np.clip(fx - ix, 0.0, 1.0)
@@ -89,8 +92,8 @@ def _grid(xlim, ylim, cell):
     y0, y1 = ylim
     nx = int(round((x1 - x0) / cell)) + 1
     ny = int(round((y1 - y0) / cell)) + 1
-    xs = x0 + np.arange(nx) * cell
-    ys = y0 + np.arange(ny) * cell
+    xs = x0 + (np.arange(nx) + 0.5) * cell  # cell centers
+    ys = y0 + (np.arange(ny) + 0.5) * cell
     XX, YY = np.meshgrid(xs, ys)  # [ny, nx]
     return XX, YY
 
