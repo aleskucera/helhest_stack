@@ -73,7 +73,9 @@ def evaluate(scene, mu, start, goal, cand, slips, beta=0.5, T=70, dt=0.1, device
     cvar = np.sort(J, axis=1)[:, -m:].mean(1)                                # CVaR = mean of worst m
     paths = controlled[:, :, :2].reshape(T + 1, B, K, 2)
     min_clear = clearance.reshape(-1, B, K).min(0).min(1)                    # worst-scenario clearance [B]
-    return nominal, cvar, paths, min_clear
+    bad = (clearance < _CLEAR_MARGIN) | (residual > _RESID_TOL)              # [T, B*K] infeasible step
+    badstep = bad.reshape(-1, B, K)                                          # [T, B, K]
+    return nominal, cvar, paths, min_clear, badstep
 
 
 def _plot(scene, goal, paths, i_nom, i_cvar, out):
@@ -100,6 +102,44 @@ def _plot(scene, goal, paths, i_nom, i_cvar, out):
     print(f"saved {out}")
 
 
+def _animate(scene, goal, paths, badstep, i_nom, i_cvar, out, stride=2, fps=12):
+    """Two-panel GIF: watch the K slip scenarios roll out under each arc. A scenario's marker
+    turns red once it has high-centered (infeasible settle). The nominal-best panel accumulates
+    red; the CVaR-best panel stays green -- the disturbance fan clearing the wall, animated."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.animation import FuncAnimation
+    from matplotlib.animation import PillowWriter
+
+    ext = [scene.x0, scene.x0 + scene.nx * scene.cell, scene.y0, scene.y0 + scene.ny * scene.cell]
+    Tp1, K = paths.shape[0], paths.shape[2]
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5.5))
+    panels = [(i_nom, "nominal-best (hugs)"), (i_cvar, "CVaR-best (clears)")]
+    frames = list(range(2, Tp1 + 1, stride))
+
+    def draw(t):
+        for ax, (idx, title) in zip(axes, panels):
+            ax.clear()
+            ax.imshow(scene.H, origin="lower", extent=ext, cmap="terrain", alpha=0.9)
+            fan, bad = paths[:, idx], badstep[:, idx]  # [T+1, K, 2], [T, K]
+            clipped = bad[: min(t, bad.shape[0])].any(0)  # [K] has scenario k clipped by now
+            for k in range(K):
+                ax.plot(fan[:t, k, 0], fan[:t, k, 1], "-", color="0.35", lw=0.4, alpha=0.4)
+                ax.plot(fan[t - 1, k, 0], fan[t - 1, k, 1], "o", ms=4,
+                        color="crimson" if clipped[k] else "seagreen")
+            ax.plot(0, 0, "o", color="k", ms=7)
+            ax.plot(*goal[:2], "*", color="red", ms=16)
+            ax.set_xlim(-0.5, 5.0); ax.set_ylim(-2.0, 3.0)
+            ax.set_xlabel("x [m]")
+            ax.set_title(f"{title}\n{int(clipped.sum())}/{K} scenarios high-centered")
+        return []
+
+    anim = FuncAnimation(fig, draw, frames=frames, interval=1000 / fps)
+    anim.save(out, writer=PillowWriter(fps=fps))
+    print(f"saved {out}  ({len(frames)} frames)")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--device", default="cuda")
@@ -108,6 +148,7 @@ def main():
     ap.add_argument("--K", type=int, default=16, help="slip scenarios per candidate")
     ap.add_argument("--beta", type=float, default=0.5, help="CVaR tail fraction (smaller = more conservative)")
     ap.add_argument("--slip-lo", type=float, default=0.6, help="min wheel-speed retained in a scenario")
+    ap.add_argument("--animate", action="store_true", help="save a GIF of the slip fans rolling out")
     args = ap.parse_args()
 
     scene = hmmod.demo_terrain()
@@ -120,7 +161,8 @@ def main():
     slips = np.ones((args.K, 2), np.float32)
     slips[1:] = rng.uniform(args.slip_lo, 1.0, (args.K - 1, 2))  # scenario 0 = no slip
 
-    nominal, cvar, paths, min_clear = evaluate(scene, mu, start, goal, cand, slips, beta=args.beta, device=args.device)
+    nominal, cvar, paths, min_clear, badstep = evaluate(
+        scene, mu, start, goal, cand, slips, beta=args.beta, device=args.device)
     i_nom, i_cvar = int(np.argmin(nominal)), int(np.argmin(cvar))
     print(f"B={args.B} candidates, K={args.K} slip scenarios, CVaR beta={args.beta}")
     print(f"  nominal-best: arc#{i_nom} turn={turns[i_nom]:.2f}  nominal={nominal[i_nom]:.1f} "
@@ -129,7 +171,11 @@ def main():
           f"cvar={cvar[i_cvar]:.1f}  worst-scenario min-clear={min_clear[i_cvar]:+.3f} m")
     print(f"  -> CVaR picks a {'wider' if turns[i_cvar] > turns[i_nom] else 'tighter'} arc; "
           f"worst-case clearance {min_clear[i_nom]:+.3f} -> {min_clear[i_cvar]:+.3f} m")
-    _plot(scene, goal, paths, i_nom, i_cvar, args.out)
+    if args.animate:
+        out = args.out[:-4] + ".gif" if args.out.endswith(".png") else args.out
+        _animate(scene, goal, paths, badstep, i_nom, i_cvar, out)
+    else:
+        _plot(scene, goal, paths, i_nom, i_cvar, args.out)
 
 
 if __name__ == "__main__":
