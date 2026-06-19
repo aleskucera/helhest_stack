@@ -157,7 +157,7 @@ def main():
     ap.add_argument("--device", default="cpu", help="warp device: cpu or cuda")
     ap.add_argument("--resid-tol", type=float, default=1e-2, help="settle residual above which the pose is invalid (lower = stricter)")
     ap.add_argument("--clear-margin", type=float, default=0.0, help="min belly-terrain gap [m] (higher = stricter)")
-    ap.add_argument("--derived-clamp", type=float, default=1.2, help="max settle derived [rad] (lower = refuses steeper slopes)")
+    ap.add_argument("--tilt-clamp", type=float, default=1.2, help="max settle tilt [rad] (lower = refuses steeper slopes)")
     args = ap.parse_args()
     run(shot=args.shot, device=args.device, resid_tol=args.resid_tol,
         clear_margin=args.clear_margin, tilt_clamp=args.tilt_clamp)
