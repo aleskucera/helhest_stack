@@ -108,55 +108,62 @@ def _cost_kernel(
     r = wp.tid()  # rollout
     run_sum = float(0.0)
     tilt_sum = float(0.0)
-    head_sum = float(0.0)
-    term = float(0.0)
+    heading_sum = float(0.0)
+    terminal_d2 = float(0.0)
     for t in range(T + 1):
-        pc = controlled[t, r]
-        dx = pc[0] - goal[0]
-        dy = pc[1] - goal[1]
-        d2 = dx * dx + dy * dy
-        run_sum += d2
-        term = d2  # last iter (t = T) sticks
-        tc = derived[t, r]
-        ang = wp.acos(wp.clamp(wp.cos(tc[1]) * wp.cos(tc[2]), -1.0, 1.0))
-        over = wp.max(ang - cw.tilt_free, 0.0)
-        tilt_sum += over * over
-        # heading: penalize facing AWAY from the goal (1 - cos angle, in [0, 2]). Makes
-        # "turn to face the goal" cheaper than "stay", so a forward-only robot commits to a
-        # U-turn when the goal is behind (it can't reverse or spin in place).
-        dist = wp.sqrt(d2)
-        if dist > 1e-3:
-            cos_align = -(wp.cos(pc[2]) * dx + wp.sin(pc[2]) * dy) / dist
-            head_sum += 1.0 - cos_align
-    eff = float(0.0)
-    smooth = float(0.0)
-    penalty = float(0.0)
+        pose = controlled[t, r]  # (x, y, yaw)
+        dx = pose[0] - goal[0]
+        dy = pose[1] - goal[1]
+        goal_d2 = dx * dx + dy * dy
+        run_sum += goal_d2
+        terminal_d2 = goal_d2  # last iter (t = T) sticks -> terminal goal distance^2
+        # tilt + heading are optional; cw is uniform across rollouts, so these guards are
+        # warp-coherent (no divergence) and skip the trig (and the derived read) when off.
+        if cw.tilt > 0.0:
+            pitch = derived[t, r][1]
+            roll = derived[t, r][2]
+            tilt_angle = wp.acos(wp.clamp(wp.cos(pitch) * wp.cos(roll), -1.0, 1.0))
+            excess = wp.max(tilt_angle - cw.tilt_free, 0.0)
+            tilt_sum += excess * excess
+        if cw.head > 0.0:
+            # heading: penalize facing AWAY from the goal (1 - cos angle, in [0, 2]). Makes
+            # "turn to face the goal" cheaper than "stay", so a forward-only robot commits to a
+            # U-turn when the goal is behind (it can't reverse or spin in place).
+            goal_dist = wp.sqrt(goal_d2)
+            if goal_dist > 1e-3:
+                facing = -(wp.cos(pose[2]) * dx + wp.sin(pose[2]) * dy) / goal_dist
+                heading_sum += 1.0 - facing
+    effort_sum = float(0.0)
+    smooth_sum = float(0.0)
+    penalty_sum = float(0.0)
     prev_l = float(0.0)
     prev_r = float(0.0)
     for t in range(T):
-        om = omega[t, r]
-        eff += om[0] * om[0] + om[1] * om[1]
+        wheels = omega[t, r]  # (wL, wR)
+        effort_sum += wheels[0] * wheels[0] + wheels[1] * wheels[1]
         if t > 0:
-            dl = om[0] - prev_l
-            dr = om[1] - prev_r
-            smooth += dl * dl + dr * dr
-        prev_l = om[0]
-        prev_r = om[1]
+            dl = wheels[0] - prev_l
+            dr = wheels[1] - prev_r
+            smooth_sum += dl * dl + dr * dr
+        prev_l = wheels[0]
+        prev_r = wheels[1]
         # GRADED validity (option C): penalize HOW FAR past the margin/tol and HOW EARLY, not a
         # binary flag. De-saturates the cost (it still ranks when every sample violates), and
         # eating into the safety margin costs little while a real penetration costs a lot.
         clear_viol = wp.max(cw.clear_margin - clearance[t, r], 0.0)
         resid_viol = wp.max(residual[t, r] - cw.resid_tol, 0.0)
         early = float(T - t) / float(T)  # earlier violations hurt more (imminent)
-        penalty += early * (clear_viol + resid_viol)
+        penalty_sum += early * (clear_viol + resid_viol)
+    # run/tilt/heading are means over the horizon; effort/smooth are raw sums (so they scale with
+    # T) -- the weights are tuned to that, mind it if T changes.
     Jout[r] = (
-        cw.term * term
+        cw.term * terminal_d2
         + cw.run * (run_sum / float(T + 1))
         + cw.tilt * (tilt_sum / float(T + 1))
-        + cw.head * (head_sum / float(T + 1))
-        + cw.eff * eff
-        + cw.smooth * smooth
-        + penalty * cw.invalid
+        + cw.head * (heading_sum / float(T + 1))
+        + cw.eff * effort_sum
+        + cw.smooth * smooth_sum
+        + penalty_sum * cw.invalid
     )
 
 
