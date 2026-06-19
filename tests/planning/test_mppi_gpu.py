@@ -91,7 +91,7 @@ def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
         wp.launch(mg._count_below_kernel, B, inputs=[Jd, tau, count], device=device)
         wp.launch(mg._bisect_step_kernel, 1, inputs=[count, float(target_k), lo, hi, tau], device=device)
     wp.launch(mg._count_below_kernel, B, inputs=[Jd, tau, count], device=device)
-    wp.launch(mg._elite_u_kernel, (T, 2), inputs=[Jd, tau, count, omega, -_WMAX, _WMAX, B, Ud], device=device)
+    wp.launch(mg._elite_u_kernel, (T, 2), inputs=[Jd, tau, count, omega, 1, -_WMAX, _WMAX, B, Ud], device=device)  # n_scen=1
     U_gpu = Ud.numpy()
 
     n_gpu = int((J <= float(tau.numpy()[0])).sum())

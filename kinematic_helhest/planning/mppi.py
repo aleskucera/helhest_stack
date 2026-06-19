@@ -71,7 +71,8 @@ def _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, 
 
 def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1,
          sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, wmin=0.0, elite_frac=0.02, goal_tol=0.3, resid_tol=1e-2, clear_margin=0.05,
-         device="cuda", seed=0, weights=None, record=False, n_show=60, costtogo=False):
+         device="cuda", seed=0, weights=None, record=False, n_show=60, costtogo=False,
+         n_scenarios=1, cvar_beta=0.5, slip_lo=0.6):
     params = SolverParams(dt=dt, k_turn=2.0, newton_iters=6, atol=1e-4)  # forward-only: shallow+loose settle
     sim = Simulator(
         RobotParams(), params,
@@ -88,7 +89,8 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
             w["head"] = 4.0
     goal = np.asarray(goal[:2], np.float64)
     drv = MppiGpu(sim, sigma, wmax, w, clear_margin, resid_tol, seed,
-                  sigma_knot=sigma_knot, n_knots=n_knots, wmin=wmin, elite_frac=elite_frac)
+                  sigma_knot=sigma_knot, n_knots=n_knots, wmin=wmin, elite_frac=elite_frac,
+                  n_scenarios=n_scenarios, cvar_beta=cvar_beta, slip_lo=slip_lo)
     drv.reset_nominal(1.5)  # nominal wheel speeds, gentle forward
     if costtogo:  # goal is fixed for the whole drive -> solve V(x,y) once, before any replan
         from .costtogo import CostToGo
