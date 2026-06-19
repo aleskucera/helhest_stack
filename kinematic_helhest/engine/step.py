@@ -399,3 +399,88 @@ def step_kernel(
     clear_out[tid] = chassis_clearance(elevation, grid, robot, Rn, pn)
     cres = clearances(envelope, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
     resid_out[tid] = wp.max(wp.max(wp.abs(cres[0]), wp.abs(cres[1])), wp.abs(cres[2]))
+
+
+@wp.kernel
+def rollout_kernel(
+    T: int,
+    envelope: wp.array2d(dtype=wp.float32),
+    elevation: wp.array2d(dtype=wp.float32),
+    grid: Grid,
+    friction: wp.array2d(dtype=wp.float32),
+    grid_mu: Grid,
+    robot: Robot,
+    solver: Solver,
+    start_pose: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw)
+    omega: wp.array2d(dtype=wp.vec3),  # [T, B] (wL, wR, w_rear)
+    controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] (x, y, yaw)
+    derived: wp.array2d(dtype=wp.vec3),  # [T+1, B] (z, pitch, roll)
+    loads_out: wp.array2d(dtype=wp.vec3),  # [T, B]
+    turn_out: wp.array2d(dtype=wp.vec2),  # [T, B]
+    clear_out: wp.array2d(dtype=float),  # [T, B]
+    resid_out: wp.array2d(dtype=float),  # [T, B]
+):
+    """FORWARD-ONLY whole-rollout fusion: one thread per rollout walks all T steps,
+    carrying the state (pc, tc) in registers instead of round-tripping it through
+    global memory between per-step launches (~1.2x faster than init_state_kernel +
+    T*step_kernel). This is the hot planning path; the differentiable/calibration
+    path keeps the per-step step_kernel (the register carry is NOT auto-diffable --
+    backprop needs the intermediate states this kernel overwrites).
+
+    MUST stay bit-identical to init_state_kernel + T*step_kernel (guarded by
+    tests/engine/step.selftest_rollout_kernel). Edit the physics in both.
+    """
+    b = wp.tid()
+    # init_state: settle the start pose -> row 0
+    pc = start_pose[b]
+    z0 = sample_height(envelope, grid, pc[0], pc[1]) + robot.wheel_radius
+    tc = settle(envelope, grid, robot, solver, pc, wp.vec3(z0, 0.0, 0.0))
+    controlled[0, b] = pc
+    derived[0, b] = tc
+
+    for t in range(T):
+        x = pc[0]
+        y = pc[1]
+        yaw = pc[2]
+        R = euler_zyx(yaw, tc[1], tc[2])
+        p = wp.vec3(x, y, tc[0])
+
+        N = normal_loads(envelope, grid, robot, R, p)
+        sw = float(0.0)
+        xicr_num = float(0.0)
+        for i in range(wp.static(3)):
+            st_i = wp.static(i)
+            wheel_pos = robot.wheel_pos[st_i]
+            wheel_center = p + R * wheel_pos
+            n = sample_normal(envelope, grid, wheel_center[0], wheel_center[1])
+            ct = wheel_center - robot.wheel_radius * n
+            mw = sample_height(friction, grid_mu, ct[0], ct[1]) * N[st_i]
+            sw += mw
+            xicr_num += mw * wheel_pos[0]
+        x_icr = xicr_num / sw
+        alpha = 1.0 + solver.k_turn * sw / (robot.gravity * robot.mass)
+
+        om = omega[t, b]
+        vx = robot.wheel_radius * (om[0] + om[1]) / 2.0
+        wz = robot.wheel_radius * (om[1] - om[0]) / (2.0 * robot.half_track * alpha)
+        vy = -x_icr * wz
+        vw = R * wp.vec3(vx, vy, 0.0)
+        xn = x + vw[0] * solver.dt
+        yn = y + vw[1] * solver.dt
+        yawn = yaw + wz * solver.dt
+
+        pose_next = wp.vec3(xn, yn, yawn)
+        settled = settle(envelope, grid, robot, solver, pose_next, tc)
+        controlled[t + 1, b] = pose_next
+        derived[t + 1, b] = settled
+
+        Rn = euler_zyx(yawn, settled[1], settled[2])
+        pn = wp.vec3(xn, yn, settled[0])
+        loads_out[t, b] = normal_loads(envelope, grid, robot, Rn, pn)
+        turn_out[t, b] = wp.vec2(alpha, x_icr)
+        clear_out[t, b] = chassis_clearance(elevation, grid, robot, Rn, pn)
+        cres = clearances(envelope, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
+        resid_out[t, b] = wp.max(wp.max(wp.abs(cres[0]), wp.abs(cres[1])), wp.abs(cres[2]))
+
+        pc = pose_next  # carry state in registers (no global round-trip)
+        tc = settled

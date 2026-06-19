@@ -22,6 +22,7 @@ from kinematic_helhest.engine import step_kernel
 from kinematic_helhest.engine.step import chassis_clearance
 from kinematic_helhest.engine.rotations import euler_zyx
 from kinematic_helhest.engine.step import normal_loads
+from kinematic_helhest.engine.step import rollout_kernel
 from kinematic_helhest.reference import placement
 from kinematic_helhest.reference import rollout as rollout_np
 
@@ -200,7 +201,45 @@ def selftest_step():
     print(f"step device-vs-oracle  {'OK' if worst < 5e-3 else 'REVIEW'}")
 
 
+def selftest_rollout_kernel():
+    """The fused forward rollout_kernel MUST equal init_state_kernel + T*step_kernel
+    bit-for-bit (it duplicates their physics for the register-carry fusion)."""
+    wp.init()
+    scene, mu = hmmod.box_scene(), friction.uniform(0.8)
+    robot_params = RobotParams()
+    robot = robot_params.build("cpu")
+    sp = SolverParams(newton_iters=12, dt=0.05, k_turn=2.0).build()
+    te, g = _upload(hmmod.wheel_envelope(scene, robot_params.wheel_radius), "cpu")
+    tr, _ = _upload(scene, "cpu")
+    tm, _ = _upload(mu, "cpu")
+    B, T = 8, 30
+    rng = np.random.default_rng(0)
+    omega = wp.array(np.clip(2.0 + rng.normal(0, 1.0, (T, B, 3)), -4, 4).astype(np.float32),
+                     dtype=wp.vec3, device="cpu")
+    pose0 = wp.array(np.tile([-1.0, 0.0, 0.0], (B, 1)).astype(np.float32), dtype=wp.vec3, device="cpu")
+
+    def buffers():
+        return [wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+                wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+                wp.zeros((T, B), dtype=wp.vec3, device="cpu"), wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
+                wp.zeros((T, B), dtype=float, device="cpu"), wp.zeros((T, B), dtype=float, device="cpu")]
+
+    fused = buffers()
+    wp.launch(rollout_kernel, B, inputs=[T, te, tr, g, tm, g, robot, sp, pose0, omega],
+              outputs=fused, device="cpu")
+    perstep = buffers()
+    wp.launch(init_state_kernel, B, inputs=[te, g, robot, sp, pose0],
+              outputs=[perstep[0], perstep[1]], device="cpu")
+    for t in range(T):
+        wp.launch(step_kernel, B, inputs=[te, tr, g, tm, g, robot, sp, omega[t], perstep[0][t], perstep[1][t]],
+                  outputs=[perstep[0][t + 1], perstep[1][t + 1], perstep[2][t], perstep[3][t],
+                           perstep[4][t], perstep[5][t]], device="cpu")
+    worst = max(np.abs(f.numpy() - s.numpy()).max() for f, s in zip(fused, perstep))
+    print(f"fused rollout_kernel == per-step  worst={worst:.2e}  {'OK' if worst == 0.0 else 'REVIEW'}")
+
+
 if __name__ == "__main__":
     selftest_settle()
     selftest_loads()
     selftest_step()
+    selftest_rollout_kernel()

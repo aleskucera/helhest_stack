@@ -20,9 +20,8 @@ from warp import Device
 from .envelope import _contact_kernel
 from .envelope import _gather_kernel
 from .robot import RobotParams
-from .step import init_state_kernel
+from .step import rollout_kernel
 from .step import SolverParams
-from .step import step_kernel
 from .terrain import GridParams
 
 
@@ -110,30 +109,23 @@ class Simulator:
         self.friction.assign(np.ascontiguousarray(friction_hm.H, np.float32))
 
     def rollout_launch(self):
-        """Launch init_state + T*step into the owned device buffers; NO host I/O.
+        """Launch the whole rollout (init + T steps) in ONE fused kernel; NO host I/O.
 
         `self.omega` must already hold the controls and `self.start_pose` the init pose
         (e.g. filled on-device by the GPU MPPI sampler). Results stay on device in
         controlled/derived/loads/turning/clearance/residual -- the graph-capturable core.
+        Forward-only fusion (~1.2x vs per-step launches); the differentiable path uses
+        the per-step step_kernel instead (rollout_kernel's register carry isn't autodiffable).
         """
         wp.launch(
-            init_state_kernel,
+            rollout_kernel,
             self.B,
-            inputs=[self.envelope, self.grid, self.robot, self.solver, self.start_pose],
-            outputs=[self.controlled, self.derived],
+            inputs=[self.T, self.envelope, self.elevation, self.grid, self.friction, self.grid,
+                    self.robot, self.solver, self.start_pose, self.omega],
+            outputs=[self.controlled, self.derived, self.loads, self.turning,
+                     self.clearance, self.residual],
             device=self.device,
         )
-        for t in range(self.T):
-            wp.launch(
-                kernel=step_kernel,
-                dim=self.B,
-                # per-step views: read row t, write row t+1 (no t index inside the kernel)
-                inputs=[self.envelope, self.elevation, self.grid, self.friction, self.grid,
-                        self.robot, self.solver, self.omega[t], self.controlled[t], self.derived[t]],
-                outputs=[self.controlled[t + 1], self.derived[t + 1], self.loads[t],
-                         self.turning[t], self.clearance[t], self.residual[t]],
-                device=self.device,
-            )
 
     def rollout(self, omega_np, init_pose):
         """omega_np [T, B, 3], init_pose (x,y,yaw) shared by all rollouts. Returns
