@@ -308,7 +308,7 @@ def chassis_clearance(
 # forward step + rollout
 # ----------------------------------------------------------------------------
 @wp.kernel
-def init_state(
+def init_state_kernel(
     envelope: wp.array2d(dtype=wp.float32),
     grid: Grid,
     robot: Robot,
@@ -333,7 +333,7 @@ def init_state(
 
 
 @wp.kernel
-def step(
+def step_kernel(
     t: int,
     envelope: wp.array2d(dtype=wp.float32),
     elevation: wp.array2d(dtype=wp.float32),

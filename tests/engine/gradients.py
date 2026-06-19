@@ -192,7 +192,7 @@ def _gmeta(hm):
 def _fwd(envH, rawH, muH, g, gmu, robot, sp, omega_np, init_pose, wpv, wtv, grad=False):
     """Forward init + T steps + loss on the FINAL state (B=1). If grad, taped
     backward -> (loss, gHenv, gHmu). T inferred from omega_np."""
-    from kinematic_helhest.engine import init_state, step
+    from kinematic_helhest.engine import init_state_kernel, step_kernel
 
     dev = "cpu"
     T = omega_np.shape[0]
@@ -210,10 +210,10 @@ def _fwd(envH, rawH, muH, g, gmu, robot, sp, omega_np, init_pose, wpv, wtv, grad
     loss = wp.zeros(1, dtype=float, device=dev, requires_grad=grad)
 
     def launches():
-        wp.launch(init_state, 1, inputs=[Henv, g, robot, sp, pose0],
+        wp.launch(init_state_kernel, 1, inputs=[Henv, g, robot, sp, pose0],
                   outputs=[controlled, derived], device=dev)
         for t in range(T):
-            wp.launch(step, 1, inputs=[t, Henv, Hraw, g, Hmu, gmu, robot, sp, omega],
+            wp.launch(step_kernel, 1, inputs=[t, Henv, Hraw, g, Hmu, gmu, robot, sp, omega],
                       outputs=[controlled, derived, loads, turn, clear, resid], device=dev)
         wp.launch(_row_loss, 1, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev)
 
@@ -279,7 +279,7 @@ def _fd_grid(envH, rawH, muH, g, gmu, robot, sp, omega_np, init_pose, wpv, wtv, 
 def _fwd_h(rawH, muH, g, gmu, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, grad=False):
     """Like _fwd but the leaf is the RAW heightmap: Henv = wheel_envelope(rawH) is
     computed on the tape, so backward yields d(loss)/d(raw h)."""
-    from kinematic_helhest.engine import init_state, step
+    from kinematic_helhest.engine import init_state_kernel, step_kernel
 
     dev = "cpu"
     T = omega_np.shape[0]
@@ -297,10 +297,10 @@ def _fwd_h(rawH, muH, g, gmu, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, 
 
     def launches():
         Henv = wheel_envelope(Hraw, g.cell_size, Rwheel, dev)  # raw h -> envelope, on the tape
-        wp.launch(init_state, 1, inputs=[Henv, g, robot, sp, pose0],
+        wp.launch(init_state_kernel, 1, inputs=[Henv, g, robot, sp, pose0],
                   outputs=[controlled, derived], device=dev)
         for t in range(T):
-            wp.launch(step, 1, inputs=[t, Henv, Hraw, g, Hmu, gmu, robot, sp, omega],
+            wp.launch(step_kernel, 1, inputs=[t, Henv, Hraw, g, Hmu, gmu, robot, sp, omega],
                       outputs=[controlled, derived, loads, turn, clear, resid], device=dev)
         wp.launch(_row_loss, 1, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev)
 
@@ -364,7 +364,7 @@ def _fd_cells(rawH, muH, g_an, which, eps, fwd):
 def _fwd_batch(envH, rawH, muH, g, gmu, robot, sp, omega_np, poses, wpv, wtv, grad=False):
     """Batched (B>1) forward init + T steps + summed loss over all rollouts.
     omega_np: [T, B, 3]; poses: [B, 3]. Grads accumulate into shared Henv/Hmu."""
-    from kinematic_helhest.engine import init_state, step
+    from kinematic_helhest.engine import init_state_kernel, step_kernel
 
     dev = "cpu"
     T, B = omega_np.shape[0], omega_np.shape[1]
@@ -382,10 +382,10 @@ def _fwd_batch(envH, rawH, muH, g, gmu, robot, sp, omega_np, poses, wpv, wtv, gr
     loss = wp.zeros(1, dtype=float, device=dev, requires_grad=grad)
 
     def launches():
-        wp.launch(init_state, B, inputs=[Henv, g, robot, sp, pose0],
+        wp.launch(init_state_kernel, B, inputs=[Henv, g, robot, sp, pose0],
                   outputs=[controlled, derived], device=dev)
         for t in range(T):
-            wp.launch(step, B, inputs=[t, Henv, Hraw, g, Hmu, gmu, robot, sp, omega],
+            wp.launch(step_kernel, B, inputs=[t, Henv, Hraw, g, Hmu, gmu, robot, sp, omega],
                       outputs=[controlled, derived, loads, turn, clear, resid], device=dev)
         wp.launch(_row_loss, B, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev)
 

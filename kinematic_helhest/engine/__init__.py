@@ -4,7 +4,7 @@ This is the main code path (the numpy `reference/` package is the verification
 oracle only). Public API:
 
     from kinematic_helhest.engine import (
-        RobotParams, SolverParams, Simulator, init_state, step,
+        RobotParams, SolverParams, Simulator, init_state_kernel, step_kernel,
     )
 
 `init_state`/`step`/`settle`/`clearances` are Warp kernels/funcs launched with
@@ -15,9 +15,9 @@ import, so gradients work automatically. The oracle/FD verification harness live
 in the top-level `tests/engine/` package (run e.g. `python -m tests.engine.step`).
 """
 from .step import clearances
-from .step import init_state
+from .step import init_state_kernel
 from .step import settle
-from .step import step
+from .step import step_kernel
 from .terrain import GridParams
 from .simulator import Simulator
 from .robot import Robot

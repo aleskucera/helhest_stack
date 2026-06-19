@@ -10,7 +10,7 @@ from kinematic_helhest import heightmap as hmmod
 from kinematic_helhest.engine import clearances
 from kinematic_helhest.engine import Grid
 from kinematic_helhest.engine import GridParams
-from kinematic_helhest.engine import init_state
+from kinematic_helhest.engine import init_state_kernel
 from kinematic_helhest.engine import Robot
 from kinematic_helhest.engine import RobotParams
 from kinematic_helhest.engine import sample_height
@@ -18,7 +18,7 @@ from kinematic_helhest.engine import sample_normal
 from kinematic_helhest.engine import settle
 from kinematic_helhest.engine import Solver
 from kinematic_helhest.engine import SolverParams
-from kinematic_helhest.engine import step
+from kinematic_helhest.engine import step_kernel
 from kinematic_helhest.engine.step import chassis_clearance
 from kinematic_helhest.engine.rotations import euler_zyx
 from kinematic_helhest.engine.step import normal_loads
@@ -56,10 +56,10 @@ def rollout_device(scene, mu_field, setpoints, init_pose, params,
     clear = wp.zeros((T, 1), dtype=float, device=device)
     resid = wp.zeros((T, 1), dtype=float, device=device)
 
-    wp.launch(init_state, 1, inputs=[te, g, robot, sp, pose0],
+    wp.launch(init_state_kernel, 1, inputs=[te, g, robot, sp, pose0],
               outputs=[controlled, derived], device=device)
     for t in range(T):
-        wp.launch(step, 1,
+        wp.launch(step_kernel, 1,
                   inputs=[t, te, tr, g, tm, g, robot, sp, omega],
                   outputs=[controlled, derived, loads, turn, clear, resid], device=device)
     clear_np, resid_np = clear.numpy()[:, 0], resid.numpy()[:, 0]

@@ -10,5 +10,5 @@ Layout:
 
 The root package stays import-light on purpose: importing `kinematic_helhest`
 does NOT pull in Warp, so the numpy reference is usable on its own. Reach into a
-subpackage for what you need, e.g. `from kinematic_helhest.engine import step`.
+subpackage for what you need, e.g. `from kinematic_helhest.engine import step_kernel`.
 """

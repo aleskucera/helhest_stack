@@ -20,9 +20,9 @@ from warp import Device
 from .envelope import _contact_kernel
 from .envelope import _gather_kernel
 from .robot import RobotParams
-from .step import init_state
+from .step import init_state_kernel
 from .step import SolverParams
-from .step import step as wstep
+from .step import step_kernel
 from .terrain import GridParams
 
 
@@ -117,7 +117,7 @@ class Simulator:
         controlled/derived/loads/turning/clearance/residual -- the graph-capturable core.
         """
         wp.launch(
-            init_state,
+            init_state_kernel,
             self.B,
             inputs=[self.envelope, self.grid, self.robot, self.solver, self.start_pose],
             outputs=[self.controlled, self.derived],
@@ -125,7 +125,7 @@ class Simulator:
         )
         for t in range(self.T):
             wp.launch(
-                kernel=wstep,
+                kernel=step_kernel,
                 dim=self.B,
                 inputs=[t, self.envelope, self.elevation, self.grid, self.friction, self.grid,
                         self.robot, self.solver, self.omega],
