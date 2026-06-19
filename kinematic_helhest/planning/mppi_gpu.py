@@ -17,54 +17,70 @@ import warp as wp
 _N_BISECT = 14  # device-side bisection iterations for the CEM top-k threshold
 
 
-@wp.kernel
-def _sample_omega_kernel(U: wp.array2d(dtype=float), sigma: float, sigma_knot: float,
-                  wmin: float, wmax: float, n_knots: int, n_wide: int,
-                  seed: wp.array(dtype=int), omega: wp.array2d(dtype=wp.vec3)):
-    t, b = wp.tid()
-    B = omega.shape[1]
-    T = omega.shape[0]
-    # n_knots control knots evenly spaced over the horizon; find the two bracketing this t.
+@wp.func
+def _knot_bracket(t: int, T: int, n_knots: int):
+    """n_knots control knots evenly spaced over the horizon: the two bracketing step t and the
+    interpolation fraction between them. Deterministic -> threads sharing a knot agree."""
     interval = float(T - 1) / float(n_knots - 1)
     pos = float(t) / interval
     j0 = int(pos)
     j1 = wp.min(j0 + 1, n_knots - 1)
     frac = pos - float(j0)
+    return j0, j1, frac
+
+
+@wp.kernel
+def _sample_omega_kernel(
+    U: wp.array2d(dtype=float),
+    sigma: float,
+    sigma_knot: float,
+    wmin: float,
+    wmax: float,
+    n_knots: int,
+    n_wide: int,
+    seed: wp.array(dtype=int),
+    omega: wp.array2d(dtype=wp.vec3),
+):
+    t, r = wp.tid()  # (timestep, rollout)
+    B = omega.shape[1]
+    T = omega.shape[0]
+    j0, j1, frac = _knot_bracket(t, T, n_knots)
     wl = U[t, 0]
     wr = U[t, 1]
-    if b == 0:
-        pass  # b == 0 keeps the nominal (no noise)
-    elif b < n_wide:
+    if r == 0:
+        pass  # r == 0 keeps the nominal (no noise)
+    elif r < n_wide:
         # WIDE prior (global search): knots sampled UNIFORMLY over the full [wmin, wmax]
         # forward-arc box, independent of the nominal -> a broad variety of maneuvers
         # (the whole control space), so the elite can escape local minima.
         span = wmax - wmin
-        kl0 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + j0) * 2))
-        kl1 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + j1) * 2))
-        kr0 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + j0) * 2 + 1))
-        kr1 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + j1) * 2 + 1))
+        kl0 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (r * n_knots + j0) * 2))
+        kl1 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (r * n_knots + j1) * 2))
+        kr0 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (r * n_knots + j0) * 2 + 1))
+        kr1 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (r * n_knots + j1) * 2 + 1))
         wl = (1.0 - frac) * kl0 + frac * kl1
         wr = (1.0 - frac) * kr0 + frac * kr1
     else:
         # NARROW (local refine): SPLINE bias around the nominal + per-step jitter (option A).
-        # Knots keyed on (b, knot) -> shared across t -> a smooth committed maneuver. Recompute
+        # Knots keyed on (r, knot) -> shared across t -> a smooth committed maneuver. Recompute
         # the bracketing knots on the fly (rand_init is deterministic) -- no shared storage.
-        be0 = wp.randn(wp.rand_init(seed[0], (b * n_knots + j0) * 2))
-        be1 = wp.randn(wp.rand_init(seed[0], (b * n_knots + j1) * 2))
-        br0 = wp.randn(wp.rand_init(seed[0], (b * n_knots + j0) * 2 + 1))
-        br1 = wp.randn(wp.rand_init(seed[0], (b * n_knots + j1) * 2 + 1))
+        be0 = wp.randn(wp.rand_init(seed[0], (r * n_knots + j0) * 2))
+        be1 = wp.randn(wp.rand_init(seed[0], (r * n_knots + j1) * 2))
+        br0 = wp.randn(wp.rand_init(seed[0], (r * n_knots + j0) * 2 + 1))
+        br1 = wp.randn(wp.rand_init(seed[0], (r * n_knots + j1) * 2 + 1))
         wl += sigma_knot * ((1.0 - frac) * be0 + frac * be1)
         wr += sigma_knot * ((1.0 - frac) * br0 + frac * br1)
-        jit = wp.rand_init(seed[0] + 9176, t * B + b)  # light per-step jitter (distinct stream)
+        jit = wp.rand_init(seed[0] + 9176, t * B + r)  # light per-step jitter (distinct stream)
         wl += sigma * wp.randn(jit)
         wr += sigma * wp.randn(jit)
     # wmin >= 0 -> forward arcs only: no reverse (vx>=0) and no in-place spin (no counter-rotation)
-    omega[t, b] = wp.vec3(wp.clamp(wl, wmin, wmax), wp.clamp(wr, wmin, wmax), 0.0)
+    omega[t, r] = wp.vec3(wp.clamp(wl, wmin, wmax), wp.clamp(wr, wmin, wmax), 0.0)
 
 
 @wp.struct
 class CostWeights:
     """Per-rollout cost weights + thresholds, baked once (fixed per planner)."""
+
     term: float
     run: float
     tilt: float
@@ -78,24 +94,30 @@ class CostWeights:
 
 
 @wp.kernel
-def _cost_kernel(controlled: wp.array2d(dtype=wp.vec3), derived: wp.array2d(dtype=wp.vec3),
-          clearance: wp.array2d(dtype=float), residual: wp.array2d(dtype=float),
-          omega: wp.array2d(dtype=wp.vec3),  # Ub in components [0], [1]
-          goal: wp.array(dtype=float),  # [2] world goal (device -> graph-safe, changes per replan)
-          cw: CostWeights, T: int, Jout: wp.array(dtype=float)):
-    b = wp.tid()
+def _cost_kernel(
+    controlled: wp.array2d(dtype=wp.vec3),
+    derived: wp.array2d(dtype=wp.vec3),
+    clearance: wp.array2d(dtype=float),
+    residual: wp.array2d(dtype=float),
+    omega: wp.array2d(dtype=wp.vec3),  # Ub in components [0], [1]
+    goal: wp.array(dtype=float),  # [2] world goal (device -> graph-safe, changes per replan)
+    cw: CostWeights,
+    T: int,
+    Jout: wp.array(dtype=float),
+):
+    r = wp.tid()  # rollout
     run_sum = float(0.0)
     tilt_sum = float(0.0)
     head_sum = float(0.0)
     term = float(0.0)
     for t in range(T + 1):
-        pc = controlled[t, b]
+        pc = controlled[t, r]
         dx = pc[0] - goal[0]
         dy = pc[1] - goal[1]
         d2 = dx * dx + dy * dy
         run_sum += d2
         term = d2  # last iter (t = T) sticks
-        tc = derived[t, b]
+        tc = derived[t, r]
         ang = wp.acos(wp.clamp(wp.cos(tc[1]) * wp.cos(tc[2]), -1.0, 1.0))
         over = wp.max(ang - cw.tilt_free, 0.0)
         tilt_sum += over * over
@@ -112,7 +134,7 @@ def _cost_kernel(controlled: wp.array2d(dtype=wp.vec3), derived: wp.array2d(dtyp
     prev_l = float(0.0)
     prev_r = float(0.0)
     for t in range(T):
-        om = omega[t, b]
+        om = omega[t, r]
         eff += om[0] * om[0] + om[1] * om[1]
         if t > 0:
             dl = om[0] - prev_l
@@ -123,13 +145,19 @@ def _cost_kernel(controlled: wp.array2d(dtype=wp.vec3), derived: wp.array2d(dtyp
         # GRADED validity (option C): penalize HOW FAR past the margin/tol and HOW EARLY, not a
         # binary flag. De-saturates the cost (it still ranks when every sample violates), and
         # eating into the safety margin costs little while a real penetration costs a lot.
-        clear_viol = wp.max(cw.clear_margin - clearance[t, b], 0.0)
-        resid_viol = wp.max(residual[t, b] - cw.resid_tol, 0.0)
+        clear_viol = wp.max(cw.clear_margin - clearance[t, r], 0.0)
+        resid_viol = wp.max(residual[t, r] - cw.resid_tol, 0.0)
         early = float(T - t) / float(T)  # earlier violations hurt more (imminent)
         penalty += early * (clear_viol + resid_viol)
-    Jout[b] = (cw.term * term + cw.run * (run_sum / float(T + 1)) + cw.tilt * (tilt_sum / float(T + 1))
-               + cw.head * (head_sum / float(T + 1))
-               + cw.eff * eff + cw.smooth * smooth + penalty * cw.invalid)
+    Jout[r] = (
+        cw.term * term
+        + cw.run * (run_sum / float(T + 1))
+        + cw.tilt * (tilt_sum / float(T + 1))
+        + cw.head * (head_sum / float(T + 1))
+        + cw.eff * eff
+        + cw.smooth * smooth
+        + penalty * cw.invalid
+    )
 
 
 # --- CEM reweight (option B): elite = top-k lowest-cost samples; U = their mean. Rank-based,
@@ -137,24 +165,32 @@ def _cost_kernel(controlled: wp.array2d(dtype=wp.vec3), derived: wp.array2d(dtyp
 # elite). The top-k threshold tau is found by device-side BISECTION (a host partition would
 # break the CUDA graph): bisect tau until #{J <= tau} ~= target_k. ---
 @wp.kernel
-def _reset_minmax_kernel(jmin: wp.array(dtype=float), jmax: wp.array(dtype=float),
-                         count: wp.array(dtype=float)):
+def _reset_minmax_kernel(
+    jmin: wp.array(dtype=float), jmax: wp.array(dtype=float), count: wp.array(dtype=float)
+):
     jmin[0] = 1.0e30
     jmax[0] = -1.0e30
     count[0] = 0.0
 
 
 @wp.kernel
-def _minmax_kernel(J: wp.array(dtype=float), jmin: wp.array(dtype=float), jmax: wp.array(dtype=float)):
+def _minmax_kernel(
+    J: wp.array(dtype=float), jmin: wp.array(dtype=float), jmax: wp.array(dtype=float)
+):
     j = J[wp.tid()]
     wp.atomic_min(jmin, 0, j)
     wp.atomic_max(jmax, 0, j)
 
 
 @wp.kernel
-def _bisect_init_kernel(jmin: wp.array(dtype=float), jmax: wp.array(dtype=float),
-                        lo: wp.array(dtype=float), hi: wp.array(dtype=float),
-                        tau: wp.array(dtype=float), count: wp.array(dtype=float)):
+def _bisect_init_kernel(
+    jmin: wp.array(dtype=float),
+    jmax: wp.array(dtype=float),
+    lo: wp.array(dtype=float),
+    hi: wp.array(dtype=float),
+    tau: wp.array(dtype=float),
+    count: wp.array(dtype=float),
+):
     lo[0] = jmin[0]
     hi[0] = jmax[0]
     tau[0] = 0.5 * (jmin[0] + jmax[0])
@@ -162,14 +198,21 @@ def _bisect_init_kernel(jmin: wp.array(dtype=float), jmax: wp.array(dtype=float)
 
 
 @wp.kernel
-def _count_below_kernel(J: wp.array(dtype=float), tau: wp.array(dtype=float), count: wp.array(dtype=float)):
+def _count_below_kernel(
+    J: wp.array(dtype=float), tau: wp.array(dtype=float), count: wp.array(dtype=float)
+):
     if J[wp.tid()] <= tau[0]:
         wp.atomic_add(count, 0, 1.0)
 
 
 @wp.kernel
-def _bisect_step_kernel(count: wp.array(dtype=float), target_k: float,
-                        lo: wp.array(dtype=float), hi: wp.array(dtype=float), tau: wp.array(dtype=float)):
+def _bisect_step_kernel(
+    count: wp.array(dtype=float),
+    target_k: float,
+    lo: wp.array(dtype=float),
+    hi: wp.array(dtype=float),
+    tau: wp.array(dtype=float),
+):
     if count[0] > target_k:
         hi[0] = tau[0]  # too many below tau -> lower it
     else:
@@ -179,14 +222,21 @@ def _bisect_step_kernel(count: wp.array(dtype=float), target_k: float,
 
 
 @wp.kernel
-def _elite_u_kernel(J: wp.array(dtype=float), tau: wp.array(dtype=float), count: wp.array(dtype=float),
-                    omega: wp.array2d(dtype=wp.vec3), wmin: float, wmax: float, B: int,
-                    U: wp.array2d(dtype=float)):
+def _elite_u_kernel(
+    J: wp.array(dtype=float),
+    tau: wp.array(dtype=float),
+    count: wp.array(dtype=float),
+    omega: wp.array2d(dtype=wp.vec3),
+    wmin: float,
+    wmax: float,
+    B: int,
+    U: wp.array2d(dtype=float),
+):
     t, c = wp.tid()
     acc = float(0.0)
-    for b in range(B):
-        if J[b] <= tau[0]:  # elite
-            acc += omega[t, b][c]
+    for r in range(B):
+        if J[r] <= tau[0]:  # elite rollout
+            acc += omega[t, r][c]
     U[t, c] = wp.clamp(acc / count[0], wmin, wmax)  # unweighted elite mean (forward arcs)
 
 
@@ -204,8 +254,21 @@ class MppiGpu:
     `goal` and `start_pose` are device arrays set per replan, so the captured graph picks
     up new values; the weights/sigma/wmax/elite_frac are baked at capture (fixed per planner)."""
 
-    def __init__(self, sim, sigma, wmax, weights, clear_margin, resid_tol, seed=0,
-                 sigma_knot=0.0, n_knots=4, elite_frac=0.02, wmin=0.0, wide_frac=0.25):
+    def __init__(
+        self,
+        sim,
+        sigma,
+        wmax,
+        weights,
+        clear_margin,
+        resid_tol,
+        seed=0,
+        sigma_knot=0.0,
+        n_knots=4,
+        elite_frac=0.02,
+        wmin=0.0,
+        wide_frac=0.25,
+    ):
         self.sim = sim
         self.dev = sim.device
         self.B, self.T = sim.B, sim.T
@@ -253,14 +316,39 @@ class MppiGpu:
         """One MPPI iteration: sample -> rollout -> cost -> CEM reweight, all on device."""
         s, d = self.sim, self.dev
         wp.launch(_bump_seed_kernel, 1, inputs=[self.seed], device=d)
-        wp.launch(_sample_omega_kernel, (self.T, self.B),
-                  inputs=[self.U, self.sigma, self.sigma_knot, self.wmin, self.wmax,
-                          self.n_knots, self.n_wide, self.seed],
-                  outputs=[s.omega], device=d)
+        wp.launch(
+            _sample_omega_kernel,
+            (self.T, self.B),
+            inputs=[
+                self.U,
+                self.sigma,
+                self.sigma_knot,
+                self.wmin,
+                self.wmax,
+                self.n_knots,
+                self.n_wide,
+                self.seed,
+            ],
+            outputs=[s.omega],
+            device=d,
+        )
         s.rollout_launch()
-        wp.launch(_cost_kernel, self.B,
-                  inputs=[s.controlled, s.derived, s.clearance, s.residual, s.omega, self.goal, self.cw, self.T],
-                  outputs=[self.J], device=d)
+        wp.launch(
+            _cost_kernel,
+            self.B,
+            inputs=[
+                s.controlled,
+                s.derived,
+                s.clearance,
+                s.residual,
+                s.omega,
+                self.goal,
+                self.cw,
+                self.T,
+            ],
+            outputs=[self.J],
+            device=d,
+        )
         self._cem_reweight()
 
     def _cem_reweight(self):
@@ -269,13 +357,29 @@ class MppiGpu:
         d, om = self.dev, self.sim.omega
         wp.launch(_reset_minmax_kernel, 1, inputs=[self.jmin, self.jmax, self.count], device=d)
         wp.launch(_minmax_kernel, self.B, inputs=[self.J, self.jmin, self.jmax], device=d)
-        wp.launch(_bisect_init_kernel, 1, inputs=[self.jmin, self.jmax, self.lo, self.hi, self.tau, self.count], device=d)
+        wp.launch(
+            _bisect_init_kernel,
+            1,
+            inputs=[self.jmin, self.jmax, self.lo, self.hi, self.tau, self.count],
+            device=d,
+        )
         for _ in range(_N_BISECT):
             wp.launch(_count_below_kernel, self.B, inputs=[self.J, self.tau, self.count], device=d)
-            wp.launch(_bisect_step_kernel, 1, inputs=[self.count, self.target_k, self.lo, self.hi, self.tau], device=d)
-        wp.launch(_count_below_kernel, self.B, inputs=[self.J, self.tau, self.count], device=d)  # final elite count
-        wp.launch(_elite_u_kernel, (self.T, 2),
-                  inputs=[self.J, self.tau, self.count, om, self.wmin, self.wmax, self.B, self.U], device=d)
+            wp.launch(
+                _bisect_step_kernel,
+                1,
+                inputs=[self.count, self.target_k, self.lo, self.hi, self.tau],
+                device=d,
+            )
+        wp.launch(
+            _count_below_kernel, self.B, inputs=[self.J, self.tau, self.count], device=d
+        )  # final elite count
+        wp.launch(
+            _elite_u_kernel,
+            (self.T, 2),
+            inputs=[self.J, self.tau, self.count, om, self.wmin, self.wmax, self.B, self.U],
+            device=d,
+        )
 
     def _seed_turn_if_facing_away(self, state, goal_xy):
         """Symmetry break for the behind-goal saddle: if the start faces >120 deg away from
@@ -295,8 +399,9 @@ class MppiGpu:
     def replan(self, state, goal_xy, n_refine):
         """Run n_refine GPU refines from `state` toward world `goal_xy`; updates U in place."""
         self.goal.assign(np.asarray(goal_xy[:2], np.float32))
-        self.sim.start_pose.assign(np.ascontiguousarray(
-            np.tile(np.asarray(state, np.float32), (self.B, 1)), np.float32))
+        self.sim.start_pose.assign(
+            np.ascontiguousarray(np.tile(np.asarray(state, np.float32), (self.B, 1)), np.float32)
+        )
         self._seed_turn_if_facing_away(state, goal_xy)
         if self.dev.is_cuda:
             if self._graph is None:
