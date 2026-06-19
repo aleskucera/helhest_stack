@@ -21,12 +21,12 @@ _N_BISECT = 14  # device-side bisection iterations for the CEM top-k threshold
 def _knot_bracket(t: int, T: int, n_knots: int):
     """n_knots control knots evenly spaced over the horizon: the two bracketing step t and the
     interpolation fraction between them. Deterministic -> threads sharing a knot agree."""
-    interval = float(T - 1) / float(n_knots - 1)
-    pos = float(t) / interval
-    j0 = int(pos)
-    j1 = wp.min(j0 + 1, n_knots - 1)
-    frac = pos - float(j0)
-    return j0, j1, frac
+    knot_spacing = float(T - 1) / float(n_knots - 1)
+    knot_pos = float(t) / knot_spacing
+    knot_lo = int(knot_pos)
+    knot_hi = wp.min(knot_lo + 1, n_knots - 1)
+    frac = knot_pos - float(knot_lo)
+    return knot_lo, knot_hi, frac
 
 
 @wp.kernel
@@ -44,9 +44,9 @@ def _sample_omega_kernel(
     t, r = wp.tid()  # (timestep, rollout)
     B = omega.shape[1]
     T = omega.shape[0]
-    j0, j1, frac = _knot_bracket(t, T, n_knots)
-    wl = U[t, 0]
-    wr = U[t, 1]
+    knot_lo, knot_hi, frac = _knot_bracket(t, T, n_knots)
+    wheel_l = U[t, 0]
+    wheel_r = U[t, 1]
     if r == 0:
         pass  # r == 0 keeps the nominal (no noise)
     elif r < n_wide:
@@ -54,27 +54,27 @@ def _sample_omega_kernel(
         # forward-arc box, independent of the nominal -> a broad variety of maneuvers
         # (the whole control space), so the elite can escape local minima.
         span = wmax - wmin
-        kl0 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (r * n_knots + j0) * 2))
-        kl1 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (r * n_knots + j1) * 2))
-        kr0 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (r * n_knots + j0) * 2 + 1))
-        kr1 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (r * n_knots + j1) * 2 + 1))
-        wl = (1.0 - frac) * kl0 + frac * kl1
-        wr = (1.0 - frac) * kr0 + frac * kr1
+        left_lo = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (r * n_knots + knot_lo) * 2))
+        left_hi = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (r * n_knots + knot_hi) * 2))
+        right_lo = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (r * n_knots + knot_lo) * 2 + 1))
+        right_hi = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (r * n_knots + knot_hi) * 2 + 1))
+        wheel_l = (1.0 - frac) * left_lo + frac * left_hi
+        wheel_r = (1.0 - frac) * right_lo + frac * right_hi
     else:
         # NARROW (local refine): SPLINE bias around the nominal + per-step jitter (option A).
         # Knots keyed on (r, knot) -> shared across t -> a smooth committed maneuver. Recompute
         # the bracketing knots on the fly (rand_init is deterministic) -- no shared storage.
-        be0 = wp.randn(wp.rand_init(seed[0], (r * n_knots + j0) * 2))
-        be1 = wp.randn(wp.rand_init(seed[0], (r * n_knots + j1) * 2))
-        br0 = wp.randn(wp.rand_init(seed[0], (r * n_knots + j0) * 2 + 1))
-        br1 = wp.randn(wp.rand_init(seed[0], (r * n_knots + j1) * 2 + 1))
-        wl += sigma_knot * ((1.0 - frac) * be0 + frac * be1)
-        wr += sigma_knot * ((1.0 - frac) * br0 + frac * br1)
-        jit = wp.rand_init(seed[0] + 9176, t * B + r)  # light per-step jitter (distinct stream)
-        wl += sigma * wp.randn(jit)
-        wr += sigma * wp.randn(jit)
+        eps_l_lo = wp.randn(wp.rand_init(seed[0], (r * n_knots + knot_lo) * 2))
+        eps_l_hi = wp.randn(wp.rand_init(seed[0], (r * n_knots + knot_hi) * 2))
+        eps_r_lo = wp.randn(wp.rand_init(seed[0], (r * n_knots + knot_lo) * 2 + 1))
+        eps_r_hi = wp.randn(wp.rand_init(seed[0], (r * n_knots + knot_hi) * 2 + 1))
+        wheel_l += sigma_knot * ((1.0 - frac) * eps_l_lo + frac * eps_l_hi)
+        wheel_r += sigma_knot * ((1.0 - frac) * eps_r_lo + frac * eps_r_hi)
+        jitter = wp.rand_init(seed[0] + 9176, t * B + r)  # light per-step jitter (distinct stream)
+        wheel_l += sigma * wp.randn(jitter)
+        wheel_r += sigma * wp.randn(jitter)
     # wmin >= 0 -> forward arcs only: no reverse (vx>=0) and no in-place spin (no counter-rotation)
-    omega[t, r] = wp.vec3(wp.clamp(wl, wmin, wmax), wp.clamp(wr, wmin, wmax), 0.0)
+    omega[t, r] = wp.vec3(wp.clamp(wheel_l, wmin, wmax), wp.clamp(wheel_r, wmin, wmax), 0.0)
 
 
 @wp.struct
