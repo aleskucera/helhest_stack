@@ -265,11 +265,27 @@ class MppiGpu:
         wp.launch(_elite_u_kernel, (self.T, 2),
                   inputs=[self.J, self.tau, self.count, om, self.wmin, self.wmax, self.B, self.U], device=d)
 
+    def _seed_turn_if_facing_away(self, state, goal_xy):
+        """Symmetry break for the behind-goal saddle: if the start faces >120 deg away from
+        the goal, seed the nominal with a hard turn. A forward-only robot facing away can only
+        reach by a U-turn, but the straight nominal is a local optimum the sampler won't leave
+        (it just drives away); the turn seed kicks it into the U-turn basin. Fires only when
+        facing away, so normal (facing-toward) planning keeps its warm-started nominal."""
+        gx = float(goal_xy[0]) - float(state[0])
+        gy = float(goal_xy[1]) - float(state[1])
+        gn = np.hypot(gx, gy)
+        if gn < 1e-3:
+            return
+        cos0 = (np.cos(state[2]) * gx + np.sin(state[2]) * gy) / gn  # heading . to-goal
+        if cos0 < -0.5:
+            self.U.assign(np.tile([self.wmin, self.wmax], (self.T, 1)).astype(np.float32))
+
     def replan(self, state, goal_xy, n_refine):
         """Run n_refine GPU refines from `state` toward world `goal_xy`; updates U in place."""
         self.goal.assign(np.asarray(goal_xy[:2], np.float32))
         self.sim.start_pose.assign(np.ascontiguousarray(
             np.tile(np.asarray(state, np.float32), (self.B, 1)), np.float32))
+        self._seed_turn_if_facing_away(state, goal_xy)
         if self.dev.is_cuda:
             if self._graph is None:
                 with wp.ScopedCapture(device=self.dev) as cap:
