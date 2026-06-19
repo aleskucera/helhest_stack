@@ -40,7 +40,7 @@ class Planner:
     """Re-plans an MPPI horizon from a given pose to the goal via the GPU MppiGpu
     driver (spline-knot sampling + graded cost + CEM reweight), on a static scene."""
 
-    def __init__(self, scene, mu, goal, device="cpu", T=90, B=1024, n_refine=3,
+    def __init__(self, scene, mu, goal, device="cpu", T=90, B=4096, n_refine=3,
                  sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, clear_margin=0.05,
                  resid_tol=1e-2, seed=0):
         params = SolverParams(dt=DT, k_turn=2.0, newton_iters=6, atol=1e-4)  # forward-only

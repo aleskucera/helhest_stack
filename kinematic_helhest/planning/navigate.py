@@ -37,7 +37,7 @@ class NavConfig:
     half_extent: float = 8.0   # local window half-size [m] (covers the reach wheel_radius*wmax*T*dt = 7 m)
     res: float = 0.06          # local window cell size [m]
     T: int = 50                # MPPI horizon (50 steps x dt = 5 s lookahead)
-    B: int = 2048              # MPPI samples
+    B: int = 8192              # MPPI samples (GPU is idle at 2048; broad coverage ~free)
     dt: float = 0.1            # 10 Hz control; kinematic Euler is accurate here (~3 cm/4 s)
     n_refine: int = 3
     sigma: float = 0.5         # per-step jitter std (local variation)

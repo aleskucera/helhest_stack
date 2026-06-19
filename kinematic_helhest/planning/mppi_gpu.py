@@ -19,33 +19,43 @@ _N_BISECT = 14  # device-side bisection iterations for the CEM top-k threshold
 
 @wp.kernel
 def _sample_omega_kernel(U: wp.array2d(dtype=float), sigma: float, sigma_knot: float,
-                  wmin: float, wmax: float,
-                  n_knots: int, seed: wp.array(dtype=int), omega: wp.array2d(dtype=wp.vec3)):
+                  wmin: float, wmax: float, n_knots: int, n_wide: int,
+                  seed: wp.array(dtype=int), omega: wp.array2d(dtype=wp.vec3)):
     t, b = wp.tid()
     B = omega.shape[1]
     T = omega.shape[0]
+    # n_knots control knots evenly spaced over the horizon; find the two bracketing this t.
+    interval = float(T - 1) / float(n_knots - 1)
+    pos = float(t) / interval
+    j0 = int(pos)
+    j1 = wp.min(j0 + 1, n_knots - 1)
+    frac = pos - float(j0)
     wl = U[t, 0]
     wr = U[t, 1]
-    if b > 0:  # b == 0 keeps the nominal (eps = 0)
-        # SPLINE bias (option A): sample n_knots correlated knots per rollout and linearly
-        # interpolate them over the horizon. Each knot is keyed on (b, knot) so it is shared
-        # by all t in its span -> the rollout commits to a smooth, low-frequency maneuver. Unlike
-        # a single constant bias (which can only arc), multiple knots express turn-then-straight,
-        # and the control is smooth by construction. Recompute the two bracketing knots on the
-        # fly (rand_init is deterministic) -- no shared knot storage.
-        interval = float(T - 1) / float(n_knots - 1)
-        pos = float(t) / interval
-        j0 = int(pos)
-        j1 = wp.min(j0 + 1, n_knots - 1)
-        frac = pos - float(j0)
+    if b == 0:
+        pass  # b == 0 keeps the nominal (no noise)
+    elif b < n_wide:
+        # WIDE prior (global search): knots sampled UNIFORMLY over the full [wmin, wmax]
+        # forward-arc box, independent of the nominal -> a broad variety of maneuvers
+        # (the whole control space), so the elite can escape local minima.
+        span = wmax - wmin
+        kl0 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + j0) * 2))
+        kl1 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + j1) * 2))
+        kr0 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + j0) * 2 + 1))
+        kr1 = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + j1) * 2 + 1))
+        wl = (1.0 - frac) * kl0 + frac * kl1
+        wr = (1.0 - frac) * kr0 + frac * kr1
+    else:
+        # NARROW (local refine): SPLINE bias around the nominal + per-step jitter (option A).
+        # Knots keyed on (b, knot) -> shared across t -> a smooth committed maneuver. Recompute
+        # the bracketing knots on the fly (rand_init is deterministic) -- no shared storage.
         be0 = wp.randn(wp.rand_init(seed[0], (b * n_knots + j0) * 2))
         be1 = wp.randn(wp.rand_init(seed[0], (b * n_knots + j1) * 2))
         br0 = wp.randn(wp.rand_init(seed[0], (b * n_knots + j0) * 2 + 1))
         br1 = wp.randn(wp.rand_init(seed[0], (b * n_knots + j1) * 2 + 1))
         wl += sigma_knot * ((1.0 - frac) * be0 + frac * be1)
         wr += sigma_knot * ((1.0 - frac) * br0 + frac * br1)
-        # Light per-step jitter on top (distinct stream) for local variation/refinement.
-        jit = wp.rand_init(seed[0] + 9176, t * B + b)
+        jit = wp.rand_init(seed[0] + 9176, t * B + b)  # light per-step jitter (distinct stream)
         wl += sigma * wp.randn(jit)
         wr += sigma * wp.randn(jit)
     # wmin >= 0 -> forward arcs only: no reverse (vx>=0) and no in-place spin (no counter-rotation)
@@ -195,12 +205,13 @@ class MppiGpu:
     up new values; the weights/sigma/wmax/elite_frac are baked at capture (fixed per planner)."""
 
     def __init__(self, sim, sigma, wmax, weights, clear_margin, resid_tol, seed=0,
-                 sigma_knot=0.0, n_knots=4, elite_frac=0.02, wmin=0.0):
+                 sigma_knot=0.0, n_knots=4, elite_frac=0.02, wmin=0.0, wide_frac=0.25):
         self.sim = sim
         self.dev = sim.device
         self.B, self.T = sim.B, sim.T
         self.sigma, self.wmax, self.wmin = float(sigma), float(wmax), float(wmin)
         self.sigma_knot, self.n_knots = float(sigma_knot), int(n_knots)
+        self.n_wide = int(float(wide_frac) * self.B)  # rollouts drawn from the WIDE global prior
         self.target_k = float(int(float(elite_frac) * self.B))  # CEM elite count (top-k by cost)
         w = weights
         cw = CostWeights()
@@ -243,7 +254,8 @@ class MppiGpu:
         s, d = self.sim, self.dev
         wp.launch(_bump_seed_kernel, 1, inputs=[self.seed], device=d)
         wp.launch(_sample_omega_kernel, (self.T, self.B),
-                  inputs=[self.U, self.sigma, self.sigma_knot, self.wmin, self.wmax, self.n_knots, self.seed],
+                  inputs=[self.U, self.sigma, self.sigma_knot, self.wmin, self.wmax,
+                          self.n_knots, self.n_wide, self.seed],
                   outputs=[s.omega], device=d)
         s.rollout_launch()
         wp.launch(_cost_kernel, self.B,

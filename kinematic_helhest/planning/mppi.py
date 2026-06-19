@@ -69,7 +69,7 @@ def _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, 
     return J + inv * w["invalid"], inv > 0
 
 
-def plan(scene, mu, start, goal, T=60, B=2048, n_refine=3, max_steps=260, dt=0.1,
+def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1,
          sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, wmin=0.0, elite_frac=0.02, goal_tol=0.3, resid_tol=1e-2, clear_margin=0.05,
          device="cuda", seed=0, weights=None, record=False, n_show=60):
     params = SolverParams(dt=dt, k_turn=2.0, newton_iters=6, atol=1e-4)  # forward-only: shallow+loose settle
