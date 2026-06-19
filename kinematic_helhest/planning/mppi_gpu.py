@@ -85,8 +85,13 @@ def _cost_kernel(controlled: wp.array2d(dtype=wp.vec3), derived: wp.array2d(dtyp
             smooth += dl * dl + dr * dr
         prev_l = om[0]
         prev_r = om[1]
-        if clearance[t, b] < clear_margin or residual[t, b] > resid_tol:
-            inv = 1.0
+        # GRADED validity (option C): penalize HOW FAR past the margin/tol and HOW EARLY, not a
+        # binary flag. De-saturates the cost (it still ranks when every sample violates), and
+        # eating into the safety margin costs little while a real penetration costs a lot.
+        clear_viol = wp.max(clear_margin - clearance[t, b], 0.0)
+        resid_viol = wp.max(residual[t, b] - resid_tol, 0.0)
+        early = float(T - t) / float(T)  # earlier violations hurt more (imminent)
+        inv += early * (clear_viol + resid_viol)
     Jout[b] = (w_term * term + w_run * (run_sum / float(T + 1)) + w_tilt * (tilt_sum / float(T + 1))
                + w_eff * eff + w_smooth * smooth + inv * w_invalid)
 

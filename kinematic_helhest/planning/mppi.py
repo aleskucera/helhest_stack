@@ -42,7 +42,12 @@ def _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, 
     """
     xy = controlled[:, :, :2]                                  # [T+1, B, 2]
     d = np.linalg.norm(xy - goal[None, None, :], axis=2)   # [T+1, B]
-    invalid = (clear < clear_margin).any(0) | (resid > resid_tol).any(0)  # [B]
+    # graded validity (option C): how far past margin/tol, weighted by how early (T,B -> B)
+    T = clear.shape[0]
+    early = ((T - np.arange(T)) / T)[:, None]              # [T, 1]
+    clear_viol = np.maximum(clear_margin - clear, 0.0)     # [T, B]
+    resid_viol = np.maximum(resid - resid_tol, 0.0)        # [T, B]
+    inv = (early * (clear_viol + resid_viol)).sum(0)       # [B]
     eff = (Ub ** 2).sum((1, 2))
     smooth = (np.diff(Ub, axis=1) ** 2).sum((1, 2))
     J = w["term"] * d[-1] ** 2 + w["run"] * (d ** 2).mean(0) + w["eff"] * eff + w["smooth"] * smooth
@@ -54,7 +59,7 @@ def _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, 
         # still climbs gentle slopes to reach a goal; only steep tilt is penalized.
         over = np.maximum(ang - w.get("tilt_free", 0.0), 0.0)
         J = J + w["tilt"] * (over ** 2).mean(0)
-    return J + invalid.astype(np.float64) * w["invalid"], invalid
+    return J + inv * w["invalid"], inv > 0
 
 
 def plan(scene, mu, start, goal, T=60, B=2048, n_refine=3, max_steps=260, dt=0.1,
