@@ -177,7 +177,7 @@ def _bump_seed_kernel(seed: wp.array(dtype=int)):
 
 class MppiGpu:
     """GPU-resident MPPI: owns the nominal control `U` + scratch on device and runs the
-    refine (sample -> rollout -> cost -> softmax reweight) entirely on the GPU. On CUDA
+    refine (sample -> rollout -> cost -> CEM reweight) entirely on the GPU. On CUDA
     the refine is captured once and replayed as a graph (the RNG counter is bumped
     in-graph, so each replay draws fresh noise); on CPU it runs eager. Wraps a Simulator.
 
@@ -228,6 +228,7 @@ class MppiGpu:
         self.U.assign(np.ascontiguousarray(U_host, np.float32))
 
     def _refine(self):
+        """One MPPI iteration: sample -> rollout -> cost -> CEM reweight, all on device."""
         s, d = self.sim, self.dev
         wp.launch(_bump_seed_kernel, 1, inputs=[self.seed], device=d)
         wp.launch(_sample_omega_kernel, (self.T, self.B),
@@ -237,7 +238,12 @@ class MppiGpu:
         wp.launch(_cost_kernel, self.B,
                   inputs=[s.controlled, s.derived, s.clearance, s.residual, s.omega, self.goal, self.cw, self.T],
                   outputs=[self.J], device=d)
-        # CEM reweight: bisection for the top-k cost threshold tau, then elite mean -> U.
+        self._cem_reweight()
+
+    def _cem_reweight(self):
+        """Top-k elite mean -> U: find the cost threshold tau by device-side bisection
+        (#{J <= tau} ~= target_k), then average the elite samples' controls."""
+        d, om = self.dev, self.sim.omega
         wp.launch(_reset_minmax_kernel, 1, inputs=[self.jmin, self.jmax, self.count], device=d)
         wp.launch(_minmax_kernel, self.B, inputs=[self.J, self.jmin, self.jmax], device=d)
         wp.launch(_bisect_init_kernel, 1, inputs=[self.jmin, self.jmax, self.lo, self.hi, self.tau, self.count], device=d)
@@ -246,7 +252,7 @@ class MppiGpu:
             wp.launch(_bisect_step_kernel, 1, inputs=[self.count, self.target_k, self.lo, self.hi, self.tau], device=d)
         wp.launch(_count_below_kernel, self.B, inputs=[self.J, self.tau, self.count], device=d)  # final elite count
         wp.launch(_elite_u_kernel, (self.T, 2),
-                  inputs=[self.J, self.tau, self.count, s.omega, self.wmin, self.wmax, self.B, self.U], device=d)
+                  inputs=[self.J, self.tau, self.count, om, self.wmin, self.wmax, self.B, self.U], device=d)
 
     def replan(self, state, goal_xy, n_refine):
         """Run n_refine GPU refines from `state` toward world `goal_xy`; updates U in place."""
