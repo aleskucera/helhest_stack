@@ -61,32 +61,38 @@ def selftest_cost_parity(device="cuda", B=2048, T=70):
     print(f"cost parity  {'OK' if rel.max() < 1e-2 else 'REVIEW'}")
 
 
-def selftest_reweight_parity(device="cuda", B=2048, T=70):
-    """Identical J + Ub -> GPU softmax-weighted U vs numpy softmax. RNG-independent."""
+def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
+    """Identical J + Ub -> GPU CEM (bisection top-k elite mean) U vs numpy exact-top-k mean."""
     rng = np.random.default_rng(1)
     Ub = np.clip(rng.normal(1.5, _WMAX, (B, T, 2)), -_WMAX, _WMAX).astype(np.float32)
     J = rng.uniform(0.0, 5.0e4, B).astype(np.float32)
+    target_k = int(elite_frac * B)
 
-    # numpy reference
-    beta = np.exp(-(J - J.min()) / _LAM); beta /= beta.sum()
-    U_np = np.clip(np.einsum("b,btc->tc", beta, Ub), -_WMAX, _WMAX).astype(np.float32)
+    # numpy reference: exact top-k elite mean
+    tau_np = np.partition(J, target_k)[target_k]
+    U_np = np.clip(Ub[J <= tau_np].mean(0), -_WMAX, _WMAX).astype(np.float32)
 
-    # GPU: jmin -> softmax -> weighted U, reading Ub from omega[:, :, :2]
+    # GPU: bisection top-k threshold -> elite mean
     Jd = wp.array(J, dtype=float, device=device)
     omega = wp.array(_to_omega(Ub), dtype=wp.vec3, device=device)
-    jmin = wp.zeros(1, dtype=float, device=device)
-    betasum = wp.zeros(1, dtype=float, device=device)
-    betad = wp.zeros(B, dtype=float, device=device)
+    jmin = wp.zeros(1, dtype=float, device=device); jmax = wp.zeros(1, dtype=float, device=device)
+    lo = wp.zeros(1, dtype=float, device=device); hi = wp.zeros(1, dtype=float, device=device)
+    tau = wp.zeros(1, dtype=float, device=device); count = wp.zeros(1, dtype=float, device=device)
     Ud = wp.zeros((T, 2), dtype=float, device=device)
-    wp.launch(mg._reset_red_kernel, 1, inputs=[jmin, betasum], device=device)
-    wp.launch(mg._jmin_kernel, B, inputs=[Jd, jmin], device=device)
-    wp.launch(mg._softmax_kernel, B, inputs=[Jd, jmin, _LAM, betad, betasum], device=device)
-    wp.launch(mg._weighted_u_kernel, (T, 2), inputs=[betad, betasum, omega, _WMAX, B, Ud], device=device)
+    wp.launch(mg._reset_minmax_kernel, 1, inputs=[jmin, jmax, count], device=device)
+    wp.launch(mg._minmax_kernel, B, inputs=[Jd, jmin, jmax], device=device)
+    wp.launch(mg._bisect_init_kernel, 1, inputs=[jmin, jmax, lo, hi, tau, count], device=device)
+    for _ in range(mg._N_BISECT):
+        wp.launch(mg._count_below_kernel, B, inputs=[Jd, tau, count], device=device)
+        wp.launch(mg._bisect_step_kernel, 1, inputs=[count, float(target_k), lo, hi, tau], device=device)
+    wp.launch(mg._count_below_kernel, B, inputs=[Jd, tau, count], device=device)
+    wp.launch(mg._elite_u_kernel, (T, 2), inputs=[Jd, tau, count, omega, _WMAX, B, Ud], device=device)
     U_gpu = Ud.numpy()
 
+    n_gpu = int((J <= float(tau.numpy()[0])).sum())
     err = np.abs(U_gpu - U_np).max()
-    print(f"  reweight B={B} T={T}: max|dU|={err:.2e}")
-    print(f"reweight parity  {'OK' if err < 1e-4 else 'REVIEW'}")
+    print(f"  CEM reweight B={B} T={T}: target_k={target_k} gpu_elite={n_gpu} max|dU|={err:.2e}")
+    print(f"reweight parity  {'OK' if err < 5e-2 else 'REVIEW'}")
 
 
 if __name__ == "__main__":

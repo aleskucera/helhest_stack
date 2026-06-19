@@ -6,13 +6,15 @@ nothing but the executed pose ever comes back, and the refine is captured as a C
 graph and replayed. `mppi._cost` stays the numpy oracle for the parity test.
 
 Kernels (all suffixed _kernel):
-  _sample_omega  noise -> Ub -> writes the rollout's omega buffer (rear unused -> 0)
-  _cost          per-rollout scalar cost J[B] (goal/tilt/invalid + eff/smooth)
-  _jmin/_softmax/_weighted_u   softmax reweight of the nominal U, on device
-  _bump_seed/_reset_red        device-side RNG counter + reduction resets (graph-safe)
+  _sample_omega  spline-knot noise -> Ub -> writes the rollout's omega buffer (rear -> 0)
+  _cost          per-rollout scalar cost J[B] (goal/tilt/graded-invalid + eff/smooth)
+  _minmax/_bisect_*/_count_below/_elite_u   CEM reweight (top-k elite mean) of U, on device
+  _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
 """
 import numpy as np
 import warp as wp
+
+_N_BISECT = 14  # device-side bisection iterations for the CEM top-k threshold
 
 
 @wp.kernel
@@ -96,34 +98,61 @@ def _cost_kernel(controlled: wp.array2d(dtype=wp.vec3), derived: wp.array2d(dtyp
                + w_eff * eff + w_smooth * smooth + inv * w_invalid)
 
 
+# --- CEM reweight (option B): elite = top-k lowest-cost samples; U = their mean. Rank-based,
+# so the validity penalty can't blow up the weighting (invalid samples just don't make the
+# elite). The top-k threshold tau is found by device-side BISECTION (a host partition would
+# break the CUDA graph): bisect tau until #{J <= tau} ~= target_k. ---
 @wp.kernel
-def _reset_red_kernel(jmin: wp.array(dtype=float), betasum: wp.array(dtype=float)):
+def _reset_minmax_kernel(jmin: wp.array(dtype=float), jmax: wp.array(dtype=float),
+                         count: wp.array(dtype=float)):
     jmin[0] = 1.0e30
-    betasum[0] = 0.0
+    jmax[0] = -1.0e30
+    count[0] = 0.0
 
 
 @wp.kernel
-def _jmin_kernel(J: wp.array(dtype=float), jmin: wp.array(dtype=float)):
-    wp.atomic_min(jmin, 0, J[wp.tid()])
+def _minmax_kernel(J: wp.array(dtype=float), jmin: wp.array(dtype=float), jmax: wp.array(dtype=float)):
+    j = J[wp.tid()]
+    wp.atomic_min(jmin, 0, j)
+    wp.atomic_max(jmax, 0, j)
 
 
 @wp.kernel
-def _softmax_kernel(J: wp.array(dtype=float), jmin: wp.array(dtype=float), lam: float,
-             beta: wp.array(dtype=float), betasum: wp.array(dtype=float)):
-    b = wp.tid()
-    bb = wp.exp(-(J[b] - jmin[0]) / lam)
-    beta[b] = bb
-    wp.atomic_add(betasum, 0, bb)
+def _bisect_init_kernel(jmin: wp.array(dtype=float), jmax: wp.array(dtype=float),
+                        lo: wp.array(dtype=float), hi: wp.array(dtype=float),
+                        tau: wp.array(dtype=float), count: wp.array(dtype=float)):
+    lo[0] = jmin[0]
+    hi[0] = jmax[0]
+    tau[0] = 0.5 * (jmin[0] + jmax[0])
+    count[0] = 0.0
 
 
 @wp.kernel
-def _weighted_u_kernel(beta: wp.array(dtype=float), betasum: wp.array(dtype=float),
-                omega: wp.array2d(dtype=wp.vec3), wmax: float, B: int, U: wp.array2d(dtype=float)):
+def _count_below_kernel(J: wp.array(dtype=float), tau: wp.array(dtype=float), count: wp.array(dtype=float)):
+    if J[wp.tid()] <= tau[0]:
+        wp.atomic_add(count, 0, 1.0)
+
+
+@wp.kernel
+def _bisect_step_kernel(count: wp.array(dtype=float), target_k: float,
+                        lo: wp.array(dtype=float), hi: wp.array(dtype=float), tau: wp.array(dtype=float)):
+    if count[0] > target_k:
+        hi[0] = tau[0]  # too many below tau -> lower it
+    else:
+        lo[0] = tau[0]  # too few -> raise it
+    tau[0] = 0.5 * (lo[0] + hi[0])
+    count[0] = 0.0  # reset for the next count pass
+
+
+@wp.kernel
+def _elite_u_kernel(J: wp.array(dtype=float), tau: wp.array(dtype=float), count: wp.array(dtype=float),
+                    omega: wp.array2d(dtype=wp.vec3), wmax: float, B: int, U: wp.array2d(dtype=float)):
     t, c = wp.tid()
     acc = float(0.0)
     for b in range(B):
-        acc += beta[b] * omega[t, b][c]
-    U[t, c] = wp.clamp(acc / betasum[0], -wmax, wmax)
+        if J[b] <= tau[0]:  # elite
+            acc += omega[t, b][c]
+    U[t, c] = wp.clamp(acc / count[0], -wmax, wmax)  # unweighted elite mean
 
 
 @wp.kernel
@@ -141,12 +170,13 @@ class MppiGpu:
     up new values; the weights/sigma/lam/wmax are baked at capture (fixed per planner)."""
 
     def __init__(self, sim, sigma, lam, wmax, weights, clear_margin, resid_tol, seed=0,
-                 sigma_knot=0.0, n_knots=4):
+                 sigma_knot=0.0, n_knots=4, elite_frac=0.1):
         self.sim = sim
         self.dev = sim.device
         self.B, self.T = sim.B, sim.T
-        self.sigma, self.lam, self.wmax = float(sigma), float(lam), float(wmax)
+        self.sigma, self.lam, self.wmax = float(sigma), float(lam), float(wmax)  # lam unused (CEM)
         self.sigma_knot, self.n_knots = float(sigma_knot), int(n_knots)
+        self.target_k = float(int(float(elite_frac) * self.B))  # CEM elite count (top-k by cost)
         self.clear_margin, self.resid_tol = float(clear_margin), float(resid_tol)
         w = weights
         self.w_term = float(w.get("term", 0.0))
@@ -159,9 +189,12 @@ class MppiGpu:
         d = self.dev
         self.U = wp.zeros((self.T, 2), dtype=float, device=d)
         self.J = wp.zeros(self.B, dtype=float, device=d)
-        self.beta = wp.zeros(self.B, dtype=float, device=d)
-        self.jmin = wp.zeros(1, dtype=float, device=d)
-        self.betasum = wp.zeros(1, dtype=float, device=d)
+        self.jmin = wp.zeros(1, dtype=float, device=d)  # CEM bisection scalars
+        self.jmax = wp.zeros(1, dtype=float, device=d)
+        self.lo = wp.zeros(1, dtype=float, device=d)
+        self.hi = wp.zeros(1, dtype=float, device=d)
+        self.tau = wp.zeros(1, dtype=float, device=d)
+        self.count = wp.zeros(1, dtype=float, device=d)
         self.seed = wp.array([int(seed)], dtype=int, device=d)
         self.goal = wp.zeros(2, dtype=float, device=d)
         self._graph = None
@@ -187,11 +220,16 @@ class MppiGpu:
                   self.goal, self.clear_margin, self.resid_tol, self.tilt_free, self.w_term, self.w_run,
                   self.w_tilt, self.w_eff, self.w_smooth, self.w_invalid, self.T],
                   outputs=[self.J], device=d)
-        wp.launch(_reset_red_kernel, 1, inputs=[self.jmin, self.betasum], device=d)
-        wp.launch(_jmin_kernel, self.B, inputs=[self.J, self.jmin], device=d)
-        wp.launch(_softmax_kernel, self.B, inputs=[self.J, self.jmin, self.lam, self.beta, self.betasum], device=d)
-        wp.launch(_weighted_u_kernel, (self.T, 2), inputs=[self.beta, self.betasum, s.omega, self.wmax, self.B, self.U],
-                  device=d)
+        # CEM reweight: bisection for the top-k cost threshold tau, then elite mean -> U.
+        wp.launch(_reset_minmax_kernel, 1, inputs=[self.jmin, self.jmax, self.count], device=d)
+        wp.launch(_minmax_kernel, self.B, inputs=[self.J, self.jmin, self.jmax], device=d)
+        wp.launch(_bisect_init_kernel, 1, inputs=[self.jmin, self.jmax, self.lo, self.hi, self.tau, self.count], device=d)
+        for _ in range(_N_BISECT):
+            wp.launch(_count_below_kernel, self.B, inputs=[self.J, self.tau, self.count], device=d)
+            wp.launch(_bisect_step_kernel, 1, inputs=[self.count, self.target_k, self.lo, self.hi, self.tau], device=d)
+        wp.launch(_count_below_kernel, self.B, inputs=[self.J, self.tau, self.count], device=d)  # final elite count
+        wp.launch(_elite_u_kernel, (self.T, 2),
+                  inputs=[self.J, self.tau, self.count, s.omega, self.wmax, self.B, self.U], device=d)
 
     def replan(self, state, goal_xy, n_refine):
         """Run n_refine GPU refines from `state` toward world `goal_xy`; updates U in place."""
