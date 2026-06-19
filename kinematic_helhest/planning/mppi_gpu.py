@@ -18,7 +18,8 @@ _N_BISECT = 14  # device-side bisection iterations for the CEM top-k threshold
 
 
 @wp.kernel
-def _sample_omega_kernel(U: wp.array2d(dtype=float), sigma: float, sigma_knot: float, wmax: float,
+def _sample_omega_kernel(U: wp.array2d(dtype=float), sigma: float, sigma_knot: float,
+                  wmin: float, wmax: float,
                   n_knots: int, seed: wp.array(dtype=int), omega: wp.array2d(dtype=wp.vec3)):
     t, b = wp.tid()
     B = omega.shape[1]
@@ -47,7 +48,8 @@ def _sample_omega_kernel(U: wp.array2d(dtype=float), sigma: float, sigma_knot: f
         jit = wp.rand_init(seed[0] + 9176, t * B + b)
         el += sigma * wp.randn(jit)
         er += sigma * wp.randn(jit)
-    omega[t, b] = wp.vec3(wp.clamp(el, -wmax, wmax), wp.clamp(er, -wmax, wmax), 0.0)
+    # wmin >= 0 -> forward arcs only: no reverse (vx>=0) and no in-place spin (no counter-rotation)
+    omega[t, b] = wp.vec3(wp.clamp(el, wmin, wmax), wp.clamp(er, wmin, wmax), 0.0)
 
 
 @wp.kernel
@@ -146,13 +148,14 @@ def _bisect_step_kernel(count: wp.array(dtype=float), target_k: float,
 
 @wp.kernel
 def _elite_u_kernel(J: wp.array(dtype=float), tau: wp.array(dtype=float), count: wp.array(dtype=float),
-                    omega: wp.array2d(dtype=wp.vec3), wmax: float, B: int, U: wp.array2d(dtype=float)):
+                    omega: wp.array2d(dtype=wp.vec3), wmin: float, wmax: float, B: int,
+                    U: wp.array2d(dtype=float)):
     t, c = wp.tid()
     acc = float(0.0)
     for b in range(B):
         if J[b] <= tau[0]:  # elite
             acc += omega[t, b][c]
-    U[t, c] = wp.clamp(acc / count[0], -wmax, wmax)  # unweighted elite mean
+    U[t, c] = wp.clamp(acc / count[0], wmin, wmax)  # unweighted elite mean (forward arcs)
 
 
 @wp.kernel
@@ -170,11 +173,11 @@ class MppiGpu:
     up new values; the weights/sigma/wmax/elite_frac are baked at capture (fixed per planner)."""
 
     def __init__(self, sim, sigma, wmax, weights, clear_margin, resid_tol, seed=0,
-                 sigma_knot=0.0, n_knots=4, elite_frac=0.1):
+                 sigma_knot=0.0, n_knots=4, elite_frac=0.1, wmin=0.0):
         self.sim = sim
         self.dev = sim.device
         self.B, self.T = sim.B, sim.T
-        self.sigma, self.wmax = float(sigma), float(wmax)
+        self.sigma, self.wmax, self.wmin = float(sigma), float(wmax), float(wmin)
         self.sigma_knot, self.n_knots = float(sigma_knot), int(n_knots)
         self.target_k = float(int(float(elite_frac) * self.B))  # CEM elite count (top-k by cost)
         self.clear_margin, self.resid_tol = float(clear_margin), float(resid_tol)
@@ -213,7 +216,7 @@ class MppiGpu:
         s, d = self.sim, self.dev
         wp.launch(_bump_seed_kernel, 1, inputs=[self.seed], device=d)
         wp.launch(_sample_omega_kernel, (self.T, self.B),
-                  inputs=[self.U, self.sigma, self.sigma_knot, self.wmax, self.n_knots, self.seed],
+                  inputs=[self.U, self.sigma, self.sigma_knot, self.wmin, self.wmax, self.n_knots, self.seed],
                   outputs=[s.omega], device=d)
         s.rollout_launch()
         wp.launch(_cost_kernel, self.B, inputs=[s.controlled, s.derived, s.clearance, s.residual, s.omega,
@@ -229,7 +232,7 @@ class MppiGpu:
             wp.launch(_bisect_step_kernel, 1, inputs=[self.count, self.target_k, self.lo, self.hi, self.tau], device=d)
         wp.launch(_count_below_kernel, self.B, inputs=[self.J, self.tau, self.count], device=d)  # final elite count
         wp.launch(_elite_u_kernel, (self.T, 2),
-                  inputs=[self.J, self.tau, self.count, s.omega, self.wmax, self.B, self.U], device=d)
+                  inputs=[self.J, self.tau, self.count, s.omega, self.wmin, self.wmax, self.B, self.U], device=d)
 
     def replan(self, state, goal_xy, n_refine):
         """Run n_refine GPU refines from `state` toward world `goal_xy`; updates U in place."""

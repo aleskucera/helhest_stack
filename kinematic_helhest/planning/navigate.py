@@ -44,6 +44,7 @@ class NavConfig:
     sigma_knot: float = 1.0    # spline-knot std (broad correlated maneuvers)
     n_knots: int = 4           # control knots interpolated over the horizon (option A)
     wmax: float = 4.0
+    wmin: float = 0.0          # min wheel speed; 0 -> forward arcs only (no reverse / in-place spin)
     clear_margin: float = 0.05
     resid_tol: float = 1e-2
     goal_tol: float = 0.3
@@ -90,7 +91,7 @@ class Navigator:
             w = dict(_W, tilt=cfg.tilt_w, tilt_free=np.radians(cfg.tilt_free_deg))
             self.drv = MppiGpu(self.sim, cfg.sigma, cfg.wmax, w,
                                cfg.clear_margin, cfg.resid_tol, self.seed,
-                               sigma_knot=cfg.sigma_knot, n_knots=cfg.n_knots)
+                               sigma_knot=cfg.sigma_knot, n_knots=cfg.n_knots, wmin=cfg.wmin)
         self.sim.set_terrain(raw_H)            # borrow + dilate, no alloc
         self.sim.set_uniform_friction(cfg.mu_value)
 
