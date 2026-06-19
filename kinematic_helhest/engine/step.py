@@ -162,7 +162,9 @@ def settle(
         # damped Newton step on every DOF...
         for i in range(wp.static(3)):
             st_i = wp.static(i)
-            derived[st_i] = derived[st_i] - wp.clamp(delta[st_i], -solver.max_step[st_i], solver.max_step[st_i])
+            derived[st_i] = derived[st_i] - wp.clamp(
+                delta[st_i], -solver.max_step[st_i], solver.max_step[st_i]
+            )
         # ...then clamp the tilt angles; z (height) is left free
         derived[1] = wp.clamp(derived[1], -solver.tilt_clamp, solver.tilt_clamp)
         derived[2] = wp.clamp(derived[2], -solver.tilt_clamp, solver.tilt_clamp)
@@ -278,7 +280,7 @@ def normal_loads(
         wheel_center = p + R * wheel_pos
         n = sample_normal(envelope, grid, wheel_center[0], wheel_center[1])
         ct = wheel_center - robot.wheel_radius * n  # contact point
-        r = ct - com_world                          # moment arm about the CoM
+        r = ct - com_world  # moment arm about the CoM
         m = wp.cross(r, n)
         A[0, st_i] = n[2]
         A[1, st_i] = m[0]
@@ -313,9 +315,9 @@ def init_state_kernel(
     grid: Grid,
     robot: Robot,
     solver: Solver,
-    start_pose: wp.array(dtype=wp.vec3),     # [B] (x, y, yaw)
-    controlled: wp.array2d(dtype=wp.vec3),   # [T+1, B] (x, y, yaw)      -> writes row 0
-    derived: wp.array2d(dtype=wp.vec3),      # [T+1, B] (z, pitch, roll) -> writes row 0
+    start_pose: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw)
+    controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] (x, y, yaw)      -> writes row 0
+    derived: wp.array2d(dtype=wp.vec3),  # [T+1, B] (z, pitch, roll) -> writes row 0
 ):
     """Seed row 0 of a rollout: settle the start pose onto the terrain.
 
@@ -362,7 +364,7 @@ def step_kernel(
     # --- turning params from the CURRENT pose: the grip-weighted ICR + turn resistance ---
     loads = normal_loads(envelope, grid, robot, R, p)  # per-wheel normal load N_i
     total_grip = float(0.0)  # Sum_i grip_i
-    grip_x = float(0.0)      # Sum_i grip_i * wheel_x  (x_icr = grip_x / total_grip)
+    grip_x = float(0.0)  # Sum_i grip_i * wheel_x  (x_icr = grip_x / total_grip)
     for i in range(wp.static(3)):
         st_i = wp.static(i)
         wheel_pos = robot.wheel_pos[st_i]
@@ -445,7 +447,7 @@ def rollout_kernel(
 
         loads = normal_loads(envelope, grid, robot, R, p)  # per-wheel normal load N_i
         total_grip = float(0.0)  # Sum_i grip_i
-        grip_x = float(0.0)      # Sum_i grip_i * wheel_x  (x_icr = grip_x / total_grip)
+        grip_x = float(0.0)  # Sum_i grip_i * wheel_x  (x_icr = grip_x / total_grip)
         for i in range(wp.static(3)):
             st_i = wp.static(i)
             wheel_pos = robot.wheel_pos[st_i]
