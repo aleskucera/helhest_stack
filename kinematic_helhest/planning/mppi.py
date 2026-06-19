@@ -59,11 +59,18 @@ def _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, 
         # still climbs gentle slopes to reach a goal; only steep tilt is penalized.
         over = np.maximum(ang - w.get("tilt_free", 0.0), 0.0)
         J = J + w["tilt"] * (over ** 2).mean(0)
+    if w.get("head", 0.0) > 0.0:
+        # heading: penalize facing away from the goal (1 - cos angle); drives the U-turn
+        dx = controlled[:, :, 0] - goal[0]; dy = controlled[:, :, 1] - goal[1]  # [T+1, B]
+        dist = np.hypot(dx, dy)
+        cos_align = -(np.cos(controlled[:, :, 2]) * dx + np.sin(controlled[:, :, 2]) * dy) / np.maximum(dist, 1e-3)
+        head = np.where(dist > 1e-3, 1.0 - cos_align, 0.0).mean(0)  # [B]
+        J = J + w["head"] * head
     return J + inv * w["invalid"], inv > 0
 
 
 def plan(scene, mu, start, goal, T=60, B=2048, n_refine=3, max_steps=260, dt=0.1,
-         sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, wmin=0.0, goal_tol=0.3, resid_tol=1e-2, clear_margin=0.05,
+         sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, wmin=0.0, elite_frac=0.02, goal_tol=0.3, resid_tol=1e-2, clear_margin=0.05,
          device="cuda", seed=0, weights=None, record=False, n_show=60):
     params = SolverParams(dt=dt, k_turn=2.0, newton_iters=6, atol=1e-4)  # forward-only: shallow+loose settle
     sim = Simulator(
@@ -74,10 +81,10 @@ def plan(scene, mu, start, goal, T=60, B=2048, n_refine=3, max_steps=260, dt=0.1
     sim.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32),
                              dtype=wp.float32, device=device))
     sim.set_friction(mu)
-    w = weights or dict(term=3.0, run=0.3, invalid=1e5, eff=2e-3, smooth=2e-3)
+    w = weights or dict(term=3.0, run=0.3, head=2.0, invalid=1e5, eff=2e-3, smooth=2e-3)
     goal = np.asarray(goal[:2], np.float64)
     drv = MppiGpu(sim, sigma, wmax, w, clear_margin, resid_tol, seed,
-                  sigma_knot=sigma_knot, n_knots=n_knots, wmin=wmin)
+                  sigma_knot=sigma_knot, n_knots=n_knots, wmin=wmin, elite_frac=elite_frac)
     drv.reset_nominal(1.5)  # nominal wheel speeds, gentle forward
 
     state = np.asarray(start, np.float32)        # (x, y, yaw)

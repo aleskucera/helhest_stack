@@ -58,6 +58,7 @@ class CostWeights:
     term: float
     run: float
     tilt: float
+    head: float
     eff: float
     smooth: float
     invalid: float
@@ -75,6 +76,7 @@ def _cost_kernel(controlled: wp.array2d(dtype=wp.vec3), derived: wp.array2d(dtyp
     b = wp.tid()
     run_sum = float(0.0)
     tilt_sum = float(0.0)
+    head_sum = float(0.0)
     term = float(0.0)
     for t in range(T + 1):
         pc = controlled[t, b]
@@ -87,6 +89,13 @@ def _cost_kernel(controlled: wp.array2d(dtype=wp.vec3), derived: wp.array2d(dtyp
         ang = wp.acos(wp.clamp(wp.cos(tc[1]) * wp.cos(tc[2]), -1.0, 1.0))
         over = wp.max(ang - cw.tilt_free, 0.0)
         tilt_sum += over * over
+        # heading: penalize facing AWAY from the goal (1 - cos angle, in [0, 2]). Makes
+        # "turn to face the goal" cheaper than "stay", so a forward-only robot commits to a
+        # U-turn when the goal is behind (it can't reverse or spin in place).
+        dist = wp.sqrt(d2)
+        if dist > 1e-3:
+            cos_align = -(wp.cos(pc[2]) * dx + wp.sin(pc[2]) * dy) / dist
+            head_sum += 1.0 - cos_align
     eff = float(0.0)
     smooth = float(0.0)
     penalty = float(0.0)
@@ -109,6 +118,7 @@ def _cost_kernel(controlled: wp.array2d(dtype=wp.vec3), derived: wp.array2d(dtyp
         early = float(T - t) / float(T)  # earlier violations hurt more (imminent)
         penalty += early * (clear_viol + resid_viol)
     Jout[b] = (cw.term * term + cw.run * (run_sum / float(T + 1)) + cw.tilt * (tilt_sum / float(T + 1))
+               + cw.head * (head_sum / float(T + 1))
                + cw.eff * eff + cw.smooth * smooth + penalty * cw.invalid)
 
 
@@ -185,7 +195,7 @@ class MppiGpu:
     up new values; the weights/sigma/wmax/elite_frac are baked at capture (fixed per planner)."""
 
     def __init__(self, sim, sigma, wmax, weights, clear_margin, resid_tol, seed=0,
-                 sigma_knot=0.0, n_knots=4, elite_frac=0.1, wmin=0.0):
+                 sigma_knot=0.0, n_knots=4, elite_frac=0.02, wmin=0.0):
         self.sim = sim
         self.dev = sim.device
         self.B, self.T = sim.B, sim.T
@@ -197,6 +207,7 @@ class MppiGpu:
         cw.term = float(w.get("term", 0.0))
         cw.run = float(w.get("run", 0.0))
         cw.tilt = float(w.get("tilt", 0.0))
+        cw.head = float(w.get("head", 0.0))
         cw.eff = float(w.get("eff", 0.0))
         cw.smooth = float(w.get("smooth", 0.0))
         cw.invalid = float(w.get("invalid", 0.0))

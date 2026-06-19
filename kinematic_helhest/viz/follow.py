@@ -54,7 +54,7 @@ class Planner:
         self.sim.set_friction(mu)
         self.goal = np.asarray(goal[:2], np.float64)
         self.B, self.n_refine = B, n_refine
-        w = dict(term=3.0, run=0.3, invalid=1e5, eff=2e-3, smooth=2e-3)
+        w = dict(term=3.0, run=0.3, head=2.0, invalid=1e5, eff=2e-3, smooth=2e-3)
         self.drv = MppiGpu(self.sim, sigma, wmax, w, clear_margin, resid_tol, seed,
                            sigma_knot=sigma_knot, n_knots=n_knots)
         self.drv.reset_nominal(1.5)

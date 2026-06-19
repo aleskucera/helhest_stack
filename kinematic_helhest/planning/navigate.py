@@ -29,7 +29,7 @@ from .mppi_gpu import MppiGpu
 from .synthetic_perception import crop_window
 from .synthetic_perception import to_local
 
-_W = dict(term=3.0, run=0.3, invalid=1e5, eff=2e-3, smooth=2e-3)
+_W = dict(term=3.0, run=0.3, head=2.0, invalid=1e5, eff=2e-3, smooth=2e-3)
 
 
 @dataclass
@@ -45,6 +45,7 @@ class NavConfig:
     n_knots: int = 4           # control knots interpolated over the horizon (option A)
     wmax: float = 4.0
     wmin: float = 0.0          # min wheel speed; 0 -> forward arcs only (no reverse / in-place spin)
+    elite_frac: float = 0.02   # CEM elite fraction; small -> mode-seeking (commits to a behind-goal U-turn)
     clear_margin: float = 0.05
     resid_tol: float = 1e-2
     goal_tol: float = 0.3
@@ -91,7 +92,8 @@ class Navigator:
             w = dict(_W, tilt=cfg.tilt_w, tilt_free=np.radians(cfg.tilt_free_deg))
             self.drv = MppiGpu(self.sim, cfg.sigma, cfg.wmax, w,
                                cfg.clear_margin, cfg.resid_tol, self.seed,
-                               sigma_knot=cfg.sigma_knot, n_knots=cfg.n_knots, wmin=cfg.wmin)
+                               sigma_knot=cfg.sigma_knot, n_knots=cfg.n_knots, wmin=cfg.wmin,
+                               elite_frac=cfg.elite_frac)
         self.sim.set_terrain(raw_H)            # borrow + dilate, no alloc
         self.sim.set_uniform_friction(cfg.mu_value)
 
