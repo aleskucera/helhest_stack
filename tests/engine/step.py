@@ -60,8 +60,9 @@ def rollout_device(scene, mu_field, setpoints, init_pose, params,
               outputs=[controlled, derived], device=device)
     for t in range(T):
         wp.launch(step_kernel, 1,
-                  inputs=[t, te, tr, g, tm, g, robot, sp, omega],
-                  outputs=[controlled, derived, loads, turn, clear, resid], device=device)
+                  inputs=[te, tr, g, tm, g, robot, sp, omega[t], controlled[t], derived[t]],
+                  outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]],
+                  device=device)
     clear_np, resid_np = clear.numpy()[:, 0], resid.numpy()[:, 0]
     bad = (clear_np < clear_margin) | (resid_np > resid_tol)
     return {

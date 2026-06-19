@@ -127,10 +127,11 @@ class Simulator:
             wp.launch(
                 kernel=step_kernel,
                 dim=self.B,
-                inputs=[t, self.envelope, self.elevation, self.grid, self.friction, self.grid,
-                        self.robot, self.solver, self.omega],
-                outputs=[self.controlled, self.derived, self.loads, self.turning,
-                         self.clearance, self.residual],
+                # per-step views: read row t, write row t+1 (no t index inside the kernel)
+                inputs=[self.envelope, self.elevation, self.grid, self.friction, self.grid,
+                        self.robot, self.solver, self.omega[t], self.controlled[t], self.derived[t]],
+                outputs=[self.controlled[t + 1], self.derived[t + 1], self.loads[t],
+                         self.turning[t], self.clearance[t], self.residual[t]],
                 device=self.device,
             )
 

@@ -334,7 +334,6 @@ def init_state_kernel(
 
 @wp.kernel
 def step_kernel(
-    t: int,
     envelope: wp.array2d(dtype=wp.float32),
     elevation: wp.array2d(dtype=wp.float32),
     grid: Grid,
@@ -342,17 +341,19 @@ def step_kernel(
     grid_mu: Grid,
     robot: Robot,
     solver: Solver,
-    omega: wp.array2d(dtype=wp.vec3),  # [T, B] (wL, wR, w_rear)
-    controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] (x, y, yaw)
-    derived: wp.array2d(dtype=wp.vec3),  # [T+1, B] (z, pitch, roll)
-    loads_out: wp.array2d(dtype=wp.vec3),  # [T, B] N_i of the NEW state
-    turn_out: wp.array2d(dtype=wp.vec2),  # [T, B] (alpha, x_icr) used this step
-    clear_out: wp.array2d(dtype=float),  # [T, B] belly clearance of the NEW state
-    resid_out: wp.array2d(dtype=float),  # [T, B] settle residual (max|c|) of NEW state
+    omega: wp.array(dtype=wp.vec3),  # [B] (wL, wR, w_rear) this step
+    controlled: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) current state
+    derived: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) current state
+    controlled_next: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) settled NEW state -> written
+    derived_next: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) NEW state -> written
+    loads_out: wp.array(dtype=wp.vec3),  # [B] N_i of the NEW state
+    turn_out: wp.array(dtype=wp.vec2),  # [B] (alpha, x_icr) used this step
+    clear_out: wp.array(dtype=float),  # [B] belly clearance of the NEW state
+    resid_out: wp.array(dtype=float),  # [B] settle residual (max|c|) of the NEW state
 ):
     tid = wp.tid()
-    pc = controlled[t, tid]
-    tc = derived[t, tid]
+    pc = controlled[tid]
+    tc = derived[tid]
     x = pc[0]
     y = pc[1]
     yaw = pc[2]
@@ -376,7 +377,7 @@ def step_kernel(
     alpha = 1.0 + solver.k_turn * sw / (robot.gravity * robot.mass)
 
     # --- predict: twist through the CURRENT orientation, Euler integrate ---
-    om = omega[t, tid]
+    om = omega[tid]
     vx = robot.wheel_radius * (om[0] + om[1]) / 2.0
     wz = robot.wheel_radius * (om[1] - om[0]) / (2.0 * robot.half_track * alpha)
     vy = -x_icr * wz
@@ -386,15 +387,15 @@ def step_kernel(
     yawn = yaw + wz * solver.dt
 
     # --- project: settle the new pose (warm-started from current derived) ---
-    controlled_next = wp.vec3(xn, yn, yawn)
-    settled = settle(envelope, grid, robot, solver, controlled_next, tc)
-    controlled[t + 1, tid] = controlled_next
-    derived[t + 1, tid] = settled
+    pose_next = wp.vec3(xn, yn, yawn)
+    settled = settle(envelope, grid, robot, solver, pose_next, tc)
+    controlled_next[tid] = pose_next
+    derived_next[tid] = settled
 
     Rn = euler_zyx(yawn, settled[1], settled[2])
     pn = wp.vec3(xn, yn, settled[0])
-    loads_out[t, tid] = normal_loads(envelope, grid, robot, Rn, pn)
-    turn_out[t, tid] = wp.vec2(alpha, x_icr)
-    clear_out[t, tid] = chassis_clearance(elevation, grid, robot, Rn, pn)
+    loads_out[tid] = normal_loads(envelope, grid, robot, Rn, pn)
+    turn_out[tid] = wp.vec2(alpha, x_icr)
+    clear_out[tid] = chassis_clearance(elevation, grid, robot, Rn, pn)
     cres = clearances(envelope, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
-    resid_out[t, tid] = wp.max(wp.max(wp.abs(cres[0]), wp.abs(cres[1])), wp.abs(cres[2]))
+    resid_out[tid] = wp.max(wp.max(wp.abs(cres[0]), wp.abs(cres[1])), wp.abs(cres[2]))

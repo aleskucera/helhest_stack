@@ -213,8 +213,8 @@ def _fwd(envH, rawH, muH, g, gmu, robot, sp, omega_np, init_pose, wpv, wtv, grad
         wp.launch(init_state_kernel, 1, inputs=[Henv, g, robot, sp, pose0],
                   outputs=[controlled, derived], device=dev)
         for t in range(T):
-            wp.launch(step_kernel, 1, inputs=[t, Henv, Hraw, g, Hmu, gmu, robot, sp, omega],
-                      outputs=[controlled, derived, loads, turn, clear, resid], device=dev)
+            wp.launch(step_kernel, 1, inputs=[Henv, Hraw, g, Hmu, gmu, robot, sp, omega[t], controlled[t], derived[t]],
+                      outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]], device=dev)
         wp.launch(_row_loss, 1, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev)
 
     if not grad:
@@ -300,8 +300,8 @@ def _fwd_h(rawH, muH, g, gmu, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, 
         wp.launch(init_state_kernel, 1, inputs=[Henv, g, robot, sp, pose0],
                   outputs=[controlled, derived], device=dev)
         for t in range(T):
-            wp.launch(step_kernel, 1, inputs=[t, Henv, Hraw, g, Hmu, gmu, robot, sp, omega],
-                      outputs=[controlled, derived, loads, turn, clear, resid], device=dev)
+            wp.launch(step_kernel, 1, inputs=[Henv, Hraw, g, Hmu, gmu, robot, sp, omega[t], controlled[t], derived[t]],
+                      outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]], device=dev)
         wp.launch(_row_loss, 1, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev)
 
     if not grad:
@@ -385,8 +385,8 @@ def _fwd_batch(envH, rawH, muH, g, gmu, robot, sp, omega_np, poses, wpv, wtv, gr
         wp.launch(init_state_kernel, B, inputs=[Henv, g, robot, sp, pose0],
                   outputs=[controlled, derived], device=dev)
         for t in range(T):
-            wp.launch(step_kernel, B, inputs=[t, Henv, Hraw, g, Hmu, gmu, robot, sp, omega],
-                      outputs=[controlled, derived, loads, turn, clear, resid], device=dev)
+            wp.launch(step_kernel, B, inputs=[Henv, Hraw, g, Hmu, gmu, robot, sp, omega[t], controlled[t], derived[t]],
+                      outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]], device=dev)
         wp.launch(_row_loss, B, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev)
 
     if not grad:
