@@ -101,8 +101,10 @@ class Navigator:
         self.drv.set_nominal(U)
         self.drv.replan(state, goal_local, cfg.n_refine)   # whole MPPI refine on GPU
         U = self.drv.nominal()
-        controlled, _, _, _ = self.sim.rollout(_to_omega(np.tile(U, (cfg.B, 1, 1))), state)
-        return U, controlled[:, 0, :2].copy()
+        # predicted path = nominal (b=0) trajectory from the last refine; read just that column
+        # (no re-rollout / full-B readback). The true robot is stepped by WorldRobot (B=1).
+        plan_local = self.sim.controlled[:, 0].numpy()[:, :2].copy()
+        return U, plan_local
 
 
 class WorldRobot:

@@ -23,7 +23,6 @@ from ..engine import GridParams
 from ..engine import RobotParams
 from ..engine import Simulator
 from ..engine import SolverParams
-from ..planning.mppi import _to_omega
 from ..planning.mppi_gpu import MppiGpu
 from .drive import WarpDriver
 from .render import DT
@@ -62,9 +61,8 @@ class Planner:
     def replan(self, state):
         """state (x,y,yaw) -> predicted path xy [T+1, 2] from the optimized nominal."""
         self.drv.replan(state, self.goal, self.n_refine)
-        U = self.drv.nominal()
-        controlled, _, _, _ = self.sim.rollout(_to_omega(np.tile(U, (self.B, 1, 1))), state)
-        return controlled[:, 0, :2].copy()
+        # nominal (b=0) trajectory from the last refine -- read just that column (cheap).
+        return self.sim.controlled[:, 0].numpy()[:, :2].copy()
 
 
 def _draw_plan(plan_xy, scene, goal):

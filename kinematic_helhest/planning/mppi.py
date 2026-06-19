@@ -98,16 +98,16 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
             break
         drv.replan(state, goal, n_refine)   # the whole MPPI refine, on GPU
         U = drv.nominal()
+        # the nominal's trajectory is already column b=0 of the last refine's rollout (which
+        # started at `state`); read just that column -- no re-rollout, no full-B readback.
+        nominal = sim.controlled[:, 0].numpy()  # [T+1, 3]
         if record:  # read back the last refine's fan for the animation (slow path)
             samp = sim.controlled.numpy()[:, idx, :2].copy()      # [T+1, n_show, 2]
             badstep = ((sim.clearance.numpy()[:, idx] < clear_margin)
                        | (sim.residual.numpy()[:, idx] > resid_tol)).copy()  # [T, n_show]
-        # execute first control: roll the nominal out and take the step-1 pose
-        controlled, _, _, _ = sim.rollout(_to_omega(np.tile(U, (B, 1, 1))), state)
-        if record:
             frames.append({"state": state.copy(), "samples": samp,
-                           "stepbad": badstep, "chosen": controlled[:, 0, :2].copy()})
-        state = controlled[1, 0].astype(np.float32).copy()
+                           "stepbad": badstep, "chosen": nominal[:, :2].copy()})
+        state = nominal[1].astype(np.float32).copy()  # step-1 pose of the nominal
         path.append(state.copy())
         U = np.roll(U, -1, axis=0)
         U[-1] = U[-2]
