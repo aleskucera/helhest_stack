@@ -23,8 +23,8 @@ from ..engine import GridParams
 from ..engine import RobotParams
 from ..engine import Simulator
 from ..engine import SolverParams
-from ..planning.mppi import _cost
 from ..planning.mppi import _to_omega
+from ..planning.mppi_gpu import MppiGpu
 from .drive import WarpDriver
 from .render import DT
 from .render import WIN_H
@@ -37,11 +37,13 @@ from .render import build_terrain
 
 
 class Planner:
-    """Re-plans an MPPI horizon trajectory from a given pose to the goal."""
+    """Re-plans an MPPI horizon from a given pose to the goal via the GPU MppiGpu
+    driver (spline-knot sampling + graded cost + CEM reweight), on a static scene."""
 
     def __init__(self, scene, mu, goal, device="cpu", T=90, B=1024, n_refine=3,
-                 sigma=2.5, lam=0.5, wmax=4.0, clear_margin=0.05, resid_tol=1e-2, seed=0):
-        params = SolverParams(dt=DT, k_turn=2.0, newton_iters=12)
+                 sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, clear_margin=0.05,
+                 resid_tol=1e-2, seed=0):
+        params = SolverParams(dt=DT, k_turn=2.0, newton_iters=6, atol=1e-4)  # forward-only
         self.sim = Simulator(
             RobotParams(), params,
             GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
@@ -50,27 +52,18 @@ class Planner:
         self.sim.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32),
                                       dtype=wp.float32, device=device))
         self.sim.set_friction(mu)
-        self.scene, self.goal = scene, np.asarray(goal[:2], np.float64)
-        self.T, self.B, self.n_refine = T, B, n_refine
-        self.sigma, self.lam, self.wmax = sigma, lam, wmax
-        self.cm, self.rt = clear_margin, resid_tol
-        self.w = dict(term=3.0, run=0.3, invalid=1e5, eff=2e-3, smooth=2e-3)
-        self.U = np.full((T, 2), 1.5, np.float32)
-        self.rng = np.random.default_rng(seed)
+        self.goal = np.asarray(goal[:2], np.float64)
+        self.B, self.n_refine = B, n_refine
+        w = dict(term=3.0, run=0.3, invalid=1e5, eff=2e-3, smooth=2e-3)
+        self.drv = MppiGpu(self.sim, sigma, wmax, w, clear_margin, resid_tol, seed,
+                           sigma_knot=sigma_knot, n_knots=n_knots)
+        self.drv.reset_nominal(1.5)
 
     def replan(self, state):
         """state (x,y,yaw) -> predicted path xy [T+1, 2] from the optimized nominal."""
-        B, T = self.B, self.T
-        for _ in range(self.n_refine):
-            eps = self.rng.normal(0.0, self.sigma, (B, T, 2)).astype(np.float32)
-            eps[0] = 0.0
-            Ub = np.clip(self.U[None] + eps, -self.wmax, self.wmax)
-            controlled, derived, clear, resid = self.sim.rollout(_to_omega(Ub), state)
-            J, _ = _cost(controlled, derived, clear, resid, Ub, self.goal, self.cm, self.rt, self.w)
-            beta = np.exp(-(J - J.min()) / self.lam)
-            beta /= beta.sum()
-            self.U = np.clip(np.einsum("b,btc->tc", beta, Ub), -self.wmax, self.wmax).astype(np.float32)
-        controlled, _, _, _ = self.sim.rollout(_to_omega(np.tile(self.U, (B, 1, 1))), state)
+        self.drv.replan(state, self.goal, self.n_refine)
+        U = self.drv.nominal()
+        controlled, _, _, _ = self.sim.rollout(_to_omega(np.tile(U, (self.B, 1, 1))), state)
         return controlled[:, 0, :2].copy()
 
 
