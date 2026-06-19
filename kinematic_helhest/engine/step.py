@@ -108,7 +108,7 @@ def settle(
     envelope: wp.array2d(dtype=wp.float32),
     grid: Grid,
     robot: Robot,
-    sp: Solver,
+    solver: Solver,
     controlled: wp.vec3,
     derived_init: wp.vec3,
 ):
@@ -125,7 +125,7 @@ def settle(
     yaw = controlled[2]
     Rz = rot_z(yaw)
     derived = derived_init
-    for _ in range(sp.newton_iters):
+    for _ in range(solver.newton_iters):
         Ry = rot_y(derived[1])
         Rx = rot_x(derived[2])
         Rot = Rz * Ry * Rx
@@ -154,16 +154,16 @@ def settle(
             J[st_i, 1] = dp[2] - gx * dp[0] - gy * dp[1]
             J[st_i, 2] = dr[2] - gx * dr[0] - gy * dr[1]
 
-        if wp.dot(res, res) < sp.atol * sp.atol:
+        if wp.dot(res, res) < solver.atol * solver.atol:
             break  # converged: the current derived is the root (skip the rest)
         delta = solve3(J, res)  # Newton step: J @ delta = res
         # damped Newton step on every DOF...
         for i in range(wp.static(3)):
             st_i = wp.static(i)
-            derived[st_i] = derived[st_i] - wp.clamp(delta[st_i], -sp.max_step[st_i], sp.max_step[st_i])
+            derived[st_i] = derived[st_i] - wp.clamp(delta[st_i], -solver.max_step[st_i], solver.max_step[st_i])
         # ...then clamp the tilt angles; z (height) is left free
-        derived[1] = wp.clamp(derived[1], -sp.tilt_clamp, sp.tilt_clamp)
-        derived[2] = wp.clamp(derived[2], -sp.tilt_clamp, sp.tilt_clamp)
+        derived[1] = wp.clamp(derived[1], -solver.tilt_clamp, solver.tilt_clamp)
+        derived[2] = wp.clamp(derived[2], -solver.tilt_clamp, solver.tilt_clamp)
     return derived
 
 
@@ -189,7 +189,7 @@ def adj_settle(
     envelope: wp.array2d(dtype=wp.float32),
     grid: Grid,
     robot: Robot,
-    sp: Solver,
+    solver: Solver,
     controlled: wp.vec3,
     derived_init: wp.vec3,
     adj_ret: wp.vec3,
@@ -207,7 +207,7 @@ def adj_settle(
     y = controlled[1]
     yaw = controlled[2]
     derived = settle(
-        envelope, grid, robot, sp, controlled, derived_init
+        envelope, grid, robot, solver, controlled, derived_init
     )  # recompute the converged derived
     Rz = rot_z(yaw)
     Ry = rot_y(derived[1])
@@ -310,17 +310,24 @@ def init_state(
     envelope: wp.array2d(dtype=wp.float32),
     grid: Grid,
     robot: Robot,
-    sp: Solver,
-    pose: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw)
-    controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] -> writes row 0
-    derived: wp.array2d(dtype=wp.vec3),
-):  # [T+1, B] -> writes row 0
+    solver: Solver,
+    start_pose: wp.array(dtype=wp.vec3),     # [B] (x, y, yaw)
+    controlled: wp.array2d(dtype=wp.vec3),   # [T+1, B] (x, y, yaw)      -> writes row 0
+    derived: wp.array2d(dtype=wp.vec3),      # [T+1, B] (z, pitch, roll) -> writes row 0
+):
+    """Seed row 0 of a rollout: settle the start pose onto the terrain.
+
+    Each thread is one rollout (tid = batch index). The controlled DOF (x, y, yaw)
+    come from `start_pose`; the derived DOF (z, pitch, roll) are solved by `settle`,
+    warm-started with z = envelope(x, y) + wheel_radius and zero tilt. Writes
+    controlled[0]/derived[0]; `step` advances from there.
+    """
     tid = wp.tid()
-    pc = pose[tid]
+    pc = start_pose[tid]
     z0 = sample_height(envelope, grid, pc[0], pc[1]) + robot.wheel_radius
-    settled = settle(envelope, grid, robot, sp, pc, wp.vec3(z0, 0.0, 0.0))
+    settled = settle(envelope, grid, robot, solver, pc, wp.vec3(z0, 0.0, 0.0))
     controlled[0, tid] = pc
-    derived[0, tid] = settled  # (z, pitch, roll)
+    derived[0, tid] = settled
 
 
 @wp.kernel
@@ -332,7 +339,7 @@ def step(
     friction: wp.array2d(dtype=wp.float32),
     grid_mu: Grid,
     robot: Robot,
-    sp: Solver,
+    solver: Solver,
     omega: wp.array2d(dtype=wp.vec3),  # [T, B] (wL, wR, w_rear)
     controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] (x, y, yaw)
     derived: wp.array2d(dtype=wp.vec3),  # [T+1, B] (z, pitch, roll)
@@ -366,7 +373,7 @@ def step(
     mw2 = sample_height(friction, grid_mu, ct2[0], ct2[1]) * N[2]
     sw = mw0 + mw1 + mw2
     x_icr = (mw0 * w0v[0] + mw1 * w1v[0] + mw2 * w2v[0]) / sw
-    alpha = 1.0 + sp.k_turn * sw / (robot.gravity * robot.mass)
+    alpha = 1.0 + solver.k_turn * sw / (robot.gravity * robot.mass)
 
     # --- predict: twist through the CURRENT orientation, Euler integrate ---
     om = omega[t, tid]
@@ -374,13 +381,13 @@ def step(
     wz = robot.wheel_radius * (om[1] - om[0]) / (2.0 * robot.half_track * alpha)
     vy = -x_icr * wz
     vw = R * wp.vec3(vx, vy, 0.0)
-    xn = x + vw[0] * sp.dt
-    yn = y + vw[1] * sp.dt
-    yawn = yaw + wz * sp.dt
+    xn = x + vw[0] * solver.dt
+    yn = y + vw[1] * solver.dt
+    yawn = yaw + wz * solver.dt
 
     # --- project: settle the new pose (warm-started from current derived) ---
     controlled_next = wp.vec3(xn, yn, yawn)
-    settled = settle(envelope, grid, robot, sp, controlled_next, tc)
+    settled = settle(envelope, grid, robot, solver, controlled_next, tc)
     controlled[t + 1, tid] = controlled_next
     derived[t + 1, tid] = settled
 
