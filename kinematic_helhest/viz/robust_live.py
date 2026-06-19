@@ -1,12 +1,15 @@
-"""Real-time view of robust (CVaR) MPPI planning past the wall.
+"""Drive the robot yourself; watch the robust (CVaR) MPPI plan + its slip fan, live.
 
-The robot drives itself to a goal using the robust MppiGpu (K slip scenarios, CVaR). Every
-cycle it draws the chosen plan (YELLOW) and its SLIP FAN -- the chosen control rolled out under
-the K scenarios, each path CYAN if it stays feasible / RED if it high-centers. The robust
-planner steers to keep the fan cyan: that cyan margin IS the robustness (a non-robust plan
-would let the fan dip red into the wall -- see planning/robust.py --animate for that contrast).
+You steer with I/J/K/L. Every few frames the robust MppiGpu (K slip scenarios, CVaR) re-plans
+a horizon from your current pose toward the goal and draws the chosen plan (YELLOW) and its
+SLIP FAN -- that plan rolled out under the K scenarios, each path CYAN if it stays feasible /
+RED if it high-centers. Drive toward the wall and watch the fan: where the robust planner would
+keep clearance, the fan stays cyan; steer it tight to the wall and scenarios dip red. (The
+planner only shows the plan -- it doesn't move the robot; you do.)
 
-Run:        python -m kinematic_helhest.viz.robust_live [--device cuda] [--K 8]
+Keys:  I fwd  K back  J left  L right   ESC/Q quit ; mouse drag orbit, scroll zoom.
+
+Run:        python -m kinematic_helhest.viz.robust_live [--device cuda] [--K 8] [--slip-lo 0.4]
 Shot test:  python -m kinematic_helhest.viz.robust_live --shot /tmp/robust_live.png
 """
 import argparse
@@ -22,6 +25,7 @@ from ..planning.mppi_gpu import MppiGpu
 from .drive import WarpDriver
 from .render import WIN_H
 from .render import WIN_W
+from .render import _commands
 from .render import _init_gl
 from .render import _render
 from .render import build_robot
@@ -74,7 +78,7 @@ def run(shot=None, device="cuda", K=8, slip_lo=0.5, beta=0.4, goal=(4.0, 1.15), 
         raise RuntimeError("glfw init failed")
     if shot:
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
-    win = glfw.create_window(WIN_W, WIN_H, "Helhest — robust CVaR planning (slip fan)", None, None)
+    win = glfw.create_window(WIN_W, WIN_H, "Helhest — drive (I/J/K/L) + robust CVaR slip fan", None, None)
     glfw.make_context_current(win)
     _init_gl()
     from OpenGL import GL as gl
@@ -100,29 +104,29 @@ def run(shot=None, device="cuda", K=8, slip_lo=0.5, beta=0.4, goal=(4.0, 1.15), 
     glfw.set_cursor_pos_callback(win, on_cursor)
     glfw.set_scroll_callback(win, on_scroll)
 
-    trail, frame = [], 0
+    trail, frame, controlled, bad = [], 0, None, None
     while not glfw.window_should_close(win):
         glfw.poll_events()
         if glfw.get_key(win, glfw.KEY_ESCAPE) == glfw.PRESS or glfw.get_key(win, glfw.KEY_Q) == glfw.PRESS:
             break
+        # YOU drive (I/J/K/L); the planner just shows its robust plan + slip fan from your pose
+        cmd = np.array([1.6, 1.6, 1.6]) if shot else _commands(lambda k: glfw.get_key(win, k))
+        drv.step(cmd)
         st = drv.render_state()
         state = np.array([st.x, st.y, st.yaw], np.float32)
-        reached = np.hypot(st.x - goal[0], st.y - goal[1]) < 0.3
-        if not reached:
+        if frame % 3 == 0:  # re-plan the robust horizon from the current pose every few frames
             planner.replan(state, goal, 3)
             U = planner.nominal()
             controlled, _, clearance, residual = fan_sim.rollout(_fan_omega(U, slips), state)
-            cmd = np.array([U[0, 0], U[0, 1], 0.5 * (U[0, 0] + U[0, 1])], np.float32)
-            drv.step(cmd)
-            trail.append([st.x, st.y, st.place["z"] + 0.02]); trail = trail[-3000:]
+            bad = (clearance < 0.05) | (residual > 1e-2)  # [T, K]
+        trail.append([st.x, st.y, st.place["z"] + 0.02]); trail = trail[-3000:]
 
         _render(st, cam, terrain, robot, trail)
-        # draw the slip fan: each scenario red if it high-centers, plan (k=0) thick green
-        bad = (clearance < 0.05) | (residual > 1e-2)  # [T, K]
         gl.glDisable(gl.GL_LIGHTING)
-        for k in range(1, K):
-            _polyline(scene, controlled[:, k, :2], _CLIP if bad[:, k].any() else _CLEAR, 2.5, 0.05)
-        _polyline(scene, controlled[:, 0, :2], _PLAN, 5.0, 0.09)  # the chosen plan
+        if controlled is not None:  # the slip fan: each scenario red if it high-centers, plan yellow
+            for k in range(1, K):
+                _polyline(scene, controlled[:, k, :2], _CLIP if bad[:, k].any() else _CLEAR, 2.5, 0.05)
+            _polyline(scene, controlled[:, 0, :2], _PLAN, 5.0, 0.09)  # the chosen plan
         gz = float(scene.sample(np.array([goal[0]]), np.array([goal[1]]))[0])
         gl.glColor3f(0.95, 0.1, 0.1); gl.glLineWidth(5.0)
         gl.glBegin(gl.GL_LINES)
@@ -130,8 +134,8 @@ def run(shot=None, device="cuda", K=8, slip_lo=0.5, beta=0.4, goal=(4.0, 1.15), 
         gl.glEnd()
         gl.glEnable(gl.GL_LIGHTING)
 
+        frame += 1
         if shot:
-            frame += 1
             if frame >= 14:  # plan reaching the wall, fan spread visible
                 gl.glReadBuffer(gl.GL_BACK)
                 buf = gl.glReadPixels(0, 0, WIN_W, WIN_H, gl.GL_RGB, gl.GL_UNSIGNED_BYTE)
