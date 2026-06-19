@@ -139,13 +139,25 @@ def _cost_kernel(
             excess = wp.max(tilt_angle - cw.tilt_free, 0.0)
             tilt_sum += excess * excess
         if cw.head > 0.0:
-            # heading: penalize facing AWAY from the goal (1 - cos angle, in [0, 2]). Makes
-            # "turn to face the goal" cheaper than "stay", so a forward-only robot commits to a
-            # U-turn when the goal is behind (it can't reverse or spin in place).
-            goal_dist = wp.sqrt(goal_d2)
-            if goal_dist > 1e-3:
-                facing = -(wp.cos(pose[2]) * dx + wp.sin(pose[2]) * dy) / goal_dist
-                heading_sum += 1.0 - facing
+            # heading: penalize facing AWAY from the desired direction (1 - cos angle, in [0, 2]).
+            # Makes "turn the right way" cheaper than "stay", so a forward-only robot commits to a
+            # U-turn / detour (it can't reverse or spin in place).
+            if cw.ctg > 0.0:
+                # follow the cost-to-go descent direction -grad V (the way AROUND the wall), by
+                # central differences of V -- NOT the straight line to the goal, which points
+                # across the wall and fights the routing.
+                e = grid.cell_size
+                gvx = sample_field(ctg_field, grid, pose[0] + e, pose[1]) - sample_field(ctg_field, grid, pose[0] - e, pose[1])
+                gvy = sample_field(ctg_field, grid, pose[0], pose[1] + e) - sample_field(ctg_field, grid, pose[0], pose[1] - e)
+                gnorm = wp.sqrt(gvx * gvx + gvy * gvy)
+                if gnorm > 1e-6:  # grad V ~ 0 at the goal (flat minimum) -> no heading pressure
+                    facing = -(wp.cos(pose[2]) * gvx + wp.sin(pose[2]) * gvy) / gnorm
+                    heading_sum += 1.0 - facing
+            else:
+                goal_dist = wp.sqrt(goal_d2)
+                if goal_dist > 1e-3:
+                    facing = -(wp.cos(pose[2]) * dx + wp.sin(pose[2]) * dy) / goal_dist
+                    heading_sum += 1.0 - facing
     effort_sum = float(0.0)
     smooth_sum = float(0.0)
     penalty_sum = float(0.0)
@@ -435,7 +447,8 @@ class MppiGpu:
         self.sim.start_pose.assign(
             np.ascontiguousarray(np.tile(np.asarray(state, np.float32), (self.B, 1)), np.float32)
         )
-        self._seed_turn_if_facing_away(state, goal_xy)
+        if self.cw.ctg == 0.0:  # the turn-seed (Euclidean "facing away") misfires mid-detour when
+            self._seed_turn_if_facing_away(state, goal_xy)  # cost-to-go is on -- V supplies the dir
         if self.dev.is_cuda:
             if self._graph is None:
                 with wp.ScopedCapture(device=self.dev) as cap:
