@@ -184,22 +184,22 @@ def _reset_minmax_kernel(
 def _minmax_kernel(
     J: wp.array(dtype=float), jmin: wp.array(dtype=float), jmax: wp.array(dtype=float)
 ):
-    j = J[wp.tid()]
-    wp.atomic_min(jmin, 0, j)
-    wp.atomic_max(jmax, 0, j)
+    cost = J[wp.tid()]
+    wp.atomic_min(jmin, 0, cost)
+    wp.atomic_max(jmax, 0, cost)
 
 
 @wp.kernel
 def _bisect_init_kernel(
     jmin: wp.array(dtype=float),
     jmax: wp.array(dtype=float),
-    lo: wp.array(dtype=float),
-    hi: wp.array(dtype=float),
+    tau_lo: wp.array(dtype=float),
+    tau_hi: wp.array(dtype=float),
     tau: wp.array(dtype=float),
     count: wp.array(dtype=float),
 ):
-    lo[0] = jmin[0]
-    hi[0] = jmax[0]
+    tau_lo[0] = jmin[0]
+    tau_hi[0] = jmax[0]
     tau[0] = 0.5 * (jmin[0] + jmax[0])
     count[0] = 0.0
 
@@ -216,15 +216,15 @@ def _count_below_kernel(
 def _bisect_step_kernel(
     count: wp.array(dtype=float),
     target_k: float,
-    lo: wp.array(dtype=float),
-    hi: wp.array(dtype=float),
+    tau_lo: wp.array(dtype=float),
+    tau_hi: wp.array(dtype=float),
     tau: wp.array(dtype=float),
 ):
     if count[0] > target_k:
-        hi[0] = tau[0]  # too many below tau -> lower it
+        tau_hi[0] = tau[0]  # too many below tau -> lower it
     else:
-        lo[0] = tau[0]  # too few -> raise it
-    tau[0] = 0.5 * (lo[0] + hi[0])
+        tau_lo[0] = tau[0]  # too few -> raise it
+    tau[0] = 0.5 * (tau_lo[0] + tau_hi[0])
     count[0] = 0.0  # reset for the next count pass
 
 
@@ -239,12 +239,12 @@ def _elite_u_kernel(
     B: int,
     U: wp.array2d(dtype=float),
 ):
-    t, c = wp.tid()
-    acc = float(0.0)
+    t, wheel = wp.tid()  # (timestep, wheel: 0=L, 1=R)
+    elite_sum = float(0.0)
     for r in range(B):
         if J[r] <= tau[0]:  # elite rollout
-            acc += omega[t, r][c]
-    U[t, c] = wp.clamp(acc / count[0], wmin, wmax)  # unweighted elite mean (forward arcs)
+            elite_sum += omega[t, r][wheel]
+    U[t, wheel] = wp.clamp(elite_sum / count[0], wmin, wmax)  # unweighted elite mean (forward arcs)
 
 
 @wp.kernel
@@ -301,8 +301,8 @@ class MppiGpu:
         self.J = wp.zeros(self.B, dtype=float, device=d)
         self.jmin = wp.zeros(1, dtype=float, device=d)  # CEM bisection scalars
         self.jmax = wp.zeros(1, dtype=float, device=d)
-        self.lo = wp.zeros(1, dtype=float, device=d)
-        self.hi = wp.zeros(1, dtype=float, device=d)
+        self.tau_lo = wp.zeros(1, dtype=float, device=d)
+        self.tau_hi = wp.zeros(1, dtype=float, device=d)
         self.tau = wp.zeros(1, dtype=float, device=d)
         self.count = wp.zeros(1, dtype=float, device=d)
         self.seed = wp.array([int(seed)], dtype=int, device=d)
@@ -361,13 +361,13 @@ class MppiGpu:
     def _cem_reweight(self):
         """Top-k elite mean -> U: find the cost threshold tau by device-side bisection
         (#{J <= tau} ~= target_k), then average the elite samples' controls."""
-        d, om = self.dev, self.sim.omega
+        d, omega = self.dev, self.sim.omega
         wp.launch(_reset_minmax_kernel, 1, inputs=[self.jmin, self.jmax, self.count], device=d)
         wp.launch(_minmax_kernel, self.B, inputs=[self.J, self.jmin, self.jmax], device=d)
         wp.launch(
             _bisect_init_kernel,
             1,
-            inputs=[self.jmin, self.jmax, self.lo, self.hi, self.tau, self.count],
+            inputs=[self.jmin, self.jmax, self.tau_lo, self.tau_hi, self.tau, self.count],
             device=d,
         )
         for _ in range(_N_BISECT):
@@ -375,7 +375,7 @@ class MppiGpu:
             wp.launch(
                 _bisect_step_kernel,
                 1,
-                inputs=[self.count, self.target_k, self.lo, self.hi, self.tau],
+                inputs=[self.count, self.target_k, self.tau_lo, self.tau_hi, self.tau],
                 device=d,
             )
         wp.launch(
@@ -384,7 +384,7 @@ class MppiGpu:
         wp.launch(
             _elite_u_kernel,
             (self.T, 2),
-            inputs=[self.J, self.tau, self.count, om, self.wmin, self.wmax, self.B, self.U],
+            inputs=[self.J, self.tau, self.count, omega, self.wmin, self.wmax, self.B, self.U],
             device=d,
         )
 
@@ -394,13 +394,13 @@ class MppiGpu:
         reach by a U-turn, but the straight nominal is a local optimum the sampler won't leave
         (it just drives away); the turn seed kicks it into the U-turn basin. Fires only when
         facing away, so normal (facing-toward) planning keeps its warm-started nominal."""
-        gx = float(goal_xy[0]) - float(state[0])
-        gy = float(goal_xy[1]) - float(state[1])
-        gn = np.hypot(gx, gy)
-        if gn < 1e-3:
+        to_goal_x = float(goal_xy[0]) - float(state[0])
+        to_goal_y = float(goal_xy[1]) - float(state[1])
+        dist = np.hypot(to_goal_x, to_goal_y)
+        if dist < 1e-3:
             return
-        cos0 = (np.cos(state[2]) * gx + np.sin(state[2]) * gy) / gn  # heading . to-goal
-        if cos0 < -0.5:
+        facing = (np.cos(state[2]) * to_goal_x + np.sin(state[2]) * to_goal_y) / dist  # heading . to-goal
+        if facing < -0.5:
             self.U.assign(np.tile([self.wmin, self.wmax], (self.T, 1)).astype(np.float32))
 
     def replan(self, state, goal_xy, n_refine):
