@@ -46,7 +46,7 @@ def evaluate(world, device="cuda", K=8, dock_radius=1.5, feasibility="traversabi
     Hc = np.ascontiguousarray(Hc, np.float32)
     cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0)
     if feasibility == "settle":
-        from .planning.costtogo import CostToGoLatticeSettle
+        from .planning.costtogo_settle import CostToGoLatticeSettle
         clat = CostToGoLatticeSettle(cgrid, device, n_theta=n_theta, turn_radius=turn_radius)
     else:
         from .planning.costtogo import CostToGoLattice

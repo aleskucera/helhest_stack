@@ -29,8 +29,6 @@ if TYPE_CHECKING:
     from terrain_toolkit import TraversabilityConfig
 
     from ..engine import GridParams
-    from ..engine import RobotParams
-    from ..engine import SolverParams
 
 
 @wp.kernel
@@ -184,128 +182,6 @@ class CostToGoLattice:
         trav = self.analyzer.compute(elevation).total
         v = self.solver.compute(
             trav, goal_xy, self.bounds, obstacle_threshold=self.obstacle_threshold
-        )
-        wp.launch(
-            _clamp3d_kernel,
-            dim=(self.ny, self.nx, self.n_theta),
-            inputs=[v, self._vcap],
-            outputs=[self.V],
-            device=self.device,
-        )
-        return self.V
-
-
-class CostToGoLatticeSettle:
-    """Like CostToGoLattice, but feasibility comes from the robot's own SETTLE instead of a
-    thresholded traversability map. For every pose (x, y, theta) it places the robot and reads the
-    engine's residual / clearance / tilt: a pose is blocked iff residual > resid_tol OR clearance <
-    clear_margin OR tilt > tilt_max (the SAME validity the MPPI rollouts use -- no arbitrary obstacle
-    threshold), and tilt is the graded arc cost (prefer flat). So walls block because the robot can't
-    sit on their face, rough terrain is costly-but-passable, and the cost-to-go agrees with the
-    rollouts by construction. compute(elevation, goal) -> clamped V[ny, nx, n_theta]."""
-
-    def __init__(
-        self,
-        grid: GridParams,
-        device: wp.context.Device | str,
-        robot_params: RobotParams | None = None,
-        solver_params: SolverParams | None = None,
-        n_theta: int = 24,
-        turn_radius: float = 0.5,
-        robot_radius: float = 0.3,
-        step: float = 0.3,
-        resid_tol: float = 1e-2,
-        clear_margin: float = 0.05,
-        tilt_max_deg: float = 40.0,
-        tilt_weight: float = 2.0,
-    ) -> None:
-        try:
-            from terrain_toolkit import LatticeValueSolver
-        except ImportError as e:
-            raise ImportError(
-                "orientation-aware cost-to-go needs terrain_toolkit; install it, e.g. "
-                "`uv pip install -e ../terrain_toolkit --no-deps`"
-            ) from e
-        from .. import dynamics
-        from ..engine import Simulator
-        from ..heightmap import Heightmap
-
-        self.nx, self.ny, self.cell = int(grid.cells_x), int(grid.cells_y), float(grid.cell_size)
-        self.x0, self.y0 = float(grid.origin_x), float(grid.origin_y)
-        self.bounds = (
-            self.x0,
-            self.x0 + self.nx * self.cell,
-            self.y0,
-            self.y0 + self.ny * self.cell,
-        )
-        self.n_theta = int(n_theta)
-        self.device = device
-        self.resid_tol, self.clear_margin = float(resid_tol), float(clear_margin)
-        self.tilt_max = float(np.radians(tilt_max_deg))
-        self.tilt_weight = float(tilt_weight)
-        self._vcap = float(1.5 * (self.nx + self.ny) * self.cell * (1.0 + tilt_weight))
-        # world coords of every cell center -> the pose grid we settle (heading added per bin)
-        cols, rows = np.meshgrid(np.arange(self.nx), np.arange(self.ny))
-        self._X = (self.x0 + cols * self.cell).ravel().astype(np.float32)
-        self._Y = (self.y0 + rows * self.cell).ravel().astype(np.float32)
-        rp = robot_params or dynamics.robot_params()
-        sp = (
-            solver_params or dynamics.execution_solver()
-        )  # high-fidelity settle (the validated config)
-        self.settle_sim = Simulator(rp, sp, grid, self.nx * self.ny, 1, device)
-        # the zero-control settle is a static resting-pose solve -> friction-independent (verified
-        # bit-identical across mu). The sim just needs SOME friction array set; a dummy uniform does.
-        self._mu = Heightmap(
-            np.full((self.ny, self.nx), 0.8, np.float32), (self.x0, self.y0), self.cell
-        )
-        self.solver = LatticeValueSolver(
-            self.cell,
-            self.ny,
-            self.nx,
-            n_theta=self.n_theta,
-            turn_radius=turn_radius,
-            robot_radius=robot_radius,
-            step=step,
-            device=device,
-        )
-        self.V = wp.zeros((self.ny, self.nx, self.n_theta), dtype=wp.float32, device=device)
-
-    def _settle_fields(self, elevation: np.ndarray) -> tuple[wp.array, wp.array]:
-        """Settle every pose; return blocked[ny,nx,n_theta], tilt[ny,nx,n_theta] (rad) as wp.arrays."""
-        sim, B = self.settle_sim, self.nx * self.ny
-        sim.set_terrain(
-            wp.array(
-                np.ascontiguousarray(elevation, np.float32), dtype=wp.float32, device=self.device
-            )
-        )
-        sim.set_friction(self._mu)
-        blocked = np.zeros((self.ny, self.nx, self.n_theta), np.float32)
-        tilt = np.zeros((self.ny, self.nx, self.n_theta), np.float32)
-        two_pi = 2.0 * np.pi
-        for t in range(self.n_theta):
-            th = (float(t) + 0.5) * two_pi / float(self.n_theta)  # bin-center heading
-            sim.start_pose.assign(np.stack([self._X, self._Y, np.full(B, th, np.float32)], 1))
-            sim.omega.zero_()
-            sim.rollout_launch()
-            der = sim.derived.numpy()[0]  # (z, pitch, roll) settled at each pose
-            res = sim.residual.numpy()[0]
-            clr = sim.clearance.numpy()[0]
-            ti = np.arccos(np.clip(np.cos(der[:, 1]) * np.cos(der[:, 2]), -1.0, 1.0))
-            blk = (res > self.resid_tol) | (clr < self.clear_margin) | (ti > self.tilt_max)
-            blocked[:, :, t] = blk.reshape(self.ny, self.nx)
-            tilt[:, :, t] = ti.reshape(self.ny, self.nx)
-        return (
-            wp.array(blocked, dtype=wp.float32, device=self.device),
-            wp.array(tilt, dtype=wp.float32, device=self.device),
-        )
-
-    def compute(self, elevation: np.ndarray, goal_xy: np.ndarray) -> wp.array:
-        """elevation [ny, nx] + world goal -> clamped V[ny, nx, n_theta]. No friction needed:
-        the static settle is friction-independent, so this matches CostToGoLattice.compute's signature.
-        """
-        blocked, tilt = self._settle_fields(elevation)
-        v = self.solver.compute_from_fields(
-            blocked, tilt, goal_xy, self.bounds, tilt_weight=self.tilt_weight
         )
         wp.launch(
             _clamp3d_kernel,
