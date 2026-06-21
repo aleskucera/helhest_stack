@@ -14,6 +14,7 @@ import argparse
 import numpy as np
 
 from .. import worlds as W
+from ..engine import GridParams
 from ..planning.costtogo import CostToGo
 from ..planning.costtogo import CostToGoLattice
 
@@ -31,8 +32,9 @@ def run(world="pocket", turn_radius=1.2, heading_deg=180.0, trav_weight=0.0, n_t
     ext = [hm.x0, hm.x0 + hm.nx * hm.cell, hm.y0, hm.y0 + hm.ny * hm.cell]
     vcap = 1.5 * (hm.nx + hm.ny) * hm.cell * (1.0 + trav_weight)
 
-    V2 = CostToGo(hm.nx, hm.ny, hm.cell, hm.x0, hm.y0, device).compute(H, goal).numpy()
-    V3 = CostToGoLattice(hm.nx, hm.ny, hm.cell, hm.x0, hm.y0, device, n_theta=n_theta,
+    grid = GridParams(hm.nx, hm.ny, hm.cell, hm.x0, hm.y0)
+    V2 = CostToGo(grid, device).compute(H, goal).numpy()
+    V3 = CostToGoLattice(grid, device, n_theta=n_theta,
                          turn_radius=turn_radius, trav_weight=trav_weight).compute(H, goal).numpy()
     dth = 360.0 / n_theta
     b0 = int(round((heading_deg % 360.0) / dth)) % n_theta

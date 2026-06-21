@@ -16,8 +16,21 @@ penalty still does the fine obstacle avoidance -- V only supplies the global rou
 
 terrain_toolkit is a lazy dependency: only this module imports it.
 """
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 import warp as wp
+
+if TYPE_CHECKING:
+    import warp.context
+
+    from terrain_toolkit import TraversabilityConfig
+
+    from ..engine import GridParams
+    from ..engine import RobotParams
+    from ..engine import SolverParams
 
 
 @wp.kernel
@@ -39,7 +52,13 @@ class CostToGo:
     clamped V buffer the MPPI cost samples. `compute(elevation, goal_xy)` updates V in place
     (a stable device buffer -> safe to hand to a CUDA-graph-captured cost kernel)."""
 
-    def __init__(self, nx, ny, cell, x0, y0, device, *, obstacle_threshold=0.8, config=None):
+    def __init__(
+        self,
+        grid: GridParams,
+        device: wp.context.Device | str,
+        obstacle_threshold: float = 0.8,
+        config: TraversabilityConfig | None = None,
+    ) -> None:
         try:
             from terrain_toolkit import (
                 GeodesicDistanceSolver,
@@ -51,27 +70,40 @@ class CostToGo:
                 "`uv pip install -e ../terrain_toolkit --no-deps`"
             ) from e
 
-        self.nx, self.ny = int(nx), int(ny)
-        self.cell = float(cell)
-        self.x0, self.y0 = float(x0), float(y0)
-        self.bounds = (self.x0, self.x0 + self.nx * self.cell,
-                       self.y0, self.y0 + self.ny * self.cell)
+        self.nx, self.ny = int(grid.cells_x), int(grid.cells_y)
+        self.cell = float(grid.cell_size)
+        self.x0, self.y0 = float(grid.origin_x), float(grid.origin_y)
+        self.bounds = (
+            self.x0,
+            self.x0 + self.nx * self.cell,
+            self.y0,
+            self.y0 + self.ny * self.cell,
+        )
         self.obstacle_threshold = float(obstacle_threshold)
         self.device = device
         # unreachable penalty: larger than any reachable path on this grid (the L1 diameter
         # is an upper bound on the 8-connected geodesic), so unreached cells are always worst.
         self._vcap = float(1.5 * (self.nx + self.ny) * self.cell)
 
-        self.analyzer = GeometricTraversabilityAnalyzer(self.cell, self.ny, self.nx, config, device=device)
+        self.analyzer = GeometricTraversabilityAnalyzer(
+            self.cell, self.ny, self.nx, config, device=device
+        )
         self.solver = GeodesicDistanceSolver(self.cell, self.ny, self.nx, device=device)
         self.V = wp.zeros((self.ny, self.nx), dtype=wp.float32, device=device)
 
-    def compute(self, elevation, goal_xy):
+    def compute(self, elevation: np.ndarray | wp.array, goal_xy: np.ndarray) -> wp.array:
         """elevation [ny, nx] (numpy or wp.array) + world goal -> V (wp.array, clamped meters)."""
         trav = self.analyzer.compute(elevation).total  # [ny, nx] in [0, 1]
-        v = self.solver.compute(trav, goal_xy, self.bounds, obstacle_threshold=self.obstacle_threshold)
-        wp.launch(_clamp_kernel, dim=(self.ny, self.nx),
-                  inputs=[v, self._vcap], outputs=[self.V], device=self.device)
+        v = self.solver.compute(
+            trav, goal_xy, self.bounds, obstacle_threshold=self.obstacle_threshold
+        )
+        wp.launch(
+            _clamp_kernel,
+            dim=(self.ny, self.nx),
+            inputs=[v, self._vcap],
+            outputs=[self.V],
+            device=self.device,
+        )
         return self.V
 
 
@@ -95,8 +127,18 @@ class CostToGoLattice:
     arc step so its grid matches the sim grid. compute() updates the clamped V[ny,nx,n_theta] in
     place (stable buffer -> graph-safe)."""
 
-    def __init__(self, nx, ny, cell, x0, y0, device, *, n_theta=16, turn_radius=0.6,
-                 robot_radius=0.3, step=0.3, obstacle_threshold=0.8, trav_weight=0.0, config=None):
+    def __init__(
+        self,
+        grid: GridParams,
+        device: wp.context.Device | str,
+        n_theta: int = 16,
+        turn_radius: float = 0.6,
+        robot_radius: float = 0.3,
+        step: float = 0.3,
+        obstacle_threshold: float = 0.8,
+        trav_weight: float = 0.0,
+        config: TraversabilityConfig | None = None,
+    ) -> None:
         try:
             from terrain_toolkit import (
                 GeometricTraversabilityAnalyzer,
@@ -107,27 +149,49 @@ class CostToGoLattice:
                 "orientation-aware cost-to-go needs terrain_toolkit; install it, e.g. "
                 "`uv pip install -e ../terrain_toolkit --no-deps`"
             ) from e
-        self.nx, self.ny, self.cell = int(nx), int(ny), float(cell)
-        self.x0, self.y0 = float(x0), float(y0)
-        self.bounds = (self.x0, self.x0 + self.nx * self.cell, self.y0, self.y0 + self.ny * self.cell)
+        self.nx, self.ny, self.cell = int(grid.cells_x), int(grid.cells_y), float(grid.cell_size)
+        self.x0, self.y0 = float(grid.origin_x), float(grid.origin_y)
+        self.bounds = (
+            self.x0,
+            self.x0 + self.nx * self.cell,
+            self.y0,
+            self.y0 + self.ny * self.cell,
+        )
         self.n_theta = int(n_theta)
         self.obstacle_threshold = float(obstacle_threshold)
         self.device = device
         # graded arc cost inflates reachable V by up to (1 + trav_weight); grow the unreachable cap
         # to stay above any reachable path, else flat-but-long routes get clipped to "unreachable".
         self._vcap = float(1.5 * (self.nx + self.ny) * self.cell * (1.0 + trav_weight))
-        self.analyzer = GeometricTraversabilityAnalyzer(self.cell, self.ny, self.nx, config, device=device)
-        self.solver = LatticeValueSolver(self.cell, self.ny, self.nx, n_theta=self.n_theta,
-                                         turn_radius=turn_radius, robot_radius=robot_radius,
-                                         step=step, trav_weight=trav_weight, device=device)
+        self.analyzer = GeometricTraversabilityAnalyzer(
+            self.cell, self.ny, self.nx, config, device=device
+        )
+        self.solver = LatticeValueSolver(
+            self.cell,
+            self.ny,
+            self.nx,
+            n_theta=self.n_theta,
+            turn_radius=turn_radius,
+            robot_radius=robot_radius,
+            step=step,
+            trav_weight=trav_weight,
+            device=device,
+        )
         self.V = wp.zeros((self.ny, self.nx, self.n_theta), dtype=wp.float32, device=device)
 
-    def compute(self, elevation, goal_xy):
+    def compute(self, elevation: np.ndarray | wp.array, goal_xy: np.ndarray) -> wp.array:
         """elevation [ny, nx] + world goal -> V[ny, nx, n_theta] (wp.array, clamped meters)."""
         trav = self.analyzer.compute(elevation).total
-        v = self.solver.compute(trav, goal_xy, self.bounds, obstacle_threshold=self.obstacle_threshold)
-        wp.launch(_clamp3d_kernel, dim=(self.ny, self.nx, self.n_theta),
-                  inputs=[v, self._vcap], outputs=[self.V], device=self.device)
+        v = self.solver.compute(
+            trav, goal_xy, self.bounds, obstacle_threshold=self.obstacle_threshold
+        )
+        wp.launch(
+            _clamp3d_kernel,
+            dim=(self.ny, self.nx, self.n_theta),
+            inputs=[v, self._vcap],
+            outputs=[self.V],
+            device=self.device,
+        )
         return self.V
 
 
@@ -138,11 +202,23 @@ class CostToGoLatticeSettle:
     clear_margin OR tilt > tilt_max (the SAME validity the MPPI rollouts use -- no arbitrary obstacle
     threshold), and tilt is the graded arc cost (prefer flat). So walls block because the robot can't
     sit on their face, rough terrain is costly-but-passable, and the cost-to-go agrees with the
-    rollouts by construction. compute(elevation, mu, goal) -> clamped V[ny, nx, n_theta]."""
+    rollouts by construction. compute(elevation, goal) -> clamped V[ny, nx, n_theta]."""
 
-    def __init__(self, nx, ny, cell, x0, y0, device, *, robot_params=None, solver_params=None,
-                 n_theta=24, turn_radius=0.5, robot_radius=0.3, step=0.3,
-                 resid_tol=1e-2, clear_margin=0.05, tilt_max_deg=40.0, tilt_weight=2.0):
+    def __init__(
+        self,
+        grid: GridParams,
+        device: wp.context.Device | str,
+        robot_params: RobotParams | None = None,
+        solver_params: SolverParams | None = None,
+        n_theta: int = 24,
+        turn_radius: float = 0.5,
+        robot_radius: float = 0.3,
+        step: float = 0.3,
+        resid_tol: float = 1e-2,
+        clear_margin: float = 0.05,
+        tilt_max_deg: float = 40.0,
+        tilt_weight: float = 2.0,
+    ) -> None:
         try:
             from terrain_toolkit import LatticeValueSolver
         except ImportError as e:
@@ -151,12 +227,17 @@ class CostToGoLatticeSettle:
                 "`uv pip install -e ../terrain_toolkit --no-deps`"
             ) from e
         from .. import dynamics
-        from ..engine import GridParams, Simulator
+        from ..engine import Simulator
         from ..heightmap import Heightmap
 
-        self.nx, self.ny, self.cell = int(nx), int(ny), float(cell)
-        self.x0, self.y0 = float(x0), float(y0)
-        self.bounds = (self.x0, self.x0 + self.nx * self.cell, self.y0, self.y0 + self.ny * self.cell)
+        self.nx, self.ny, self.cell = int(grid.cells_x), int(grid.cells_y), float(grid.cell_size)
+        self.x0, self.y0 = float(grid.origin_x), float(grid.origin_y)
+        self.bounds = (
+            self.x0,
+            self.x0 + self.nx * self.cell,
+            self.y0,
+            self.y0 + self.ny * self.cell,
+        )
         self.n_theta = int(n_theta)
         self.device = device
         self.resid_tol, self.clear_margin = float(resid_tol), float(clear_margin)
@@ -168,21 +249,35 @@ class CostToGoLatticeSettle:
         self._X = (self.x0 + cols * self.cell).ravel().astype(np.float32)
         self._Y = (self.y0 + rows * self.cell).ravel().astype(np.float32)
         rp = robot_params or dynamics.robot_params()
-        sp = solver_params or dynamics.execution_solver()  # high-fidelity settle (the validated config)
-        self.settle_sim = Simulator(rp, sp, GridParams(self.nx, self.ny, self.cell, self.x0, self.y0),
-                                    self.nx * self.ny, 1, device)
+        sp = (
+            solver_params or dynamics.execution_solver()
+        )  # high-fidelity settle (the validated config)
+        self.settle_sim = Simulator(rp, sp, grid, self.nx * self.ny, 1, device)
         # the zero-control settle is a static resting-pose solve -> friction-independent (verified
         # bit-identical across mu). The sim just needs SOME friction array set; a dummy uniform does.
-        self._mu = Heightmap(np.full((self.ny, self.nx), 0.8, np.float32), (self.x0, self.y0), self.cell)
-        self.solver = LatticeValueSolver(self.cell, self.ny, self.nx, n_theta=self.n_theta,
-                                         turn_radius=turn_radius, robot_radius=robot_radius,
-                                         step=step, device=device)
+        self._mu = Heightmap(
+            np.full((self.ny, self.nx), 0.8, np.float32), (self.x0, self.y0), self.cell
+        )
+        self.solver = LatticeValueSolver(
+            self.cell,
+            self.ny,
+            self.nx,
+            n_theta=self.n_theta,
+            turn_radius=turn_radius,
+            robot_radius=robot_radius,
+            step=step,
+            device=device,
+        )
         self.V = wp.zeros((self.ny, self.nx, self.n_theta), dtype=wp.float32, device=device)
 
-    def _settle_fields(self, elevation):
+    def _settle_fields(self, elevation: np.ndarray) -> tuple[wp.array, wp.array]:
         """Settle every pose; return blocked[ny,nx,n_theta], tilt[ny,nx,n_theta] (rad) as wp.arrays."""
         sim, B = self.settle_sim, self.nx * self.ny
-        sim.set_terrain(wp.array(np.ascontiguousarray(elevation, np.float32), dtype=wp.float32, device=self.device))
+        sim.set_terrain(
+            wp.array(
+                np.ascontiguousarray(elevation, np.float32), dtype=wp.float32, device=self.device
+            )
+        )
         sim.set_friction(self._mu)
         blocked = np.zeros((self.ny, self.nx, self.n_theta), np.float32)
         tilt = np.zeros((self.ny, self.nx, self.n_theta), np.float32)
@@ -192,21 +287,31 @@ class CostToGoLatticeSettle:
             sim.start_pose.assign(np.stack([self._X, self._Y, np.full(B, th, np.float32)], 1))
             sim.omega.zero_()
             sim.rollout_launch()
-            der = sim.derived.numpy()[0]       # (z, pitch, roll) settled at each pose
+            der = sim.derived.numpy()[0]  # (z, pitch, roll) settled at each pose
             res = sim.residual.numpy()[0]
             clr = sim.clearance.numpy()[0]
             ti = np.arccos(np.clip(np.cos(der[:, 1]) * np.cos(der[:, 2]), -1.0, 1.0))
             blk = (res > self.resid_tol) | (clr < self.clear_margin) | (ti > self.tilt_max)
             blocked[:, :, t] = blk.reshape(self.ny, self.nx)
             tilt[:, :, t] = ti.reshape(self.ny, self.nx)
-        return (wp.array(blocked, dtype=wp.float32, device=self.device),
-                wp.array(tilt, dtype=wp.float32, device=self.device))
+        return (
+            wp.array(blocked, dtype=wp.float32, device=self.device),
+            wp.array(tilt, dtype=wp.float32, device=self.device),
+        )
 
-    def compute(self, elevation, goal_xy):
+    def compute(self, elevation: np.ndarray, goal_xy: np.ndarray) -> wp.array:
         """elevation [ny, nx] + world goal -> clamped V[ny, nx, n_theta]. No friction needed:
-        the static settle is friction-independent, so this matches CostToGoLattice.compute's signature."""
+        the static settle is friction-independent, so this matches CostToGoLattice.compute's signature.
+        """
         blocked, tilt = self._settle_fields(elevation)
-        v = self.solver.compute_from_fields(blocked, tilt, goal_xy, self.bounds, tilt_weight=self.tilt_weight)
-        wp.launch(_clamp3d_kernel, dim=(self.ny, self.nx, self.n_theta),
-                  inputs=[v, self._vcap], outputs=[self.V], device=self.device)
+        v = self.solver.compute_from_fields(
+            blocked, tilt, goal_xy, self.bounds, tilt_weight=self.tilt_weight
+        )
+        wp.launch(
+            _clamp3d_kernel,
+            dim=(self.ny, self.nx, self.n_theta),
+            inputs=[v, self._vcap],
+            outputs=[self.V],
+            device=self.device,
+        )
         return self.V

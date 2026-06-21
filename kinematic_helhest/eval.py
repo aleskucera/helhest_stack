@@ -44,19 +44,17 @@ def evaluate(world, device="cuda", K=8, dock_radius=1.5, feasibility="traversabi
     cny, cnx, ccell = scene.ny // k, scene.nx // k, scene.cell * k
     Hc = scene.H[:cny * k, :cnx * k].reshape(cny, k, cnx, k).max(axis=(1, 3)) if k > 1 else scene.H
     Hc = np.ascontiguousarray(Hc, np.float32)
-    cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0).build()
+    cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0)
     if feasibility == "settle":
         from .planning.costtogo import CostToGoLatticeSettle
-        clat = CostToGoLatticeSettle(cnx, cny, ccell, scene.x0, scene.y0, device,
-                                     n_theta=n_theta, turn_radius=turn_radius)
+        clat = CostToGoLatticeSettle(cgrid, device, n_theta=n_theta, turn_radius=turn_radius)
     else:
         from .planning.costtogo import CostToGoLattice
-        clat = CostToGoLattice(cnx, cny, ccell, scene.x0, scene.y0, device,
-                               n_theta=n_theta, turn_radius=turn_radius)
+        clat = CostToGoLattice(cgrid, device, n_theta=n_theta, turn_radius=turn_radius)
     t0 = time.perf_counter()
     V = clat.compute(Hc, goal); wp.synchronize()
     ctg_ms = (time.perf_counter() - t0) * 1000.0
-    planner.set_lattice(V, cgrid)
+    planner.set_lattice(V, cgrid.build())
     drv = WarpDriver(scene, mu, init_pose=tuple(start), device=device)
 
     contacts, closest, reached, f = 0, 99.0, False, 0

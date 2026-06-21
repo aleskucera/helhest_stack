@@ -74,17 +74,17 @@ def run(world="pocket", costtogo=False, K=1, drive=False, shot=None, device="cud
     if lattice:
         if feasibility == "settle":
             from ..planning.costtogo import CostToGoLatticeSettle
-            clat = CostToGoLatticeSettle(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, drv.sim.device,
+            clat = CostToGoLatticeSettle(grid, drv.sim.device,
                                          n_theta=n_theta, turn_radius=0.5, tilt_weight=trav_weight)
             planner.set_lattice(clat.compute(np.ascontiguousarray(scene.H, np.float32), goal))
         else:
             from ..planning.costtogo import CostToGoLattice
-            clat = CostToGoLattice(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, drv.sim.device,
+            clat = CostToGoLattice(grid, drv.sim.device,
                                    n_theta=n_theta, turn_radius=0.5, trav_weight=trav_weight)
             planner.set_lattice(clat.compute(np.ascontiguousarray(scene.H, np.float32), goal))
     elif costtogo:
         from ..planning.costtogo import CostToGo
-        ctg = CostToGo(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, drv.sim.device)
+        ctg = CostToGo(grid, drv.sim.device)
         planner.set_costtogo(ctg.compute(np.ascontiguousarray(scene.H, np.float32), goal))
 
     if not glfw.init():

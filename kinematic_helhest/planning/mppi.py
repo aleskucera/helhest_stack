@@ -111,23 +111,23 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
         else:
             cny, cnx, ccell, Hc = scene.ny, scene.nx, scene.cell, scene.H
         Hc = np.ascontiguousarray(Hc, np.float32)
-        cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0).build()
+        cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0)
         if lat_feasibility == "settle":  # feasibility from the robot's own settle, not a traversability threshold
             from .costtogo import CostToGoLatticeSettle
-            clat = CostToGoLatticeSettle(cnx, cny, ccell, scene.x0, scene.y0, sim.device,
+            clat = CostToGoLatticeSettle(cgrid, sim.device,
                                          n_theta=n_theta, turn_radius=lat_turn_radius, robot_radius=lat_robot_radius,
                                          resid_tol=resid_tol, clear_margin=clear_margin,
                                          tilt_max_deg=lat_tilt_max_deg, tilt_weight=lat_trav_weight)
         else:
             from .costtogo import CostToGoLattice
-            clat = CostToGoLattice(cnx, cny, ccell, scene.x0, scene.y0, sim.device,
+            clat = CostToGoLattice(cgrid, sim.device,
                                    n_theta=n_theta, turn_radius=lat_turn_radius, robot_radius=lat_robot_radius,
                                    obstacle_threshold=obstacle_threshold, trav_weight=lat_trav_weight,
                                    config=trav_config)
-        drv.set_lattice(clat.compute(Hc, goal), cgrid)
+        drv.set_lattice(clat.compute(Hc, goal), cgrid.build())
     elif costtogo:  # goal is fixed for the whole drive -> solve V(x,y) once, before any replan
         from .costtogo import CostToGo
-        ctg = CostToGo(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, sim.device,
+        ctg = CostToGo(GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0), sim.device,
                        obstacle_threshold=obstacle_threshold, config=trav_config)
         drv.set_costtogo(ctg.compute(np.ascontiguousarray(scene.H, np.float32), goal))
 
