@@ -72,7 +72,9 @@ def _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, 
 def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1,
          sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, wmin=0.0, elite_frac=0.02, goal_tol=0.3, resid_tol=1e-2, clear_margin=0.05,
          device="cuda", seed=0, weights=None, record=False, n_show=60, costtogo=False, lattice=False,
-         n_scenarios=1, cvar_beta=0.5, slip_lo=0.6, n_theta=16, lat_turn_radius=0.5, lat_robot_radius=0.3):
+         n_scenarios=1, cvar_beta=0.5, slip_lo=0.6, n_theta=16, lat_turn_radius=0.5, lat_robot_radius=0.3,
+         trav_config=None, obstacle_threshold=0.8, tilt=0.0, tilt_free_deg=0.0, lat_trav_weight=0.0,
+         lat_feasibility="traversability", lat_tilt_max_deg=40.0):
     params = SolverParams(dt=dt, k_turn=2.0, newton_iters=6, atol=1e-4)  # forward-only: shallow+loose settle
     sim = Simulator(
         RobotParams(), params,
@@ -96,19 +98,32 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
             w["head"] = 4.0   # the -grad V heading is a softer signal than Euclidean -> commit harder
             w["oob"] = 50.0   # soft wall at the grid edge: V is clamped off-grid, so the goal term
             w["term_v"] = 1.0  # alone lets it drive off the map; and end the plan stopped at the goal
+    if tilt > 0.0:  # per-rollout tilt cost: penalize body tilt past tilt_free_deg along the trajectory
+        w = {**w, "tilt": float(tilt), "tilt_free": float(np.radians(tilt_free_deg))}
     goal = np.asarray(goal[:2], np.float64)
     drv = MppiGpu(sim, sigma, wmax, w, clear_margin, resid_tol, seed,
                   sigma_knot=sigma_knot, n_knots=n_knots, wmin=wmin, elite_frac=elite_frac,
                   n_scenarios=n_scenarios, cvar_beta=cvar_beta, slip_lo=slip_lo, n_theta=n_theta)
     drv.reset_nominal(1.5)  # nominal wheel speeds, gentle forward
     if lattice:  # solve the orientation-aware V(x,y,theta) once (fixed goal), before any replan
-        from .costtogo import CostToGoLattice
-        clat = CostToGoLattice(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, sim.device,
-                               n_theta=n_theta, turn_radius=lat_turn_radius, robot_radius=lat_robot_radius)
-        drv.set_lattice(clat.compute(np.ascontiguousarray(scene.H, np.float32), goal))
+        if lat_feasibility == "settle":  # feasibility from the robot's own settle, not a traversability threshold
+            from .costtogo import CostToGoLatticeSettle
+            clat = CostToGoLatticeSettle(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, sim.device,
+                                         n_theta=n_theta, turn_radius=lat_turn_radius, robot_radius=lat_robot_radius,
+                                         resid_tol=resid_tol, clear_margin=clear_margin,
+                                         tilt_max_deg=lat_tilt_max_deg, tilt_weight=lat_trav_weight)
+            drv.set_lattice(clat.compute(np.ascontiguousarray(scene.H, np.float32), mu, goal))
+        else:
+            from .costtogo import CostToGoLattice
+            clat = CostToGoLattice(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, sim.device,
+                                   n_theta=n_theta, turn_radius=lat_turn_radius, robot_radius=lat_robot_radius,
+                                   obstacle_threshold=obstacle_threshold, trav_weight=lat_trav_weight,
+                                   config=trav_config)
+            drv.set_lattice(clat.compute(np.ascontiguousarray(scene.H, np.float32), goal))
     elif costtogo:  # goal is fixed for the whole drive -> solve V(x,y) once, before any replan
         from .costtogo import CostToGo
-        ctg = CostToGo(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, sim.device)
+        ctg = CostToGo(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, sim.device,
+                       obstacle_threshold=obstacle_threshold, config=trav_config)
         drv.set_costtogo(ctg.compute(np.ascontiguousarray(scene.H, np.float32), goal))
 
     state = np.asarray(start, np.float32)        # (x, y, yaw)
