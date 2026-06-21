@@ -114,7 +114,7 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
         cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0)
         if lat_feasibility == "settle":  # feasibility from the robot's own settle, not a traversability threshold
             from .costtogo_settle import CostToGoLatticeSettle
-            clat = CostToGoLatticeSettle(cgrid, sim.device,
+            clat = CostToGoLatticeSettle(cgrid, dynamics.robot_params(), dynamics.planning_solver(dt=dt), sim.device,
                                          n_theta=n_theta, turn_radius=lat_turn_radius, robot_radius=lat_robot_radius,
                                          resid_tol=resid_tol, clear_margin=clear_margin,
                                          tilt_max_deg=lat_tilt_max_deg, tilt_weight=lat_trav_weight)

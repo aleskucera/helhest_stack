@@ -48,9 +48,9 @@ class CostToGoLatticeSettle:
     def __init__(
         self,
         grid: GridParams,
+        robot_params: RobotParams,
+        solver_params: SolverParams,
         device: wp.context.Device | str | None = None,
-        robot_params: RobotParams | None = None,
-        solver_params: SolverParams | None = None,
         n_theta: int = 24,
         turn_radius: float = 0.5,
         robot_radius: float = 0.3,
@@ -60,6 +60,9 @@ class CostToGoLatticeSettle:
         tilt_max_deg: float = 40.0,
         tilt_weight: float = 2.0,
     ) -> None:
+        # robot_params / solver_params are MANDATORY (like grid): the caller passes the same vehicle
+        # it gave the planner, so the cost-to-go settles exactly the robot the rollouts drive -- no
+        # silent fallback that could quietly disagree with the planner.
         try:
             from terrain_toolkit import LatticeValueSolver
         except ImportError as e:
@@ -67,7 +70,6 @@ class CostToGoLatticeSettle:
                 "orientation-aware cost-to-go needs terrain_toolkit; install it, e.g. "
                 "`uv pip install -e ../terrain_toolkit --no-deps`"
             ) from e
-        from .. import dynamics
         from ..engine import Simulator
         from ..heightmap import Heightmap
 
@@ -84,9 +86,7 @@ class CostToGoLatticeSettle:
         cols, rows = np.meshgrid(np.arange(self.nx), np.arange(self.ny))
         self._X = (self.x0 + cols * self.cell).ravel().astype(np.float32)
         self._Y = (self.y0 + rows * self.cell).ravel().astype(np.float32)
-        rp = robot_params or dynamics.robot_params()
-        sp = solver_params or dynamics.execution_solver()  # high-fidelity settle (the validated config)
-        self.settle_sim = Simulator(rp, sp, grid, self.nx * self.ny, 1, self.device)
+        self.settle_sim = Simulator(robot_params, solver_params, grid, self.nx * self.ny, 1, self.device)
         # the zero-control settle is a static resting-pose solve -> friction-independent (verified
         # bit-identical across mu). The sim just needs SOME friction array set; a dummy uniform does.
         self._mu = Heightmap(np.full((self.ny, self.nx), 0.8, np.float32), (self.x0, self.y0), self.cell)
