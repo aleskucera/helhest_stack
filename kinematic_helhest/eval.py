@@ -28,7 +28,8 @@ _LATTICE_W = dict(term=3.0, run=0.3, head=0.0, invalid=1e5, eff=2e-3, smooth=2e-
 
 
 def evaluate(world, device="cuda", K=8, dock_radius=1.5, feasibility="traversability",
-             n_theta=24, turn_radius=0.5, max_frames=1500, B=4096, T=70):
+             n_theta=24, turn_radius=0.5, lat_coarsen=1, max_frames=1500, B=4096, T=70):
+    import time
     builder, start, goal = W.WORLDS[world]
     scene = builder(); mu = W.matching_friction(scene); goal = np.asarray(goal, np.float64)
     grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
@@ -38,16 +39,24 @@ def evaluate(world, device="cuda", K=8, dock_radius=1.5, feasibility="traversabi
     planner = MppiGpu(plan_sim, 0.5, 4.0, _LATTICE_W, 0.05, 1e-2, 0, sigma_knot=1.0, n_knots=4,
                       n_scenarios=K, n_theta=n_theta)
     planner.reset_nominal(1.5)
+    # routing field, optionally coarse (k>1): max-pool the terrain (keeps thin walls), solve low-res
+    k = max(1, int(lat_coarsen))
+    cny, cnx, ccell = scene.ny // k, scene.nx // k, scene.cell * k
+    Hc = scene.H[:cny * k, :cnx * k].reshape(cny, k, cnx, k).max(axis=(1, 3)) if k > 1 else scene.H
+    Hc = np.ascontiguousarray(Hc, np.float32)
+    cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0).build()
     if feasibility == "settle":
         from .planning.costtogo import CostToGoLatticeSettle
-        clat = CostToGoLatticeSettle(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, device,
+        clat = CostToGoLatticeSettle(cnx, cny, ccell, scene.x0, scene.y0, device,
                                      n_theta=n_theta, turn_radius=turn_radius)
-        planner.set_lattice(clat.compute(np.ascontiguousarray(scene.H, np.float32), goal))
     else:
         from .planning.costtogo import CostToGoLattice
-        clat = CostToGoLattice(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, device,
+        clat = CostToGoLattice(cnx, cny, ccell, scene.x0, scene.y0, device,
                                n_theta=n_theta, turn_radius=turn_radius)
-        planner.set_lattice(clat.compute(np.ascontiguousarray(scene.H, np.float32), goal))
+    t0 = time.perf_counter()
+    V = clat.compute(Hc, goal); wp.synchronize()
+    ctg_ms = (time.perf_counter() - t0) * 1000.0
+    planner.set_lattice(V, cgrid)
     drv = WarpDriver(scene, mu, init_pose=tuple(start), device=device)
 
     contacts, closest, reached, f = 0, 99.0, False, 0
@@ -68,16 +77,16 @@ def evaluate(world, device="cuda", K=8, dock_radius=1.5, feasibility="traversabi
         drv.step(cmd)
         if drv.clear < 0.05:
             contacts += 1
-    return dict(reached=reached, frames=f + 1, closest=closest, contacts=contacts)
+    return dict(reached=reached, frames=f + 1, closest=closest, contacts=contacts, ctg_ms=ctg_ms)
 
 
 def stress(device="cuda", **kw):
-    print(f"{'world':9}{'reach':7}{'frames':8}{'closest':9}{'contacts':9}")
+    print(f"{'world':9}{'reach':7}{'frames':8}{'closest':9}{'contacts':10}{'ctg_ms':8}")
     n_reached = 0
     for name in W.WORLDS:
         r = evaluate(name, device=device, **kw)
         n_reached += bool(r["reached"])
-        print(f"{name:9}{str(r['reached']):7}{r['frames']:<8}{r['closest']:<9.2f}{r['contacts']:<9}")
+        print(f"{name:9}{str(r['reached']):7}{r['frames']:<8}{r['closest']:<9.2f}{r['contacts']:<10}{r['ctg_ms']:<8.0f}")
     print(f"reached {n_reached}/{len(W.WORLDS)}")
 
 
@@ -88,14 +97,15 @@ def main():
     ap.add_argument("--K", type=int, default=8, help="CVaR robust scenarios (1 = off)")
     ap.add_argument("--dock-radius", type=float, default=1.5, help="terminal-dock handoff radius (0 = off)")
     ap.add_argument("--feasibility", default="traversability", choices=["traversability", "settle"])
+    ap.add_argument("--lat-coarsen", type=int, default=1, help="solve the routing field at 1/k resolution (k>1 = faster, ~k^3)")
     ap.add_argument("--device", default="cuda")
     args = ap.parse_args()
     wp.init()
+    kw = dict(K=args.K, dock_radius=args.dock_radius, feasibility=args.feasibility, lat_coarsen=args.lat_coarsen)
     if args.world and not args.stress:
-        print(evaluate(args.world, device=args.device, K=args.K, dock_radius=args.dock_radius,
-                       feasibility=args.feasibility))
+        print(evaluate(args.world, device=args.device, **kw))
     else:
-        stress(device=args.device, K=args.K, dock_radius=args.dock_radius, feasibility=args.feasibility)
+        stress(device=args.device, **kw)
 
 
 if __name__ == "__main__":

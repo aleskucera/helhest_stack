@@ -73,7 +73,7 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
          device="cuda", seed=0, weights=None, record=False, n_show=60, costtogo=False, lattice=False,
          n_scenarios=1, cvar_beta=0.5, slip_lo=0.6, n_theta=16, lat_turn_radius=0.5, lat_robot_radius=0.3,
          trav_config=None, obstacle_threshold=0.8, tilt=0.0, tilt_free_deg=0.0, lat_trav_weight=0.0,
-         lat_feasibility="traversability", lat_tilt_max_deg=40.0, dock_radius=None):
+         lat_feasibility="traversability", lat_tilt_max_deg=40.0, dock_radius=None, lat_coarsen=1):
     sim = Simulator(
         dynamics.robot_params(), dynamics.planning_solver(dt=dt),
         GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
@@ -102,20 +102,29 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
                   n_scenarios=n_scenarios, cvar_beta=cvar_beta, slip_lo=slip_lo, n_theta=n_theta)
     drv.reset_nominal(1.5)  # nominal wheel speeds, gentle forward
     if lattice:  # solve the orientation-aware V(x,y,theta) once (fixed goal), before any replan
+        # the routing field can be solved COARSE (k>1): the rollouts do fine obstacle avoidance, so the
+        # global router needn't be sim-resolution. ~k^3 cheaper -> fast enough to re-solve a moving goal.
+        k = max(1, int(lat_coarsen))
+        if k > 1:
+            cny, cnx, ccell = scene.ny // k, scene.nx // k, scene.cell * k
+            Hc = scene.H[:cny * k, :cnx * k].reshape(cny, k, cnx, k).max(axis=(1, 3))  # max-pool keeps thin walls
+        else:
+            cny, cnx, ccell, Hc = scene.ny, scene.nx, scene.cell, scene.H
+        Hc = np.ascontiguousarray(Hc, np.float32)
+        cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0).build()
         if lat_feasibility == "settle":  # feasibility from the robot's own settle, not a traversability threshold
             from .costtogo import CostToGoLatticeSettle
-            clat = CostToGoLatticeSettle(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, sim.device,
+            clat = CostToGoLatticeSettle(cnx, cny, ccell, scene.x0, scene.y0, sim.device,
                                          n_theta=n_theta, turn_radius=lat_turn_radius, robot_radius=lat_robot_radius,
                                          resid_tol=resid_tol, clear_margin=clear_margin,
                                          tilt_max_deg=lat_tilt_max_deg, tilt_weight=lat_trav_weight)
-            drv.set_lattice(clat.compute(np.ascontiguousarray(scene.H, np.float32), goal))
         else:
             from .costtogo import CostToGoLattice
-            clat = CostToGoLattice(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, sim.device,
+            clat = CostToGoLattice(cnx, cny, ccell, scene.x0, scene.y0, sim.device,
                                    n_theta=n_theta, turn_radius=lat_turn_radius, robot_radius=lat_robot_radius,
                                    obstacle_threshold=obstacle_threshold, trav_weight=lat_trav_weight,
                                    config=trav_config)
-            drv.set_lattice(clat.compute(np.ascontiguousarray(scene.H, np.float32), goal))
+        drv.set_lattice(clat.compute(Hc, goal), cgrid)
     elif costtogo:  # goal is fixed for the whole drive -> solve V(x,y) once, before any replan
         from .costtogo import CostToGo
         ctg = CostToGo(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0, sim.device,

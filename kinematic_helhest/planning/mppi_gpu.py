@@ -454,6 +454,10 @@ class MppiGpu:
         self.ctg_field = wp.zeros((ny, nx), dtype=float, device=d)
         self.n_theta = int(n_theta)
         self.lattice_field = wp.zeros((ny, nx, self.n_theta), dtype=float, device=d)  # V(x,y,theta)
+        # the grid the cost kernel samples the cost-to-go on: defaults to the sim grid, but a COARSER
+        # grid can be set (set_lattice(V, grid)) so the routing field is solved at low resolution --
+        # the rollouts do fine obstacle avoidance, so the global router needn't be sim-resolution.
+        self.ctg_grid = sim.grid
         self._graph = None
 
     def reset_nominal(self, value=1.5):
@@ -472,10 +476,16 @@ class MppiGpu:
         the cost-to-go goal term -- requires the planner to have been built with ctg weight > 0."""
         wp.copy(self.ctg_field, V)
 
-    def set_lattice(self, V):
-        """Copy the orientation-aware cost-to-go V[ny, nx, n_theta] into the stable buffer the cost
-        kernel reads. Call before the first replan; requires the planner built with lattice weight > 0."""
+    def set_lattice(self, V, grid=None):
+        """Copy the orientation-aware cost-to-go V[ny', nx', n_theta] into the stable buffer the cost
+        kernel reads. `grid` is the Grid V was solved on (a coarse grid for a low-res routing field);
+        defaults to the sim grid. Call before the first replan; on re-solve (moving goal) call again
+        with the SAME shape -- it copies into the stable buffer the captured graph reads."""
+        if tuple(V.shape) != tuple(self.lattice_field.shape):
+            self.lattice_field = wp.zeros(V.shape, dtype=float, device=self.dev)
         wp.copy(self.lattice_field, V)
+        if grid is not None:
+            self.ctg_grid = grid
 
     def _refine(self):
         """One MPPI iteration: sample -> rollout -> cost -> CEM reweight, all on device."""
@@ -511,7 +521,7 @@ class MppiGpu:
                 s.omega,
                 self.goal,
                 self.ctg_field,
-                s.grid,
+                self.ctg_grid,
                 self.lattice_field,
                 self.n_theta,
                 self.cw,
