@@ -47,7 +47,7 @@ class CostToGoLatticeSettle:
 
     def __init__(
         self,
-        grid: GridParams,
+        grid_params: GridParams,
         robot_params: RobotParams,
         solver_params: SolverParams,
         device: wp.context.Device | str | None = None,
@@ -73,49 +73,50 @@ class CostToGoLatticeSettle:
         from ..engine import Simulator
         from ..heightmap import Heightmap
 
-        self.nx, self.ny, self.cell = int(grid.cells_x), int(grid.cells_y), float(grid.cell_size)
-        self.x0, self.y0 = float(grid.origin_x), float(grid.origin_y)
-        self.bounds = (self.x0, self.x0 + self.nx * self.cell, self.y0, self.y0 + self.ny * self.cell)
-        self.n_theta = int(n_theta)
+        nx, ny, cell = grid_params.cells_x, grid_params.cells_y, grid_params.cell_size
+        x0, y0 = grid_params.origin_x, grid_params.origin_y
+
         self.device = wp.get_device(device)  # resolve None -> default once, reuse everywhere
-        self.resid_tol, self.clear_margin = float(resid_tol), float(clear_margin)
-        self.tilt_max = float(np.radians(tilt_max_deg))
-        self.tilt_weight = float(tilt_weight)
-        self._vcap = float(1.5 * (self.nx + self.ny) * self.cell * (1.0 + tilt_weight))
-        # world coords of every cell center -> the pose grid we settle (heading added per bin)
-        cols, rows = np.meshgrid(np.arange(self.nx), np.arange(self.ny))
-        self._X = (self.x0 + cols * self.cell).ravel().astype(np.float32)
-        self._Y = (self.y0 + rows * self.cell).ravel().astype(np.float32)
-        self.settle_sim = Simulator(robot_params, solver_params, grid, self.nx * self.ny, 1, self.device)
-        # the zero-control settle is a static resting-pose solve -> friction-independent (verified
-        # bit-identical across mu). The sim just needs SOME friction array set; a dummy uniform does.
-        self._mu = Heightmap(np.full((self.ny, self.nx), 0.8, np.float32), (self.x0, self.y0), self.cell)
-        self.solver = LatticeValueSolver(
-            self.cell, self.ny, self.nx, n_theta=self.n_theta,
-            turn_radius=turn_radius, robot_radius=robot_radius, step=step, device=self.device,
-        )
-        self.V = wp.zeros((self.ny, self.nx, self.n_theta), dtype=wp.float32, device=self.device)
+        self.resid_tol, self.clear_margin = resid_tol, clear_margin
+        self.tilt_max = np.radians(tilt_max_deg)
+        self.tilt_weight = tilt_weight
+        self.bounds = (x0, x0 + nx * cell, y0, y0 + ny * cell)
+        self._vcap = 1.5 * (nx + ny) * cell * (1.0 + tilt_weight)
+
+        # world coords of every cell center -> the pose grid we settle (one heading bin at a time)
+        cols, rows = np.meshgrid(np.arange(nx), np.arange(ny))
+        self._X = (x0 + cols * cell).ravel().astype(np.float32)
+        self._Y = (y0 + rows * cell).ravel().astype(np.float32)
+
+        self.settle_sim = Simulator(robot_params, solver_params, grid_params, nx * ny, 1, self.device)
+        # the static (zero-control) settle is friction-independent (verified bit-identical across mu),
+        # so a dummy uniform friction is all the Simulator needs.
+        self._mu = Heightmap(np.full((ny, nx), 0.8, np.float32), (x0, y0), cell)
+        self.solver = LatticeValueSolver(cell, ny, nx, n_theta=n_theta, turn_radius=turn_radius,
+                                         robot_radius=robot_radius, step=step, device=self.device)
+        self.V = wp.zeros((ny, nx, n_theta), dtype=wp.float32, device=self.device)
 
     def _settle_fields(self, elevation: np.ndarray) -> tuple[wp.array, wp.array]:
         """Settle every pose; return blocked[ny,nx,n_theta], tilt[ny,nx,n_theta] (rad) as wp.arrays."""
-        sim, B = self.settle_sim, self.nx * self.ny
+        ny, nx, n_theta = self.V.shape
+        n_poses = nx * ny
+        sim = self.settle_sim
         sim.set_terrain(wp.array(np.ascontiguousarray(elevation, np.float32), dtype=wp.float32, device=self.device))
         sim.set_friction(self._mu)
-        blocked = np.zeros((self.ny, self.nx, self.n_theta), np.float32)
-        tilt = np.zeros((self.ny, self.nx, self.n_theta), np.float32)
-        two_pi = 2.0 * np.pi
-        for t in range(self.n_theta):
-            th = (float(t) + 0.5) * two_pi / float(self.n_theta)  # bin-center heading
-            sim.start_pose.assign(np.stack([self._X, self._Y, np.full(B, th, np.float32)], 1))
+        blocked = np.zeros((ny, nx, n_theta), np.float32)
+        tilt = np.zeros((ny, nx, n_theta), np.float32)
+        for t in range(n_theta):
+            heading = (t + 0.5) * 2.0 * np.pi / n_theta  # bin-center heading for this theta slice
+            sim.start_pose.assign(np.stack([self._X, self._Y, np.full(n_poses, heading, np.float32)], 1))
             sim.omega.zero_()
             sim.rollout_launch()
             der = sim.derived.numpy()[0]  # (z, pitch, roll) settled at each pose
             res = sim.residual.numpy()[0]
             clr = sim.clearance.numpy()[0]
-            ti = np.arccos(np.clip(np.cos(der[:, 1]) * np.cos(der[:, 2]), -1.0, 1.0))
-            blk = (res > self.resid_tol) | (clr < self.clear_margin) | (ti > self.tilt_max)
-            blocked[:, :, t] = blk.reshape(self.ny, self.nx)
-            tilt[:, :, t] = ti.reshape(self.ny, self.nx)
+            pose_tilt = np.arccos(np.clip(np.cos(der[:, 1]) * np.cos(der[:, 2]), -1.0, 1.0))
+            infeasible = (res > self.resid_tol) | (clr < self.clear_margin) | (pose_tilt > self.tilt_max)
+            blocked[:, :, t] = infeasible.reshape(ny, nx)
+            tilt[:, :, t] = pose_tilt.reshape(ny, nx)
         return (wp.array(blocked, dtype=wp.float32, device=self.device),
                 wp.array(tilt, dtype=wp.float32, device=self.device))
 
@@ -123,6 +124,5 @@ class CostToGoLatticeSettle:
         """elevation [ny, nx] + world goal -> clamped V[ny, nx, n_theta] (no friction needed)."""
         blocked, tilt = self._settle_fields(elevation)
         v = self.solver.compute_from_fields(blocked, tilt, goal_xy, self.bounds, tilt_weight=self.tilt_weight)
-        wp.launch(_clamp3d_kernel, dim=(self.ny, self.nx, self.n_theta),
-                  inputs=[v, self._vcap], outputs=[self.V], device=self.device)
+        wp.launch(_clamp3d_kernel, dim=self.V.shape, inputs=[v, self._vcap], outputs=[self.V], device=self.device)
         return self.V
