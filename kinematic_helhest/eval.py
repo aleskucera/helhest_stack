@@ -22,9 +22,9 @@ from .engine import Simulator
 from .planning.mppi_gpu import MppiGpu
 from .planning.terminal import dock_control
 
-# the lattice routing weights (endgame terms here are the patches the terminal dock will replace)
-_LATTICE_W = dict(term=3.0, run=0.3, head=0.0, invalid=1e5, eff=2e-3, smooth=2e-3, lattice=1.0,
-                  oob=50.0, term_v=1.0, endgame=12.0, endgame_r2=2.25)
+# lattice routing weights: routing + feasibility only. The terminal dock handles reach+stop, so the
+# endgame cost-patches (endgame/endgame_r2/term_v) are gone -- oob stays as routing-edge safety.
+_LATTICE_W = dict(term=3.0, run=0.3, head=0.0, invalid=1e5, eff=2e-3, smooth=2e-3, lattice=1.0, oob=50.0)
 
 
 def evaluate(world, device="cuda", K=8, dock_radius=1.5, feasibility="traversability",

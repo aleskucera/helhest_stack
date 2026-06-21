@@ -73,7 +73,7 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
          device="cuda", seed=0, weights=None, record=False, n_show=60, costtogo=False, lattice=False,
          n_scenarios=1, cvar_beta=0.5, slip_lo=0.6, n_theta=16, lat_turn_radius=0.5, lat_robot_radius=0.3,
          trav_config=None, obstacle_threshold=0.8, tilt=0.0, tilt_free_deg=0.0, lat_trav_weight=0.0,
-         lat_feasibility="traversability", lat_tilt_max_deg=40.0, dock_radius=0.0):
+         lat_feasibility="traversability", lat_tilt_max_deg=40.0, dock_radius=None):
     sim = Simulator(
         dynamics.robot_params(), dynamics.planning_solver(dt=dt),
         GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
@@ -83,13 +83,11 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
                              dtype=wp.float32, device=device))
     sim.set_friction(mu)
     w = weights or dict(term=3.0, run=0.3, head=2.0, invalid=1e5, eff=2e-3, smooth=2e-3)
-    if lattice:  # orientation-aware cost-to-go V(x,y,theta): also avoids misaligned entry
-        w = {**w, "lattice": 1.0}
+    if lattice:  # orientation-aware cost-to-go V(x,y,theta): routing + feasibility only --
+        w = {**w, "lattice": 1.0}  # the terminal dock handles reach+stop, so no endgame cost-patches
         if weights is None:
             w["head"] = 0.0    # V(x,y,theta) already encodes the desired heading
-            w["oob"] = 50.0
-            w["term_v"] = 1.0
-            w["endgame"] = 12.0; w["endgame_r2"] = 2.25  # commit terminal pull within 1.5 m of goal
+            w["oob"] = 50.0    # soft wall at the grid edge (routing safety, not endgame)
     elif costtogo:  # option E: score by obstacle-aware cost-to-go instead of straight-line distance
         w = {**w, "ctg": 1.0}
         if weights is None:
@@ -124,6 +122,9 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
                        obstacle_threshold=obstacle_threshold, config=trav_config)
         drv.set_costtogo(ctg.compute(np.ascontiguousarray(scene.H, np.float32), goal))
 
+    # terminal dock replaces the endgame cost-patches; on by default for lattice (pass 0 to disable)
+    if dock_radius is None:
+        dock_radius = 1.5 if lattice else 0.0
     dock_sim = None
     if dock_radius > 0.0:  # terminal stage: a B=1 sim to execute the dock control near the goal
         from .terminal import dock_control
