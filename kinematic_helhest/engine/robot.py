@@ -52,6 +52,12 @@ class RobotParams:  # host-side robot knobs — what you nudge
     com: tuple = (float(DEFAULT_COM[0]), 0.0, 0.0)  # full vec3, independent of mass
     chassis_nx: int = 3
     chassis_ny: int = 3
+    # --- planning capabilities: the robot's own limits, read by the planner/cost-to-go. NOT copied
+    # into the device Robot struct by build() -- the kernels never see these. ---
+    min_turn_radius: float = 0.5    # tightest forward arc the planner assumes (skid-steer maneuverability)
+    max_roll_deg: float = 30.0      # lateral tip-over limit (symmetric; narrow track -> strict)
+    max_pitch_up_deg: float = 45.0  # climbing limit (nose UP, pitch < 0)
+    max_pitch_down_deg: float = 30.0  # descending limit (nose DOWN, pitch > 0; front-heavy -> stricter)
 
     def build(self, device="cuda") -> Robot:
         b, l = self.half_track, self.rear_offset

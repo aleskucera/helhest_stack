@@ -2,12 +2,13 @@
 
 Feasibility comes from the robot's OWN settle, not a thresholded traversability map: for every pose
 (x, y, theta) the robot is placed on the terrain and the engine's residual / clearance / tilt are
-read. A pose is blocked iff residual > resid_tol OR clearance < clear_margin OR tilt > tilt_max --
-the SAME validity the MPPI rollouts use, so the cost-to-go and the rollouts agree by construction
-(no arbitrary obstacle threshold). tilt is the graded arc cost (prefer flat). So walls block because
-the robot can't sit on their face, and rough terrain is costly-but-passable rather than a false
-obstacle. The static (zero-control) settle is friction-independent, so compute() needs only the
-elevation and the goal.
+read. A pose is blocked iff residual > resid_tol OR clearance < clear_margin OR the body exceeds the
+robot's stability ENVELOPE -- |roll| > max_roll, or pitch beyond the asymmetric climb/descend limits
+(climbing is nose-up = negative pitch). So feasibility is direction-aware: a side-slope is fine to
+CLIMB head-on (pitch, tolerated) but blocked to traverse sideways (roll, dangerous) -- exactly what
+the orientation-aware lattice can exploit. The envelope + turn radius come from RobotParams, the
+SAME robot the rollouts drive. Total tilt is still the graded arc cost (prefer flat). The static
+(zero-control) settle is friction-independent, so compute() needs only the elevation and the goal.
 
 Self-contained on purpose: this is the cost-to-go we keep; the traversability/2D variants in
 costtogo.py are on their way out.
@@ -52,12 +53,9 @@ class CostToGoLatticeSettle:
         solver_params: SolverParams,
         device: wp.context.Device | str | None = None,
         n_theta: int = 24,
-        turn_radius: float = 0.5,
-        robot_radius: float = 0.3,
         step: float = 0.3,
         resid_tol: float = 1e-2,
         clear_margin: float = 0.05,
-        tilt_max_deg: float = 40.0,
         tilt_weight: float = 2.0,
     ) -> None:
         # robot_params / solver_params are MANDATORY (like grid): the caller passes the same vehicle
@@ -78,8 +76,11 @@ class CostToGoLatticeSettle:
 
         self.device = wp.get_device(device)  # resolve None -> default once, reuse everywhere
         self.resid_tol, self.clear_margin = resid_tol, clear_margin
-        self.tilt_max = np.radians(tilt_max_deg)
         self.tilt_weight = tilt_weight
+        # the robot's stability envelope (radians); climbing is nose-UP = negative pitch
+        self.max_roll = np.radians(robot_params.max_roll_deg)
+        self.max_pitch_up = np.radians(robot_params.max_pitch_up_deg)
+        self.max_pitch_down = np.radians(robot_params.max_pitch_down_deg)
         self.bounds = (x0, x0 + nx * cell, y0, y0 + ny * cell)
         self._vcap = 1.5 * (nx + ny) * cell * (1.0 + tilt_weight)
 
@@ -92,8 +93,8 @@ class CostToGoLatticeSettle:
         # the static (zero-control) settle is friction-independent (verified bit-identical across mu),
         # so a dummy uniform friction is all the Simulator needs.
         self._mu = Heightmap(np.full((ny, nx), 0.8, np.float32), (x0, y0), cell)
-        self.solver = LatticeValueSolver(cell, ny, nx, n_theta=n_theta, turn_radius=turn_radius,
-                                         robot_radius=robot_radius, step=step, device=self.device)
+        self.solver = LatticeValueSolver(cell, ny, nx, n_theta=n_theta,
+                                         turn_radius=robot_params.min_turn_radius, step=step, device=self.device)
         self.V = wp.zeros((ny, nx, n_theta), dtype=wp.float32, device=self.device)
 
     def _settle_fields(self, elevation: np.ndarray) -> tuple[wp.array, wp.array]:
@@ -113,8 +114,10 @@ class CostToGoLatticeSettle:
             der = sim.derived.numpy()[0]  # (z, pitch, roll) settled at each pose
             res = sim.residual.numpy()[0]
             clr = sim.clearance.numpy()[0]
-            pose_tilt = np.arccos(np.clip(np.cos(der[:, 1]) * np.cos(der[:, 2]), -1.0, 1.0))
-            infeasible = (res > self.resid_tol) | (clr < self.clear_margin) | (pose_tilt > self.tilt_max)
+            pitch, roll = der[:, 1], der[:, 2]
+            pose_tilt = np.arccos(np.clip(np.cos(pitch) * np.cos(roll), -1.0, 1.0))  # total tilt -> graded cost
+            over_envelope = (np.abs(roll) > self.max_roll) | (pitch < -self.max_pitch_up) | (pitch > self.max_pitch_down)
+            infeasible = (res > self.resid_tol) | (clr < self.clear_margin) | over_envelope
             blocked[:, :, t] = infeasible.reshape(ny, nx)
             tilt[:, :, t] = pose_tilt.reshape(ny, nx)
         return (wp.array(blocked, dtype=wp.float32, device=self.device),

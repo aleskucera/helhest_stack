@@ -48,7 +48,7 @@ def evaluate(world, device="cuda", K=8, dock_radius=1.5, feasibility="traversabi
     if feasibility == "settle":
         from .planning.costtogo_settle import CostToGoLatticeSettle
         clat = CostToGoLatticeSettle(cgrid, dynamics.robot_params(), dynamics.planning_solver(), device,
-                                     n_theta=n_theta, turn_radius=turn_radius)
+                                     n_theta=n_theta)
     else:
         from .planning.costtogo import CostToGoLattice
         clat = CostToGoLattice(cgrid, device, n_theta=n_theta, turn_radius=turn_radius)
