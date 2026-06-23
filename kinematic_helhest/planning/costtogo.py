@@ -71,12 +71,7 @@ class CostToGo:
         self.nx, self.ny = int(grid.cells_x), int(grid.cells_y)
         self.cell = float(grid.cell_size)
         self.x0, self.y0 = float(grid.origin_x), float(grid.origin_y)
-        self.bounds = (
-            self.x0,
-            self.x0 + self.nx * self.cell,
-            self.y0,
-            self.y0 + self.ny * self.cell,
-        )
+        self.bounds = grid.bounds
         self.obstacle_threshold = float(obstacle_threshold)
         self.device = device
         # unreachable penalty: larger than any reachable path on this grid (the L1 diameter
@@ -149,12 +144,7 @@ class CostToGoLattice:
             ) from e
         self.nx, self.ny, self.cell = int(grid.cells_x), int(grid.cells_y), float(grid.cell_size)
         self.x0, self.y0 = float(grid.origin_x), float(grid.origin_y)
-        self.bounds = (
-            self.x0,
-            self.x0 + self.nx * self.cell,
-            self.y0,
-            self.y0 + self.ny * self.cell,
-        )
+        self.bounds = grid.bounds
         self.n_theta = int(n_theta)
         self.obstacle_threshold = float(obstacle_threshold)
         self.device = device

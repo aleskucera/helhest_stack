@@ -84,9 +84,9 @@ class CostToGoLatticeSettle:
         # clearance / resid_tol / turn radius / cost shape).
         self.robot = robot_params.build(self.device)
         self.grid = grid_params.build()
+        self.bounds = grid_params.bounds  # (xmin, xmax, ymin, ymax) the solver takes
         nx, ny, cell = self.grid.cells_x, self.grid.cells_y, self.grid.cell_size
         x0, y0 = self.grid.origin_x, self.grid.origin_y
-        self.bounds = (x0, x0 + nx * cell, y0, y0 + ny * cell)
         self._vcap = 1.5 * (nx + ny) * cell * (1.0 + flatness_weight)
 
         # world coords of every cell center -> the pose grid we settle (one heading bin at a time)
