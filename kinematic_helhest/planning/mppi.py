@@ -126,7 +126,7 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
             from .costtogo_settle import CostToGoLatticeSettle
             clat = CostToGoLatticeSettle(cgrid, dynamics.robot_params(), dynamics.planning_solver(dt=dt), sim.device,
                                          n_theta=n_theta, resid_tol=resid_tol, clear_margin=clear_margin,
-                                         tilt_weight=lat_trav_weight)
+                                         flatness_weight=lat_trav_weight)
         else:
             from .costtogo import CostToGoLattice
             clat = CostToGoLattice(cgrid, sim.device,
