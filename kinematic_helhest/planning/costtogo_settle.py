@@ -77,14 +77,15 @@ class CostToGoLatticeSettle:
         from ..engine import Simulator
         from ..heightmap import Heightmap
 
-        nx, ny, cell = grid_params.cells_x, grid_params.cells_y, grid_params.cell_size
-        x0, y0 = grid_params.origin_x, grid_params.origin_y
-
         self.device = wp.get_device(device)  # resolve None -> default once, reuse everywhere
         self.flatness_weight = flatness_weight  # the single global gain on the graded tilt cost
-        # one robot object: build the dataclass once and read every robot property off it (the
-        # built struct carries the planning fields: envelope / clearance / turn radius / cost shape).
+        # build the robot + grid once and read every property off the built structs; the dataclass
+        # args are used only to build (the Robot struct also carries the planning fields: envelope /
+        # clearance / resid_tol / turn radius / cost shape).
         self.robot = robot_params.build(self.device)
+        self.grid = grid_params.build()
+        nx, ny, cell = self.grid.cells_x, self.grid.cells_y, self.grid.cell_size
+        x0, y0 = self.grid.origin_x, self.grid.origin_y
         self.bounds = (x0, x0 + nx * cell, y0, y0 + ny * cell)
         self._vcap = 1.5 * (nx + ny) * cell * (1.0 + flatness_weight)
 
