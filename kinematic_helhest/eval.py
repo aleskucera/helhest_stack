@@ -27,8 +27,7 @@ from .planning.terminal import dock_control
 # max_* = the robot's tip-over envelope (rad), shared with the cost-to-go so they agree on what's safe.
 _rp = dynamics.robot_params()
 _LATTICE_W = dict(term=3.0, run=0.3, head=0.0, invalid=1e5, eff=2e-3, smooth=2e-3, lattice=1.0, oob=50.0,
-                  max_roll=np.radians(_rp.max_roll_deg), max_pitch_up=np.radians(_rp.max_pitch_up_deg),
-                  max_pitch_down=np.radians(_rp.max_pitch_down_deg))
+                  max_roll=_rp.max_roll, max_pitch_up=_rp.max_pitch_up, max_pitch_down=_rp.max_pitch_down)
 
 
 def evaluate(world, device="cuda", K=8, dock_radius=1.5, feasibility="traversability",

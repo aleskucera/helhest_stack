@@ -95,9 +95,9 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
             w["head"] = 0.0    # V(x,y,theta) already encodes the desired heading
             w["oob"] = 50.0    # soft wall at the grid edge (routing safety, not endgame)
             rp = dynamics.robot_params()  # rollouts share the robot's tip-over envelope with the cost-to-go
-            w["max_roll"] = np.radians(rp.max_roll_deg)
-            w["max_pitch_up"] = np.radians(rp.max_pitch_up_deg)
-            w["max_pitch_down"] = np.radians(rp.max_pitch_down_deg)
+            w["max_roll"] = rp.max_roll
+            w["max_pitch_up"] = rp.max_pitch_up
+            w["max_pitch_down"] = rp.max_pitch_down
     elif costtogo:  # option E: score by obstacle-aware cost-to-go instead of straight-line distance
         w = {**w, "ctg": 1.0}
         if weights is None:

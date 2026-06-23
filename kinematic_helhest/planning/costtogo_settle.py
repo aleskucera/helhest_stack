@@ -116,10 +116,7 @@ class CostToGoLatticeSettle:
         """Settle every pose; return blocked[ny,nx,n_theta], tilt[ny,nx,n_theta] (rad) as wp.arrays."""
         ny, nx, n_theta = self.V.shape
         n_poses = nx * ny
-        rob = self.robot  # read the robot's limits/weights off the one built struct
-        max_roll = np.radians(rob.max_roll_deg)        # envelope -> radians (climb = nose-up = -pitch)
-        max_pitch_up = np.radians(rob.max_pitch_up_deg)
-        max_pitch_down = np.radians(rob.max_pitch_down_deg)
+        rob = self.robot  # read the robot's limits/weights (radians) off the one built struct
         sim = self.settle_sim
         sim.set_terrain(
             wp.array(
@@ -141,8 +138,10 @@ class CostToGoLatticeSettle:
             clr = sim.clearance.numpy()[0]
             pitch, roll = der[:, 1], der[:, 2]
             graded = rob.roll_cost_weight * np.abs(roll) + rob.pitch_cost_weight * np.abs(pitch)  # roll>pitch
-            over_envelope = (
-                (np.abs(roll) > max_roll) | (pitch < -max_pitch_up) | (pitch > max_pitch_down)
+            over_envelope = (  # climb = nose-up = NEGATIVE pitch, so the climb limit is on -pitch
+                (np.abs(roll) > rob.max_roll)
+                | (pitch < -rob.max_pitch_up)
+                | (pitch > rob.max_pitch_down)
             )
             infeasible = (res > self.resid_tol) | (clr < rob.clear_margin) | over_envelope
             blocked[:, :, t] = infeasible.reshape(ny, nx)

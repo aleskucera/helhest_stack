@@ -43,9 +43,9 @@ class Robot:
     # --- planning capabilities (mirror of the RobotParams fields; the dynamics kernels don't read
     # these, but carrying them on the built struct lets the planner read one object). ---
     min_turn_radius: wp.float32
-    max_roll_deg: wp.float32
-    max_pitch_up_deg: wp.float32
-    max_pitch_down_deg: wp.float32
+    max_roll: wp.float32  # radians
+    max_pitch_up: wp.float32
+    max_pitch_down: wp.float32
     clear_margin: wp.float32
     roll_cost_weight: wp.float32
     pitch_cost_weight: wp.float32
@@ -64,9 +64,9 @@ class RobotParams:  # host-side robot knobs — what you nudge
     # --- planning capabilities: the robot's own limits, read by the planner/cost-to-go. NOT copied
     # into the device Robot struct by build() -- the kernels never see these. ---
     min_turn_radius: float = 0.5    # tightest forward arc the planner assumes (skid-steer maneuverability)
-    max_roll_deg: float = 30.0      # lateral tip-over limit (symmetric; narrow track -> strict)
-    max_pitch_up_deg: float = 45.0  # climbing limit (nose UP, pitch < 0)
-    max_pitch_down_deg: float = 30.0  # descending limit (nose DOWN, pitch > 0; front-heavy -> stricter)
+    max_roll: float = np.radians(30.0)      # [rad] lateral tip-over limit (symmetric; narrow track -> strict)
+    max_pitch_up: float = np.radians(45.0)  # [rad] climbing limit (nose UP, pitch < 0)
+    max_pitch_down: float = np.radians(30.0)  # [rad] descending limit (nose DOWN, pitch > 0; front-heavy)
     clear_margin: float = 0.05      # min belly-terrain gap [m]; below it the pose is infeasible (high-centers)
     # graded cost-to-go penalty per radian of tilt -- roll weighted MORE than pitch (roll is the
     # dangerous axis), so among feasible poses the router prefers low-roll lines (attack slopes head-on).
@@ -87,9 +87,9 @@ class RobotParams:  # host-side robot knobs — what you nudge
         r.mass = self.mass
         r.gravity = self.gravity
         r.min_turn_radius = self.min_turn_radius
-        r.max_roll_deg = self.max_roll_deg
-        r.max_pitch_up_deg = self.max_pitch_up_deg
-        r.max_pitch_down_deg = self.max_pitch_down_deg
+        r.max_roll = self.max_roll
+        r.max_pitch_up = self.max_pitch_up
+        r.max_pitch_down = self.max_pitch_down
         r.clear_margin = self.clear_margin
         r.roll_cost_weight = self.roll_cost_weight
         r.pitch_cost_weight = self.pitch_cost_weight
