@@ -63,7 +63,6 @@ class CostToGoLatticeSettle:
         n_theta: int = 24,
         step: float = 0.3,
         resid_tol: float = 1e-2,
-        clear_margin: float = 0.05,
         flatness_weight: float = 2.0,  # planner strength: how much detour to trade for flat ground
     ) -> None:
         # robot_params / solver_params are MANDATORY (like grid): the caller passes the same vehicle
@@ -83,7 +82,8 @@ class CostToGoLatticeSettle:
         x0, y0 = grid_params.origin_x, grid_params.origin_y
 
         self.device = wp.get_device(device)  # resolve None -> default once, reuse everywhere
-        self.resid_tol, self.clear_margin = resid_tol, clear_margin
+        self.resid_tol = resid_tol
+        self.clear_margin = robot_params.clear_margin  # belly-clearance safety: a robot property
         self.flatness_weight = flatness_weight  # the single global gain on the graded tilt cost
         # the robot's stability envelope (radians); climbing is nose-UP = negative pitch
         self.max_roll = np.radians(robot_params.max_roll_deg)

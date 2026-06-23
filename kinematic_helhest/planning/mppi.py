@@ -75,7 +75,7 @@ def _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, 
 
 
 def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1,
-         sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, wmin=0.0, elite_frac=0.02, goal_tol=0.3, resid_tol=1e-2, clear_margin=0.05,
+         sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, wmin=0.0, elite_frac=0.02, goal_tol=0.3, resid_tol=1e-2,
          device="cuda", seed=0, weights=None, record=False, n_show=60, costtogo=False, lattice=False,
          n_scenarios=1, cvar_beta=0.5, slip_lo=0.6, n_theta=16, lat_robot_radius=0.3,
          trav_config=None, obstacle_threshold=0.8, tilt=0.0, tilt_free_deg=0.0, lat_trav_weight=0.0,
@@ -107,6 +107,7 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
     if tilt > 0.0:  # per-rollout tilt cost: penalize body tilt past tilt_free_deg along the trajectory
         w = {**w, "tilt": float(tilt), "tilt_free": float(np.radians(tilt_free_deg))}
     goal = np.asarray(goal[:2], np.float64)
+    clear_margin = dynamics.robot_params().clear_margin  # belly-clearance lives on the robot, not here
     drv = MppiGpu(sim, sigma, wmax, w, clear_margin, resid_tol, seed,
                   sigma_knot=sigma_knot, n_knots=n_knots, wmin=wmin, elite_frac=elite_frac,
                   n_scenarios=n_scenarios, cvar_beta=cvar_beta, slip_lo=slip_lo, n_theta=n_theta)
@@ -125,8 +126,7 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
         if lat_feasibility == "settle":  # feasibility from the robot's own settle, not a traversability threshold
             from .costtogo_settle import CostToGoLatticeSettle
             clat = CostToGoLatticeSettle(cgrid, dynamics.robot_params(), dynamics.planning_solver(dt=dt), sim.device,
-                                         n_theta=n_theta, resid_tol=resid_tol, clear_margin=clear_margin,
-                                         flatness_weight=lat_trav_weight)
+                                         n_theta=n_theta, resid_tol=resid_tol, flatness_weight=lat_trav_weight)
         else:
             from .costtogo import CostToGoLattice
             clat = CostToGoLattice(cgrid, sim.device,
