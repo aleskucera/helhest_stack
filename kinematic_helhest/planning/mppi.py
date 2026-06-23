@@ -78,7 +78,7 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
          sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, wmin=0.0, elite_frac=0.02, goal_tol=0.3, resid_tol=1e-2,
          device="cuda", seed=0, weights=None, record=False, n_show=60, costtogo=False, lattice=False,
          n_scenarios=1, cvar_beta=0.5, slip_lo=0.6, n_theta=16, lat_robot_radius=0.3,
-         trav_config=None, obstacle_threshold=0.8, tilt=0.0, tilt_free_deg=0.0, lat_trav_weight=0.0,
+         trav_config=None, obstacle_threshold=0.8, tilt=0.0, tilt_free=0.0, lat_trav_weight=0.0,
          lat_feasibility="traversability", dock_radius=None, lat_coarsen=1):
     sim = Simulator(
         dynamics.robot_params(), dynamics.planning_solver(dt=dt),
@@ -104,8 +104,8 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
             w["head"] = 4.0   # the -grad V heading is a softer signal than Euclidean -> commit harder
             w["oob"] = 50.0   # soft wall at the grid edge: V is clamped off-grid, so the goal term
             w["term_v"] = 1.0  # alone lets it drive off the map; and end the plan stopped at the goal
-    if tilt > 0.0:  # per-rollout tilt cost: penalize body tilt past tilt_free_deg along the trajectory
-        w = {**w, "tilt": float(tilt), "tilt_free": float(np.radians(tilt_free_deg))}
+    if tilt > 0.0:  # per-rollout tilt cost: penalize body tilt past tilt_free [rad] along the trajectory
+        w = {**w, "tilt": float(tilt), "tilt_free": float(tilt_free)}
     goal = np.asarray(goal[:2], np.float64)
     clear_margin = dynamics.robot_params().clear_margin  # belly-clearance lives on the robot, not here
     drv = MppiGpu(sim, sigma, wmax, w, clear_margin, resid_tol, seed,

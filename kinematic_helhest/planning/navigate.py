@@ -54,7 +54,7 @@ class NavConfig:
     # but only ABOVE tilt_free (gentle drivable ramps are free, so slope goals stay
     # reachable). Obstacle avoidance comes from robust control, not a map.
     tilt_w: float = 300.0      # MPPI weight on mean max(tilt - tilt_free, 0)^2
-    tilt_free_deg: float = 12.0  # tilt below this is free [deg]
+    tilt_free: float = np.radians(12.0)  # tilt below this is free [rad]
 
 
 class Navigator:
@@ -89,7 +89,7 @@ class Navigator:
             ny, nx = raw_H.shape
             grid = GridParams(nx, ny, cell, x0, y0)
             self.sim = Simulator(self.rp, self.params, grid, cfg.B, cfg.T, self.dev)
-            w = dict(_W, tilt=cfg.tilt_w, tilt_free=np.radians(cfg.tilt_free_deg))
+            w = dict(_W, tilt=cfg.tilt_w, tilt_free=cfg.tilt_free)
             self.drv = MppiGpu(self.sim, cfg.sigma, cfg.wmax, w,
                                cfg.clear_margin, cfg.resid_tol, self.seed,
                                sigma_knot=cfg.sigma_knot, n_knots=cfg.n_knots, wmin=cfg.wmin,

@@ -42,7 +42,7 @@ def _polyline(scene, xy, color, width, dz):
 
 
 def run(world="pocket", costtogo=False, K=1, drive=False, shot=None, device="cuda", T=70, B=4096,
-        tilt=0.0, tilt_free_deg=0.0, lattice=False, trav_weight=0.0, feasibility="traversability",
+        tilt=0.0, tilt_free=0.0, lattice=False, trav_weight=0.0, feasibility="traversability",
         dock_radius=1.5):
     import glfw
 
@@ -66,8 +66,8 @@ def run(world="pocket", costtogo=False, K=1, drive=False, shot=None, device="cud
              "endgame": 12.0, "endgame_r2": 2.25}
     elif costtogo:
         w = {**w, "ctg": 1.0, "head": 4.0}  # cost-to-go heading (-grad V) wants more weight
-    if tilt > 0.0:  # penalize body tilt past tilt_free_deg along each rollout (steer onto flat ground)
-        w = {**w, "tilt": float(tilt), "tilt_free": float(np.radians(tilt_free_deg))}
+    if tilt > 0.0:  # penalize body tilt past tilt_free [rad] along each rollout (steer onto flat ground)
+        w = {**w, "tilt": float(tilt), "tilt_free": float(tilt_free)}
     planner = MppiGpu(plan_sim, 0.5, 4.0, w, 0.05, 1e-2, 0, sigma_knot=1.0, n_knots=4,
                       n_scenarios=K, n_theta=n_theta)
     planner.reset_nominal(1.5)
@@ -187,10 +187,10 @@ def main():
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--shot", default=None)
     ap.add_argument("--tilt", type=float, default=0.0, help="tilt-penalty weight (0 = off; try 300)")
-    ap.add_argument("--tilt-free-deg", type=float, default=8.0, help="tilt below this (deg) is free")
+    ap.add_argument("--tilt-free", type=float, default=0.14, help="tilt below this [rad] is free (~8 deg)")
     args = ap.parse_args()
     run(world=args.world, costtogo=args.costtogo, K=args.K, drive=args.drive,
-        shot=args.shot, device=args.device, tilt=args.tilt, tilt_free_deg=args.tilt_free_deg,
+        shot=args.shot, device=args.device, tilt=args.tilt, tilt_free=args.tilt_free,
         lattice=args.lattice, trav_weight=args.trav_weight, feasibility=args.feasibility,
         dock_radius=args.dock_radius)
 
