@@ -1,88 +1,161 @@
-"""Visualize the cost-to-go field: 2D (position-only) vs the orientation-aware lattice.
+"""Visualize the settle-based orientation-aware cost-to-go as a heading FLOW FIELD over a world.
 
-Renders three panels for a world: the 2D cost-to-go V(x,y) (heading-ignored), and two heading
-slices of the lattice V(x,y,theta) -- the chosen heading and its opposite -- so you can see how
-the SAME cell costs differently depending on which way the (forward-only) robot faces. Black is
-+inf (no forward-only path from that pose), grey is wall.
+Solves V(x, y, theta) with CostToGo for a world's goal, then renders:
+  * color    = min over heading of V(x, y, .)  -- the best-case cost-to-go (black = +inf unreachable)
+  * arrows   = the argmin-heading direction at each cell -- "face this way for the cheapest forward-
+               only path to the goal", i.e. the flow streaming toward the goal.
 
   python -m kinematic_helhest.viz.costfield --world pocket
-  python -m kinematic_helhest.viz.costfield --world pocket --turn-radius 1.2 --heading-deg 180
-  python -m kinematic_helhest.viz.costfield --world bumpy --trav-weight 3   # flat-preferring routing
+  python -m kinematic_helhest.viz.costfield --world slalom --lat-coarsen 2 --stride 1
 """
 import argparse
 
 import numpy as np
 
-from .. import worlds as W
-from ..engine import GridParams
-from ..planning.costtogo import CostToGo
-from ..planning.costtogo import CostToGoLattice
+
+def _trace_optimal(ctg, start, n_theta, cnx, cny, x0, y0, cell, max_steps=500):
+    """Follow the lattice's OWN policy from the start pose: at each pose pick the primitive the value
+    iteration would (min over feasible forward arcs of arc_cost + V[successor]) and integrate it as a
+    smooth arc. Mirrors _relax_lattice_pose_kernel's selection -> the optimal forward-only trajectory."""
+    V = ctg.V.numpy()
+    blocked = ctg.blocked.numpy()
+    tiltf = ctg.graded_tilt.numpy()
+    s = ctg.solver
+    pdr, pdc = s._prim_dr.numpy(), s._prim_dc.numpy()
+    pheading, pcost = s._prim_heading.numpy(), s._prim_cost.numpy()
+    sdr, sdc, sn = s._sweep_dr.numpy(), s._sweep_dc.numpy(), s._sweep_n.numpy()
+    n_prim, tw = s.n_prim, float(ctg.flatness_weight)
+    gr, gc = (int(v) for v in ctg._goal_rc.numpy())
+    dth = 2.0 * np.pi / n_theta
+
+    # walk the lattice state (r, c, t) along primitive successors -- this is the optimal policy and
+    # descends V monotonically to the goal. Draw the path through the cell centers it visits (the
+    # cells the heatmap/arrows are drawn on), so there's no continuous-integration drift off the grid.
+    r = int(round((float(start[1]) - y0) / cell))
+    c = int(round((float(start[0]) - x0) / cell))
+    t = int(np.floor((float(start[2]) % (2.0 * np.pi)) / dth)) % n_theta
+    pts = [(float(start[0]), float(start[1]))]
+    for _ in range(max_steps):
+        if not (0 <= r < cny and 0 <= c < cnx) or (abs(r - gr) <= 1 and abs(c - gc) <= 1):
+            break  # reached (the goal cell or an immediate neighbor)
+        best_p, best_val = -1, np.inf
+        for p in range(n_prim):
+            ns, ok, tsum = int(sn[t, p]), True, 0.0
+            for si in range(ns):
+                sr, sc = r + int(sdr[t, p, si]), c + int(sdc[t, p, si])
+                if not (0 <= sr < cny and 0 <= sc < cnx) or blocked[sr, sc, t] > 0.5:
+                    ok = False
+                    break
+                tsum += tiltf[sr, sc, t]
+            if not ok:
+                continue
+            nr, nc, nt = r + int(pdr[t, p]), c + int(pdc[t, p]), int(pheading[t, p])
+            if not (0 <= nr < cny and 0 <= nc < cnx):
+                continue
+            arc = float(pcost[t, p]) * (1.0 + tw * tsum / ns if ns > 0 else 1.0)
+            val = arc + V[nr, nc, nt]
+            if val < best_val:
+                best_val, best_p = val, p
+        if best_p < 0 or best_val >= ctg._vcap * 0.9:
+            break
+        r, c, t = r + int(pdr[t, best_p]), c + int(pdc[t, best_p]), int(pheading[t, best_p])
+        pts.append((x0 + (c + 0.5) * cell, y0 + (r + 0.5) * cell))  # lattice cell center (drift-free)
+    return np.asarray(pts)
 
 
-def run(world="pocket", turn_radius=1.2, heading_deg=180.0, trav_weight=0.0, n_theta=24,
-        device="cuda", out=None):
+def run(world="pocket", n_theta=24, stride=1, lat_coarsen=6, device="cuda", out=None):
+    import warp as wp
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    from .. import dynamics
+    from .. import worlds as W
+    from ..engine import GridParams
+    from ..planning.costtogo import CostToGo
+
+    wp.init()
     builder, start, goal = W.WORLDS[world]
-    hm = builder()
+    scene = builder()
     goal = np.asarray(goal, np.float64)
-    H = np.ascontiguousarray(hm.H, np.float32)
-    ext = [hm.x0, hm.x0 + hm.nx * hm.cell, hm.y0, hm.y0 + hm.ny * hm.cell]
-    vcap = 1.5 * (hm.nx + hm.ny) * hm.cell * (1.0 + trav_weight)
 
-    grid = GridParams(hm.nx, hm.ny, hm.cell, hm.x0, hm.y0)
-    V2 = CostToGo(grid, device).compute(H, goal).numpy()
-    V3 = CostToGoLattice(grid, device, n_theta=n_theta,
-                         turn_radius=turn_radius, trav_weight=trav_weight).compute(H, goal).numpy()
-    dth = 360.0 / n_theta
-    b0 = int(round((heading_deg % 360.0) / dth)) % n_theta
-    b1 = int(round(((heading_deg + 180.0) % 360.0) / dth)) % n_theta
+    # optionally coarsen the router like the planner does (max-pool keeps thin walls)
+    k = max(1, int(lat_coarsen))
+    cny, cnx, ccell = scene.ny // k, scene.nx // k, scene.cell * k
+    Hc = scene.H[: cny * k, : cnx * k].reshape(cny, k, cnx, k).max(axis=(1, 3)) if k > 1 else scene.H
+    Hc = np.ascontiguousarray(Hc, np.float32)
+    cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0)
+    # scale the arc step with the coarse cell so the forward-arc primitives never shrink below a cell
+    # (step < cell -> turns round to 0 cells -> degenerate "in-place" rotation, which a forward-only
+    # robot can't do). ~1.6 cells/arc keeps the lattice meaningful at any coarsening.
+    step = max(0.3, 1.6 * ccell)
+    ctg = CostToGo(
+        cgrid, dynamics.robot_params(), dynamics.planning_solver(), n_theta=n_theta, step=step,
+        device=device,
+    )
+    V = ctg.compute(wp.array(Hc, dtype=wp.float32, device=device), goal).numpy()  # [cny, cnx, n_theta]
+    traj = _trace_optimal(ctg, start, n_theta, cnx, cny, scene.x0, scene.y0, ccell)
 
-    vmax = float(np.percentile(V2[V2 < vcap * 0.9], 98))
+    Vmin = V.min(axis=2)  # best-case cost-to-go per cell
+    tbest = V.argmin(axis=2)  # best heading bin per cell
+    heading = (tbest + 0.5) * 2.0 * np.pi / n_theta  # bin-center angle (matches the lattice)
+    reachable = Vmin < ctg._vcap * 0.9  # below the unreachable clamp
 
-    def prep(V):
-        Vm = V.astype(float).copy()
-        Vm[Vm >= vcap * 0.9] = np.nan  # +inf (unreachable) -> distinct color
-        return Vm
+    x0, y0 = scene.x0, scene.y0
+    ext = [x0, x0 + cnx * ccell, y0, y0 + cny * ccell]
+    Vshow = np.where(reachable, Vmin, np.nan)  # +inf -> distinct color
+    vmax = float(np.percentile(Vmin[reachable], 98)) if reachable.any() else 1.0
 
-    wall = np.ma.masked_where(H <= 0.5, H)
+    Xc, Yc = np.meshgrid(x0 + (np.arange(cnx) + 0.5) * ccell, y0 + (np.arange(cny) + 0.5) * ccell)
+    U = np.where(reachable, np.cos(heading), np.nan)  # arrow dir = the best heading to face
+    Vq = np.where(reachable, np.sin(heading), np.nan)
+    s = (slice(None, None, stride), slice(None, None, stride))
+
+    from matplotlib.colors import ListedColormap
+
+    fig, ax = plt.subplots(figsize=(8.5, 7.2))
     cmap = plt.cm.viridis.copy()
-    cmap.set_bad("black")
-    panels = [(f"2D cost-to-go  V(x,y)\nPOSITION ONLY (heading ignored)", prep(V2)),
-              (f"lattice  V(x,y, heading {heading_deg:.0f}°)", prep(V3[:, :, b0])),
-              (f"lattice  V(x,y, heading {(heading_deg + 180) % 360:.0f}°)", prep(V3[:, :, b1]))]
-    fig, ax = plt.subplots(1, 3, figsize=(18, 5.4))
-    for a, (t, Vp) in zip(ax, panels):
-        im = a.imshow(Vp, origin="lower", extent=ext, cmap=cmap, vmin=0, vmax=vmax, aspect="equal")
-        a.imshow(wall, origin="lower", extent=ext, cmap="Greys", vmin=0, vmax=1)
-        a.plot(start[0], start[1], "o", color="white", mec="k", ms=10)
-        a.plot(goal[0], goal[1], "*", color="red", ms=20)
-        a.set_title(t, fontsize=11)
-        fig.colorbar(im, ax=a, shrink=0.82, label="cost-to-go (m)")
-    tw = f", trav_weight={trav_weight:g}" if trav_weight else ""
-    fig.suptitle(f"{world}: position-only vs orientation-aware cost-to-go (min turn radius {turn_radius} m{tw})"
-                 "  --  black = +inf (no forward-only path), grey = wall", fontsize=12)
+    cmap.set_bad("black")  # +inf (unreachable: actual wall OR an orientation/topology trap) -> black
+    im = ax.imshow(Vshow, origin="lower", extent=ext, cmap=cmap, vmin=0, vmax=vmax, aspect="equal")
+    # the ACTUAL walls at full resolution (a SUBSET of the black region) -- solid grey so you can tell
+    # a wall-black from a trap-black (standable cells with no forward-only path to the goal).
+    ext_fine = [x0, x0 + scene.nx * scene.cell, y0, y0 + scene.ny * scene.cell]
+    wallmask = np.where(scene.H > 0.5, 1.0, np.nan)
+    ax.imshow(wallmask, origin="lower", extent=ext_fine, cmap=ListedColormap(["#9a9a9a"]),
+              vmin=0, vmax=1, zorder=4)
+    ax.quiver(Xc[s], Yc[s], U[s], Vq[s], color="white", pivot="mid", angles="xy",
+              scale=30, width=0.004, headwidth=4, headlength=5, alpha=0.85, zorder=3)
+    if len(traj) > 1:  # the optimal forward-only trajectory the policy rolls out from the start
+        ax.plot(traj[:, 0], traj[:, 1], "-", color="#ff5a00", lw=3.0, zorder=6,
+                solid_capstyle="round", label="optimal trajectory")
+        ax.legend(loc="upper left", fontsize=9, framealpha=0.9)
+    ax.plot(start[0], start[1], "o", color="white", mec="k", ms=12, zorder=7)
+    ax.plot(goal[0], goal[1], "*", color="red", ms=22, mec="k", zorder=7)
+    fig.colorbar(im, ax=ax, shrink=0.85, label="min over heading  V(x, y)  [m]")
+    ax.set_title(f"{world}: cost-to-go flow + optimal trajectory  (color = min_theta V, arrows = best heading)\n"
+                 f"n_theta={n_theta}, grid {cnx}x{cny}  --  black = unreachable at every heading, grey = actual wall")
+    ax.set_xlabel("x (forward, m)")
+    ax.set_ylabel("y (left, m)")
     fig.tight_layout()
-    out = out or f"/tmp/costfield_{world}.png"
-    fig.savefig(out, dpi=110)
+    out = out or f"/tmp/costflow_{world}.png"
+    fig.savefig(out, dpi=120)
     print(f"saved {out}")
+    return out
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
+    import kinematic_helhest.worlds as W
+
     ap.add_argument("--world", default="pocket", choices=list(W.WORLDS))
-    ap.add_argument("--turn-radius", type=float, default=1.2,
-                    help="min turn radius for the lattice (bigger -> orientation matters more)")
-    ap.add_argument("--heading-deg", type=float, default=180.0, help="heading slice to show (and its opposite)")
-    ap.add_argument("--trav-weight", type=float, default=0.0, help="graded flat-preferring arc cost (try 3 on bumpy)")
     ap.add_argument("--n-theta", type=int, default=24)
+    ap.add_argument("--stride", type=int, default=1, help="draw an arrow every `stride` cells")
+    ap.add_argument("--lat-coarsen", type=int, default=6, help="solve the router at 1/k resolution")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
-    run(world=args.world, turn_radius=args.turn_radius, heading_deg=args.heading_deg,
-        trav_weight=args.trav_weight, n_theta=args.n_theta, device=args.device, out=args.out)
+    run(world=args.world, n_theta=args.n_theta, stride=args.stride,
+        lat_coarsen=args.lat_coarsen, device=args.device, out=args.out)
 
 
 if __name__ == "__main__":
