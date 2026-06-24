@@ -16,12 +16,12 @@ from kinematic_helhest.engine import GridParams
 from kinematic_helhest.engine import RobotParams
 from kinematic_helhest.engine import Simulator
 from kinematic_helhest.engine import SolverParams
-from kinematic_helhest.planning import mppi_gpu as mg
-from kinematic_helhest.planning.mppi import _cost as cost_np
-from kinematic_helhest.planning.mppi import _to_omega
+from kinematic_helhest.control import mppi_gpu as mg
+from kinematic_helhest.control.mppi import _cost as cost_np
+from kinematic_helhest.control.mppi import _to_omega
 
 _W = dict(term=3.0, run=0.3, head=2.0, invalid=1e5, eff=2e-3, smooth=2e-3,
-          tilt=300.0, tilt_free=np.radians(12.0),
+          tilt=300.0, tilt_free=np.radians(12.0), roll_cost_weight=1.0, pitch_cost_weight=0.5,
           max_roll=np.radians(30.0), max_pitch_up=np.radians(45.0), max_pitch_down=np.radians(30.0))
 _CM, _RT, _WMAX = 0.05, 1e-2, 4.0
 
@@ -51,19 +51,19 @@ def selftest_cost_parity(device="cuda", B=2048, T=70):
     Jg = wp.zeros(B, dtype=float, device=device)
     cw = mg.CostWeights()
     cw.term, cw.run, cw.tilt, cw.head = _W["term"], _W["run"], _W["tilt"], _W["head"]
-    cw.ctg = 0.0  # Euclidean goal term
-    cw.lattice = 0.0  # no orientation-aware cost-to-go in parity
+    cw.lattice = 0.0  # no orientation-aware cost-to-go in parity -> Euclidean goal term
+    cw.fallback = 0.0; cw.vcap = 1e9  # saturation fallback off (lattice term not exercised in parity)
     cw.oob = 0.0  # no out-of-bounds penalty in parity
     cw.endgame = 0.0; cw.endgame_r2 = 0.0  # no endgame boost in parity
     cw.term_v = 0.0  # no terminal-speed penalty in parity (the cost-to-go path is verified e2e, not here)
     cw.eff, cw.smooth, cw.invalid = _W["eff"], _W["smooth"], _W["invalid"]
     cw.tilt_free, cw.clear_margin, cw.resid_tol = _W["tilt_free"], _CM, _RT
+    cw.roll_cost_weight, cw.pitch_cost_weight = _W["roll_cost_weight"], _W["pitch_cost_weight"]
     cw.max_roll, cw.max_pitch_up, cw.max_pitch_down = _W["max_roll"], _W["max_pitch_up"], _W["max_pitch_down"]
-    ctg_field = wp.zeros((sim.grid.cells_y, sim.grid.cells_x), dtype=float, device=device)  # unused at ctg=0
     lat_field = wp.zeros((sim.grid.cells_y, sim.grid.cells_x, 16), dtype=float, device=device)  # unused at lattice=0
     wp.launch(mg._cost_kernel, B,
               inputs=[sim.controlled, sim.derived, sim.clearance, sim.residual, sim.omega, goal_d,
-                      ctg_field, sim.grid, lat_field, 16, cw, T],
+                      sim.grid, lat_field, 16, cw, T],
               outputs=[Jg], device=device)
     J_gpu = Jg.numpy()
 

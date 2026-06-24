@@ -9,7 +9,7 @@ No gradients -- pure forward sampling. The validity flags (high-center /
 infeasible settle, with the tunable resid_tol / clear_margin / tilt_clamp) are
 what steer the robot around the wall.
 
-Demo:  python -m kinematic_helhest.planning.mppi [--device cuda] [--out plan.png]
+Demo:  python -m kinematic_helhest.control.mppi [--device cuda] [--out plan.png]
 """
 import argparse
 
@@ -34,10 +34,11 @@ def _to_omega(Ub):
 def _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, w):
     """Per-rollout cost [B]. goal [2]. `derived` is [T+1, B, 3] = (z, pitch, roll).
 
-    `w["tilt"]` (optional) penalizes the robot's total tilt from vertical along the
-    rollout — the traversability term. The settle gives the true body pitch/roll for
-    each candidate trajectory, so this is trajectory-aware (a diagonal slope crossing
-    rolls differently than a straight climb), not a static per-cell terrain slope.
+    `w["tilt"]` (optional) penalizes body tilt past `tilt_free` along the rollout, split
+    PER AXIS with roll weighted > pitch (`roll_cost_weight : pitch_cost_weight`, the robot's
+    shape) — roll is the dangerous axis. The settle gives the true body pitch/roll for each
+    candidate trajectory, so this is trajectory-aware (a diagonal slope crossing rolls
+    differently than a straight climb), not a static per-cell terrain slope.
     """
     xy = controlled[:, :, :2]                                  # [T+1, B, 2]
     d = np.linalg.norm(xy - goal[None, None, :], axis=2)   # [T+1, B]
@@ -57,13 +58,13 @@ def _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, 
     smooth = (np.diff(Ub, axis=1) ** 2).sum((1, 2))
     J = w["term"] * d[-1] ** 2 + w["run"] * (d ** 2).mean(0) + w["eff"] * eff + w["smooth"] * smooth
     if w.get("tilt", 0.0) > 0.0:
-        # total tilt from vertical: angle of body-z off world-z = arccos(cos p cos r)
-        cpr = np.cos(derived[:, :, 1]) * np.cos(derived[:, :, 2])
-        ang = np.arccos(np.clip(cpr, -1.0, 1.0))          # [T+1, B] radians
-        # deadzone: tilt below `tilt_free` is free (drivable ramps), so the robot
-        # still climbs gentle slopes to reach a goal; only steep tilt is penalized.
-        over = np.maximum(ang - w.get("tilt_free", 0.0), 0.0)
-        J = J + w["tilt"] * (over ** 2).mean(0)
+        # split per axis, roll weighted > pitch (the robot's roll-vs-pitch shape): roll is the
+        # dangerous axis. deadzone: tilt below `tilt_free` PER AXIS is free (drivable ramps), so the
+        # robot still climbs gentle slopes to reach a goal; only steep tilt is penalized.
+        roll_over = np.maximum(np.abs(derived[:, :, 2]) - w.get("tilt_free", 0.0), 0.0)   # [T+1, B]
+        pitch_over = np.maximum(np.abs(derived[:, :, 1]) - w.get("tilt_free", 0.0), 0.0)
+        rw, pw = w.get("roll_cost_weight", 1.0), w.get("pitch_cost_weight", 0.5)
+        J = J + w["tilt"] * (rw * roll_over ** 2 + pw * pitch_over ** 2).mean(0)
     if w.get("head", 0.0) > 0.0:
         # heading: penalize facing away from the goal (1 - cos angle); drives the U-turn
         dx = controlled[:, :, 0] - goal[0]; dy = controlled[:, :, 1] - goal[1]  # [T+1, B]
@@ -76,10 +77,9 @@ def _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, 
 
 def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1,
          sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, wmin=0.0, elite_frac=0.02, goal_tol=0.3,
-         device="cuda", seed=0, weights=None, record=False, n_show=60, costtogo=False, lattice=False,
-         n_scenarios=1, cvar_beta=0.5, slip_lo=0.6, n_theta=16, lat_robot_radius=0.3,
-         trav_config=None, obstacle_threshold=0.8, tilt=0.0, tilt_free=0.0, lat_trav_weight=0.0,
-         lat_feasibility="traversability", dock_radius=None, lat_coarsen=1):
+         device="cuda", seed=0, weights=None, record=False, n_show=60, lattice=False,
+         n_scenarios=1, cvar_beta=0.5, slip_lo=0.6, n_theta=16,
+         tilt=0.0, tilt_free=0.0, lat_flatness_weight=0.0, dock_radius=None, lat_coarsen=1):
     sim = Simulator(
         dynamics.robot_params(), dynamics.planning_solver(dt=dt),
         GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
@@ -98,14 +98,10 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
             w["max_roll"] = rp.max_roll
             w["max_pitch_up"] = rp.max_pitch_up
             w["max_pitch_down"] = rp.max_pitch_down
-    elif costtogo:  # option E: score by obstacle-aware cost-to-go instead of straight-line distance
-        w = {**w, "ctg": 1.0}
-        if weights is None:
-            w["head"] = 4.0   # the -grad V heading is a softer signal than Euclidean -> commit harder
-            w["oob"] = 50.0   # soft wall at the grid edge: V is clamped off-grid, so the goal term
-            w["term_v"] = 1.0  # alone lets it drive off the map; and end the plan stopped at the goal
-    if tilt > 0.0:  # per-rollout tilt cost: penalize body tilt past tilt_free [rad] along the trajectory
-        w = {**w, "tilt": float(tilt), "tilt_free": float(tilt_free)}
+    if tilt > 0.0:  # per-rollout tilt cost: penalize body tilt past tilt_free [rad] (roll weighted > pitch)
+        rp = dynamics.robot_params()  # one source of the roll-vs-pitch shape (same as the cost-to-go)
+        w = {**w, "tilt": float(tilt), "tilt_free": float(tilt_free),
+             "roll_cost_weight": rp.roll_cost_weight, "pitch_cost_weight": rp.pitch_cost_weight}
     goal = np.asarray(goal[:2], np.float64)
     rp = dynamics.robot_params()  # feasibility thresholds live on the robot, not here
     clear_margin, resid_tol = rp.clear_margin, rp.resid_tol
@@ -124,23 +120,11 @@ def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1
             cny, cnx, ccell, Hc = scene.ny, scene.nx, scene.cell, scene.H
         Hc = np.ascontiguousarray(Hc, np.float32)
         cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0)
-        if lat_feasibility == "settle":  # feasibility from the robot's own settle, not a traversability threshold
-            from .costtogo_settle import CostToGoLatticeSettle
-            clat = CostToGoLatticeSettle(cgrid, dynamics.robot_params(), dynamics.planning_solver(dt=dt), sim.device,
-                                         n_theta=n_theta, flatness_weight=lat_trav_weight)
-        else:
-            from .costtogo import CostToGoLattice
-            clat = CostToGoLattice(cgrid, sim.device,
-                                   n_theta=n_theta, turn_radius=dynamics.robot_params().min_turn_radius,
-                                   robot_radius=lat_robot_radius,
-                                   obstacle_threshold=obstacle_threshold, trav_weight=lat_trav_weight,
-                                   config=trav_config)
+        from ..planning.costtogo import CostToGo  # feasibility from the robot's own settle
+        clat = CostToGo(cgrid, dynamics.robot_params(), dynamics.planning_solver(dt=dt),
+                                     n_theta=n_theta, flatness_weight=lat_flatness_weight, device=sim.device)
+        Hc = wp.array(Hc, dtype=wp.float32, device=sim.device)  # settle cost-to-go takes a device array
         drv.set_lattice(clat.compute(Hc, goal), cgrid.build())
-    elif costtogo:  # goal is fixed for the whole drive -> solve V(x,y) once, before any replan
-        from .costtogo import CostToGo
-        ctg = CostToGo(GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0), sim.device,
-                       obstacle_threshold=obstacle_threshold, config=trav_config)
-        drv.set_costtogo(ctg.compute(np.ascontiguousarray(scene.H, np.float32), goal))
 
     # terminal dock replaces the endgame cost-patches; on by default for lattice (pass 0 to disable)
     if dock_radius is None:

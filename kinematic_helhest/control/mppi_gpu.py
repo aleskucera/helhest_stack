@@ -16,7 +16,7 @@ import warp as wp
 
 from ..engine.terrain import Grid
 from ..engine.terrain import _locate
-from ..engine.terrain import sample_field
+from ..profiling import StageProfiler
 
 _N_BISECT = 14  # device-side bisection iterations for the CEM top-k threshold
 
@@ -126,8 +126,9 @@ class CostWeights:
     run: float
     tilt: float
     head: float
-    ctg: float  # >0 -> goal term is the cost-to-go field V(x,y), else Euclidean distance^2
     lattice: float  # >0 -> goal term is the orientation-aware cost-to-go V(x,y,theta)
+    fallback: float  # >0 -> where V is SATURATED (>= vcap, goal unreachable in-window) fall back to a
+    vcap: float  #        direct straight-line pull (weight `fallback`) so the robot explores toward it
     oob: float  # >0 -> penalize leaving the world (soft wall at the grid edge)
     endgame: float  # extra terminal weight when the plan ENDS within sqrt(endgame_r2) of the goal
     endgame_r2: float  # (so the robot commits to the final approach without over-pulling while routing)
@@ -136,6 +137,10 @@ class CostWeights:
     smooth: float
     invalid: float
     tilt_free: float
+    # soft-tilt SHAPE: roll weighted > pitch (the robot's roll-vs-pitch susceptibility); cw.tilt is
+    # the overall gain, tilt_free the per-axis free zone. Mirrors the cost-to-go's graded tilt.
+    roll_cost_weight: float
+    pitch_cost_weight: float
     clear_margin: float
     resid_tol: float
     # robot stability envelope (rad): a rollout pose past these is invalid, same as the cost-to-go
@@ -153,8 +158,7 @@ def _cost_kernel(
     residual: wp.array2d(dtype=float),
     omega: wp.array2d(dtype=wp.vec3),  # Ub in components [0], [1]
     goal: wp.array(dtype=float),  # [2] world goal (device -> graph-safe, changes per replan)
-    ctg_field: wp.array2d(dtype=float),  # [ny, nx] cost-to-go V (only read when cw.ctg > 0)
-    grid: Grid,  # geometry for sampling ctg_field / lattice_field at the rollout pose
+    grid: Grid,  # geometry for sampling lattice_field at the rollout pose
     lattice_field: wp.array3d(dtype=float),  # [ny, nx, n_theta] V(x,y,theta) (only read when cw.lattice > 0)
     n_theta: int,
     cw: CostWeights,
@@ -182,14 +186,18 @@ def _cost_kernel(
             # goal term alone doesn't stop the robot driving off the map -- this does).
             oob_sum += wp.max(x_lo - pose[0], 0.0) + wp.max(pose[0] - x_hi, 0.0)
             oob_sum += wp.max(y_lo - pose[1], 0.0) + wp.max(pose[1] - y_hi, 0.0)
-        # goal term: obstacle-aware cost-to-go V(x,y)^2 (routes around the wall) when enabled,
-        # else straight-line distance^2. cw is uniform across rollouts -> warp-coherent branch.
+        # goal term: the orientation-aware cost-to-go V(x,y,theta)^2 (routes around the wall) when
+        # enabled, else straight-line distance^2. cw is uniform across rollouts -> warp-coherent.
         if cw.lattice > 0.0:
             vl = sample_lattice(lattice_field, grid, n_theta, pose[0], pose[1], pose[2])
-            goal_cost = vl * vl  # orientation-aware: misaligned poses read high -> penalized
-        elif cw.ctg > 0.0:
-            v = sample_field(ctg_field, grid, pose[0], pose[1])
-            goal_cost = v * v
+            if cw.fallback > 0.0 and vl >= cw.vcap * 0.9:
+                # routing field SATURATED here (goal unreachable within the window) -> V is flat, so
+                # add a direct straight-line pull toward the goal. The vcap^2 baseline keeps any
+                # reachable cell strictly cheaper (so the robot still prefers routable ground), while
+                # the goal_d2 term gives a gradient to EXPLORE toward the goal instead of creeping.
+                goal_cost = cw.vcap * cw.vcap + cw.fallback * goal_d2
+            else:
+                goal_cost = vl * vl  # orientation-aware: misaligned poses read high -> penalized
         else:
             goal_cost = goal_d2
         run_sum += goal_cost
@@ -197,31 +205,24 @@ def _cost_kernel(
         # tilt + heading are optional; cw is uniform across rollouts, so these guards are
         # warp-coherent (no divergence) and skip the trig (and the derived read) when off.
         if cw.tilt > 0.0:
+            # per-axis, roll weighted > pitch: roll is the dangerous axis, so executing a rolled pose
+            # costs more than the same pitch. tilt_free = per-axis free zone (gentle tilt is drivable).
             pitch = derived[t, r][1]
             roll = derived[t, r][2]
-            tilt_angle = wp.acos(wp.clamp(wp.cos(pitch) * wp.cos(roll), -1.0, 1.0))
-            excess = wp.max(tilt_angle - cw.tilt_free, 0.0)
-            tilt_sum += excess * excess
+            roll_excess = wp.max(wp.abs(roll) - cw.tilt_free, 0.0)
+            pitch_excess = wp.max(wp.abs(pitch) - cw.tilt_free, 0.0)
+            tilt_sum += (
+                cw.roll_cost_weight * roll_excess * roll_excess
+                + cw.pitch_cost_weight * pitch_excess * pitch_excess
+            )
         if cw.head > 0.0:
             # heading: penalize facing AWAY from the desired direction (1 - cos angle, in [0, 2]).
             # Makes "turn the right way" cheaper than "stay", so a forward-only robot commits to a
             # U-turn / detour (it can't reverse or spin in place).
-            if cw.ctg > 0.0:
-                # follow the cost-to-go descent direction -grad V (the way AROUND the wall), by
-                # central differences of V -- NOT the straight line to the goal, which points
-                # across the wall and fights the routing.
-                e = grid.cell_size
-                gvx = sample_field(ctg_field, grid, pose[0] + e, pose[1]) - sample_field(ctg_field, grid, pose[0] - e, pose[1])
-                gvy = sample_field(ctg_field, grid, pose[0], pose[1] + e) - sample_field(ctg_field, grid, pose[0], pose[1] - e)
-                gnorm = wp.sqrt(gvx * gvx + gvy * gvy)
-                if gnorm > 1e-6:  # grad V ~ 0 at the goal (flat minimum) -> no heading pressure
-                    facing = -(wp.cos(pose[2]) * gvx + wp.sin(pose[2]) * gvy) / gnorm
-                    heading_sum += 1.0 - facing
-            else:
-                goal_dist = wp.sqrt(goal_d2)
-                if goal_dist > 1e-3:
-                    facing = -(wp.cos(pose[2]) * dx + wp.sin(pose[2]) * dy) / goal_dist
-                    heading_sum += 1.0 - facing
+            goal_dist = wp.sqrt(goal_d2)
+            if goal_dist > 1e-3:
+                facing = -(wp.cos(pose[2]) * dx + wp.sin(pose[2]) * dy) / goal_dist
+                heading_sum += 1.0 - facing
     effort_sum = float(0.0)
     smooth_sum = float(0.0)
     penalty_sum = float(0.0)
@@ -409,6 +410,7 @@ class MppiGpu:
         cvar_beta=0.5,
         slip_lo=0.6,
         n_theta=16,
+        profile=False,  # opt-in per-stage CUDA-event timing of the refine loop (tiny event nodes)
     ):
         self.sim = sim
         self.dev = sim.device
@@ -430,8 +432,9 @@ class MppiGpu:
         cw.run = float(w.get("run", 0.0))
         cw.tilt = float(w.get("tilt", 0.0))
         cw.head = float(w.get("head", 0.0))
-        cw.ctg = float(w.get("ctg", 0.0))
         cw.lattice = float(w.get("lattice", 0.0))
+        cw.fallback = float(w.get("fallback", 0.0))
+        cw.vcap = 1e9  # set to the routing field's cap (planner.cw.vcap = ctg._vcap) to arm the fallback
         cw.oob = float(w.get("oob", 0.0))
         cw.endgame = float(w.get("endgame", 0.0))
         cw.endgame_r2 = float(w.get("endgame_r2", 0.0))
@@ -440,6 +443,8 @@ class MppiGpu:
         cw.smooth = float(w.get("smooth", 0.0))
         cw.invalid = float(w.get("invalid", 0.0))
         cw.tilt_free = float(w.get("tilt_free", 0.0))
+        cw.roll_cost_weight = float(w.get("roll_cost_weight", 1.0))  # tilt SHAPE: roll > pitch
+        cw.pitch_cost_weight = float(w.get("pitch_cost_weight", 0.5))
         cw.clear_margin = float(clear_margin)
         cw.resid_tol = float(resid_tol)
         cw.max_roll = float(w.get("max_roll", 1e3))  # 1e3 rad = effectively off unless set
@@ -463,17 +468,27 @@ class MppiGpu:
         self.count = wp.zeros(1, dtype=float, device=d)
         self.seed = wp.array([int(seed)], dtype=int, device=d)
         self.goal = wp.zeros(2, dtype=float, device=d)
-        # cost-to-go field V[ny, nx] (option E): a stable buffer the cost kernel samples;
-        # zeros + cw.ctg == 0 means it's ignored. set_costtogo() copies V in (graph-safe).
         ny, nx = sim.elevation.shape
-        self.ctg_field = wp.zeros((ny, nx), dtype=float, device=d)
         self.n_theta = int(n_theta)
         self.lattice_field = wp.zeros((ny, nx, self.n_theta), dtype=float, device=d)  # V(x,y,theta)
-        # the grid the cost kernel samples the cost-to-go on: defaults to the sim grid, but a COARSER
+        # the grid the cost kernel samples the lattice field on: defaults to the sim grid, but a COARSER
         # grid can be set (set_lattice(V, grid)) so the routing field is solved at low resolution --
         # the rollouts do fine obstacle avoidance, so the global router needn't be sim-resolution.
-        self.ctg_grid = sim.grid
+        self.lattice_grid = sim.grid
         self._graph = None
+        # opt-in per-stage profiling of the captured refine loop (CUDA-event timing; off = no overhead)
+        self._prof = StageProfiler(self.dev, ("sample", "rollout", "cost", "reweight"), profile)
+        self._n_refine_done = 0
+
+    def reset_timing(self):
+        """Clear the accumulated per-stage refine timings (e.g. after a warmup replan)."""
+        self._prof.reset()
+
+    def timing_stats(self):
+        """Per-stage refine timing over profiled replans (CUDA + profile=True), first refine excluded:
+        {stage: {"mean_ms", "std_ms", "n"}} for sample / rollout / cost / reweight. Use the means (the
+        event reads sync, so a profiling run is serialized -- its wall-clock isn't the real rate)."""
+        return self._prof.stats()
 
     def reset_nominal(self, value=1.5):
         self.U.fill_(float(value))
@@ -485,12 +500,6 @@ class MppiGpu:
     def set_nominal(self, U_host):
         self.U.assign(np.ascontiguousarray(U_host, np.float32))
 
-    def set_costtogo(self, V):
-        """Copy the cost-to-go field V[ny, nx] into the stable buffer the cost kernel reads
-        (so a captured graph picks up new contents). Call before the first replan to enable
-        the cost-to-go goal term -- requires the planner to have been built with ctg weight > 0."""
-        wp.copy(self.ctg_field, V)
-
     def set_lattice(self, V, grid=None):
         """Copy the orientation-aware cost-to-go V[ny', nx', n_theta] into the stable buffer the cost
         kernel reads. `grid` is the Grid V was solved on (a coarse grid for a low-res routing field);
@@ -500,11 +509,12 @@ class MppiGpu:
             self.lattice_field = wp.zeros(V.shape, dtype=float, device=self.dev)
         wp.copy(self.lattice_field, V)
         if grid is not None:
-            self.ctg_grid = grid
+            self.lattice_grid = grid
 
     def _refine(self):
         """One MPPI iteration: sample -> rollout -> cost -> CEM reweight, all on device."""
         s, d = self.sim, self.dev
+        self._prof.mark(0)
         wp.launch(_bump_seed_kernel, 1, inputs=[self.seed], device=d)
         wp.launch(
             _sample_omega_kernel,
@@ -524,7 +534,9 @@ class MppiGpu:
             outputs=[s.omega],
             device=d,
         )
+        self._prof.mark(1)  # sample done
         s.rollout_launch()
+        self._prof.mark(2)  # rollout done
         wp.launch(
             _cost_kernel,
             self.B,
@@ -535,8 +547,7 @@ class MppiGpu:
                 s.residual,
                 s.omega,
                 self.goal,
-                self.ctg_field,
-                self.ctg_grid,
+                self.lattice_grid,
                 self.lattice_field,
                 self.n_theta,
                 self.cw,
@@ -545,10 +556,12 @@ class MppiGpu:
             outputs=[self.J],
             device=d,
         )
+        self._prof.mark(3)  # cost done
         # robust eval: reduce each candidate's K scenario costs to its CVaR (K=1 -> J_cand = J)
         wp.launch(_cvar_kernel, self.n_cand, inputs=[self.J, self.K, self.m_tail],
                   outputs=[self.J_cand], device=d)
         self._cem_reweight()
+        self._prof.mark(4)  # reweight (CVaR + CEM) done
 
     def _cem_reweight(self):
         """Top-k elite mean -> U over CANDIDATES (cost = J_cand, the CVaR): find the threshold
@@ -603,8 +616,8 @@ class MppiGpu:
         self.sim.start_pose.assign(
             np.ascontiguousarray(np.tile(np.asarray(state, np.float32), (self.B, 1)), np.float32)
         )
-        if self.cw.ctg == 0.0 and self.cw.lattice == 0.0:  # the Euclidean turn-seed misfires when a
-            self._seed_turn_if_facing_away(state, goal_xy)  # cost-to-go field already supplies the dir
+        if self.cw.lattice == 0.0:  # the Euclidean turn-seed misfires when the lattice field
+            self._seed_turn_if_facing_away(state, goal_xy)  # already supplies the heading direction
         if self.dev.is_cuda:
             if self._graph is None:
                 with wp.ScopedCapture(device=self.dev) as cap:
@@ -612,6 +625,9 @@ class MppiGpu:
                 self._graph = cap.graph
             for _ in range(n_refine):
                 wp.capture_launch(self._graph)
+                self._n_refine_done += 1
+                if self._prof.enabled and self._n_refine_done > 1:  # skip the first (cold) refine
+                    self._prof.accumulate()
         else:
             for _ in range(n_refine):
                 self._refine()

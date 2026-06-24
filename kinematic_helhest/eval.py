@@ -7,7 +7,7 @@ routing + the terminal dock, exactly as navigate_live does but headless, and rep
 reach / frames / closest approach / wall-contact frames. This is the loop that matches reality.
 
   python -m kinematic_helhest.eval --world pocket
-  python -m kinematic_helhest.eval --stress [--K 8] [--dock-radius 1.5] [--feasibility settle]
+  python -m kinematic_helhest.eval --stress [--K 8] [--dock-radius 1.5]
 """
 import argparse
 
@@ -19,18 +19,19 @@ from . import worlds as W
 from .driver import WarpDriver
 from .engine import GridParams
 from .engine import Simulator
-from .planning.mppi_gpu import MppiGpu
-from .planning.terminal import dock_control
+from .control.mppi_gpu import MppiGpu
+from .control.terminal import dock_control
 
 # lattice routing weights: routing + feasibility only. The terminal dock handles reach+stop, so the
 # endgame cost-patches (endgame/endgame_r2/term_v) are gone -- oob stays as routing-edge safety.
 # max_* = the robot's tip-over envelope (rad), shared with the cost-to-go so they agree on what's safe.
 _rp = dynamics.robot_params()
 _LATTICE_W = dict(term=3.0, run=0.3, head=0.0, invalid=1e5, eff=2e-3, smooth=2e-3, lattice=1.0, oob=50.0,
+                  fallback=1.0,  # explore toward the goal where the routing field saturates (vcap)
                   max_roll=_rp.max_roll, max_pitch_up=_rp.max_pitch_up, max_pitch_down=_rp.max_pitch_down)
 
 
-def evaluate(world, device="cuda", K=8, dock_radius=1.5, feasibility="traversability",
+def evaluate(world, device="cuda", K=8, dock_radius=1.5,
              n_theta=24, lat_coarsen=1, max_frames=1500, B=4096, T=70):
     import time
     builder, start, goal = W.WORLDS[world]
@@ -48,13 +49,10 @@ def evaluate(world, device="cuda", K=8, dock_radius=1.5, feasibility="traversabi
     Hc = scene.H[:cny * k, :cnx * k].reshape(cny, k, cnx, k).max(axis=(1, 3)) if k > 1 else scene.H
     Hc = np.ascontiguousarray(Hc, np.float32)
     cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0)
-    if feasibility == "settle":
-        from .planning.costtogo_settle import CostToGoLatticeSettle
-        clat = CostToGoLatticeSettle(cgrid, dynamics.robot_params(), dynamics.planning_solver(), device,
-                                     n_theta=n_theta)
-    else:
-        from .planning.costtogo import CostToGoLattice
-        clat = CostToGoLattice(cgrid, device, n_theta=n_theta, turn_radius=dynamics.robot_params().min_turn_radius)
+    from .planning.costtogo import CostToGo
+    clat = CostToGo(cgrid, dynamics.robot_params(), dynamics.planning_solver(),
+                                 n_theta=n_theta, device=device)
+    Hc = wp.array(Hc, dtype=wp.float32, device=device)  # settle cost-to-go takes a device array
     t0 = time.perf_counter()
     V = clat.compute(Hc, goal); wp.synchronize()
     ctg_ms = (time.perf_counter() - t0) * 1000.0
@@ -98,12 +96,11 @@ def main():
     ap.add_argument("--stress", action="store_true")
     ap.add_argument("--K", type=int, default=8, help="CVaR robust scenarios (1 = off)")
     ap.add_argument("--dock-radius", type=float, default=1.5, help="terminal-dock handoff radius (0 = off)")
-    ap.add_argument("--feasibility", default="traversability", choices=["traversability", "settle"])
     ap.add_argument("--lat-coarsen", type=int, default=1, help="solve the routing field at 1/k resolution (k>1 = faster, ~k^3)")
     ap.add_argument("--device", default="cuda")
     args = ap.parse_args()
     wp.init()
-    kw = dict(K=args.K, dock_radius=args.dock_radius, feasibility=args.feasibility, lat_coarsen=args.lat_coarsen)
+    kw = dict(K=args.K, dock_radius=args.dock_radius, lat_coarsen=args.lat_coarsen)
     if args.world and not args.stress:
         print(evaluate(args.world, device=args.device, **kw))
     else:
