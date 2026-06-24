@@ -14,8 +14,8 @@ import argparse
 import numpy as np
 
 from .. import heightmap as hmmod
-from ..planning.robust import _arc_candidates
-from ..planning.robust import evaluate
+from ..control.robust import _arc_candidates
+from ..control.robust import evaluate
 from .render import WIN_H
 from .render import WIN_W
 from .render import _draw

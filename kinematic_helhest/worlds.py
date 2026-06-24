@@ -126,13 +126,13 @@ def _plot_all(out):
 
 
 def _stress(device="cuda", max_steps=500):
-    """Run the planner (baseline vs cost-to-go) on every world; print reach/steps/final dist."""
-    from .planning import mppi
+    """Run the planner (baseline vs orientation-aware lattice) on every world; print reach/steps/final dist."""
+    from .control import mppi
 
     print(f"{'world':9}{'config':12}{'reached':9}{'steps':7}{'dist':6}")
     for name, (builder, start, goal) in WORLDS.items():
         hm, mu, g = builder(), matching_friction(builder()), np.asarray(goal)
-        for cfg, kw in [("baseline", {}), ("cost-to-go", dict(costtogo=True))]:
+        for cfg, kw in [("baseline", {}), ("lattice", dict(lattice=True))]:
             try:
                 p, r = mppi.plan(hm, mu, np.asarray(start, np.float32), g,
                                  device=device, seed=0, max_steps=max_steps, **kw)

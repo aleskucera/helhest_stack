@@ -11,7 +11,7 @@ For the synthetic demo the "true robot" is the kinematic engine stepping on the 
 world map (a B=1,T=1 rollout — the model is memoryless, so one rollout step == one
 real step).
 
-Demo:  python -m kinematic_helhest.planning.navigate [--device cuda] [--gx 4 --gy 1.5]
+Demo:  python -m kinematic_helhest.navigate [--device cuda] [--gx 4 --gy 1.5]
 """
 import argparse
 from dataclasses import dataclass
@@ -19,15 +19,15 @@ from dataclasses import dataclass
 import numpy as np
 import warp as wp
 
-from .. import heightmap as hmmod
-from ..engine import GridParams
-from ..engine import RobotParams
-from ..engine import Simulator
-from ..engine import SolverParams
-from .mppi import _to_omega
-from .mppi_gpu import MppiGpu
-from .synthetic_perception import crop_window
-from .synthetic_perception import to_local
+from . import heightmap as hmmod
+from .engine import GridParams
+from .engine import RobotParams
+from .engine import Simulator
+from .engine import SolverParams
+from .control.mppi import _to_omega
+from .control.mppi_gpu import MppiGpu
+from .perception.synthetic_perception import crop_window
+from .perception.synthetic_perception import to_local
 
 _W = dict(term=3.0, run=0.3, head=2.0, invalid=1e5, eff=2e-3, smooth=2e-3)
 

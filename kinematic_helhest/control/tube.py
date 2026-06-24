@@ -14,7 +14,7 @@ The tube's value is exactly the gap between these: open-loop drifts off the nomi
 each replan window (slip accumulates); the tracker holds it on. This is the sim stand-in
 for sim-to-real -- the disturbance IS the model error a real skid-steer would have.
 
-Run:  python -m kinematic_helhest.planning.tube [--device cuda] [--out /tmp/tube.png]
+Run:  python -m kinematic_helhest.control.tube [--device cuda] [--out /tmp/tube.png]
 """
 import argparse
 

@@ -21,7 +21,7 @@ from ..engine import GridParams
 from ..engine import RobotParams
 from ..engine import Simulator
 from ..engine import SolverParams
-from ..planning.mppi_gpu import MppiGpu
+from ..control.mppi_gpu import MppiGpu
 from .drive import WarpDriver
 from .render import WIN_H
 from .render import WIN_W

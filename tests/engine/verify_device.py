@@ -9,24 +9,24 @@ Three checks (CPU by default; pass --device cuda for the GPU path):
   3. a device-fed `Simulator` reproduces the host (numpy-scene) path
      rollout-for-rollout on the same cell grid.
 
-Run:  python -m kinematic_helhest.planning.verify_device [--device cuda]
+Run:  python -m tests.engine.verify_device [--device cuda]
 """
 import argparse
 
 import numpy as np
 import warp as wp
 
-from .. import friction
-from .. import heightmap as hmmod
-from ..engine import Grid
-from ..engine import GridParams
-from ..engine import RobotParams
-from ..engine import sample_field
-from ..engine import Simulator
-from ..engine import SolverParams
-from ..engine.envelope import _contact_kernel
-from ..engine.envelope import _gather_kernel
-from .mppi import _to_omega
+from kinematic_helhest import friction
+from kinematic_helhest import heightmap as hmmod
+from kinematic_helhest.engine import Grid
+from kinematic_helhest.engine import GridParams
+from kinematic_helhest.engine import RobotParams
+from kinematic_helhest.engine import sample_field
+from kinematic_helhest.engine import Simulator
+from kinematic_helhest.engine import SolverParams
+from kinematic_helhest.engine.envelope import _contact_kernel
+from kinematic_helhest.engine.envelope import _gather_kernel
+from kinematic_helhest.control.mppi import _to_omega
 
 
 def wheel_envelope(elevation, cell_size, wheel_radius, device="cpu"):

@@ -16,7 +16,7 @@ candidate in numpy.
 Demo: a fan of arc candidates toward a goal past demo_terrain's wall. The nominal-best candidate
 hugs the wall (its fan clips); the CVaR-best keeps clear.
 
-Run:  python -m kinematic_helhest.planning.robust [--device cuda] [--out /tmp/robust.png]
+Run:  python -m kinematic_helhest.control.robust [--device cuda] [--out /tmp/robust.png]
 """
 import argparse
 

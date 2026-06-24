@@ -22,10 +22,10 @@ import numpy as np
 
 from .. import friction
 from .. import heightmap as hmmod
-from ..planning.navigate import NavConfig
-from ..planning.navigate import Navigator
-from ..planning.synthetic_perception import crop_window
-from ..planning.synthetic_perception import to_local
+from ..navigate import NavConfig
+from ..navigate import Navigator
+from ..perception.synthetic_perception import crop_window
+from ..perception.synthetic_perception import to_local
 from .drive import WarpDriver
 from .render import DT
 from .render import WIN_H

@@ -5,7 +5,7 @@ and/or robust CVaR). Draws the terrain, robot, the plan (yellow) and the driven 
 can watch it reach or STALL -- e.g. the pocket cul-de-sac, or the slalom weave. `--drive` lets
 you steer with I/J/K/L instead of the planner.
 
-Run:  python -m kinematic_helhest.viz.navigate_live --world pocket [--costtogo] [--K 8] [--drive]
+Run:  python -m kinematic_helhest.viz.navigate_live --world pocket [--lattice] [--K 8] [--drive]
 Shot: python -m kinematic_helhest.viz.navigate_live --world pocket --shot /tmp/nav.png
 """
 import argparse
@@ -15,35 +15,48 @@ import warp as wp
 
 from .. import dynamics
 from .. import worlds as W
+from ..driver import WarpDriver
 from ..engine import GridParams
 from ..engine import Simulator
-from ..driver import WarpDriver
-from ..planning.mppi_gpu import MppiGpu
-from ..planning.terminal import dock_control
-from .render import WIN_H
-from .render import WIN_W
+from ..control.mppi_gpu import MppiGpu
+from ..control.terminal import dock_control
 from .render import _commands
 from .render import _init_gl
 from .render import _render
 from .render import build_robot
 from .render import build_terrain
+from .render import WIN_H
+from .render import WIN_W
 
 _PLAN, _GOAL = (1.0, 0.85, 0.05), (0.95, 0.1, 0.1)  # yellow plan, red goal pole
 
 
 def _polyline(scene, xy, color, width, dz):
     from OpenGL import GL as gl
+
     z = np.minimum(scene.sample(xy[:, 0], xy[:, 1]), 0.7) + dz
-    gl.glColor3f(*color); gl.glLineWidth(width)
+    gl.glColor3f(*color)
+    gl.glLineWidth(width)
     gl.glBegin(gl.GL_LINE_STRIP)
     for (x, y), zz in zip(xy, z):
         gl.glVertex3f(float(x), float(y), float(zz))
     gl.glEnd()
 
 
-def run(world="pocket", costtogo=False, K=1, drive=False, shot=None, device="cuda", T=70, B=4096,
-        tilt=0.0, tilt_free=0.0, lattice=False, trav_weight=0.0, feasibility="traversability",
-        dock_radius=1.5):
+def run(
+    world="pocket",
+    K=1,
+    drive=False,
+    shot=None,
+    device="cuda",
+    T=70,
+    B=4096,
+    tilt=0.0,
+    tilt_free=0.0,
+    lattice=False,
+    flatness_weight=0.0,
+    dock_radius=1.5,
+):
     import glfw
 
     builder, start, goal = W.WORLDS[world]
@@ -57,48 +70,74 @@ def run(world="pocket", costtogo=False, K=1, drive=False, shot=None, device="cud
     # the plan lag/clip. The residual plan->real gap is absorbed by CVaR (--K).
     drv = WarpDriver(scene, mu, init_pose=tuple(start), device=device)
     plan_sim = Simulator(dynamics.robot_params(), dynamics.planning_solver(), grid, B, T, device)
-    plan_sim.set_terrain(terr); plan_sim.set_friction(mu)
+    plan_sim.set_terrain(terr)
+    plan_sim.set_friction(mu)
 
     n_theta = 24
     w = dict(term=3.0, run=0.3, head=2.0, invalid=1e5, eff=2e-3, smooth=2e-3)
-    if lattice:  # orientation-aware cost-to-go V(x,y,theta); trav_weight makes routing prefer flat
-        w = {**w, "lattice": 1.0, "head": 0.0, "oob": 50.0, "term_v": 1.0,
-             "endgame": 12.0, "endgame_r2": 2.25}
-    elif costtogo:
-        w = {**w, "ctg": 1.0, "head": 4.0}  # cost-to-go heading (-grad V) wants more weight
-    if tilt > 0.0:  # penalize body tilt past tilt_free [rad] along each rollout (steer onto flat ground)
-        w = {**w, "tilt": float(tilt), "tilt_free": float(tilt_free)}
-    planner = MppiGpu(plan_sim, 0.5, 4.0, w, 0.05, 1e-2, 0, sigma_knot=1.0, n_knots=4,
-                      n_scenarios=K, n_theta=n_theta)
+    if (
+        lattice
+    ):  # orientation-aware cost-to-go V(x,y,theta); flatness_weight makes routing prefer flat
+        w = {
+            **w,
+            "lattice": 1.0,
+            "head": 0.0,
+            "oob": 50.0,
+            "term_v": 1.0,
+            "endgame": 12.0,
+            "endgame_r2": 2.25,
+        }
+    if tilt > 0.0:  # penalize body tilt past tilt_free [rad] per rollout (roll weighted > pitch)
+        rp = (
+            dynamics.robot_params()
+        )  # one source of the roll-vs-pitch shape (same as the cost-to-go)
+        w = {
+            **w,
+            "tilt": float(tilt),
+            "tilt_free": float(tilt_free),
+            "roll_cost_weight": rp.roll_cost_weight,
+            "pitch_cost_weight": rp.pitch_cost_weight,
+        }
+    planner = MppiGpu(
+        plan_sim,
+        0.5,
+        4.0,
+        w,
+        0.05,
+        1e-2,
+        0,
+        sigma_knot=1.0,
+        n_knots=4,
+        n_scenarios=K,
+        n_theta=n_theta,
+    )
     planner.reset_nominal(1.5)
-    if lattice:
-        if feasibility == "settle":
-            from ..planning.costtogo_settle import CostToGoLatticeSettle
-            clat = CostToGoLatticeSettle(grid, dynamics.robot_params(), dynamics.planning_solver(), drv.sim.device,
-                                         n_theta=n_theta, flatness_weight=trav_weight)
-            planner.set_lattice(clat.compute(np.ascontiguousarray(scene.H, np.float32), goal))
-        else:
-            from ..planning.costtogo import CostToGoLattice
-            clat = CostToGoLattice(grid, drv.sim.device, n_theta=n_theta,
-                                   turn_radius=dynamics.robot_params().min_turn_radius, trav_weight=trav_weight)
-            planner.set_lattice(clat.compute(np.ascontiguousarray(scene.H, np.float32), goal))
-    elif costtogo:
+    if lattice:  # feasibility from the robot's own settle (residual/clearance/tilt envelope)
         from ..planning.costtogo import CostToGo
-        ctg = CostToGo(grid, drv.sim.device)
-        planner.set_costtogo(ctg.compute(np.ascontiguousarray(scene.H, np.float32), goal))
+
+        clat = CostToGo(
+            grid,
+            dynamics.robot_params(),
+            dynamics.planning_solver(),
+            n_theta=n_theta,
+            flatness_weight=flatness_weight,
+            device=drv.sim.device,
+        )
+        planner.set_lattice(clat.compute(terr, goal))  # terr is the device elevation built above
 
     if not glfw.init():
         raise RuntimeError("glfw init failed")
     if shot:
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
-    mode = ", lattice" if lattice else (", cost-to-go" if costtogo else "")
-    if lattice and trav_weight > 0.0:
-        mode += f" (trav_w={trav_weight:g})"
+    mode = ", lattice" if lattice else ""
+    if lattice and flatness_weight > 0.0:
+        mode += f" (flat_w={flatness_weight:g})"
     title = f"Helhest — {world} ({'drive' if drive else 'auto'}{mode})"
     win = glfw.create_window(WIN_W, WIN_H, title, None, None)
     glfw.make_context_current(win)
     _init_gl()
     from OpenGL import GL as gl
+
     terrain, robot = build_terrain(scene), build_robot()
     cam = [-2.1, 0.7, 10.0]
     mouse = {"down": False, "x": 0.0, "y": 0.0}
@@ -124,7 +163,10 @@ def run(world="pocket", costtogo=False, K=1, drive=False, shot=None, device="cud
     trail, frame, plan_xy = [], 0, None
     while not glfw.window_should_close(win):
         glfw.poll_events()
-        if glfw.get_key(win, glfw.KEY_ESCAPE) == glfw.PRESS or glfw.get_key(win, glfw.KEY_Q) == glfw.PRESS:
+        if (
+            glfw.get_key(win, glfw.KEY_ESCAPE) == glfw.PRESS
+            or glfw.get_key(win, glfw.KEY_Q) == glfw.PRESS
+        ):
             break
         st = drv.render_state()
         state = np.array([st.x, st.y, st.yaw], np.float32)
@@ -142,16 +184,19 @@ def run(world="pocket", costtogo=False, K=1, drive=False, shot=None, device="cud
         else:
             cmd = np.array([U[0, 0], U[0, 1], 0.5 * (U[0, 0] + U[0, 1])], np.float32)
         drv.step(cmd)
-        trail.append([st.x, st.y, st.place["z"] + 0.03]); trail = trail[-4000:]
+        trail.append([st.x, st.y, st.place["z"] + 0.03])
+        trail = trail[-4000:]
 
         _render(st, cam, terrain, robot, trail)
         gl.glDisable(gl.GL_LIGHTING)
         if plan_xy is not None:
             _polyline(scene, plan_xy, _PLAN, 4.0, 0.08)
         gz = float(scene.sample(np.array([goal[0]]), np.array([goal[1]]))[0])
-        gl.glColor3f(*_GOAL); gl.glLineWidth(5.0)
+        gl.glColor3f(*_GOAL)
+        gl.glLineWidth(5.0)
         gl.glBegin(gl.GL_LINES)
-        gl.glVertex3f(goal[0], goal[1], gz); gl.glVertex3f(goal[0], goal[1], gz + 1.2)
+        gl.glVertex3f(goal[0], goal[1], gz)
+        gl.glVertex3f(goal[0], goal[1], gz + 1.2)
         gl.glEnd()
         gl.glEnable(gl.GL_LIGHTING)
 
@@ -162,7 +207,9 @@ def run(world="pocket", costtogo=False, K=1, drive=False, shot=None, device="cud
                 buf = gl.glReadPixels(0, 0, WIN_W, WIN_H, gl.GL_RGB, gl.GL_UNSIGNED_BYTE)
                 img = np.frombuffer(buf, np.uint8).reshape(WIN_H, WIN_W, 3)[::-1]
                 import matplotlib.pyplot as plt
-                plt.imsave(shot, img); print(f"saved {shot}")
+
+                plt.imsave(shot, img)
+                print(f"saved {shot}")
                 break
             continue
         glfw.swap_buffers(win)
@@ -172,27 +219,51 @@ def run(world="pocket", costtogo=False, K=1, drive=False, shot=None, device="cud
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--world", default="pocket", choices=list(W.WORLDS))
-    ap.add_argument("--costtogo", action="store_true", help="2D cost-to-go routing (avoids hard obstacles)")
-    ap.add_argument("--lattice", action="store_true",
-                    help="orientation-aware cost-to-go V(x,y,theta); pair with --trav-weight for flat-preferring routing")
-    ap.add_argument("--trav-weight", type=float, default=0.0,
-                    help="lattice arc-cost weight on terrain traversability (0 = pure distance; try 3) -> routes around bumps")
-    ap.add_argument("--feasibility", default="traversability", choices=["traversability", "settle"],
-                    help="lattice feasibility source: traversability map, or the robot's own settle (residual/tilt)")
-    ap.add_argument("--K", type=int, default=8,
-                    help="robust CVaR slip scenarios -- margin that absorbs the plan->real gap (1 = off)")
-    ap.add_argument("--dock-radius", type=float, default=1.5,
-                    help="terminal-stage handoff radius: within this the dock controller takes over (0 = off)")
+    ap.add_argument(
+        "--lattice",
+        action="store_true",
+        help="orientation-aware cost-to-go V(x,y,theta); pair with --flatness-weight for flat-preferring routing",
+    )
+    ap.add_argument(
+        "--flatness-weight",
+        type=float,
+        default=0.0,
+        help="how much detour to trade for flat ground -- weights the settle tilt in the lattice arc cost (0 = pure distance; try 3) -> routes around bumps/slopes",
+    )
+    ap.add_argument(
+        "--K",
+        type=int,
+        default=8,
+        help="robust CVaR slip scenarios -- margin that absorbs the plan->real gap (1 = off)",
+    )
+    ap.add_argument(
+        "--dock-radius",
+        type=float,
+        default=1.5,
+        help="terminal-stage handoff radius: within this the dock controller takes over (0 = off)",
+    )
     ap.add_argument("--drive", action="store_true", help="steer yourself instead of the planner")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--shot", default=None)
-    ap.add_argument("--tilt", type=float, default=0.0, help="tilt-penalty weight (0 = off; try 300)")
-    ap.add_argument("--tilt-free", type=float, default=0.14, help="tilt below this [rad] is free (~8 deg)")
+    ap.add_argument(
+        "--tilt", type=float, default=0.0, help="tilt-penalty weight (0 = off; try 300)"
+    )
+    ap.add_argument(
+        "--tilt-free", type=float, default=0.14, help="tilt below this [rad] is free (~8 deg)"
+    )
     args = ap.parse_args()
-    run(world=args.world, costtogo=args.costtogo, K=args.K, drive=args.drive,
-        shot=args.shot, device=args.device, tilt=args.tilt, tilt_free=args.tilt_free,
-        lattice=args.lattice, trav_weight=args.trav_weight, feasibility=args.feasibility,
-        dock_radius=args.dock_radius)
+    run(
+        world=args.world,
+        K=args.K,
+        drive=args.drive,
+        shot=args.shot,
+        device=args.device,
+        tilt=args.tilt,
+        tilt_free=args.tilt_free,
+        lattice=args.lattice,
+        flatness_weight=args.flatness_weight,
+        dock_radius=args.dock_radius,
+    )
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ from kinematic_helhest.engine import GridParams
 from kinematic_helhest.engine import RobotParams
 from kinematic_helhest.engine import Simulator
 from kinematic_helhest.engine import SolverParams
-from kinematic_helhest.planning.mppi import _to_omega
+from kinematic_helhest.control.mppi import _to_omega
 from tests.engine.gradients import dsettle_dHenv
 
 
