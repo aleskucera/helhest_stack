@@ -11,19 +11,21 @@ Kernels (all suffixed _kernel):
   _minmax/_bisect_*/_count_below/_elite_u   CEM reweight (top-k elite mean) of U, on device
   _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
 """
+
 import numpy as np
 import warp as wp
 
-from ..engine.terrain import Grid
 from ..engine.terrain import _locate
+from ..engine.terrain import Grid
 from ..profiling import StageProfiler
 
 _N_BISECT = 14  # device-side bisection iterations for the CEM top-k threshold
 
 
 @wp.func
-def sample_lattice(field: wp.array3d(dtype=float), grid: Grid, n_theta: int,
-                   x: float, y: float, yaw: float):
+def sample_lattice(
+    field: wp.array3d(dtype=float), grid: Grid, n_theta: int, x: float, y: float, yaw: float
+):
     """Trilinear sample of the orientation-aware cost-to-go V(x, y, theta): bilinear in (x, y),
     linear in the (wrapped) heading. Misaligned poses read high/inf, so MPPI's rollouts prefer an
     approach the forward-only robot can actually complete."""
@@ -39,14 +41,18 @@ def sample_lattice(field: wp.array3d(dtype=float), grid: Grid, n_theta: int,
     fy = c.frac_y
     xi = c.x_idx
     yi = c.y_idx
-    va = ((1.0 - fx) * (1.0 - fy) * field[yi, xi, t0]
-          + fx * (1.0 - fy) * field[yi, xi + 1, t0]
-          + (1.0 - fx) * fy * field[yi + 1, xi, t0]
-          + fx * fy * field[yi + 1, xi + 1, t0])
-    vb = ((1.0 - fx) * (1.0 - fy) * field[yi, xi, t1]
-          + fx * (1.0 - fy) * field[yi, xi + 1, t1]
-          + (1.0 - fx) * fy * field[yi + 1, xi, t1]
-          + fx * fy * field[yi + 1, xi + 1, t1])
+    va = (
+        (1.0 - fx) * (1.0 - fy) * field[yi, xi, t0]
+        + fx * (1.0 - fy) * field[yi, xi + 1, t0]
+        + (1.0 - fx) * fy * field[yi + 1, xi, t0]
+        + fx * fy * field[yi + 1, xi + 1, t0]
+    )
+    vb = (
+        (1.0 - fx) * (1.0 - fy) * field[yi, xi, t1]
+        + fx * (1.0 - fy) * field[yi, xi + 1, t1]
+        + (1.0 - fx) * fy * field[yi + 1, xi, t1]
+        + fx * fy * field[yi + 1, xi + 1, t1]
+    )
     return (1.0 - fth) * va + fth * vb
 
 
@@ -71,8 +77,8 @@ def _sample_omega_kernel(
     wmax: float,
     n_wide: int,
     n_knots: int,
-    n_scen: int,                     # K slip scenarios per candidate (1 = non-robust)
-    slip: wp.array2d(dtype=float),   # [K, 2] wheel-speed retention; scenario 0 = (1, 1)
+    n_scen: int,  # K slip scenarios per candidate (1 = non-robust)
+    slip: wp.array2d(dtype=float),  # [K, 2] wheel-speed retention; scenario 0 = (1, 1)
     seed: wp.array(dtype=int),
     omega: wp.array2d(dtype=wp.vec3),
 ):
@@ -96,8 +102,12 @@ def _sample_omega_kernel(
         span = wmax - wmin
         left_lo = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + knot_lo) * 2))
         left_hi = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + knot_hi) * 2))
-        right_lo = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + knot_lo) * 2 + 1))
-        right_hi = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + knot_hi) * 2 + 1))
+        right_lo = wmin + span * wp.randf(
+            wp.rand_init(seed[0] + 1234, (b * n_knots + knot_lo) * 2 + 1)
+        )
+        right_hi = wmin + span * wp.randf(
+            wp.rand_init(seed[0] + 1234, (b * n_knots + knot_hi) * 2 + 1)
+        )
         wheel_l = (1.0 - frac) * left_lo + frac * left_hi
         wheel_r = (1.0 - frac) * right_lo + frac * right_hi
     else:
@@ -110,12 +120,14 @@ def _sample_omega_kernel(
         eps_r_hi = wp.randn(wp.rand_init(seed[0], (b * n_knots + knot_hi) * 2 + 1))
         wheel_l += sigma_knot * ((1.0 - frac) * eps_l_lo + frac * eps_l_hi)
         wheel_r += sigma_knot * ((1.0 - frac) * eps_r_lo + frac * eps_r_hi)
-        jitter = wp.rand_init(seed[0] + 9176, t * n_cand + b)  # light per-step jitter (distinct stream)
+        # light per-step jitter (distinct stream)
+        jitter = wp.rand_init(seed[0] + 9176, t * n_cand + b)
         wheel_l += sigma * wp.randn(jitter)
         wheel_r += sigma * wp.randn(jitter)
     # apply scenario k's wheel slip, then clamp to the forward-arc box (wmin >= 0 -> no reverse)
-    omega[t, r] = wp.vec3(wp.clamp(wheel_l * slip[k, 0], wmin, wmax),
-                          wp.clamp(wheel_r * slip[k, 1], wmin, wmax), 0.0)
+    omega[t, r] = wp.vec3(
+        wp.clamp(wheel_l * slip[k, 0], wmin, wmax), wp.clamp(wheel_r * slip[k, 1], wmin, wmax), 0.0
+    )
 
 
 @wp.struct
@@ -127,11 +139,13 @@ class CostWeights:
     tilt: float
     head: float
     lattice: float  # >0 -> goal term is the orientation-aware cost-to-go V(x,y,theta)
-    fallback: float  # >0 -> where V is SATURATED (>= vcap, goal unreachable in-window) fall back to a
+    # >0 -> where V is SATURATED (>= vcap, goal unreachable in-window) fall back to a
+    fallback: float
     vcap: float  #        direct straight-line pull (weight `fallback`) so the robot explores toward it
     oob: float  # >0 -> penalize leaving the world (soft wall at the grid edge)
     endgame: float  # extra terminal weight when the plan ENDS within sqrt(endgame_r2) of the goal
-    endgame_r2: float  # (so the robot commits to the final approach without over-pulling while routing)
+    # (so the robot commits to the final approach without over-pulling while routing)
+    endgame_r2: float
     term_v: float  # >0 -> penalize speed at the horizon end (plan should END stopped at the goal)
     eff: float
     smooth: float
@@ -159,7 +173,9 @@ def _cost_kernel(
     omega: wp.array2d(dtype=wp.vec3),  # Ub in components [0], [1]
     goal: wp.array(dtype=float),  # [2] world goal (device -> graph-safe, changes per replan)
     grid: Grid,  # geometry for sampling lattice_field at the rollout pose
-    lattice_field: wp.array3d(dtype=float),  # [ny, nx, n_theta] V(x,y,theta) (only read when cw.lattice > 0)
+    lattice_field: wp.array3d(
+        dtype=float
+    ),  # [ny, nx, n_theta] V(x,y,theta) (only read when cw.lattice > 0)
     n_theta: int,
     cw: CostWeights,
     T: int,
@@ -425,7 +441,8 @@ class MppiGpu:
         self.sigma, self.wmax, self.wmin = float(sigma), float(wmax), float(wmin)
         self.sigma_knot, self.n_knots = float(sigma_knot), int(n_knots)
         self.n_wide = int(float(wide_frac) * self.n_cand)  # candidates drawn from the WIDE prior
-        self.target_k = float(int(float(elite_frac) * self.n_cand))  # CEM elite count (over candidates)
+        # CEM elite count (over candidates)
+        self.target_k = float(int(float(elite_frac) * self.n_cand))
         w = weights
         cw = CostWeights()
         cw.term = float(w.get("term", 0.0))
@@ -434,7 +451,8 @@ class MppiGpu:
         cw.head = float(w.get("head", 0.0))
         cw.lattice = float(w.get("lattice", 0.0))
         cw.fallback = float(w.get("fallback", 0.0))
-        cw.vcap = 1e9  # set to the routing field's cap (planner.cw.vcap = ctg._vcap) to arm the fallback
+        # set to the routing field's cap (planner.cw.vcap = ctg._vcap) to arm the fallback
+        cw.vcap = 1e9
         cw.oob = float(w.get("oob", 0.0))
         cw.endgame = float(w.get("endgame", 0.0))
         cw.endgame_r2 = float(w.get("endgame_r2", 0.0))
@@ -458,7 +476,7 @@ class MppiGpu:
             slip[1:] = rng.uniform(float(slip_lo), 1.0, (self.K - 1, 2)).astype(np.float32)
         self.slip = wp.array(slip, dtype=float, device=d)
         self.U = wp.zeros((self.T, 2), dtype=float, device=d)
-        self.J = wp.zeros(self.B, dtype=float, device=d)            # cost per scenario-rollout
+        self.J = wp.zeros(self.B, dtype=float, device=d)  # cost per scenario-rollout
         self.J_cand = wp.zeros(self.n_cand, dtype=float, device=d)  # CVaR cost per candidate
         self.jmin = wp.zeros(1, dtype=float, device=d)  # CEM bisection scalars
         self.jmax = wp.zeros(1, dtype=float, device=d)
@@ -487,7 +505,8 @@ class MppiGpu:
     def timing_stats(self):
         """Per-stage refine timing over profiled replans (CUDA + profile=True), first refine excluded:
         {stage: {"mean_ms", "std_ms", "n"}} for sample / rollout / cost / reweight. Use the means (the
-        event reads sync, so a profiling run is serialized -- its wall-clock isn't the real rate)."""
+        event reads sync, so a profiling run is serialized -- its wall-clock isn't the real rate).
+        """
         return self._prof.stats()
 
     def reset_nominal(self, value=1.5):
@@ -558,8 +577,13 @@ class MppiGpu:
         )
         self._prof.mark(3)  # cost done
         # robust eval: reduce each candidate's K scenario costs to its CVaR (K=1 -> J_cand = J)
-        wp.launch(_cvar_kernel, self.n_cand, inputs=[self.J, self.K, self.m_tail],
-                  outputs=[self.J_cand], device=d)
+        wp.launch(
+            _cvar_kernel,
+            self.n_cand,
+            inputs=[self.J, self.K, self.m_tail],
+            outputs=[self.J_cand],
+            device=d,
+        )
         self._cem_reweight()
         self._prof.mark(4)  # reweight (CVaR + CEM) done
 
@@ -577,7 +601,12 @@ class MppiGpu:
             device=d,
         )
         for _ in range(_N_BISECT):
-            wp.launch(_count_below_kernel, self.n_cand, inputs=[self.J_cand, self.tau, self.count], device=d)
+            wp.launch(
+                _count_below_kernel,
+                self.n_cand,
+                inputs=[self.J_cand, self.tau, self.count],
+                device=d,
+            )
             wp.launch(
                 _bisect_step_kernel,
                 1,
@@ -590,8 +619,17 @@ class MppiGpu:
         wp.launch(
             _elite_u_kernel,
             (self.T, 2),
-            inputs=[self.J_cand, self.tau, self.count, omega, self.K,
-                    self.wmin, self.wmax, self.n_cand, self.U],
+            inputs=[
+                self.J_cand,
+                self.tau,
+                self.count,
+                omega,
+                self.K,
+                self.wmin,
+                self.wmax,
+                self.n_cand,
+                self.U,
+            ],
             device=d,
         )
 
@@ -606,7 +644,9 @@ class MppiGpu:
         dist = np.hypot(to_goal_x, to_goal_y)
         if dist < 1e-3:
             return
-        facing = (np.cos(state[2]) * to_goal_x + np.sin(state[2]) * to_goal_y) / dist  # heading . to-goal
+        facing = (
+            np.cos(state[2]) * to_goal_x + np.sin(state[2]) * to_goal_y
+        ) / dist  # heading . to-goal
         if facing < -0.5:
             self.U.assign(np.tile([self.wmin, self.wmax], (self.T, 1)).astype(np.float32))
 

@@ -4,6 +4,7 @@ silently mis-place every obstacle, so these tests are the tripwire.
 
   python -m tests.perception.test_rasterize
 """
+
 import numpy as np
 
 from kinematic_helhest.perception.rasterize import heightmap_to_points
@@ -14,8 +15,9 @@ def selftest_transpose_guard():
     # ny != nx so a transpose also changes shape; two points whose (row, col) are SWAPS of each other
     # with DISTINCT heights -> if the code swapped r<->c, A and B would trade cells (and heights).
     x0, y0, cell, ny, nx = 0.0, 0.0, 0.1, 20, 30
-    pts = np.array([[1.2, 0.3, 1.5],   # x=1.2 -> col 12, y=0.3 -> row 3
-                    [0.3, 1.2, 0.4]])  # x=0.3 -> col 3,  y=1.2 -> row 12
+    pts = np.array(
+        [[1.2, 0.3, 1.5], [0.3, 1.2, 0.4]]  # x=1.2 -> col 12, y=0.3 -> row 3
+    )  # x=0.3 -> col 3,  y=1.2 -> row 12
     H, known = rasterize(pts, x0, y0, cell, ny, nx)
     okA = bool(known[3, 12]) and abs(H[3, 12] - 1.5) < 1e-5  # A at row 3, col 12
     okB = bool(known[12, 3]) and abs(H[12, 3] - 0.4) < 1e-5  # B at row 12, col 3

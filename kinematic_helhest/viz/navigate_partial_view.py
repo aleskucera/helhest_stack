@@ -16,6 +16,7 @@ mouse-drag orbits, scroll zooms, ESC/Q quits.
   python -m kinematic_helhest.viz.navigate_partial_view --world pocket --drift 0.04
   python -m kinematic_helhest.viz.navigate_partial_view --world pocket --shot /tmp/dual.png --shot-frame 150
 """
+
 import argparse
 from collections import deque
 
@@ -50,21 +51,26 @@ def _view(cam, st, w, h):
     """Aim the current context's perspective camera at the robot, filling a w x h window."""
     from OpenGL import GL as gl
     from OpenGL import GLU as glu
+
     az, el, dist = cam
     tgt = np.array([st.x, st.y, st.place["z"]])
     d = np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
     eye = tgt + dist * d
     gl.glViewport(0, 0, w, h)
-    gl.glMatrixMode(gl.GL_PROJECTION); gl.glLoadIdentity()
+    gl.glMatrixMode(gl.GL_PROJECTION)
+    gl.glLoadIdentity()
     glu.gluPerspective(50.0, w / max(h, 1), 0.1, 100.0)
-    gl.glMatrixMode(gl.GL_MODELVIEW); gl.glLoadIdentity()
+    gl.glMatrixMode(gl.GL_MODELVIEW)
+    gl.glLoadIdentity()
     glu.gluLookAt(*eye, *tgt, 0, 0, 1)
 
 
 def _draw_robot(robot, st):
     from OpenGL import GL as gl
+
     V, N, C, red = robot
-    R4 = np.eye(4, dtype=np.float32); R4[:3, :3] = st.place["R"]
+    R4 = np.eye(4, dtype=np.float32)
+    R4[:3, :3] = st.place["R"]
     gl.glPushMatrix()
     gl.glTranslatef(st.x, st.y, st.place["z"])
     gl.glMultMatrixf(np.ascontiguousarray(R4.T))
@@ -74,18 +80,26 @@ def _draw_robot(robot, st):
 
 def _box(rx, ry, side, z):
     from OpenGL import GL as gl
+
     gl.glBegin(gl.GL_LINE_LOOP)
-    for dx, dy in [(-side / 2, -side / 2), (side / 2, -side / 2),
-                   (side / 2, side / 2), (-side / 2, side / 2)]:
+    for dx, dy in [
+        (-side / 2, -side / 2),
+        (side / 2, -side / 2),
+        (side / 2, side / 2),
+        (-side / 2, side / 2),
+    ]:
         gl.glVertex3f(rx + dx, ry + dy, z)
     gl.glEnd()
 
 
 def _goal_pole(goal):
     from OpenGL import GL as gl
-    gl.glColor3f(0.95, 0.1, 0.1); gl.glLineWidth(5.0)
+
+    gl.glColor3f(0.95, 0.1, 0.1)
+    gl.glLineWidth(5.0)
     gl.glBegin(gl.GL_LINES)
-    gl.glVertex3f(goal[0], goal[1], 0.0); gl.glVertex3f(goal[0], goal[1], 1.6)
+    gl.glVertex3f(goal[0], goal[1], 0.0)
+    gl.glVertex3f(goal[0], goal[1], 1.6)
     gl.glEnd()
 
 
@@ -93,6 +107,7 @@ def _cost_colors(Vmin, vcap, scene, rwx0, rwy0, rccell, rcny, rcnx):
     """Per scene-cell RGB from the routing field V (min over heading), aligned to the global mesh's
     row*nx+col vertex order. Cells outside the routing window or unreachable -> dark."""
     from matplotlib import cm
+
     ny, nx = scene.ny, scene.nx
     xs = scene.x0 + (np.arange(nx) + 0.5) * scene.cell
     ys = scene.y0 + (np.arange(ny) + 0.5) * scene.cell
@@ -114,6 +129,7 @@ def _draw_fan(fan, stepB):
     set MPPI actually averages is drawn bright green; the chosen nominal plan is bold cyan. ctr is
     [T+1, B] vec3 in planning-LOCAL coords; z is the settled body height [T+1, B]."""
     from OpenGL import GL as gl
+
     ctr, z, feas, elite, wx0, wy0 = (fan[k] for k in ("ctr", "z", "feas", "elite", "wx0", "wy0"))
     T1, B = z.shape
 
@@ -123,16 +139,19 @@ def _draw_fan(fan, stepB):
             gl.glVertex3f(wx0 + ctr[t, b, 0], wy0 + ctr[t, b, 1], z[t, b] + dz)
         gl.glEnd()
 
-    gl.glEnable(gl.GL_BLEND); gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+    gl.glEnable(gl.GL_BLEND)
+    gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
     gl.glLineWidth(1.4)
     for b in range(0, B, stepB):  # cloud: green = feasible, red = rejected (hits wall / tips)
         gl.glColor4f(0.3, 0.95, 0.4, 0.4) if feas[b] else gl.glColor4f(1.0, 0.25, 0.2, 0.4)
         strip(b, 0.02)
     gl.glDisable(gl.GL_BLEND)
-    gl.glLineWidth(2.5); gl.glColor3f(0.5, 1.0, 0.6)  # the elites MPPI averages
+    gl.glLineWidth(2.5)
+    gl.glColor3f(0.5, 1.0, 0.6)  # the elites MPPI averages
     for b in elite:
         strip(int(b), 0.04)
-    gl.glColor3f(0.1, 0.95, 0.98); gl.glLineWidth(4.0)  # chosen plan
+    gl.glColor3f(0.1, 0.95, 0.98)
+    gl.glLineWidth(4.0)  # chosen plan
     strip(0, 0.06)
 
 
@@ -140,6 +159,7 @@ def _grab(win):
     """Read the current GL back buffer (call after drawing, before swap) -> HxWx3 uint8, top-up."""
     import glfw
     from OpenGL import GL as gl
+
     w, h = glfw.get_framebuffer_size(win)
     gl.glReadBuffer(gl.GL_BACK)
     buf = gl.glReadPixels(0, 0, w, h, gl.GL_RGB, gl.GL_UNSIGNED_BYTE)
@@ -167,32 +187,65 @@ def _cbs(cam, ms):
     return on_button, on_cursor, on_scroll
 
 
-def run(world="pocket", K=8, dock_radius=1.5, lat_coarsen=4, win_m=9.0, route_m=16.0, local_scans=5,
-        drift=0.0, drive=False, fan_n=160, device="cuda", shot=None, shot_frame=None, max_frames=2000):
+def run(
+    world="pocket",
+    K=8,
+    dock_radius=1.5,
+    lat_coarsen=4,
+    win_m=9.0,
+    route_m=16.0,
+    local_scans=5,
+    drift=0.0,
+    drive=False,
+    fan_n=160,
+    device="cuda",
+    shot=None,
+    shot_frame=None,
+    max_frames=2000,
+):
     import glfw
     from OpenGL import GL as gl
 
     wp.init()
     builder, start, goal = W.WORLDS[world]
-    scene = builder(); mu = W.matching_friction(scene); goal = np.asarray(goal, np.float64)
+    scene = builder()
+    mu = W.matching_friction(scene)
+    goal = np.asarray(goal, np.float64)
     cell = scene.cell
     ww = wh = int(round(win_m / cell))
 
     drv = WarpDriver(scene, mu, init_pose=tuple(start), device=device)  # reality
     win_grid = GridParams(ww, wh, cell, 0.0, 0.0)
-    plan_sim = Simulator(dynamics.robot_params(), dynamics.planning_solver(), win_grid, 4096, 70, device)
+    plan_sim = Simulator(
+        dynamics.robot_params(), dynamics.planning_solver(), win_grid, 4096, 70, device
+    )
     plan_sim.set_uniform_friction(0.8)
-    planner = MppiGpu(plan_sim, 0.5, 4.0, _LATTICE_W, 0.05, 1e-2, 0, sigma_knot=1.0, n_knots=4,
-                      n_scenarios=K, n_theta=24)
+    planner = MppiGpu(
+        plan_sim,
+        0.5,
+        4.0,
+        _LATTICE_W,
+        0.05,
+        1e-2,
+        0,
+        sigma_knot=1.0,
+        n_knots=4,
+        n_scenarios=K,
+        n_theta=24,
+    )
     planner.reset_nominal(1.5)
     rww = rwh = int(round(max(route_m, win_m) / cell))
     kr = max(1, int(lat_coarsen))
     rcny, rcnx, rccell = rwh // kr, rww // kr, cell * kr
     route_grid = GridParams(rcnx, rcny, rccell, 0.0, 0.0)
-    ctg = CostToGo(route_grid, dynamics.robot_params(), dynamics.planning_solver(), n_theta=24, device=device)
-    planner.cw.vcap = ctg._vcap  # arm the saturation fallback (explore toward an out-of-window goal)
-    sgrid = GridParams(rcnx, rcny, rccell, (ww // 2 - rww // 2) * cell,
-                       (wh // 2 - rwh // 2) * cell).build()
+    ctg = CostToGo(
+        route_grid, dynamics.robot_params(), dynamics.planning_solver(), n_theta=24, device=device
+    )
+    # arm the saturation fallback (explore toward an out-of-window goal)
+    planner.cw.vcap = ctg._vcap
+    sgrid = GridParams(
+        rcnx, rcny, rccell, (ww // 2 - rww // 2) * cell, (wh // 2 - rwh // 2) * cell
+    ).build()
     mm = MultiScanMap(scene.ny, scene.nx)  # GLOBAL routing map (drift-prone)
     local = mm  # LOCAL map the MPPI plans on (reassigned per frame to the last-N-scan crop)
     scan_buf = deque(maxlen=local_scans) if local_scans >= 1 else None
@@ -203,8 +256,10 @@ def run(world="pocket", K=8, dock_radius=1.5, lat_coarsen=4, win_m=9.0, route_m=
     CM, RT, T = 0.05, 1e-2, plan_sim.T
     _rp = dynamics.robot_params()
     MAXR, MAXPU, MAXPD = _rp.max_roll, _rp.max_pitch_up, _rp.max_pitch_down
-    sXX, sYY = np.meshgrid(scene.x0 + (np.arange(scene.nx) + 0.5) * cell,  # cell centers (for cropping)
-                           scene.y0 + (np.arange(scene.ny) + 0.5) * cell)
+    sXX, sYY = np.meshgrid(
+        scene.x0 + (np.arange(scene.nx) + 0.5) * cell,  # cell centers (for cropping)
+        scene.y0 + (np.arange(scene.ny) + 0.5) * cell,
+    )
 
     if not glfw.init():
         raise RuntimeError("glfw init failed")
@@ -217,7 +272,8 @@ def run(world="pocket", K=8, dock_radius=1.5, lat_coarsen=4, win_m=9.0, route_m=
         glfw.set_window_pos(win_l, 60, 90)
         glfw.set_window_pos(win_r, 80 + PW, 90)
     for w_ in (win_l, win_r):
-        glfw.make_context_current(w_); _init_gl()
+        glfw.make_context_current(w_)
+        _init_gl()
     cam_l = [-2.1, 0.85, 16.0]
     cam_r = [-2.1, 0.85, 16.0]
     for w_, cam in ((win_l, cam_l), (win_r, cam_r)):
@@ -229,22 +285,30 @@ def run(world="pocket", K=8, dock_radius=1.5, lat_coarsen=4, win_m=9.0, route_m=
 
     robot = build_robot()
     _twr, _twc = np.nonzero(scene.H > 0.5)
-    true_wall = np.column_stack([scene.x0 + _twc * cell, scene.y0 + _twr * cell])  # true wall centers
+    # true wall centers
+    true_wall = np.column_stack([scene.x0 + _twc * cell, scene.y0 + _twr * cell])
     trail = []
-    route = None       # latest optimal lattice route (world coords) for window 1
-    fan = None         # latest rollouts (dict) for window 2
-    crop = None        # (wx0, wy0) of the fine planning window, to clip window-2's terrain to it
+    route = None  # latest optimal lattice route (world coords) for window 1
+    fan = None  # latest rollouts (dict) for window 2
+    crop = None  # (wx0, wy0) of the fine planning window, to clip window-2's terrain to it
     cost_C = None
     mode = {"manual": drive, "m_prev": False}  # press M (either window) to toggle AUTO <-> MANUAL
 
     def _press(k):  # key down in EITHER window -> driving works whichever window has focus
-        return glfw.PRESS if any(glfw.get_key(w_, k) == glfw.PRESS for w_ in (win_l, win_r)) else glfw.RELEASE
+        return (
+            glfw.PRESS
+            if any(glfw.get_key(w_, k) == glfw.PRESS for w_ in (win_l, win_r))
+            else glfw.RELEASE
+        )
 
     f = 0
     while not (glfw.window_should_close(win_l) or glfw.window_should_close(win_r)):
         glfw.poll_events()
-        if any(glfw.get_key(w_, k) == glfw.PRESS
-               for w_ in (win_l, win_r) for k in (glfw.KEY_ESCAPE, glfw.KEY_Q)):
+        if any(
+            glfw.get_key(w_, k) == glfw.PRESS
+            for w_ in (win_l, win_r)
+            for k in (glfw.KEY_ESCAPE, glfw.KEY_Q)
+        ):
             break
         m_now = _press(glfw.KEY_M) == glfw.PRESS  # edge-detected mode toggle
         if m_now and not mode["m_prev"]:
@@ -253,18 +317,22 @@ def run(world="pocket", K=8, dock_radius=1.5, lat_coarsen=4, win_m=9.0, route_m=
         mode["m_prev"] = m_now
         st = drv.render_state()
         rx, ry, yaw = st.x, st.y, st.yaw
-        trail.append([rx, ry, st.place["z"] + 0.05]); trail = trail[-6000:]
+        trail.append([rx, ry, st.place["z"] + 0.05])
+        trail = trail[-6000:]
         d = float(np.hypot(rx - goal[0], ry - goal[1]))
 
         if d >= 0.3:
-            obs, known = lidar_scan(scene.H, scene.x0, scene.y0, cell, (rx, ry, yaw),
-                                    fov_deg=180.0, max_range=7.0)
+            obs, known = lidar_scan(
+                scene.H, scene.x0, scene.y0, cell, (rx, ry, yaw), fov_deg=180.0, max_range=7.0
+            )
             if drift > 0.0:
                 drift_x += float(rng.normal(0.0, drift))
                 drift_y += float(rng.normal(0.0, drift))
-                drift_yaw += float(rng.normal(0.0, 0.1 * drift))  # coupled rotational drift (rad/step)
-                gobs, gkn = _drift_scan(obs, known, scene.x0, scene.y0, cell, rx, ry,
-                                        drift_x, drift_y, drift_yaw)
+                # coupled rotational drift (rad/step)
+                drift_yaw += float(rng.normal(0.0, 0.1 * drift))
+                gobs, gkn = _drift_scan(
+                    obs, known, scene.x0, scene.y0, cell, rx, ry, drift_x, drift_y, drift_yaw
+                )
             else:
                 gobs, gkn = obs, known
             mm.integrate(gobs, gkn)
@@ -280,12 +348,20 @@ def run(world="pocket", K=8, dock_radius=1.5, lat_coarsen=4, win_m=9.0, route_m=
             goal_l = (goal[0] - wx0, goal[1] - wy0)
             state_l = np.array([rx - wx0, ry - wy0, yaw], np.float32)
             crop = (wx0, wy0)
-            plan_sim.set_terrain(wp.array(np.ascontiguousarray(elev), dtype=wp.float32, device=device))
+            plan_sim.set_terrain(
+                wp.array(np.ascontiguousarray(elev), dtype=wp.float32, device=device)
+            )
             relev, rkn, rwx0, rwy0 = _crop_window(mm, scene, rx, ry, rww, rwh, cell)
             relev = np.where(rkn, relev, 0.0).astype(np.float32)
             goal_r = (goal[0] - rwx0, goal[1] - rwy0)
-            Hc = relev[:rcny * kr, :rcnx * kr].reshape(rcny, kr, rcnx, kr).max(axis=(1, 3)) if kr > 1 else relev
-            V = ctg.compute(wp.array(np.ascontiguousarray(Hc), dtype=wp.float32, device=device), goal_r)
+            Hc = (
+                relev[: rcny * kr, : rcnx * kr].reshape(rcny, kr, rcnx, kr).max(axis=(1, 3))
+                if kr > 1
+                else relev
+            )
+            V = ctg.compute(
+                wp.array(np.ascontiguousarray(Hc), dtype=wp.float32, device=device), goal_r
+            )
             planner.set_lattice(V, sgrid)
             if dock_radius > 0.0 and d < dock_radius and not mode["manual"]:
                 cmd = dock_control(state_l, goal_l)
@@ -296,17 +372,31 @@ def run(world="pocket", K=8, dock_radius=1.5, lat_coarsen=4, win_m=9.0, route_m=
                 der = planner.sim.derived.numpy()
                 clr, rsd = planner.sim.clearance.numpy(), planner.sim.residual.numpy()
                 pit, rol = der[:T, :, 1], der[:T, :, 2]
-                feas = ~((clr < CM) | (rsd > RT) | (np.abs(rol) > MAXR)
-                         | (-pit > MAXPU) | (pit > MAXPD)).any(0)  # per-rollout validity
-                elite = np.argsort(planner.J_cand.numpy())[:max(8, int(0.02 * planner.n_cand))] * planner.K
-                fan = dict(ctr=planner.sim.controlled.numpy(), z=der[..., 0], feas=feas,
-                           elite=elite, wx0=wx0, wy0=wy0)
+                feas = ~(
+                    (clr < CM) | (rsd > RT) | (np.abs(rol) > MAXR) | (-pit > MAXPU) | (pit > MAXPD)
+                ).any(
+                    0
+                )  # per-rollout validity
+                elite = (
+                    np.argsort(planner.J_cand.numpy())[: max(8, int(0.02 * planner.n_cand))]
+                    * planner.K
+                )
+                fan = dict(
+                    ctr=planner.sim.controlled.numpy(),
+                    z=der[..., 0],
+                    feas=feas,
+                    elite=elite,
+                    wx0=wx0,
+                    wy0=wy0,
+                )
                 # MANUAL: you drive (keyboard, either window); AUTO: follow the MPPI nominal (cyan)
                 cmd = _commands(_press).astype(np.float32) if mode["manual"] else auto_cmd
             drv.step(cmd)
             Vmin = V.numpy().min(axis=2)
             cost_C = _cost_colors(Vmin, ctg._vcap, scene, rwx0, rwy0, rccell, rcny, rcnx)
-            rpts = _trace_optimal(ctg, (rx - rwx0, ry - rwy0, yaw), 24, rcnx, rcny, 0.0, 0.0, rccell)
+            rpts = _trace_optimal(
+                ctg, (rx - rwx0, ry - rwy0, yaw), 24, rcnx, rcny, 0.0, 0.0, rccell
+            )
             route = (rpts + np.array([rwx0, rwy0])) if len(rpts) > 1 else None
 
         # window-1 mesh: the GLOBAL belief; window-2 mesh: the LOCAL map the MPPI actually plans on
@@ -319,8 +409,12 @@ def run(world="pocket", K=8, dock_radius=1.5, lat_coarsen=4, win_m=9.0, route_m=
         # clip the local terrain to the fine planning WINDOW (the bounded costmap the MPPI actually
         # crops to): inside & seen -> real terrain; inside & unseen -> flat (optimism); outside -> dark.
         if crop is not None:
-            in_win = ((sXX >= crop[0]) & (sXX < crop[0] + ww * cell)
-                      & (sYY >= crop[1]) & (sYY < crop[1] + wh * cell))
+            in_win = (
+                (sXX >= crop[0])
+                & (sXX < crop[0] + ww * cell)
+                & (sYY >= crop[1])
+                & (sYY < crop[1] + wh * cell)
+            )
             Cl[(in_win & ~local.known).ravel()] = (0.28, 0.30, 0.34)
             Cl[(~in_win).ravel()] = (0.13, 0.14, 0.17)
         else:
@@ -334,21 +428,36 @@ def run(world="pocket", K=8, dock_radius=1.5, lat_coarsen=4, win_m=9.0, route_m=
         _draw_robot(robot, st)
         gl.glDisable(gl.GL_LIGHTING)
         if route is not None:
-            gl.glColor3f(1.0, 0.45, 0.0); gl.glLineWidth(3.5)
+            gl.glColor3f(1.0, 0.45, 0.0)
+            gl.glLineWidth(3.5)
             gl.glBegin(gl.GL_LINE_STRIP)
             for px, py in route:
                 gl.glVertex3f(float(px), float(py), 0.18)
             gl.glEnd()
-        gl.glColor3f(1.0, 0.6, 0.1); gl.glLineWidth(2.0); _box(rx, ry, max(route_m, win_m), 0.05)
-        if drift > 0.0 and len(true_wall):  # RED ghost of the TRUE walls -> the belief rotates off it
-            gl.glColor3f(0.95, 0.15, 0.15); gl.glPointSize(3.0)
+        gl.glColor3f(1.0, 0.6, 0.1)
+        gl.glLineWidth(2.0)
+        _box(rx, ry, max(route_m, win_m), 0.05)
+        if drift > 0.0 and len(
+            true_wall
+        ):  # RED ghost of the TRUE walls -> the belief rotates off it
+            gl.glColor3f(0.95, 0.15, 0.15)
+            gl.glPointSize(3.0)
             gl.glBegin(gl.GL_POINTS)
             for px, py in true_wall:
                 gl.glVertex3f(float(px), float(py), 0.2)
             gl.glEnd()
         _goal_pole(goal)
         gl.glEnable(gl.GL_LIGHTING)
-        img_l = _grab(win_l) if (shot and (shot_frame is None and d < 0.3 or shot_frame is not None and f + 1 >= shot_frame)) else None
+        img_l = (
+            _grab(win_l)
+            if (
+                shot
+                and (
+                    shot_frame is None and d < 0.3 or shot_frame is not None and f + 1 >= shot_frame
+                )
+            )
+            else None
+        )
         glfw.swap_buffers(win_l)
 
         # ===== WINDOW 2: local MPPI (rollout fan over the LOCAL terrain) =====
@@ -360,7 +469,9 @@ def run(world="pocket", K=8, dock_radius=1.5, lat_coarsen=4, win_m=9.0, route_m=
         gl.glDisable(gl.GL_LIGHTING)
         if fan is not None:
             _draw_fan(fan, stepB)
-        gl.glColor3f(0.1, 0.9, 0.95); gl.glLineWidth(2.0); _box(rx, ry, win_m, 0.06)
+        gl.glColor3f(0.1, 0.9, 0.95)
+        gl.glLineWidth(2.0)
+        _box(rx, ry, win_m, 0.06)
         _goal_pole(goal)
         gl.glEnable(gl.GL_LIGHTING)
         img_r = _grab(win_r) if img_l is not None else None
@@ -370,6 +481,7 @@ def run(world="pocket", K=8, dock_radius=1.5, lat_coarsen=4, win_m=9.0, route_m=
         if f >= max_frames or img_l is not None:
             if img_l is not None:
                 import matplotlib.pyplot as plt
+
                 h = min(img_l.shape[0], img_r.shape[0])
                 plt.imsave(shot, np.concatenate([img_l[:h], img_r[:h]], axis=1))
                 print(f"saved {shot}")
@@ -387,17 +499,36 @@ def main():
     ap.add_argument("--route-m", type=float, default=16.0)
     ap.add_argument("--local-scans", type=int, default=5)
     ap.add_argument("--drift", type=float, default=0.0)
-    ap.add_argument("--drive", action="store_true",
-                    help="start in MANUAL drive mode (I/J/K/L, either window); press M to toggle live")
+    ap.add_argument(
+        "--drive",
+        action="store_true",
+        help="start in MANUAL drive mode (I/J/K/L, either window); press M to toggle live",
+    )
     ap.add_argument("--fan-n", type=int, default=160, help="how many rollouts to draw in window 2")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--shot", default=None, help="save a side-by-side still of both windows")
-    ap.add_argument("--shot-frame", type=int, default=None,
-                    help="capture --shot at this frame (default: at goal reach)")
+    ap.add_argument(
+        "--shot-frame",
+        type=int,
+        default=None,
+        help="capture --shot at this frame (default: at goal reach)",
+    )
     args = ap.parse_args()
-    run(world=args.world, K=args.K, dock_radius=args.dock_radius, lat_coarsen=args.lat_coarsen,
-        win_m=args.win_m, route_m=args.route_m, local_scans=args.local_scans, drift=args.drift,
-        drive=args.drive, fan_n=args.fan_n, device=args.device, shot=args.shot, shot_frame=args.shot_frame)
+    run(
+        world=args.world,
+        K=args.K,
+        dock_radius=args.dock_radius,
+        lat_coarsen=args.lat_coarsen,
+        win_m=args.win_m,
+        route_m=args.route_m,
+        local_scans=args.local_scans,
+        drift=args.drift,
+        drive=args.drive,
+        fan_n=args.fan_n,
+        device=args.device,
+        shot=args.shot,
+        shot_frame=args.shot_frame,
+    )
 
 
 if __name__ == "__main__":

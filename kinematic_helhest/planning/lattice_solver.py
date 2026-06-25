@@ -7,6 +7,7 @@ which the goal is unreachable for a forward-only robot keeps cost +inf -- so sam
 (x, y, yaw) penalises exactly the misaligned approaches a 2D geodesic can't express. The convergence
 loop runs ON DEVICE (capture_while), so the whole solve is CUDA-graph-capturable.
 """
+
 from __future__ import annotations
 
 import math
@@ -204,26 +205,21 @@ class LatticeValueSolver:
         with wp.ScopedDevice(self.device):
             self._prim_dr = wp.array(prim_dr, dtype=wp.int32)  # endpoint row offset of the arc
             self._prim_dc = wp.array(prim_dc, dtype=wp.int32)  # endpoint col offset
-            self._prim_heading = wp.array(
-                prim_heading, dtype=wp.int32
-            )  # heading bin the arc ends at
-            self._prim_cost = wp.array(
-                prim_cost, dtype=wp.float32
-            )  # arc length (the move's base cost)
-            self._sweep_dr = wp.array(
-                sweep_dr, dtype=wp.int32
-            )  # row offsets of the cells the arc crosses
+            # heading bin the arc ends at
+            self._prim_heading = wp.array(prim_heading, dtype=wp.int32)
+            # arc length (the move's base cost)
+            self._prim_cost = wp.array(prim_cost, dtype=wp.float32)
+            # row offsets of the cells the arc crosses
+            self._sweep_dr = wp.array(sweep_dr, dtype=wp.int32)
             self._sweep_dc = wp.array(sweep_dc, dtype=wp.int32)  # col offsets of those swept cells
             self._sweep_n = wp.array(sweep_n, dtype=wp.int32)  # how many swept cells each arc has
             # two value buffers, ping-ponged each sweep (read one, write the other, swap); +changed flag
             self._dist_a = wp.zeros((self.height, self.width, self.n_theta), dtype=wp.float32)
             self._dist_b = wp.zeros((self.height, self.width, self.n_theta), dtype=wp.float32)
-            self._changed = wp.zeros(
-                1, dtype=wp.int32
-            )  # >0 if any cell improved this sweep (convergence)
-            self._keep_running = wp.zeros(
-                1, dtype=wp.int32
-            )  # device while-condition for capture_while
+            # >0 if any cell improved this sweep (convergence)
+            self._changed = wp.zeros(1, dtype=wp.int32)
+            # device while-condition for capture_while
+            self._keep_running = wp.zeros(1, dtype=wp.int32)
             self._iter = wp.zeros(1, dtype=wp.int32)
         self._cap = self.height + self.width  # max bodies (each = 2 sweeps -> 2*(h+w) sweeps total)
 

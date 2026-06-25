@@ -12,6 +12,7 @@ x_ICR = CoM_x (rotation about the load centroid). Lowering the rear friction
 shrinks sum w -> alpha down -> the robot yaws MORE (the replay_real mu_rear
 finding), and pulls x_ICR toward the front axle (rear kicks out).
 """
+
 import numpy as np
 
 from ..model import GRAVITY

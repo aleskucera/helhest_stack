@@ -10,6 +10,7 @@ For Phase 0 this is a plain numpy reference (bilinear value + central-difference
 normal). The Warp port (Phase 2/5) mirrors this exactly so the numpy version
 stays usable as a finite-difference gradient oracle.
 """
+
 import numpy as np
 
 from . import data
@@ -39,12 +40,7 @@ class Heightmap:
         h10 = H[iy, ix + 1]
         h01 = H[iy + 1, ix]
         h11 = H[iy + 1, ix + 1]
-        h = (
-            (1 - tx) * (1 - ty) * h00
-            + tx * (1 - ty) * h10
-            + (1 - tx) * ty * h01
-            + tx * ty * h11
-        )
+        h = (1 - tx) * (1 - ty) * h00 + tx * (1 - ty) * h10 + (1 - tx) * ty * h01 + tx * ty * h11
         return h
 
     def normal(self, x, y, eps=None):
@@ -135,10 +131,11 @@ def demo_terrain(cell=0.06):
     xlim, ylim = (-3.0, 10.0), (-4.0, 4.0)
     XX, YY = _grid(xlim, ylim, cell)
     H = np.zeros_like(XX)
-    H[(np.abs(XX - 1.3) <= 0.35) & (np.abs(YY) <= 1.0)] = 0.12        # curb
-    H[(np.abs(XX - 2.2) <= 0.15) & (np.abs(YY) <= 1.0)] = 1.0         # wall: drive straight in -> robot turns red (infeasible settle)
-    H += np.clip(XX - 3.0, 0.0, 3.0) / 3.0 * 0.5                       # ramp+plateau
-    H += 0.6 * np.exp(-((XX - 8.0) ** 2 + (YY + 2.0) ** 2) / (2 * 1.2 ** 2))  # hill
+    H[(np.abs(XX - 1.3) <= 0.35) & (np.abs(YY) <= 1.0)] = 0.12  # curb
+    # wall: drive straight in -> robot turns red (infeasible settle)
+    H[(np.abs(XX - 2.2) <= 0.15) & (np.abs(YY) <= 1.0)] = 1.0
+    H += np.clip(XX - 3.0, 0.0, 3.0) / 3.0 * 0.5  # ramp+plateau
+    H += 0.6 * np.exp(-((XX - 8.0) ** 2 + (YY + 2.0) ** 2) / (2 * 1.2**2))  # hill
     return Heightmap(H, (xlim[0], ylim[0]), cell)
 
 
@@ -150,5 +147,7 @@ if __name__ == "__main__":
     assert abs(hm.sample(-1.0, 0.0) - 0.0) < 1e-9, "ground wrong"
     n = hm.normal(-1.0, 0.0)
     assert np.allclose(n, [0, 0, 1], atol=1e-6), f"flat normal wrong: {n}"
-    print("heightmap smoke test OK:",
-          f"box top={hm.sample(cx, cy):.3f}, ground={hm.sample(-1.0, 0.0):.3f}, normal={n}")
+    print(
+        "heightmap smoke test OK:",
+        f"box top={hm.sample(cx, cy):.3f}, ground={hm.sample(-1.0, 0.0):.3f}, normal={n}",
+    )

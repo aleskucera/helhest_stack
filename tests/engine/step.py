@@ -2,6 +2,7 @@
 
 Run:  python -m tests.engine.step
 """
+
 import numpy as np
 import warp as wp
 
@@ -19,8 +20,8 @@ from kinematic_helhest.engine import settle
 from kinematic_helhest.engine import Solver
 from kinematic_helhest.engine import SolverParams
 from kinematic_helhest.engine import step_kernel
-from kinematic_helhest.engine.step import chassis_clearance
 from kinematic_helhest.engine.rotations import euler_zyx
+from kinematic_helhest.engine.step import chassis_clearance
 from kinematic_helhest.engine.step import normal_loads
 from kinematic_helhest.engine.step import rollout_kernel
 from kinematic_helhest.reference import placement
@@ -29,13 +30,26 @@ from kinematic_helhest.reference import rollout as rollout_np
 
 def _upload(hm, device, requires_grad=False):
     """Verification-only: numpy Heightmap -> (device elevation array, Grid)."""
-    elev = wp.array(np.ascontiguousarray(hm.H, np.float32), dtype=wp.float32,
-                    device=device, requires_grad=requires_grad)
+    elev = wp.array(
+        np.ascontiguousarray(hm.H, np.float32),
+        dtype=wp.float32,
+        device=device,
+        requires_grad=requires_grad,
+    )
     return elev, GridParams(hm.nx, hm.ny, hm.cell, hm.x0, hm.y0).build()
 
 
-def rollout_device(scene, mu_field, setpoints, init_pose, params,
-                   robot_params=None, device="cpu", resid_tol=1e-2, clear_margin=0.0):
+def rollout_device(
+    scene,
+    mu_field,
+    setpoints,
+    init_pose,
+    params,
+    robot_params=None,
+    device="cpu",
+    resid_tol=1e-2,
+    clear_margin=0.0,
+):
     """Single-rollout (B=1) device rollout. Returns numpy logs to match the oracle."""
     robot_params = robot_params or RobotParams()
     robot = robot_params.build(device)
@@ -57,29 +71,47 @@ def rollout_device(scene, mu_field, setpoints, init_pose, params,
     clear = wp.zeros((T, 1), dtype=float, device=device)
     resid = wp.zeros((T, 1), dtype=float, device=device)
 
-    wp.launch(init_state_kernel, 1, inputs=[te, g, robot, sp, pose0],
-              outputs=[controlled, derived], device=device)
+    wp.launch(
+        init_state_kernel,
+        1,
+        inputs=[te, g, robot, sp, pose0],
+        outputs=[controlled, derived],
+        device=device,
+    )
     for t in range(T):
-        wp.launch(step_kernel, 1,
-                  inputs=[te, tr, tm, g, robot, sp, omega[t], controlled[t], derived[t]],
-                  outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]],
-                  device=device)
+        wp.launch(
+            step_kernel,
+            1,
+            inputs=[te, tr, tm, g, robot, sp, omega[t], controlled[t], derived[t]],
+            outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]],
+            device=device,
+        )
     clear_np, resid_np = clear.numpy()[:, 0], resid.numpy()[:, 0]
     bad = (clear_np < clear_margin) | (resid_np > resid_tol)
     return {
-        "controlled": controlled.numpy()[:, 0, :], "derived": derived.numpy()[:, 0, :],
-        "loads": loads.numpy()[:, 0, :], "turn": turn.numpy()[:, 0, :],
-        "clear": clear_np, "residual": resid_np,
+        "controlled": controlled.numpy()[:, 0, :],
+        "derived": derived.numpy()[:, 0, :],
+        "loads": loads.numpy()[:, 0, :],
+        "turn": turn.numpy()[:, 0, :],
+        "clear": clear_np,
+        "residual": resid_np,
         "valid": not bool(bad.any()),
         "first_invalid": int(np.argmax(bad)) if bad.any() else -1,
     }
 
 
 @wp.kernel
-def _settle_probe(H: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot, sp: Solver,
-                  pose: wp.array(dtype=wp.vec3),
-                  u_out: wp.array(dtype=wp.vec3), contacts: wp.array(dtype=wp.vec3),
-                  normals: wp.array(dtype=wp.vec3), residual: wp.array(dtype=float)):
+def _settle_probe(
+    H: wp.array2d(dtype=wp.float32),
+    g: Grid,
+    robot: Robot,
+    sp: Solver,
+    pose: wp.array(dtype=wp.vec3),
+    u_out: wp.array(dtype=wp.vec3),
+    contacts: wp.array(dtype=wp.vec3),
+    normals: wp.array(dtype=wp.vec3),
+    residual: wp.array(dtype=float),
+):
     tid = wp.tid()
     x = pose[tid][0]
     y = pose[tid][1]
@@ -99,9 +131,16 @@ def _settle_probe(H: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot, sp: So
 
 
 @wp.kernel
-def _loads_probe(Henv: wp.array2d(dtype=wp.float32), Hraw: wp.array2d(dtype=wp.float32),
-                 g: Grid, robot: Robot, sp: Solver, pose: wp.array(dtype=wp.vec3),
-                 loads: wp.array(dtype=wp.vec3), clearance: wp.array(dtype=float)):
+def _loads_probe(
+    Henv: wp.array2d(dtype=wp.float32),
+    Hraw: wp.array2d(dtype=wp.float32),
+    g: Grid,
+    robot: Robot,
+    sp: Solver,
+    pose: wp.array(dtype=wp.vec3),
+    loads: wp.array(dtype=wp.vec3),
+    clearance: wp.array(dtype=float),
+):
     tid = wp.tid()
     x = pose[tid][0]
     y = pose[tid][1]
@@ -123,9 +162,11 @@ def _build_test(device="cpu", iters=12):
 def selftest_settle():
     wp.init()
     robot, sp = _build_test()
-    cases = [("flat", hmmod.flat(), [(0.0, 0.0, 0.0), (1.0, 0.5, 0.7)]),
-             ("ramp", hmmod.ramp_scene(), [(2.0, 0.0, 0.0), (3.0, 0.5, 0.3)]),
-             ("box", hmmod.box_scene(), [(-1.0, 0.0, 0.0), (0.5, 0.0, 0.0)])]
+    cases = [
+        ("flat", hmmod.flat(), [(0.0, 0.0, 0.0), (1.0, 0.5, 0.7)]),
+        ("ramp", hmmod.ramp_scene(), [(2.0, 0.0, 0.0), (3.0, 0.5, 0.3)]),
+        ("box", hmmod.box_scene(), [(-1.0, 0.0, 0.0), (0.5, 0.0, 0.0)]),
+    ]
     worst = 0.0
     for name, scene, poses in cases:
         env = hmmod.wheel_envelope(scene, 0.35)
@@ -136,25 +177,36 @@ def selftest_settle():
         contacts = wp.zeros(B * 3, dtype=wp.vec3, device="cpu")
         normals = wp.zeros(B * 3, dtype=wp.vec3, device="cpu")
         resid = wp.zeros(B, dtype=float, device="cpu")
-        wp.launch(_settle_probe, B, inputs=[te, g, robot, sp, pose],
-                  outputs=[u_out, contacts, normals, resid], device="cpu")
+        wp.launch(
+            _settle_probe,
+            B,
+            inputs=[te, g, robot, sp, pose],
+            outputs=[u_out, contacts, normals, resid],
+            device="cpu",
+        )
         uo = u_out.numpy()
         co = contacts.numpy().reshape(B, 3, 3)
         for i, (x, y, yaw) in enumerate(poses):
             ref = placement.settle(x, y, yaw, env)
-            du = max(abs(uo[i, 0] - ref["z"]), abs(uo[i, 1] - ref["pitch"]), abs(uo[i, 2] - ref["roll"]))
+            du = max(
+                abs(uo[i, 0] - ref["z"]), abs(uo[i, 1] - ref["pitch"]), abs(uo[i, 2] - ref["roll"])
+            )
             dc = np.abs(co[i] - ref["contacts"]).max()
             worst = max(worst, du, dc)
-            print(f"  {name:4s} ({x:+.1f},{y:+.1f},{yaw:+.1f})  d(z,p,r)={du:.2e}  dcontacts={dc:.2e}")
+            print(
+                f"  {name:4s} ({x:+.1f},{y:+.1f},{yaw:+.1f})  d(z,p,r)={du:.2e}  dcontacts={dc:.2e}"
+            )
     print(f"settle device-vs-oracle worst={worst:.2e}  {'OK' if worst < 1e-4 else 'REVIEW'}")
 
 
 def selftest_loads():
     wp.init()
     robot, sp = _build_test()
-    cases = [("flat", hmmod.flat(), [(0.0, 0.0, 0.0), (1.0, 0.5, 0.7)]),
-             ("ramp", hmmod.ramp_scene(), [(2.0, 0.0, 0.0), (3.0, 0.5, 0.3)]),
-             ("box", hmmod.box_scene(), [(-1.0, 0.0, 0.0), (0.9, 0.0, 0.0)])]
+    cases = [
+        ("flat", hmmod.flat(), [(0.0, 0.0, 0.0), (1.0, 0.5, 0.7)]),
+        ("ramp", hmmod.ramp_scene(), [(2.0, 0.0, 0.0), (3.0, 0.5, 0.3)]),
+        ("box", hmmod.box_scene(), [(-1.0, 0.0, 0.0), (0.9, 0.0, 0.0)]),
+    ]
     worst = 0.0
     for name, scene, poses in cases:
         env, raw = hmmod.wheel_envelope(scene, 0.35), scene
@@ -164,8 +216,13 @@ def selftest_loads():
         pose = wp.array(np.asarray(poses, np.float32), dtype=wp.vec3, device="cpu")
         loads = wp.zeros(B, dtype=wp.vec3, device="cpu")
         clear = wp.zeros(B, dtype=float, device="cpu")
-        wp.launch(_loads_probe, B, inputs=[te, tr, g, robot, sp, pose],
-                  outputs=[loads, clear], device="cpu")
+        wp.launch(
+            _loads_probe,
+            B,
+            inputs=[te, tr, g, robot, sp, pose],
+            outputs=[loads, clear],
+            device="cpu",
+        )
         lo, cl = loads.numpy(), clear.numpy()
         for i, (x, y, yaw) in enumerate(poses):
             place = placement.settle(x, y, yaw, env)
@@ -175,7 +232,9 @@ def selftest_loads():
             dC = abs(cl[i] - cc_ref)
             worst = max(worst, dN, dC)
             print(f"  {name:4s} ({x:+.1f},{y:+.1f},{yaw:+.1f})  dN={dN:.2e}  dclear={dC:.2e}")
-    print(f"loads/clearance device-vs-oracle worst={worst:.2e}  {'OK' if worst < 1e-3 else 'REVIEW'}")
+    print(
+        f"loads/clearance device-vs-oracle worst={worst:.2e}  {'OK' if worst < 1e-3 else 'REVIEW'}"
+    )
 
 
 def selftest_step():
@@ -184,8 +243,10 @@ def selftest_step():
     params = SolverParams(newton_iters=12, dt=dt, k_turn=k)
     mu = friction.uniform(0.8)
     worst = 0.0
-    cases = [("flat-turn", hmmod.flat(), (0.0, 0.0, 0.0), np.tile([1.0, 2.0, 1.5], (40, 1))),
-             ("box-climb", hmmod.box_scene(), (-1.0, 0.0, 0.0), np.tile([2.0, 2.0, 2.0], (60, 1)))]
+    cases = [
+        ("flat-turn", hmmod.flat(), (0.0, 0.0, 0.0), np.tile([1.0, 2.0, 1.5], (40, 1))),
+        ("box-climb", hmmod.box_scene(), (-1.0, 0.0, 0.0), np.tile([2.0, 2.0, 2.0], (60, 1))),
+    ]
     for name, scene, init_pose, sp in cases:
         out = rollout_device(scene, mu, sp, init_pose, params)
         ref = rollout_np.rollout_terrain(sp, dt, scene, init_pose=init_pose, mu_field=mu, k=k)
@@ -196,8 +257,10 @@ def selftest_step():
         d_x = np.abs(out["turn"][:, 1] - ref["x_icr"]).max()
         d_c = np.abs(out["clear"] - ref["chassis_clear"]).max()
         worst = max(worst, d_xy, d_yaw, d_N * 1e-3, d_c)
-        print(f"  {name:9s} dXY={d_xy:.2e} dyaw={d_yaw:.2e} dN={d_N:.2e} "
-              f"dalpha={d_a:.2e} dxicr={d_x:.2e} dclear={d_c:.2e}")
+        print(
+            f"  {name:9s} dXY={d_xy:.2e} dyaw={d_yaw:.2e} dN={d_N:.2e} "
+            f"dalpha={d_a:.2e} dxicr={d_x:.2e} dclear={d_c:.2e}"
+        )
     print(f"step device-vs-oracle  {'OK' if worst < 5e-3 else 'REVIEW'}")
 
 
@@ -214,28 +277,60 @@ def selftest_rollout_kernel():
     tm, _ = _upload(mu, "cpu")
     B, T = 8, 30
     rng = np.random.default_rng(0)
-    omega = wp.array(np.clip(2.0 + rng.normal(0, 1.0, (T, B, 3)), -4, 4).astype(np.float32),
-                     dtype=wp.vec3, device="cpu")
-    pose0 = wp.array(np.tile([-1.0, 0.0, 0.0], (B, 1)).astype(np.float32), dtype=wp.vec3, device="cpu")
+    omega = wp.array(
+        np.clip(2.0 + rng.normal(0, 1.0, (T, B, 3)), -4, 4).astype(np.float32),
+        dtype=wp.vec3,
+        device="cpu",
+    )
+    pose0 = wp.array(
+        np.tile([-1.0, 0.0, 0.0], (B, 1)).astype(np.float32), dtype=wp.vec3, device="cpu"
+    )
 
     def buffers():
-        return [wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
-                wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
-                wp.zeros((T, B), dtype=wp.vec3, device="cpu"), wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
-                wp.zeros((T, B), dtype=float, device="cpu"), wp.zeros((T, B), dtype=float, device="cpu")]
+        return [
+            wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros((T, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
+            wp.zeros((T, B), dtype=float, device="cpu"),
+            wp.zeros((T, B), dtype=float, device="cpu"),
+        ]
 
     fused = buffers()
-    wp.launch(rollout_kernel, B, inputs=[T, te, tr, tm, g, robot, sp, pose0, omega],
-              outputs=fused, device="cpu")
+    wp.launch(
+        rollout_kernel,
+        B,
+        inputs=[T, te, tr, tm, g, robot, sp, pose0, omega],
+        outputs=fused,
+        device="cpu",
+    )
     perstep = buffers()
-    wp.launch(init_state_kernel, B, inputs=[te, g, robot, sp, pose0],
-              outputs=[perstep[0], perstep[1]], device="cpu")
+    wp.launch(
+        init_state_kernel,
+        B,
+        inputs=[te, g, robot, sp, pose0],
+        outputs=[perstep[0], perstep[1]],
+        device="cpu",
+    )
     for t in range(T):
-        wp.launch(step_kernel, B, inputs=[te, tr, tm, g, robot, sp, omega[t], perstep[0][t], perstep[1][t]],
-                  outputs=[perstep[0][t + 1], perstep[1][t + 1], perstep[2][t], perstep[3][t],
-                           perstep[4][t], perstep[5][t]], device="cpu")
+        wp.launch(
+            step_kernel,
+            B,
+            inputs=[te, tr, tm, g, robot, sp, omega[t], perstep[0][t], perstep[1][t]],
+            outputs=[
+                perstep[0][t + 1],
+                perstep[1][t + 1],
+                perstep[2][t],
+                perstep[3][t],
+                perstep[4][t],
+                perstep[5][t],
+            ],
+            device="cpu",
+        )
     worst = max(np.abs(f.numpy() - s.numpy()).max() for f, s in zip(fused, perstep))
-    print(f"fused rollout_kernel == per-step  worst={worst:.2e}  {'OK' if worst == 0.0 else 'REVIEW'}")
+    print(
+        f"fused rollout_kernel == per-step  worst={worst:.2e}  {'OK' if worst == 0.0 else 'REVIEW'}"
+    )
 
 
 if __name__ == "__main__":

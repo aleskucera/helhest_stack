@@ -9,13 +9,27 @@ drive (MultiScanMap) to get the multi-scan map.
 
   python -m kinematic_helhest.perception.lidar --world pocket
 """
+
 from __future__ import annotations
 
 import numpy as np
 
 
-def lidar_scan(H, x0, y0, cell, pose, *, mount_height=0.4, max_range=7.0, fov_deg=180.0,
-               ang_res_deg=0.5, r_min=0.3, noise=0.0, rng=None):
+def lidar_scan(
+    H,
+    x0,
+    y0,
+    cell,
+    pose,
+    *,
+    mount_height=0.4,
+    max_range=7.0,
+    fov_deg=180.0,
+    ang_res_deg=0.5,
+    r_min=0.3,
+    noise=0.0,
+    rng=None,
+):
     """One scan from world pose (x, y, yaw) over heightmap H[ny,nx] (grid origin x0,y0, size cell).
 
     Returns (obs_elev[ny,nx], known[ny,nx] bool): obs_elev = ground-truth height at the cells the
@@ -76,9 +90,12 @@ def _poses_along(traj, start, n):
     return out
 
 
-def run(world="pocket", n_scans=16, fov_deg=180.0, max_range=7.0, lat_coarsen=6, device="cuda", out=None):
+def run(
+    world="pocket", n_scans=16, fov_deg=180.0, max_range=7.0, lat_coarsen=6, device="cuda", out=None
+):
     import warp as wp
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.colors import ListedColormap
@@ -98,10 +115,18 @@ def run(world="pocket", n_scans=16, fov_deg=180.0, max_range=7.0, lat_coarsen=6,
     # an optimal path to drive along (so the scan poses are a realistic route through the world)
     k = max(1, int(lat_coarsen))
     cny, cnx, ccell = scene.ny // k, scene.nx // k, scene.cell * k
-    Hc = np.ascontiguousarray(scene.H[: cny * k, : cnx * k].reshape(cny, k, cnx, k).max(axis=(1, 3)), np.float32)
+    Hc = np.ascontiguousarray(
+        scene.H[: cny * k, : cnx * k].reshape(cny, k, cnx, k).max(axis=(1, 3)), np.float32
+    )
     cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0)
-    ctg = CostToGo(cgrid, dynamics.robot_params(), dynamics.planning_solver(),
-                                n_theta=24, step=max(0.3, 1.6 * ccell), device=device)
+    ctg = CostToGo(
+        cgrid,
+        dynamics.robot_params(),
+        dynamics.planning_solver(),
+        n_theta=24,
+        step=max(0.3, 1.6 * ccell),
+        device=device,
+    )
     ctg.compute(wp.array(Hc, dtype=wp.float32, device=device), goalv)
     traj = _trace_optimal(ctg, start, 24, cnx, cny, scene.x0, scene.y0, ccell)
     poses = _poses_along(traj, start, n_scans)
@@ -110,15 +135,18 @@ def run(world="pocket", n_scans=16, fov_deg=180.0, max_range=7.0, lat_coarsen=6,
     snaps = {n_scans // 4, n_scans // 2, (3 * n_scans) // 4, n_scans}  # 4 progression frames
     frames = []
     for i, pose in enumerate(poses, 1):
-        obs, known = lidar_scan(H, scene.x0, scene.y0, scene.cell, pose,
-                                fov_deg=fov_deg, max_range=max_range)
+        obs, known = lidar_scan(
+            H, scene.x0, scene.y0, scene.cell, pose, fov_deg=fov_deg, max_range=max_range
+        )
         mm.integrate(obs, known)
         if i in snaps:
             frames.append((i, mm.known.copy(), pose))
 
     ext = [scene.x0, scene.x0 + scene.nx * scene.cell, scene.y0, scene.y0 + scene.ny * scene.cell]
     wall = H > 0.5
-    cmap = ListedColormap(["#1a1a28", "#cfd3da", "#3a3a3a"])  # 0 unknown / 1 known-free / 2 known-wall
+    cmap = ListedColormap(
+        ["#1a1a28", "#cfd3da", "#3a3a3a"]
+    )  # 0 unknown / 1 known-free / 2 known-wall
     fig, axes = plt.subplots(2, 2, figsize=(13, 8))
     for ax, (i, kn, pose) in zip(axes.ravel(), frames):
         cat = np.where(kn, 1, 0)
@@ -126,14 +154,26 @@ def run(world="pocket", n_scans=16, fov_deg=180.0, max_range=7.0, lat_coarsen=6,
         ax.imshow(cat, origin="lower", extent=ext, cmap=cmap, vmin=0, vmax=2, aspect="equal")
         ax.plot(traj[:, 0], traj[:, 1], "-", color="#ff7a1a", lw=1.6, alpha=0.7)
         ax.plot(pose[0], pose[1], "o", color="yellow", mec="k", ms=9, zorder=5)
-        ax.arrow(pose[0], pose[1], 0.9 * np.cos(pose[2]), 0.9 * np.sin(pose[2]),
-                 head_width=0.4, color="yellow", zorder=5, length_includes_head=True)
+        ax.arrow(
+            pose[0],
+            pose[1],
+            0.9 * np.cos(pose[2]),
+            0.9 * np.sin(pose[2]),
+            head_width=0.4,
+            color="yellow",
+            zorder=5,
+            length_includes_head=True,
+        )
         ax.plot(goal[0], goal[1], "*", color="red", ms=16, mec="k", zorder=5)
         ax.set_title(f"after scan {i}/{n_scans}", fontsize=10)
-        ax.set_xlabel("x (m)"); ax.set_ylabel("y (m)")
-    fig.suptitle(f"{world}: synthetic-lidar multi-scan map filling in along the route  "
-                 f"(fov={fov_deg:g}°, range={max_range:g} m)  --  navy = unknown, light = seen-free, "
-                 f"grey = seen-wall", fontsize=12)
+        ax.set_xlabel("x (m)")
+        ax.set_ylabel("y (m)")
+    fig.suptitle(
+        f"{world}: synthetic-lidar multi-scan map filling in along the route  "
+        f"(fov={fov_deg:g}°, range={max_range:g} m)  --  navy = unknown, light = seen-free, "
+        f"grey = seen-wall",
+        fontsize=12,
+    )
     fig.tight_layout()
     out = out or f"/tmp/lidar_{world}.png"
     fig.savefig(out, dpi=120)
@@ -154,8 +194,15 @@ def main():
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
-    run(world=args.world, n_scans=args.n_scans, fov_deg=args.fov_deg, max_range=args.max_range,
-        lat_coarsen=args.lat_coarsen, device=args.device, out=args.out)
+    run(
+        world=args.world,
+        n_scans=args.n_scans,
+        fov_deg=args.fov_deg,
+        max_range=args.max_range,
+        lat_coarsen=args.lat_coarsen,
+        device=args.device,
+        out=args.out,
+    )
 
 
 if __name__ == "__main__":

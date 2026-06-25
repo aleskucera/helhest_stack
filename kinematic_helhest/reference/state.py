@@ -14,6 +14,7 @@ It is predict->project:
             advance the planar pose (climbing slows horizontal progress).
   project : settle the new pose onto the terrain -> the next valid State.
 """
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -30,10 +31,10 @@ class State:
     x: float
     y: float
     yaw: float
-    place: dict           # settle result: z, pitch, roll, R, contacts, normals, residual
-    loads: np.ndarray     # contact normal loads N_i [3] (Newtons)
+    place: dict  # settle result: z, pitch, roll, R, contacts, normals, residual
+    loads: np.ndarray  # contact normal loads N_i [3] (Newtons)
     chassis_clear: float  # min chassis-point clearance vs raw terrain [m]
-    valid: bool           # not high-centered (chassis clears)
+    valid: bool  # not high-centered (chassis clears)
     alpha: float = float("nan")  # turning params USED to reach this state
     x_icr: float = float("nan")  # (nan for an initial settled-only state)
 
@@ -79,8 +80,19 @@ def turning_of(state, mu_field, k, alpha=1.0, x_icr=0.0):
     return turning.turning_params(mu_i, state.loads, k)
 
 
-def step(state, omega, surf, hm, dt, mu_field=None, k=2.0,
-         alpha=1.0, x_icr=0.0, R=WHEEL_RADIUS, b=HALF_TRACK):
+def step(
+    state,
+    omega,
+    surf,
+    hm,
+    dt,
+    mu_field=None,
+    k=2.0,
+    alpha=1.0,
+    x_icr=0.0,
+    R=WHEEL_RADIUS,
+    b=HALF_TRACK,
+):
     """Advance one timestep: valid State + wheel speeds [L,R,rear] -> valid State."""
     alpha_t, xicr_t = turning_of(state, mu_field, k, alpha, x_icr)
 

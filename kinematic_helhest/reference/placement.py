@@ -11,6 +11,7 @@ gradients; this forward solve stays as the finite-difference oracle.
 Orientation convention: R = Rz(yaw) @ Ry(pitch) @ Rx(roll)  (Z-Y-X intrinsic).
 Pitch nose-up is negative (rotation about +Y tilts +X toward -Z).
 """
+
 import numpy as np
 
 from ..model import chassis_sample_points
@@ -106,9 +107,15 @@ def settle(x, y, yaw, hm, init=None, R_wheel=WHEEL_RADIUS, max_iter=20, tol=1e-7
     c, hubs, n = _wheel_clearances(x, y, yaw, z, pitch, roll, hm, R_wheel)
     contacts = hubs - R_wheel * n  # contact points on the terrain
     return {
-        "z": float(z), "pitch": float(pitch), "roll": float(roll),
-        "R": R, "hubs": hubs, "normals": n, "contacts": contacts,
-        "converged": bool(np.max(np.abs(c)) < 1e-4), "residual": float(np.max(np.abs(c))),
+        "z": float(z),
+        "pitch": float(pitch),
+        "roll": float(roll),
+        "R": R,
+        "hubs": hubs,
+        "normals": n,
+        "contacts": contacts,
+        "converged": bool(np.max(np.abs(c)) < 1e-4),
+        "residual": float(np.max(np.abs(c))),
     }
 
 
@@ -119,8 +126,8 @@ def normal_loads(place, x, y):
     determined equations; tangential friction carries the rest). Returns N [3].
     """
     R = place["R"]
-    contacts = place["contacts"]   # [3,3]
-    n = place["normals"]           # [3,3]
+    contacts = place["contacts"]  # [3,3]
+    n = place["normals"]  # [3,3]
     com_world = np.array([x, y, place["z"]]) + R @ COM
     r = contacts - com_world[None, :]  # lever arms [3,3]
 

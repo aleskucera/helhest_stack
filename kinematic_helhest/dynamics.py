@@ -10,11 +10,12 @@ Two solver fidelities share the same dt and turn gain:
   planning_solver   -- the B-batch MPPI rollouts: fewer Newton iters (speed across thousands)
   execution_solver  -- the single driven / settled robot: more Newton iters (accuracy)
 """
+
 from .engine import RobotParams
 from .engine import SolverParams
 
-DT = 0.05      # control timestep -- the plan horizon step AND the driver frame step (must match)
-K_TURN = 2.0   # skid-steer turn gain
+DT = 0.05  # control timestep -- the plan horizon step AND the driver frame step (must match)
+K_TURN = 2.0  # skid-steer turn gain
 
 
 def robot_params():

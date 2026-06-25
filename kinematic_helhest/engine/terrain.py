@@ -23,8 +23,12 @@ class GridParams:
     @property
     def bounds(self) -> tuple:
         """World extent (xmin, xmax, ymin, ymax) -- the convention the geodesic solvers take."""
-        return (self.origin_x, self.origin_x + self.cells_x * self.cell_size,
-                self.origin_y, self.origin_y + self.cells_y * self.cell_size)
+        return (
+            self.origin_x,
+            self.origin_x + self.cells_x * self.cell_size,
+            self.origin_y,
+            self.origin_y + self.cells_y * self.cell_size,
+        )
 
     def build(self) -> Grid:
         grid = Grid()

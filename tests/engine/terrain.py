@@ -2,6 +2,7 @@
 
 Run:  python -m tests.engine.terrain
 """
+
 import numpy as np
 import warp as wp
 
@@ -13,9 +14,14 @@ from kinematic_helhest.engine import sample_normal
 
 
 @wp.kernel
-def _probe(elevation: wp.array2d(dtype=wp.float32), g: Grid,
-           xs: wp.array(dtype=wp.float32), ys: wp.array(dtype=wp.float32),
-           out_h: wp.array(dtype=wp.float32), out_n: wp.array(dtype=wp.vec3)):
+def _probe(
+    elevation: wp.array2d(dtype=wp.float32),
+    g: Grid,
+    xs: wp.array(dtype=wp.float32),
+    ys: wp.array(dtype=wp.float32),
+    out_h: wp.array(dtype=wp.float32),
+    out_n: wp.array(dtype=wp.vec3),
+):
     """Verification-only: launch the engine samplers from host code."""
     i = wp.tid()
     out_h[i] = sample_field(elevation, g, xs[i], ys[i])

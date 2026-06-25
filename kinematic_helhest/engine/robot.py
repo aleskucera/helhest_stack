@@ -4,6 +4,7 @@
 of read-only constants passed into the kernels). The numpy geometry/mass also live
 in the top-level `model.py` for the reference/viz paths; these are the device twin.
 """
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -64,12 +65,17 @@ class RobotParams:  # host-side robot knobs — what you nudge
     chassis_ny: int = 3
     # --- planning capabilities: the robot's own limits, read by the planner/cost-to-go. NOT copied
     # into the device Robot struct by build() -- the kernels never see these. ---
-    min_turn_radius: float = 0.5    # tightest forward arc the planner assumes (skid-steer maneuverability)
-    max_roll: float = np.radians(30.0)      # [rad] lateral tip-over limit (symmetric; narrow track -> strict)
+    # tightest forward arc the planner assumes (skid-steer maneuverability)
+    min_turn_radius: float = 0.5
+    # [rad] lateral tip-over limit (symmetric; narrow track -> strict)
+    max_roll: float = np.radians(30.0)
     max_pitch_up: float = np.radians(45.0)  # [rad] climbing limit (nose UP, pitch < 0)
-    max_pitch_down: float = np.radians(30.0)  # [rad] descending limit (nose DOWN, pitch > 0; front-heavy)
-    clear_margin: float = 0.05      # min belly-terrain gap [m]; below it the pose is infeasible (high-centers)
-    resid_tol: float = 1e-2         # settle residual above which the pose is infeasible (can't find a resting pose)
+    # [rad] descending limit (nose DOWN, pitch > 0; front-heavy)
+    max_pitch_down: float = np.radians(30.0)
+    # min belly-terrain gap [m]; below it the pose is infeasible (high-centers)
+    clear_margin: float = 0.05
+    # settle residual above which the pose is infeasible (can't find a resting pose)
+    resid_tol: float = 1e-2
     # graded cost-to-go penalty per radian of tilt -- roll weighted MORE than pitch (roll is the
     # dangerous axis), so among feasible poses the router prefers low-roll lines (attack slopes head-on).
     roll_cost_weight: float = 1.0

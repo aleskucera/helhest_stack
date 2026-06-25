@@ -13,6 +13,7 @@ each cycle overwrites the owned buffers in place.
 Forward-only for now (no requires_grad / tape); the differentiable calibration path
 keeps its own buffers in tests/engine/gradients.py.
 """
+
 import numpy as np
 import warp as wp
 from warp import Device
@@ -120,10 +121,25 @@ class Simulator:
         wp.launch(
             rollout_kernel,
             self.B,
-            inputs=[self.T, self.envelope, self.elevation, self.friction, self.grid,
-                    self.robot, self.solver, self.start_pose, self.omega],
-            outputs=[self.controlled, self.derived, self.loads, self.turning,
-                     self.clearance, self.residual],
+            inputs=[
+                self.T,
+                self.envelope,
+                self.elevation,
+                self.friction,
+                self.grid,
+                self.robot,
+                self.solver,
+                self.start_pose,
+                self.omega,
+            ],
+            outputs=[
+                self.controlled,
+                self.derived,
+                self.loads,
+                self.turning,
+                self.clearance,
+                self.residual,
+            ],
             device=self.device,
         )
 
@@ -137,4 +153,9 @@ class Simulator:
             )
         )
         self.rollout_launch()
-        return self.controlled.numpy(), self.derived.numpy(), self.clearance.numpy(), self.residual.numpy()
+        return (
+            self.controlled.numpy(),
+            self.derived.numpy(),
+            self.clearance.numpy(),
+            self.residual.numpy(),
+        )

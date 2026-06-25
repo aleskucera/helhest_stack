@@ -4,6 +4,7 @@ Reuses the Heightmap grid container (same bilinear sampling) to hold mu values.
 This is the free per-cell learnable field of Phase 5/6; here we just build test
 fields (uniform, and a low-friction strip along the rear-wheel track).
 """
+
 import numpy as np
 
 from . import heightmap

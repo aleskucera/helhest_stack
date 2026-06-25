@@ -8,6 +8,7 @@ captured graph and the default path are byte-for-byte unchanged.
 The catch: `accumulate()` reads events via `get_event_elapsed_time`, which SYNCS on the end event --
 a profiling run is therefore serialized. Use the per-stage means as the cost, NOT the run's wall-clock.
 """
+
 from __future__ import annotations
 
 import warp as wp
@@ -23,7 +24,10 @@ class StageProfiler:
         self.stage_names = tuple(stage_names)
         self.enabled = bool(enabled) and self.device.is_cuda
         self._ev = (
-            [wp.Event(device=self.device, enable_timing=True) for _ in range(len(self.stage_names) + 1)]
+            [
+                wp.Event(device=self.device, enable_timing=True)
+                for _ in range(len(self.stage_names) + 1)
+            ]
             if self.enabled
             else None
         )

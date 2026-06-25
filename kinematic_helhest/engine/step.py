@@ -11,6 +11,7 @@ Arg convention (Option 2): the differentiated grids (height, friction) are plain
 State across timesteps is two vec3s (avoids the length-6 spatial_vector type):
 controlled = (x, y, yaw) the wheel-driven DOF; derived = (z, pitch, roll) the terrain-settled DOF.
 """
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -211,9 +212,8 @@ def adj_settle(
     x = controlled[0]
     y = controlled[1]
     yaw = controlled[2]
-    derived = settle(
-        envelope, grid, robot, solver, controlled, derived_init
-    )  # recompute the converged derived
+    # recompute the converged derived
+    derived = settle(envelope, grid, robot, solver, controlled, derived_init)
     Rz = rot_z(yaw)
     Ry = rot_y(derived[1])
     Rx = rot_x(derived[2])

@@ -22,6 +22,7 @@ This is the settle-based feasibility PRODUCER: it settles the robot at every pos
 blocked / graded-tilt fields, then hands them to the LatticeValueSolver (lattice_solver.py) that does
 the forward-arc value iteration. (The solver was vendored from terrain_toolkit.)
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

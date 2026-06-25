@@ -5,6 +5,7 @@ It lives in core (not viz) so headless code (the eval harness, tests) can drive 
 pulling in OpenGL. The interactive viewer and the eval loop both step this same object, so what you
 watch on screen and what we measure are the same vehicle.
 """
+
 from types import SimpleNamespace
 
 import numpy as np
@@ -20,21 +21,38 @@ from .model import euler_zyx
 class WarpDriver:
     """Wraps a B=1, T=1 `Simulator` and the current pose; steps one frame per call."""
 
-    def __init__(self, hm, mu, init_pose=(0.0, 0.0, 0.0), device="cpu", dt=dynamics.DT,
-                 k_turn=dynamics.K_TURN, resid_tol=1e-2, clear_margin=0.0, tilt_clamp=1.2):
+    def __init__(
+        self,
+        hm,
+        mu,
+        init_pose=(0.0, 0.0, 0.0),
+        device="cpu",
+        dt=dynamics.DT,
+        k_turn=dynamics.K_TURN,
+        resid_tol=1e-2,
+        clear_margin=0.0,
+        tilt_clamp=1.2,
+    ):
         wp.init()
         self.resid_tol, self.clear_margin = resid_tol, clear_margin
         sp = SolverParams(dt=dt, k_turn=k_turn, newton_iters=12, tilt_clamp=tilt_clamp)
-        self.sim = Simulator(dynamics.robot_params(), sp,
-                             GridParams(hm.nx, hm.ny, hm.cell, hm.x0, hm.y0), 1, 1, device)
-        self.sim.set_terrain(wp.array(np.ascontiguousarray(hm.H, np.float32),
-                                      dtype=wp.float32, device=device))
+        self.sim = Simulator(
+            dynamics.robot_params(),
+            sp,
+            GridParams(hm.nx, hm.ny, hm.cell, hm.x0, hm.y0),
+            1,
+            1,
+            device,
+        )
+        self.sim.set_terrain(
+            wp.array(np.ascontiguousarray(hm.H, np.float32), dtype=wp.float32, device=device)
+        )
         self.sim.set_friction(mu)
 
         # frame 0: settle at the start pose (zero control)
         controlled, derived, _, _ = self.sim.rollout(np.zeros((1, 1, 3), np.float32), init_pose)
         self.controlled = controlled[0, 0].copy()  # (x, y, yaw)
-        self.derived = derived[0, 0].copy()       # (z, pitch, roll)
+        self.derived = derived[0, 0].copy()  # (z, pitch, roll)
         self.clear, self.alpha, self.resid = 1.0, 1.0, 0.0
 
     def step(self, omega3):
@@ -52,6 +70,10 @@ class WarpDriver:
         R = euler_zyx(yaw, pitch, roll)
         valid = self.clear >= self.clear_margin and self.resid < self.resid_tol
         return SimpleNamespace(
-            x=x, y=y, yaw=yaw, alpha=self.alpha, valid=valid,
+            x=x,
+            y=y,
+            yaw=yaw,
+            alpha=self.alpha,
+            valid=valid,
             place={"z": z, "R": R, "pitch": pitch, "roll": roll},
         )

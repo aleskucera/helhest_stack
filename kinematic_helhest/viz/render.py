@@ -7,6 +7,7 @@ and `st.place` ({"z", "R", ...}) — so it does not care whether the pose came f
 the Warp engine or the numpy oracle. Uses legacy OpenGL directly (no GLEW), which
 works where open3d's GL viewer fails on Wayland.
 """
+
 import numpy as np
 
 from ..dynamics import DT  # re-exported here for back-compat (viz used to own DT)
@@ -14,8 +15,7 @@ from ..model import WHEEL_POS
 from ..model import WHEEL_RADIUS
 
 WHEEL_WIDTH = 0.10
-CHASSIS_BOXES = [(-0.13, 0.0, 0.0, 0.48, 0.56, 0.20),
-                 (-0.61, 0.0, 0.0, 0.48, 0.24, 0.20)]
+CHASSIS_BOXES = [(-0.13, 0.0, 0.0, 0.48, 0.56, 0.20), (-0.61, 0.0, 0.0, 0.48, 0.24, 0.20)]
 BASE_SPEED = 3.0
 TURN_SPEED = 2.0
 WIN_W, WIN_H = 1280, 800
@@ -31,9 +31,14 @@ def _box_tris(cx, cy, cz, sx, sy, sz, color):
     s = np.array([[i, j, k] for i in (-1, 1) for j in (-1, 1) for k in (-1, 1)], float)
     P = c + s * np.array([hx, hy, hz])
     # faces as (4 corner indices, normal)
-    faces = [((0, 1, 3, 2), (-1, 0, 0)), ((4, 6, 7, 5), (1, 0, 0)),
-             ((0, 4, 5, 1), (0, -1, 0)), ((2, 3, 7, 6), (0, 1, 0)),
-             ((0, 2, 6, 4), (0, 0, -1)), ((1, 5, 7, 3), (0, 0, 1))]
+    faces = [
+        ((0, 1, 3, 2), (-1, 0, 0)),
+        ((4, 6, 7, 5), (1, 0, 0)),
+        ((0, 4, 5, 1), (0, -1, 0)),
+        ((2, 3, 7, 6), (0, 1, 0)),
+        ((0, 2, 6, 4), (0, 0, -1)),
+        ((1, 5, 7, 3), (0, 0, 1)),
+    ]
     V, N = [], []
     for (a, b, d, e), n in faces:
         for tri in ((a, b, d), (a, d, e)):
@@ -83,6 +88,7 @@ def build_robot():
 
 def build_terrain(hm):
     from matplotlib import cm
+
     ny, nx = hm.H.shape
     xs = hm.x0 + (np.arange(nx) + 0.5) * hm.cell  # cell centers
     ys = hm.y0 + (np.arange(ny) + 0.5) * hm.cell
@@ -105,6 +111,7 @@ def build_terrain(hm):
 # --------------------------------------------------------------------------- #
 def _init_gl():
     from OpenGL import GL as gl
+
     gl.glEnable(gl.GL_DEPTH_TEST)
     gl.glEnable(gl.GL_LIGHTING)
     gl.glEnable(gl.GL_LIGHT0)
@@ -119,6 +126,7 @@ def _init_gl():
 
 def _draw(V, N, C, idx=None):
     from OpenGL import GL as gl
+
     gl.glEnableClientState(gl.GL_VERTEX_ARRAY)
     gl.glEnableClientState(gl.GL_NORMAL_ARRAY)
     gl.glEnableClientState(gl.GL_COLOR_ARRAY)
@@ -137,6 +145,7 @@ def _draw(V, N, C, idx=None):
 def _render(st, cam, terrain, robot, trail_pts):
     from OpenGL import GL as gl
     from OpenGL import GLU as glu
+
     az, el, dist = cam
     tgt = np.array([st.x, st.y, st.place["z"]])
     d = np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
@@ -144,15 +153,18 @@ def _render(st, cam, terrain, robot, trail_pts):
 
     gl.glViewport(0, 0, WIN_W, WIN_H)
     gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-    gl.glMatrixMode(gl.GL_PROJECTION); gl.glLoadIdentity()
+    gl.glMatrixMode(gl.GL_PROJECTION)
+    gl.glLoadIdentity()
     glu.gluPerspective(50.0, WIN_W / WIN_H, 0.1, 100.0)
-    gl.glMatrixMode(gl.GL_MODELVIEW); gl.glLoadIdentity()
+    gl.glMatrixMode(gl.GL_MODELVIEW)
+    gl.glLoadIdentity()
     glu.gluLookAt(*eye, *tgt, 0, 0, 1)
 
     _draw(*terrain[:3], terrain[3])  # ground
 
     V, N, C, red = robot
-    R4 = np.eye(4, dtype=np.float32); R4[:3, :3] = st.place["R"]
+    R4 = np.eye(4, dtype=np.float32)
+    R4[:3, :3] = st.place["R"]
     gl.glPushMatrix()
     gl.glTranslatef(st.x, st.y, st.place["z"])
     gl.glMultMatrixf(np.ascontiguousarray(R4.T))
@@ -161,7 +173,8 @@ def _render(st, cam, terrain, robot, trail_pts):
 
     if len(trail_pts) > 1:
         gl.glDisable(gl.GL_LIGHTING)
-        gl.glColor3f(1.0, 0.35, 0.0); gl.glLineWidth(2.0)
+        gl.glColor3f(1.0, 0.35, 0.0)
+        gl.glLineWidth(2.0)
         gl.glBegin(gl.GL_LINE_STRIP)
         for p in trail_pts:
             gl.glVertex3f(*p)
@@ -171,13 +184,18 @@ def _render(st, cam, terrain, robot, trail_pts):
 
 def _commands(get_key):
     import glfw
+
     left = right = 0.0
     if get_key(glfw.KEY_I) == glfw.PRESS:
-        left += BASE_SPEED; right += BASE_SPEED
+        left += BASE_SPEED
+        right += BASE_SPEED
     if get_key(glfw.KEY_K) == glfw.PRESS:
-        left -= BASE_SPEED; right -= BASE_SPEED
+        left -= BASE_SPEED
+        right -= BASE_SPEED
     if get_key(glfw.KEY_J) == glfw.PRESS:
-        left -= TURN_SPEED; right += TURN_SPEED
+        left -= TURN_SPEED
+        right += TURN_SPEED
     if get_key(glfw.KEY_L) == glfw.PRESS:
-        left += TURN_SPEED; right -= TURN_SPEED
+        left += TURN_SPEED
+        right -= TURN_SPEED
     return np.array([left, right, (left + right) / 2.0], np.float64)

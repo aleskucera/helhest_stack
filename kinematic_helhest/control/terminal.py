@@ -12,10 +12,13 @@ no sampling, no horizon:
 This is the separate terminal stage (vs patching the MPPI cost): routing and docking are different
 control problems, so they get different controllers.
 """
+
 import numpy as np
 
 
-def dock_control(state, goal, dock_speed=2.0, slow_radius=1.5, wmax=4.0, turn_gain=3.0, turn_width=0.5):
+def dock_control(
+    state, goal, dock_speed=2.0, slow_radius=1.5, wmax=4.0, turn_gain=3.0, turn_width=0.5
+):
     """state (x, y, yaw), goal (x, y) -> wheel command (wL, wR, rear) for one step.
 
     dock_speed: top forward speed for the final approach -- well below the routing wmax, since this
@@ -28,8 +31,8 @@ def dock_control(state, goal, dock_speed=2.0, slow_radius=1.5, wmax=4.0, turn_ga
     dist = np.hypot(dx, dy)
     bearing = np.arctan2(dy, dx) - yaw
     bearing = (bearing + np.pi) % (2.0 * np.pi) - np.pi  # wrap to [-pi, pi]
-    v = dock_speed * min(1.0, dist / slow_radius)        # gentle, decelerating-to-stop approach
-    v *= max(0.0, np.cos(bearing))                       # only drive forward when ~facing the goal
+    v = dock_speed * min(1.0, dist / slow_radius)  # gentle, decelerating-to-stop approach
+    v *= max(0.0, np.cos(bearing))  # only drive forward when ~facing the goal
     turn = turn_gain * bearing
     wl = float(np.clip(v - turn * turn_width, 0.0, wmax))
     wr = float(np.clip(v + turn * turn_width, 0.0, wmax))

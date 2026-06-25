@@ -13,6 +13,7 @@ Needs a CUDA device; skips cleanly (exit 0) otherwise.
 
 Run on a GPU box:  python -m tests.engine.gpu_check
 """
+
 import time
 
 import numpy as np
@@ -20,11 +21,11 @@ import warp as wp
 
 from kinematic_helhest import friction
 from kinematic_helhest import heightmap as hmmod
+from kinematic_helhest.control.reference import _to_omega
 from kinematic_helhest.engine import GridParams
 from kinematic_helhest.engine import RobotParams
 from kinematic_helhest.engine import Simulator
 from kinematic_helhest.engine import SolverParams
-from kinematic_helhest.control.reference import _to_omega
 from tests.engine.gradients import dsettle_dHenv
 
 
@@ -33,10 +34,13 @@ def _sim(scene, mu, B, T, device):
         RobotParams(),
         SolverParams(dt=0.05, k_turn=2.0, newton_iters=12),
         GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
-        B, T, device,
+        B,
+        T,
+        device,
     )
-    sim.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32),
-                             dtype=wp.float32, device=device))
+    sim.set_terrain(
+        wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
+    )
     sim.set_friction(mu)
     return sim
 
@@ -71,8 +75,9 @@ def check_adjoint_parity():
 
     eps, err = 1e-3, 0.0
     for i, j in zip(*np.where(np.abs(g_gpu) > 1e-6)):  # only the contact cells
-        g_fd = (_fd_loss(env, poses, adj_u, i, j, +eps)
-                - _fd_loss(env, poses, adj_u, i, j, -eps)) / (2.0 * eps)
+        g_fd = (
+            _fd_loss(env, poses, adj_u, i, j, +eps) - _fd_loss(env, poses, adj_u, i, j, -eps)
+        ) / (2.0 * eps)
         err = max(err, abs(g_gpu[i, j] - g_fd))
     drift = float(np.abs(g_gpu - g_cpu).max())
     print(f"  adjoint CUDA-vs-FD  max|err|={err:.2e}  (CUDA-vs-CPU fp drift {drift:.2e})")
@@ -95,8 +100,10 @@ def time_rollout(B=2048, T=70, reps=30):
         sim.rollout(omega, start)
     wp.synchronize_device("cuda")
     dt = (time.perf_counter() - t0) / reps
-    print(f"  rollout B={B} T={T} iters=12:  {dt * 1e3:.2f} ms/rollout  "
-          f"({B * T / dt / 1e6:.0f} M wheel-steps/s)")
+    print(
+        f"  rollout B={B} T={T} iters=12:  {dt * 1e3:.2f} ms/rollout  "
+        f"({B * T / dt / 1e6:.0f} M wheel-steps/s)"
+    )
 
 
 def main():
@@ -104,9 +111,12 @@ def main():
     if not wp.is_cuda_available():
         print("CUDA not available — skipping GPU check.")
         return
-    print("[1/3] forward parity");  check_forward_parity()
-    print("[2/3] adjoint parity");  check_adjoint_parity()
-    print("[3/3] throughput");      time_rollout()
+    print("[1/3] forward parity")
+    check_forward_parity()
+    print("[2/3] adjoint parity")
+    check_adjoint_parity()
+    print("[3/3] throughput")
+    time_rollout()
     print("GPU check: ALL OK")
 
 

@@ -2,6 +2,7 @@
 
 Run:  python -m tests.engine.envelope
 """
+
 import numpy as np
 import warp as wp
 
@@ -19,14 +20,23 @@ def wheel_envelope(elevation, cell_size, wheel_radius, device="cpu"):
     contact_iy = wp.zeros((ny, nx), dtype=wp.int32, device=device)
     contact_ix = wp.zeros((ny, nx), dtype=wp.int32, device=device)
     contact_cap = wp.zeros((ny, nx), dtype=wp.float32, device=device)
-    envelope = wp.zeros((ny, nx), dtype=wp.float32, device=device,
-                        requires_grad=elevation.requires_grad)
-    wp.launch(_contact_kernel, dim=elevation.shape,
-              inputs=[elevation, float(cell_size), float(wheel_radius), env_radius],
-              outputs=[contact_iy, contact_ix, contact_cap], device=device)
-    wp.launch(_gather_kernel, dim=elevation.shape,
-              inputs=[elevation, contact_iy, contact_ix, contact_cap],
-              outputs=[envelope], device=device)
+    envelope = wp.zeros(
+        (ny, nx), dtype=wp.float32, device=device, requires_grad=elevation.requires_grad
+    )
+    wp.launch(
+        _contact_kernel,
+        dim=elevation.shape,
+        inputs=[elevation, float(cell_size), float(wheel_radius), env_radius],
+        outputs=[contact_iy, contact_ix, contact_cap],
+        device=device,
+    )
+    wp.launch(
+        _gather_kernel,
+        dim=elevation.shape,
+        inputs=[elevation, contact_iy, contact_ix, contact_cap],
+        outputs=[envelope],
+        device=device,
+    )
     return envelope
 
 

@@ -11,6 +11,7 @@ Three checks (CPU by default; pass --device cuda for the GPU path):
 
 Run:  python -m tests.engine.verify_device [--device cuda]
 """
+
 import argparse
 
 import numpy as np
@@ -18,6 +19,7 @@ import warp as wp
 
 from kinematic_helhest import friction
 from kinematic_helhest import heightmap as hmmod
+from kinematic_helhest.control.reference import _to_omega
 from kinematic_helhest.engine import Grid
 from kinematic_helhest.engine import GridParams
 from kinematic_helhest.engine import RobotParams
@@ -26,7 +28,6 @@ from kinematic_helhest.engine import Simulator
 from kinematic_helhest.engine import SolverParams
 from kinematic_helhest.engine.envelope import _contact_kernel
 from kinematic_helhest.engine.envelope import _gather_kernel
-from kinematic_helhest.control.reference import _to_omega
 
 
 def wheel_envelope(elevation, cell_size, wheel_radius, device="cpu"):
@@ -39,19 +40,31 @@ def wheel_envelope(elevation, cell_size, wheel_radius, device="cpu"):
     contact_ix = wp.zeros((ny, nx), dtype=wp.int32, device=device)
     contact_cap = wp.zeros((ny, nx), dtype=wp.float32, device=device)
     envelope = wp.zeros((ny, nx), dtype=wp.float32, device=device)
-    wp.launch(_contact_kernel, dim=elevation.shape,
-              inputs=[elevation, float(cell_size), float(wheel_radius), env_radius],
-              outputs=[contact_iy, contact_ix, contact_cap], device=device)
-    wp.launch(_gather_kernel, dim=elevation.shape,
-              inputs=[elevation, contact_iy, contact_ix, contact_cap],
-              outputs=[envelope], device=device)
+    wp.launch(
+        _contact_kernel,
+        dim=elevation.shape,
+        inputs=[elevation, float(cell_size), float(wheel_radius), env_radius],
+        outputs=[contact_iy, contact_ix, contact_cap],
+        device=device,
+    )
+    wp.launch(
+        _gather_kernel,
+        dim=elevation.shape,
+        inputs=[elevation, contact_iy, contact_ix, contact_cap],
+        outputs=[envelope],
+        device=device,
+    )
     return envelope
 
 
 @wp.kernel
-def _probe_h(elevation: wp.array2d(dtype=wp.float32), g: Grid,
-             xs: wp.array(dtype=wp.float32), ys: wp.array(dtype=wp.float32),
-             out_h: wp.array(dtype=wp.float32)):
+def _probe_h(
+    elevation: wp.array2d(dtype=wp.float32),
+    g: Grid,
+    xs: wp.array(dtype=wp.float32),
+    ys: wp.array(dtype=wp.float32),
+    out_h: wp.array(dtype=wp.float32),
+):
     """Verification-only: launch the engine height sampler from host code."""
     i = wp.tid()
     out_h[i] = sample_field(elevation, g, xs[i], ys[i])
@@ -62,8 +75,7 @@ def _sample(elevation, g, xs, ys, device):
     wx = wp.array(xs.astype(np.float32), dtype=wp.float32, device=device)
     wy = wp.array(ys.astype(np.float32), dtype=wp.float32, device=device)
     oh = wp.zeros(len(xs), dtype=wp.float32, device=device)
-    wp.launch(_probe_h, len(xs), inputs=[elevation, g, wx, wy],
-              outputs=[oh], device=device)
+    wp.launch(_probe_h, len(xs), inputs=[elevation, g, wx, wy], outputs=[oh], device=device)
     return oh.numpy()
 
 
@@ -95,11 +107,13 @@ def check_alignment(device):
 
 def check_envelope(device, R=0.35):
     worst = 0.0
-    for name, scene in [("flat", hmmod.flat()), ("box", hmmod.box_scene()),
-                        ("ramp", hmmod.ramp_scene())]:
+    for name, scene in [
+        ("flat", hmmod.flat()),
+        ("box", hmmod.box_scene()),
+        ("ramp", hmmod.ramp_scene()),
+    ]:
         ref = hmmod.wheel_envelope(scene, R).H
-        H_wp = wp.array(np.ascontiguousarray(scene.H, np.float32),
-                        dtype=wp.float32, device=device)
+        H_wp = wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
         got = wheel_envelope(H_wp, scene.cell, R, device).numpy()
         d = float(np.abs(got - ref).max())
         worst = max(worst, d)
@@ -117,17 +131,20 @@ def check_end_to_end(device, B=16, T=25):
     omega = _to_omega(np.full((B, T, 2), 2.0, np.float32))
 
     host = Simulator(
-        RobotParams(), params,
+        RobotParams(),
+        params,
         GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
-        B, T, device,
+        B,
+        T,
+        device,
     )
-    host.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32),
-                              dtype=wp.float32, device=device))
+    host.set_terrain(
+        wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
+    )
     host.set_friction(mu)
     ph, _, ch, rh = host.rollout(omega, start)
 
-    H_wp = wp.array(np.ascontiguousarray(scene.H, np.float32),
-                    dtype=wp.float32, device=device)
+    H_wp = wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
     grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
     dev = Simulator(RobotParams(), params, grid, B, T, device)
     dev.set_terrain(H_wp)
@@ -147,9 +164,12 @@ def main():
     ap.add_argument("--device", default="cpu", help="warp device: cpu or cuda")
     args = ap.parse_args()
     wp.init()
-    print(f"[1/3] alignment ({args.device})");    check_alignment(args.device)
-    print(f"[2/3] envelope parity ({args.device})"); check_envelope(args.device)
-    print(f"[3/3] end-to-end ({args.device})");    check_end_to_end(args.device)
+    print(f"[1/3] alignment ({args.device})")
+    check_alignment(args.device)
+    print(f"[2/3] envelope parity ({args.device})")
+    check_envelope(args.device)
+    print(f"[3/3] end-to-end ({args.device})")
+    check_end_to_end(args.device)
     print("Phase-1 device path: ALL OK")
 
 

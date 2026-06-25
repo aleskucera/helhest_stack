@@ -13,6 +13,7 @@ when driven at the L/R average) and does not enter the twist.
 
 Conventions: body X fwd, Y left, yaw CCW+. Arrays may carry a leading batch dim.
 """
+
 import numpy as np
 
 from ..model import HALF_TRACK

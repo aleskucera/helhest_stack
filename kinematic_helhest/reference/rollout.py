@@ -3,15 +3,27 @@
 `rollout_terrain` settles an initial pose into a valid State (state.py) and
 applies the physics step for each recorded wheel-speed command.
 """
+
 import numpy as np
 
 from ..model import HALF_TRACK
 from ..model import WHEEL_RADIUS
 
 
-def rollout_terrain(setpoints, dt, hm, alpha=1.0, x_icr=0.0, init_pose=(0.0, 0.0, 0.0),
-                    mu_field=None, k=2.0, R=WHEEL_RADIUS, b=HALF_TRACK,
-                    resid_tol=1e-2, clear_margin=0.0):
+def rollout_terrain(
+    setpoints,
+    dt,
+    hm,
+    alpha=1.0,
+    x_icr=0.0,
+    init_pose=(0.0, 0.0, 0.0),
+    mu_field=None,
+    k=2.0,
+    R=WHEEL_RADIUS,
+    b=HALF_TRACK,
+    resid_tol=1e-2,
+    clear_margin=0.0,
+):
     """Roll out on a heightmap by repeated `state.step` (predict->project).
 
     Settles the initial pose into a valid State, then applies the physics step T
@@ -33,6 +45,7 @@ def rollout_terrain(setpoints, dt, hm, alpha=1.0, x_icr=0.0, init_pose=(0.0, 0.0
     """
     from .. import heightmap as _hm
     from . import state as _state
+
     setpoints = np.asarray(setpoints, dtype=np.float64)
     T = setpoints.shape[0]
 
@@ -43,20 +56,38 @@ def rollout_terrain(setpoints, dt, hm, alpha=1.0, x_icr=0.0, init_pose=(0.0, 0.0
     pose7 = np.empty((T, 7), dtype=np.float32)
     pose2 = np.empty((T, 3), dtype=np.float64)
     loads = np.empty((T, 3), dtype=np.float64)
-    fz = np.empty(T); chassis_clear = np.empty(T)
-    alpha_log = np.empty(T); xicr_log = np.empty(T)
-    pitch = np.empty(T); roll = np.empty(T); resid = np.empty(T)
+    fz = np.empty(T)
+    chassis_clear = np.empty(T)
+    alpha_log = np.empty(T)
+    xicr_log = np.empty(T)
+    pitch = np.empty(T)
+    roll = np.empty(T)
+    resid = np.empty(T)
 
     for t in range(T):
-        st = _state.step(st, setpoints[t], surf, hm, dt,
-                         mu_field=mu_field, k=k, alpha=alpha, x_icr=x_icr, R=R, b=b)
+        st = _state.step(
+            st,
+            setpoints[t],
+            surf,
+            hm,
+            dt,
+            mu_field=mu_field,
+            k=k,
+            alpha=alpha,
+            x_icr=x_icr,
+            R=R,
+            b=b,
+        )
         pose7[t] = st.pose7
         pose2[t] = st.pose2
         loads[t] = st.loads
         fz[t] = st.fz
         chassis_clear[t] = st.chassis_clear
-        alpha_log[t] = st.alpha; xicr_log[t] = st.x_icr
-        pitch[t] = st.place["pitch"]; roll[t] = st.place["roll"]; resid[t] = st.place["residual"]
+        alpha_log[t] = st.alpha
+        xicr_log[t] = st.x_icr
+        pitch[t] = st.place["pitch"]
+        roll[t] = st.place["roll"]
+        resid[t] = st.place["residual"]
 
     # Belly must keep at least clear_margin above the terrain (0 = touch allowed).
     high_center = chassis_clear < clear_margin
@@ -64,14 +95,23 @@ def rollout_terrain(setpoints, dt, hm, alpha=1.0, x_icr=0.0, init_pose=(0.0, 0.0
     # than the tilt clamp): residual stays large -> the pose is non-physical.
     infeasible = resid > resid_tol
     bad = high_center | infeasible
-    return {"pose7": pose7, "pose2": pose2, "loads": loads, "fz": fz,
-            "chassis_clear": chassis_clear, "high_center": high_center,
-            "infeasible": infeasible,
-            "valid": not bool(bad.any()),
-            "first_high_center": int(np.argmax(high_center)) if high_center.any() else -1,
-            "first_invalid": int(np.argmax(bad)) if bad.any() else -1,
-            "alpha": alpha_log, "x_icr": xicr_log,
-            "pitch": pitch, "roll": roll, "residual": resid}
+    return {
+        "pose7": pose7,
+        "pose2": pose2,
+        "loads": loads,
+        "fz": fz,
+        "chassis_clear": chassis_clear,
+        "high_center": high_center,
+        "infeasible": infeasible,
+        "valid": not bool(bad.any()),
+        "first_high_center": int(np.argmax(high_center)) if high_center.any() else -1,
+        "first_invalid": int(np.argmax(bad)) if bad.any() else -1,
+        "alpha": alpha_log,
+        "x_icr": xicr_log,
+        "pitch": pitch,
+        "roll": roll,
+        "residual": resid,
+    }
 
 
 def cruise_decomposition(pose2, setpoints, dt, x_max=0.9, t_min=0.3, R=WHEEL_RADIUS):

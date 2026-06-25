@@ -14,17 +14,18 @@ The implicit settle adjoint (`@wp.func_grad(settle)`) lives in `engine.step` and
 import, so gradients work automatically. The oracle/FD verification harness lives
 in the top-level `tests/engine/` package (run e.g. `python -m tests.engine.step`).
 """
+
+from .robot import Robot
+from .robot import RobotParams
+from .simulator import Simulator
 from .step import clearances
 from .step import init_state_kernel
 from .step import settle
-from .step import step_kernel
-from .terrain import GridParams
-from .simulator import Simulator
-from .robot import Robot
-from .robot import RobotParams
 from .step import Solver
 from .step import SolverParams
+from .step import step_kernel
 from .terrain import Grid
+from .terrain import GridParams
 from .terrain import sample_field
 from .terrain import sample_height_grad
 from .terrain import sample_normal

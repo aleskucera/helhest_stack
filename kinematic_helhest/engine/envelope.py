@@ -10,6 +10,7 @@ adjoint routes to the arg-max (contact) cell, so Warp autodiff gives
 d(loss)/d(raw elevation) for free -- no hand-written backward. Mirrors
 `heightmap.wheel_envelope`.
 """
+
 import warp as wp
 
 

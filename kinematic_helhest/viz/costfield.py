@@ -8,6 +8,7 @@ Solves V(x, y, theta) with CostToGo for a world's goal, then renders:
   python -m kinematic_helhest.viz.costfield --world pocket
   python -m kinematic_helhest.viz.costfield --world slalom --lat-coarsen 2 --stride 1
 """
+
 import argparse
 
 import numpy as np
@@ -16,7 +17,8 @@ import numpy as np
 def _trace_optimal(ctg, start, n_theta, cnx, cny, x0, y0, cell, max_steps=500):
     """Follow the lattice's OWN policy from the start pose: at each pose pick the primitive the value
     iteration would (min over feasible forward arcs of arc_cost + V[successor]) and integrate it as a
-    smooth arc. Mirrors _relax_lattice_pose_kernel's selection -> the optimal forward-only trajectory."""
+    smooth arc. Mirrors _relax_lattice_pose_kernel's selection -> the optimal forward-only trajectory.
+    """
     V = ctg.V.numpy()
     blocked = ctg.blocked.numpy()
     tiltf = ctg.graded_tilt.numpy()
@@ -59,13 +61,15 @@ def _trace_optimal(ctg, start, n_theta, cnx, cny, x0, y0, cell, max_steps=500):
         if best_p < 0 or best_val >= ctg._vcap * 0.9:
             break
         r, c, t = r + int(pdr[t, best_p]), c + int(pdc[t, best_p]), int(pheading[t, best_p])
-        pts.append((x0 + (c + 0.5) * cell, y0 + (r + 0.5) * cell))  # lattice cell center (drift-free)
+        # lattice cell center (drift-free)
+        pts.append((x0 + (c + 0.5) * cell, y0 + (r + 0.5) * cell))
     return np.asarray(pts)
 
 
 def run(world="pocket", n_theta=24, stride=1, lat_coarsen=6, device="cuda", out=None):
     import warp as wp
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -82,7 +86,9 @@ def run(world="pocket", n_theta=24, stride=1, lat_coarsen=6, device="cuda", out=
     # optionally coarsen the router like the planner does (max-pool keeps thin walls)
     k = max(1, int(lat_coarsen))
     cny, cnx, ccell = scene.ny // k, scene.nx // k, scene.cell * k
-    Hc = scene.H[: cny * k, : cnx * k].reshape(cny, k, cnx, k).max(axis=(1, 3)) if k > 1 else scene.H
+    Hc = (
+        scene.H[: cny * k, : cnx * k].reshape(cny, k, cnx, k).max(axis=(1, 3)) if k > 1 else scene.H
+    )
     Hc = np.ascontiguousarray(Hc, np.float32)
     cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0)
     # scale the arc step with the coarse cell so the forward-arc primitives never shrink below a cell
@@ -90,10 +96,16 @@ def run(world="pocket", n_theta=24, stride=1, lat_coarsen=6, device="cuda", out=
     # robot can't do). ~1.6 cells/arc keeps the lattice meaningful at any coarsening.
     step = max(0.3, 1.6 * ccell)
     ctg = CostToGo(
-        cgrid, dynamics.robot_params(), dynamics.planning_solver(), n_theta=n_theta, step=step,
+        cgrid,
+        dynamics.robot_params(),
+        dynamics.planning_solver(),
+        n_theta=n_theta,
+        step=step,
         device=device,
     )
-    V = ctg.compute(wp.array(Hc, dtype=wp.float32, device=device), goal).numpy()  # [cny, cnx, n_theta]
+    V = ctg.compute(
+        wp.array(Hc, dtype=wp.float32, device=device), goal
+    ).numpy()  # [cny, cnx, n_theta]
     traj = _trace_optimal(ctg, start, n_theta, cnx, cny, scene.x0, scene.y0, ccell)
 
     Vmin = V.min(axis=2)  # best-case cost-to-go per cell
@@ -115,25 +127,56 @@ def run(world="pocket", n_theta=24, stride=1, lat_coarsen=6, device="cuda", out=
 
     fig, ax = plt.subplots(figsize=(8.5, 7.2))
     cmap = plt.cm.viridis.copy()
-    cmap.set_bad("black")  # +inf (unreachable: actual wall OR an orientation/topology trap) -> black
+    # +inf (unreachable: actual wall OR an orientation/topology trap) -> black
+    cmap.set_bad("black")
     im = ax.imshow(Vshow, origin="lower", extent=ext, cmap=cmap, vmin=0, vmax=vmax, aspect="equal")
     # the ACTUAL walls at full resolution (a SUBSET of the black region) -- solid grey so you can tell
     # a wall-black from a trap-black (standable cells with no forward-only path to the goal).
     ext_fine = [x0, x0 + scene.nx * scene.cell, y0, y0 + scene.ny * scene.cell]
     wallmask = np.where(scene.H > 0.5, 1.0, np.nan)
-    ax.imshow(wallmask, origin="lower", extent=ext_fine, cmap=ListedColormap(["#9a9a9a"]),
-              vmin=0, vmax=1, zorder=4)
-    ax.quiver(Xc[s], Yc[s], U[s], Vq[s], color="white", pivot="mid", angles="xy",
-              scale=30, width=0.004, headwidth=4, headlength=5, alpha=0.85, zorder=3)
+    ax.imshow(
+        wallmask,
+        origin="lower",
+        extent=ext_fine,
+        cmap=ListedColormap(["#9a9a9a"]),
+        vmin=0,
+        vmax=1,
+        zorder=4,
+    )
+    ax.quiver(
+        Xc[s],
+        Yc[s],
+        U[s],
+        Vq[s],
+        color="white",
+        pivot="mid",
+        angles="xy",
+        scale=30,
+        width=0.004,
+        headwidth=4,
+        headlength=5,
+        alpha=0.85,
+        zorder=3,
+    )
     if len(traj) > 1:  # the optimal forward-only trajectory the policy rolls out from the start
-        ax.plot(traj[:, 0], traj[:, 1], "-", color="#ff5a00", lw=3.0, zorder=6,
-                solid_capstyle="round", label="optimal trajectory")
+        ax.plot(
+            traj[:, 0],
+            traj[:, 1],
+            "-",
+            color="#ff5a00",
+            lw=3.0,
+            zorder=6,
+            solid_capstyle="round",
+            label="optimal trajectory",
+        )
         ax.legend(loc="upper left", fontsize=9, framealpha=0.9)
     ax.plot(start[0], start[1], "o", color="white", mec="k", ms=12, zorder=7)
     ax.plot(goal[0], goal[1], "*", color="red", ms=22, mec="k", zorder=7)
     fig.colorbar(im, ax=ax, shrink=0.85, label="min over heading  V(x, y)  [m]")
-    ax.set_title(f"{world}: cost-to-go flow + optimal trajectory  (color = min_theta V, arrows = best heading)\n"
-                 f"n_theta={n_theta}, grid {cnx}x{cny}  --  black = unreachable at every heading, grey = actual wall")
+    ax.set_title(
+        f"{world}: cost-to-go flow + optimal trajectory  (color = min_theta V, arrows = best heading)\n"
+        f"n_theta={n_theta}, grid {cnx}x{cny}  --  black = unreachable at every heading, grey = actual wall"
+    )
     ax.set_xlabel("x (forward, m)")
     ax.set_ylabel("y (left, m)")
     fig.tight_layout()
@@ -154,8 +197,14 @@ def main():
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
-    run(world=args.world, n_theta=args.n_theta, stride=args.stride,
-        lat_coarsen=args.lat_coarsen, device=args.device, out=args.out)
+    run(
+        world=args.world,
+        n_theta=args.n_theta,
+        stride=args.stride,
+        lat_coarsen=args.lat_coarsen,
+        device=args.device,
+        out=args.out,
+    )
 
 
 if __name__ == "__main__":

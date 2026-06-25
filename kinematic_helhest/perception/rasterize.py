@@ -10,6 +10,7 @@ H[ny, nx] = H[row, col] with row -> y and col -> x; cell (r, c)'s CENTER is worl
 (x0 + c*cell, y0 + r*cell). So (x0, y0) is the center of cell (0, 0), and the cell index of world
 point (x, y) is (round((y - y0) / cell), round((x - x0) / cell)).
 """
+
 import numpy as np
 
 

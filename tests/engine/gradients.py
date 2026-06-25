@@ -11,15 +11,16 @@ We hand-solve the 3x3 transpose system for lambda, then run the *residual* kerne
 c(u*, Henv) on the tape with cotangent -lambda; Warp autodiff turns that into the
 bilinear-stencil scatter into Henv.grad. No Newton, no max on the tape.
 """
+
 import numpy as np
 import warp as wp
 
 from kinematic_helhest.engine import clearances
-from kinematic_helhest.engine import settle
-from kinematic_helhest.engine import Robot
-from kinematic_helhest.engine import Solver
 from kinematic_helhest.engine import Grid
+from kinematic_helhest.engine import Robot
 from kinematic_helhest.engine import sample_field
+from kinematic_helhest.engine import settle
+from kinematic_helhest.engine import Solver
 from kinematic_helhest.engine.envelope import _contact_kernel
 from kinematic_helhest.engine.envelope import _gather_kernel
 
@@ -33,20 +34,35 @@ def wheel_envelope(elevation, cell_size, wheel_radius, device="cpu"):
     contact_iy = wp.zeros((ny, nx), dtype=wp.int32, device=device)
     contact_ix = wp.zeros((ny, nx), dtype=wp.int32, device=device)
     contact_cap = wp.zeros((ny, nx), dtype=wp.float32, device=device)
-    envelope = wp.zeros((ny, nx), dtype=wp.float32, device=device,
-                        requires_grad=elevation.requires_grad)
-    wp.launch(_contact_kernel, dim=elevation.shape,
-              inputs=[elevation, float(cell_size), float(wheel_radius), env_radius],
-              outputs=[contact_iy, contact_ix, contact_cap], device=device)
-    wp.launch(_gather_kernel, dim=elevation.shape,
-              inputs=[elevation, contact_iy, contact_ix, contact_cap],
-              outputs=[envelope], device=device)
+    envelope = wp.zeros(
+        (ny, nx), dtype=wp.float32, device=device, requires_grad=elevation.requires_grad
+    )
+    wp.launch(
+        _contact_kernel,
+        dim=elevation.shape,
+        inputs=[elevation, float(cell_size), float(wheel_radius), env_radius],
+        outputs=[contact_iy, contact_ix, contact_cap],
+        device=device,
+    )
+    wp.launch(
+        _gather_kernel,
+        dim=elevation.shape,
+        inputs=[elevation, contact_iy, contact_ix, contact_cap],
+        outputs=[envelope],
+        device=device,
+    )
     return envelope
 
 
 @wp.kernel
-def _settle_only(Henv: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot, sp: Solver,
-                 pose: wp.array(dtype=wp.vec3), u_out: wp.array(dtype=wp.vec3)):
+def _settle_only(
+    Henv: wp.array2d(dtype=wp.float32),
+    g: Grid,
+    robot: Robot,
+    sp: Solver,
+    pose: wp.array(dtype=wp.vec3),
+    u_out: wp.array(dtype=wp.vec3),
+):
     tid = wp.tid()
     x = pose[tid][0]
     y = pose[tid][1]
@@ -56,9 +72,15 @@ def _settle_only(Henv: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot, sp: 
 
 
 @wp.kernel
-def _settle_jac(Henv: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot,
-                pose: wp.array(dtype=wp.vec3), u_star: wp.array(dtype=wp.vec3),
-                eps: float, Jout: wp.array(dtype=wp.mat33)):
+def _settle_jac(
+    Henv: wp.array2d(dtype=wp.float32),
+    g: Grid,
+    robot: Robot,
+    pose: wp.array(dtype=wp.vec3),
+    u_star: wp.array(dtype=wp.vec3),
+    eps: float,
+    Jout: wp.array(dtype=wp.mat33),
+):
     tid = wp.tid()
     x = pose[tid][0]
     y = pose[tid][1]
@@ -68,23 +90,29 @@ def _settle_jac(Henv: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot,
     jz = (clearances(Henv, g, robot, x, y, yaw, u[0] + eps, u[1], u[2]) - c) / eps
     jp = (clearances(Henv, g, robot, x, y, yaw, u[0], u[1] + eps, u[2]) - c) / eps
     jr = (clearances(Henv, g, robot, x, y, yaw, u[0], u[1], u[2] + eps) - c) / eps
-    Jout[tid] = wp.mat33(jz[0], jp[0], jr[0],
-                         jz[1], jp[1], jr[1],
-                         jz[2], jp[2], jr[2])
+    Jout[tid] = wp.mat33(jz[0], jp[0], jr[0], jz[1], jp[1], jr[1], jz[2], jp[2], jr[2])
 
 
 @wp.kernel
-def _solve_jt(Jin: wp.array(dtype=wp.mat33), adj_u: wp.array(dtype=wp.vec3),
-              minus_lam: wp.array(dtype=wp.vec3)):
+def _solve_jt(
+    Jin: wp.array(dtype=wp.mat33),
+    adj_u: wp.array(dtype=wp.vec3),
+    minus_lam: wp.array(dtype=wp.vec3),
+):
     tid = wp.tid()
     lam = wp.inverse(wp.transpose(Jin[tid])) * adj_u[tid]
     minus_lam[tid] = -lam
 
 
 @wp.kernel
-def _residual(Henv: wp.array2d(dtype=wp.float32), g: Grid, robot: Robot,
-              pose: wp.array(dtype=wp.vec3), u_star: wp.array(dtype=wp.vec3),
-              c: wp.array(dtype=wp.vec3)):
+def _residual(
+    Henv: wp.array2d(dtype=wp.float32),
+    g: Grid,
+    robot: Robot,
+    pose: wp.array(dtype=wp.vec3),
+    u_star: wp.array(dtype=wp.vec3),
+    c: wp.array(dtype=wp.vec3),
+):
     tid = wp.tid()
     x = pose[tid][0]
     y = pose[tid][1]
@@ -97,8 +125,12 @@ def dsettle_dHenv(env_hm, poses, adj_u, params, jac_eps=1e-4, device="cpu"):
     """Implicit grad d(sum_p adj_u_p . u*_p)/dHenv. Returns (grad_Henv, u_star)."""
     from kinematic_helhest.engine import GridParams, RobotParams
 
-    elev = wp.array(np.ascontiguousarray(env_hm.H, np.float32), dtype=wp.float32,
-                    device=device, requires_grad=True)
+    elev = wp.array(
+        np.ascontiguousarray(env_hm.H, np.float32),
+        dtype=wp.float32,
+        device=device,
+        requires_grad=True,
+    )
     g = GridParams(env_hm.nx, env_hm.ny, env_hm.cell, env_hm.x0, env_hm.y0).build()
     robot = RobotParams().build(device)
     sp = params.build()
@@ -109,8 +141,9 @@ def dsettle_dHenv(env_hm, poses, adj_u, params, jac_eps=1e-4, device="cpu"):
     u_star = wp.zeros(B, dtype=wp.vec3, device=device)
     wp.launch(_settle_only, B, inputs=[elev, g, robot, sp, pose, u_star], device=device)
     J = wp.zeros(B, dtype=wp.mat33, device=device)
-    wp.launch(_settle_jac, B, inputs=[elev, g, robot, pose, u_star, float(jac_eps), J],
-              device=device)
+    wp.launch(
+        _settle_jac, B, inputs=[elev, g, robot, pose, u_star, float(jac_eps), J], device=device
+    )
     adj = wp.array(np.asarray(adj_u, np.float32), dtype=wp.vec3, device=device)
     minus_lam = wp.zeros(B, dtype=wp.vec3, device=device)
     wp.launch(_solve_jt, B, inputs=[J, adj, minus_lam], device=device)
@@ -119,8 +152,7 @@ def dsettle_dHenv(env_hm, poses, adj_u, params, jac_eps=1e-4, device="cpu"):
     c = wp.zeros(B, dtype=wp.vec3, device=device, requires_grad=True)
     tape = wp.Tape()
     with tape:
-        wp.launch(_residual, B, inputs=[elev, g, robot, pose, u_star], outputs=[c],
-                  device=device)
+        wp.launch(_residual, B, inputs=[elev, g, robot, pose, u_star], outputs=[c], device=device)
     tape.backward(grads={c: minus_lam})
     return elev.grad.numpy(), u_star.numpy()
 
@@ -134,8 +166,10 @@ def _selftest():
 
     wp.init()
     params = SolverParams(newton_iters=12)
-    cases = [("ramp", hmmod.ramp_scene(), [(2.0, 0.0, 0.0), (3.0, 0.3, 0.2)]),
-             ("box", hmmod.box_scene(), [(0.9, 0.0, 0.0)])]
+    cases = [
+        ("ramp", hmmod.ramp_scene(), [(2.0, 0.0, 0.0), (3.0, 0.3, 0.2)]),
+        ("box", hmmod.box_scene(), [(0.9, 0.0, 0.0)]),
+    ]
     adj_template = np.array([0.3, 1.0, 0.5], np.float32)  # weights on (z, pitch, roll)
     worst = 0.0
     for name, scene, poses in cases:
@@ -147,16 +181,20 @@ def _selftest():
         cells = list(zip(*np.where(np.abs(g_imp) > 1e-6)))
         eps = 1e-3
         err = 0.0
-        for (i, j) in cells:
+        for i, j in cells:
             gp = _fd_loss(env, poses, adj_u, i, j, +eps)
             gm = _fd_loss(env, poses, adj_u, i, j, -eps)
             g_fd = (gp - gm) / (2 * eps)
             err = max(err, abs(g_imp[i, j] - g_fd))
         worst = max(worst, err)
-        print(f"  {name:4s}  {len(cells)} contact cells  max|g_imp-g_fd|={err:.2e}  "
-              f"||g||={np.abs(g_imp).max():.3f}")
-    print(f"implicit settle d/dHenv vs FD  worst={worst:.2e}  "
-          f"{'OK' if worst < 5e-2 else 'REVIEW'}")
+        print(
+            f"  {name:4s}  {len(cells)} contact cells  max|g_imp-g_fd|={err:.2e}  "
+            f"||g||={np.abs(g_imp).max():.3f}"
+        )
+    print(
+        f"implicit settle d/dHenv vs FD  worst={worst:.2e}  "
+        f"{'OK' if worst < 5e-2 else 'REVIEW'}"
+    )
 
 
 def _fd_loss(env, poses, adj_u, i, j, delta):
@@ -175,14 +213,21 @@ def _fd_loss(env, poses, adj_u, i, j, delta):
 
 
 @wp.kernel
-def _row_loss(controlled: wp.array2d(dtype=wp.vec3), derived: wp.array2d(dtype=wp.vec3),
-              wpv: wp.vec3, wtv: wp.vec3, row: int, loss: wp.array(dtype=float)):
+def _row_loss(
+    controlled: wp.array2d(dtype=wp.vec3),
+    derived: wp.array2d(dtype=wp.vec3),
+    wpv: wp.vec3,
+    wtv: wp.vec3,
+    row: int,
+    loss: wp.array(dtype=float),
+):
     tid = wp.tid()
     wp.atomic_add(loss, 0, wp.dot(wpv, controlled[row, tid]) + wp.dot(wtv, derived[row, tid]))
 
 
 def _gmeta(hm):
     from kinematic_helhest.engine import Grid
+
     g = Grid()
     g.origin_x, g.origin_y, g.cell_size = float(hm.x0), float(hm.y0), float(hm.cell)
     g.cells_x, g.cells_y = int(hm.nx), int(hm.ny)
@@ -210,12 +255,24 @@ def _fwd(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, grad=Fals
     loss = wp.zeros(1, dtype=float, device=dev, requires_grad=grad)
 
     def launches():
-        wp.launch(init_state_kernel, 1, inputs=[Henv, g, robot, sp, pose0],
-                  outputs=[controlled, derived], device=dev)
+        wp.launch(
+            init_state_kernel,
+            1,
+            inputs=[Henv, g, robot, sp, pose0],
+            outputs=[controlled, derived],
+            device=dev,
+        )
         for t in range(T):
-            wp.launch(step_kernel, 1, inputs=[Henv, Hraw, Hmu, g, robot, sp, omega[t], controlled[t], derived[t]],
-                      outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]], device=dev)
-        wp.launch(_row_loss, 1, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev)
+            wp.launch(
+                step_kernel,
+                1,
+                inputs=[Henv, Hraw, Hmu, g, robot, sp, omega[t], controlled[t], derived[t]],
+                outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]],
+                device=dev,
+            )
+        wp.launch(
+            _row_loss, 1, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev
+        )
 
     if not grad:
         launches()
@@ -251,26 +308,34 @@ def _selftest_step_grad():
     _, gHenv, gHmu = _fwd(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, grad=True)
 
     eps = 1e-3
-    err_e = _fd_grid(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv,
-                     gHenv, "env", eps)
-    err_m = _fd_grid(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv,
-                     gHmu, "mu", eps)
+    err_e = _fd_grid(
+        envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, gHenv, "env", eps
+    )
+    err_m = _fd_grid(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, gHmu, "mu", eps)
     worst = max(err_e, err_m)
-    print(f"  dHenv: {np.count_nonzero(np.abs(gHenv) > 1e-5)} cells ||g||={np.abs(gHenv).max():.3f}  "
-          f"max|err|={err_e:.2e}")
-    print(f"  dHmu : {np.count_nonzero(np.abs(gHmu) > 1e-5)} cells ||g||={np.abs(gHmu).max():.3f}  "
-          f"max|err|={err_m:.2e}")
-    print(f"step grad d/dHenv,d/dHmu vs FD  worst={worst:.2e}  {'OK' if worst < 5e-2 else 'REVIEW'}")
+    print(
+        f"  dHenv: {np.count_nonzero(np.abs(gHenv) > 1e-5)} cells ||g||={np.abs(gHenv).max():.3f}  "
+        f"max|err|={err_e:.2e}"
+    )
+    print(
+        f"  dHmu : {np.count_nonzero(np.abs(gHmu) > 1e-5)} cells ||g||={np.abs(gHmu).max():.3f}  "
+        f"max|err|={err_m:.2e}"
+    )
+    print(
+        f"step grad d/dHenv,d/dHmu vs FD  worst={worst:.2e}  {'OK' if worst < 5e-2 else 'REVIEW'}"
+    )
 
 
 def _fd_grid(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, g_an, which, eps):
     cells = list(zip(*np.where(np.abs(g_an) > 1e-5)))
     err = 0.0
-    for (i, j) in cells:
+    for i, j in cells:
+
         def loss_at(delta):
             e, r, m = envH.copy(), rawH.copy(), muH.copy()
             (e if which == "env" else m)[i, j] += delta
             return _fwd(e, r, m, g, robot, sp, omega_np, init_pose, wpv, wtv)
+
         g_fd = (loss_at(+eps) - loss_at(-eps)) / (2 * eps)
         err = max(err, abs(g_an[i, j] - g_fd))
     return err
@@ -297,12 +362,24 @@ def _fwd_h(rawH, muH, g, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, grad=
 
     def launches():
         Henv = wheel_envelope(Hraw, g.cell_size, Rwheel, dev)  # raw h -> envelope, on the tape
-        wp.launch(init_state_kernel, 1, inputs=[Henv, g, robot, sp, pose0],
-                  outputs=[controlled, derived], device=dev)
+        wp.launch(
+            init_state_kernel,
+            1,
+            inputs=[Henv, g, robot, sp, pose0],
+            outputs=[controlled, derived],
+            device=dev,
+        )
         for t in range(T):
-            wp.launch(step_kernel, 1, inputs=[Henv, Hraw, Hmu, g, robot, sp, omega[t], controlled[t], derived[t]],
-                      outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]], device=dev)
-        wp.launch(_row_loss, 1, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev)
+            wp.launch(
+                step_kernel,
+                1,
+                inputs=[Henv, Hraw, Hmu, g, robot, sp, omega[t], controlled[t], derived[t]],
+                outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]],
+                device=dev,
+            )
+        wp.launch(
+            _row_loss, 1, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev
+        )
 
     if not grad:
         launches()
@@ -341,17 +418,21 @@ def _selftest_dh():
     err_h = _fd_cells(rawH, muH, gH, "raw", eps, fwd)
     err_m = _fd_cells(rawH, muH, gMu, "mu", eps, fwd)
     worst = max(err_h, err_m)
-    print(f"  d/d(raw h): {np.count_nonzero(np.abs(gH) > 1e-5)} cells "
-          f"||g||={np.abs(gH).max():.3f}  max|err|={err_h:.2e}")
-    print(f"  d/dHmu    : {np.count_nonzero(np.abs(gMu) > 1e-5)} cells "
-          f"||g||={np.abs(gMu).max():.3f}  max|err|={err_m:.2e}")
+    print(
+        f"  d/d(raw h): {np.count_nonzero(np.abs(gH) > 1e-5)} cells "
+        f"||g||={np.abs(gH).max():.3f}  max|err|={err_h:.2e}"
+    )
+    print(
+        f"  d/dHmu    : {np.count_nonzero(np.abs(gMu) > 1e-5)} cells "
+        f"||g||={np.abs(gMu).max():.3f}  max|err|={err_m:.2e}"
+    )
     print(f"end-to-end d/d(raw h) vs FD  worst={worst:.2e}  {'OK' if worst < 5e-2 else 'REVIEW'}")
 
 
 def _fd_cells(rawH, muH, g_an, which, eps, fwd):
     cells = list(zip(*np.where(np.abs(g_an) > 1e-5)))
     err = 0.0
-    for (i, j) in cells:
+    for i, j in cells:
         rp, mp = rawH.copy(), muH.copy()
         rm, mm = rawH.copy(), muH.copy()
         (rp if which == "raw" else mp)[i, j] += eps
@@ -382,12 +463,24 @@ def _fwd_batch(envH, rawH, muH, g, robot, sp, omega_np, poses, wpv, wtv, grad=Fa
     loss = wp.zeros(1, dtype=float, device=dev, requires_grad=grad)
 
     def launches():
-        wp.launch(init_state_kernel, B, inputs=[Henv, g, robot, sp, pose0],
-                  outputs=[controlled, derived], device=dev)
+        wp.launch(
+            init_state_kernel,
+            B,
+            inputs=[Henv, g, robot, sp, pose0],
+            outputs=[controlled, derived],
+            device=dev,
+        )
         for t in range(T):
-            wp.launch(step_kernel, B, inputs=[Henv, Hraw, Hmu, g, robot, sp, omega[t], controlled[t], derived[t]],
-                      outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]], device=dev)
-        wp.launch(_row_loss, B, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev)
+            wp.launch(
+                step_kernel,
+                B,
+                inputs=[Henv, Hraw, Hmu, g, robot, sp, omega[t], controlled[t], derived[t]],
+                outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]],
+                device=dev,
+            )
+        wp.launch(
+            _row_loss, B, inputs=[controlled, derived, wpv, wtv, T], outputs=[loss], device=dev
+        )
 
     if not grad:
         launches()
@@ -428,8 +521,19 @@ def _selftest_batch():
 
     ls, gHs, gMs = 0.0, np.zeros_like(gHb), np.zeros_like(gMb)
     for b in range(B):
-        lo, gh, gm = _fwd_batch(envH, rawH, muH, g, robot, sp,
-                                omega[:, b:b + 1], poses[b:b + 1], wpv, wtv, grad=True)
+        lo, gh, gm = _fwd_batch(
+            envH,
+            rawH,
+            muH,
+            g,
+            robot,
+            sp,
+            omega[:, b : b + 1],
+            poses[b : b + 1],
+            wpv,
+            wtv,
+            grad=True,
+        )
         ls += lo
         gHs += gh
         gMs += gm
@@ -438,8 +542,9 @@ def _selftest_batch():
     d_H = np.abs(gHb - gHs).max()
     d_M = np.abs(gMb - gMs).max()
     worst = max(d_loss, d_H, d_M)
-    print(f"  B={B} T={T}  |loss_batch-sum_solo|={d_loss:.2e}  "
-          f"dgHenv={d_H:.2e}  dgHmu={d_M:.2e}")
+    print(
+        f"  B={B} T={T}  |loss_batch-sum_solo|={d_loss:.2e}  " f"dgHenv={d_H:.2e}  dgHmu={d_M:.2e}"
+    )
     print(f"batch == sum-of-solo  worst={worst:.2e}  {'OK' if worst < 1e-3 else 'REVIEW'}")
 
 
@@ -468,13 +573,19 @@ def _selftest_bptt():
     _, gHenv, gHmu = _fwd(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, grad=True)
 
     eps = 1e-3
-    err_e = _fd_grid(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, gHenv, "env", eps)
+    err_e = _fd_grid(
+        envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, gHenv, "env", eps
+    )
     err_m = _fd_grid(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, gHmu, "mu", eps)
     worst = max(err_e, err_m)
-    print(f"  T={T}  dHenv: {np.count_nonzero(np.abs(gHenv) > 1e-5)} cells "
-          f"||g||={np.abs(gHenv).max():.3f}  max|err|={err_e:.2e}")
-    print(f"  T={T}  dHmu : {np.count_nonzero(np.abs(gHmu) > 1e-5)} cells "
-          f"||g||={np.abs(gHmu).max():.3f}  max|err|={err_m:.2e}")
+    print(
+        f"  T={T}  dHenv: {np.count_nonzero(np.abs(gHenv) > 1e-5)} cells "
+        f"||g||={np.abs(gHenv).max():.3f}  max|err|={err_e:.2e}"
+    )
+    print(
+        f"  T={T}  dHmu : {np.count_nonzero(np.abs(gHmu) > 1e-5)} cells "
+        f"||g||={np.abs(gHmu).max():.3f}  max|err|={err_m:.2e}"
+    )
     print(f"BPTT d/dHenv,d/dHmu vs FD  worst={worst:.2e}  {'OK' if worst < 5e-2 else 'REVIEW'}")
 
 
