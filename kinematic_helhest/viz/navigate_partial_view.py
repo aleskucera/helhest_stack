@@ -221,7 +221,7 @@ def run(
         dynamics.robot_params(), dynamics.planning_solver(), win_grid, 4096, 70, device
     )
     plan_sim.set_uniform_friction(0.8)
-    planner = MppiGpu(plan_sim, _LATTICE_W, robust=RobustConfig(n_scenarios=K), n_theta=24)
+    planner = MppiGpu(plan_sim, _LATTICE_W, robust=RobustConfig(n_slip_samples=K), n_theta=24)
     planner.reset_nominal(1.5)
     rww = rwh = int(round(max(route_m, win_m) / cell))
     kr = max(1, int(lat_coarsen))
@@ -240,9 +240,9 @@ def run(
     scan_buf = deque(maxlen=local_scans) if local_scans >= 1 else None
     rng = np.random.default_rng(0)
     drift_x = drift_y = drift_yaw = 0.0  # accumulated SE(2) global-map drift (m, m, rad)
-    stepB = max(1, plan_sim.B // max(1, fan_n))
+    stepB = max(1, plan_sim.batch_size // max(1, fan_n))
     # feasibility limits for coloring the rollouts (same as the MPPI cost invalid term)
-    CM, RT, T = 0.05, 1e-2, plan_sim.T
+    CM, RT, T = 0.05, 1e-2, plan_sim.n_steps
     _rp = dynamics.robot_params()
     MAXR, MAXPU, MAXPD = _rp.max_roll, _rp.max_pitch_up, _rp.max_pitch_down
     sXX, sYY = np.meshgrid(

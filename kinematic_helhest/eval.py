@@ -17,6 +17,7 @@ import warp as wp
 
 from . import dynamics
 from . import worlds as W
+from .control.mppi import CostParams
 from .control.mppi import MppiGpu
 from .control.mppi import RobustConfig
 from .control.terminal import dock_control
@@ -24,10 +25,10 @@ from .driver import WarpDriver
 from .engine import GridParams
 from .engine import Simulator
 
-# lattice routing weights: routing + feasibility only. The terminal dock handles reach+stop, so the
-# Just the cost WEIGHTS. The robot's tip-over envelope + feasibility thresholds come from the Robot
-# struct (sim.robot), read straight by the cost kernel -- not duplicated into this weight dict.
-_LATTICE_W = dict(
+# lattice routing cost weights: routing + feasibility only (the terminal dock handles reach+stop).
+# The robot's tip-over envelope + feasibility thresholds come from the Robot struct (sim.robot), read
+# straight by the cost kernel -- not duplicated here.
+_LATTICE_W = CostParams(
     goal_terminal=3.0,
     goal_running=0.3,
     infeasible=1e5,
@@ -61,7 +62,7 @@ def evaluate(
         wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
     )
     plan_sim.set_friction(mu)
-    planner = MppiGpu(plan_sim, _LATTICE_W, robust=RobustConfig(n_scenarios=K), n_theta=n_theta)
+    planner = MppiGpu(plan_sim, _LATTICE_W, robust=RobustConfig(n_slip_samples=K), n_theta=n_theta)
     planner.reset_nominal(1.5)
     # routing field, optionally coarse (k>1): max-pool the terrain (keeps thin walls), solve low-res
     k = max(1, int(lat_coarsen))

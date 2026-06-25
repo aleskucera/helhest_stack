@@ -103,7 +103,7 @@ def navigate(
         dynamics.robot_params(), dynamics.planning_solver(), win_grid, B, T, device
     )
     plan_sim.set_uniform_friction(0.8)
-    planner = MppiGpu(plan_sim, _LATTICE_W, robust=RobustConfig(n_scenarios=K), n_theta=n_theta)
+    planner = MppiGpu(plan_sim, _LATTICE_W, robust=RobustConfig(n_slip_samples=K), n_theta=n_theta)
     planner.reset_nominal(1.5)
 
     # DECOUPLED routing: the cost-to-go is solved on a LARGER (but still bounded, robot-centered)

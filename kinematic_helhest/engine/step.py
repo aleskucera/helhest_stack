@@ -405,7 +405,7 @@ def step_kernel(
 
 @wp.kernel
 def rollout_kernel(
-    T: int,
+    n_steps: int,
     envelope: wp.array2d(dtype=wp.float32),
     elevation: wp.array2d(dtype=wp.float32),
     friction: wp.array2d(dtype=wp.float32),
@@ -421,14 +421,14 @@ def rollout_kernel(
     clear_out: wp.array2d(dtype=float),  # [T, B]
     resid_out: wp.array2d(dtype=float),  # [T, B]
 ):
-    """FORWARD-ONLY whole-rollout fusion: one thread per rollout walks all T steps,
+    """FORWARD-ONLY whole-rollout fusion: one thread per rollout walks all n_steps steps,
     carrying the state (pc, tc) in registers instead of round-tripping it through
     global memory between per-step launches (~1.2x faster than init_state_kernel +
-    T*step_kernel). This is the hot planning path; the differentiable/calibration
+    n_steps*step_kernel). This is the hot planning path; the differentiable/calibration
     path keeps the per-step step_kernel (the register carry is NOT auto-diffable --
     backprop needs the intermediate states this kernel overwrites).
 
-    MUST stay bit-identical to init_state_kernel + T*step_kernel (guarded by
+    MUST stay bit-identical to init_state_kernel + n_steps*step_kernel (guarded by
     tests/engine/step.selftest_rollout_kernel). Edit the physics in both.
     """
     b = wp.tid()
@@ -439,7 +439,7 @@ def rollout_kernel(
     controlled[0, b] = pc
     derived[0, b] = tc
 
-    for t in range(T):
+    for t in range(n_steps):
         x = pc[0]
         y = pc[1]
         yaw = pc[2]

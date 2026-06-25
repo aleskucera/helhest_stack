@@ -1,6 +1,6 @@
 """Preallocated forward-simulation context.
 
-Build once from (robot params, solver params, grid spec, B, T); then `set_terrain`,
+Build once from (robot params, solver params, grid spec, batch_size, n_steps); then `set_terrain`,
 `set_uniform_friction`, and `rollout` reuse every device buffer — no allocation in the loop.
 Replaces the old planning-side `BatchRollout`: the engine now owns the simulation
 state (the rollout buffers + the terrain/envelope/friction grids), and the planner
@@ -32,15 +32,15 @@ class Simulator:
         robot_params: RobotParams,
         solver_params: SolverParams,
         grid_params: GridParams,
-        B: int,  # Batch size
-        T: int,  # Number of timesteps
+        batch_size: int,
+        n_steps: int,
         device: Device | str | None = None,
     ):
 
         self.device = wp.get_device(device)
 
-        self.B = B
-        self.T = T
+        self.batch_size = batch_size
+        self.n_steps = n_steps
 
         self.robot = robot_params.build(device)  # device Robot struct
         self.solver = solver_params.build()  # device Solver struct
@@ -59,14 +59,14 @@ class Simulator:
             self._cap = wp.zeros((ny, nx), dtype=wp.float32)
 
             # rollout buffers + control inputs, allocated ONCE.
-            self.controlled = wp.zeros((T + 1, B), dtype=wp.vec3f)
-            self.derived = wp.zeros((T + 1, B), dtype=wp.vec3f)
-            self.loads = wp.zeros((T, B), dtype=wp.vec3f)
-            self.turning = wp.zeros((T, B), dtype=wp.vec2f)
-            self.clearance = wp.zeros((T, B), dtype=wp.float32)
-            self.residual = wp.zeros((T, B), dtype=wp.float32)
-            self.omega = wp.zeros((T, B), dtype=wp.vec3f)
-            self.start_pose = wp.zeros(B, dtype=wp.vec3f)
+            self.controlled = wp.zeros((n_steps + 1, batch_size), dtype=wp.vec3f)
+            self.derived = wp.zeros((n_steps + 1, batch_size), dtype=wp.vec3f)
+            self.loads = wp.zeros((n_steps, batch_size), dtype=wp.vec3f)
+            self.turning = wp.zeros((n_steps, batch_size), dtype=wp.vec2f)
+            self.clearance = wp.zeros((n_steps, batch_size), dtype=wp.float32)
+            self.residual = wp.zeros((n_steps, batch_size), dtype=wp.float32)
+            self.omega = wp.zeros((n_steps, batch_size), dtype=wp.vec3f)
+            self.start_pose = wp.zeros(batch_size, dtype=wp.vec3f)
 
     def set_terrain(self, elevation: wp.array):
         wp.copy(self.elevation, elevation)
@@ -120,9 +120,9 @@ class Simulator:
         """
         wp.launch(
             rollout_kernel,
-            self.B,
+            self.batch_size,
             inputs=[
-                self.T,
+                self.n_steps,
                 self.envelope,
                 self.elevation,
                 self.friction,
@@ -149,7 +149,7 @@ class Simulator:
         self.omega.assign(np.ascontiguousarray(omega_np, np.float32))
         self.start_pose.assign(
             np.ascontiguousarray(
-                np.tile(np.asarray(init_pose, np.float32), (self.B, 1)), np.float32
+                np.tile(np.asarray(init_pose, np.float32), (self.batch_size, 1)), np.float32
             )
         )
         self.rollout_launch()

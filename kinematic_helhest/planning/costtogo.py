@@ -133,8 +133,8 @@ class CostToGo:
             robot_params=robot_params,
             solver_params=solver_params,
             grid_params=grid_params,
-            B=nx * ny * n_theta,
-            T=1,
+            batch_size=nx * ny * n_theta,
+            n_steps=1,
             device=self.device,
         )
         rr, cc, tt = np.meshgrid(np.arange(ny), np.arange(nx), np.arange(n_theta), indexing="ij")

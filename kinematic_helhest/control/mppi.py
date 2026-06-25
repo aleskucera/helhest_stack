@@ -11,13 +11,13 @@ Kernels (all suffixed _kernel):
   _minmax/_bisect_*/_count_below/_elite_u   CEM reweight (top-k elite mean) of U, on device
   _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
 """
-
 from dataclasses import dataclass
 
 import numpy as np
 import warp as wp
 
 from ..engine.robot import Robot
+from ..engine.simulator import Simulator
 from ..engine.terrain import _locate
 from ..engine.terrain import Grid
 from ..profiling import StageProfiler
@@ -40,18 +40,19 @@ class SamplingConfig:
 
 @dataclass
 class RobustConfig:
-    """MppiGpu config: CVaR-over-wheel-slip robustness (option F). n_scenarios=1 -> plain MPPI."""
+    """MppiGpu config: CVaR-over-wheel-slip robustness (option F). n_slip_samples=1 -> plain MPPI."""
 
-    n_scenarios: int = 1  # K slip scenarios per candidate
-    cvar_beta: float = 0.5  # CVaR tail fraction (the candidate's cost = mean of its worst beta*K)
-    slip_lo: float = 0.6  # slip-retention lower bound for the sampled scenarios
+    n_slip_samples: int = 1  # wheel-slip realizations each candidate is rolled out under
+    # CVaR tail fraction (the candidate's cost = mean of its worst cvar_beta * n_slip_samples)
+    cvar_beta: float = 0.5
+    slip_lo: float = 0.6  # slip-retention lower bound for the sampled realizations
 
 
 @wp.struct
 class CostWeights:
-    """Per-rollout cost WEIGHTS, baked once (fixed per planner). The robot's envelope + feasibility
-    thresholds (roll/pitch limits, roll/pitch cost shape, clear_margin, resid_tol) come from the Robot
-    struct the kernel is handed -- one source of truth shared with the cost-to-go feasibility."""
+    """Device-side per-rollout cost weights, passed into _cost_kernel. Built from CostParams (below).
+    The robot's envelope + feasibility thresholds (roll/pitch limits, roll/pitch cost shape,
+    clear_margin, resid_tol) are NOT here -- they come from the Robot struct, one shared source."""
 
     goal_terminal: float
     goal_running: float
@@ -63,6 +64,46 @@ class CostWeights:
     effort: float
     smoothness: float
     infeasible: float
+
+
+@dataclass(frozen=True)
+class CostParams:  # host-side cost weights -- what you tune; build() -> the device CostWeights
+    """The MPPI cost weights. A weight left at 0 disables its term in the kernel. The robot's envelope
+    + feasibility thresholds are NOT here -- they live on the Robot struct (one shared source)."""
+
+    goal_terminal: float = 0.0  # cost-to-go V^2 at the horizon end -> end the plan at the goal
+    # cost-to-go V^2 averaged over the horizon -> make progress every step
+    goal_running: float = 0.0
+    # straight-line pull where V saturates (goal unreachable in-window)
+    explore_fallback: float = 0.0
+    out_of_bounds: float = 0.0  # soft wall just inside the world edge (V is clamped off-grid)
+    effort: float = 0.0  # penalize wheel-speed^2
+    smoothness: float = 0.0  # penalize wheel-speed CHANGES (jerk)
+    # penalize clearance/residual/tip-over violations (does obstacle avoidance)
+    infeasible: float = 0.0
+
+    def build(self) -> CostWeights:
+        cw = CostWeights()
+        cw.goal_terminal = self.goal_terminal
+        cw.goal_running = self.goal_running
+        cw.explore_fallback = self.explore_fallback
+        cw.lattice_cap = 1e9  # off until armed: planner.cw.lattice_cap = ctg._vcap
+        cw.out_of_bounds = self.out_of_bounds
+        cw.effort = self.effort
+        cw.smoothness = self.smoothness
+        cw.infeasible = self.infeasible
+        return cw
+
+
+@wp.func
+def _bilinear(field: wp.array3d(dtype=float), yi: int, xi: int, fx: float, fy: float, t: int):
+    """Bilinear read of the heading-t slice field[:, :, t] at the fractional cell (yi + fy, xi + fx)."""
+    return (
+        (1.0 - fx) * (1.0 - fy) * field[yi, xi, t]
+        + fx * (1.0 - fy) * field[yi, xi + 1, t]
+        + (1.0 - fx) * fy * field[yi + 1, xi, t]
+        + fx * fy * field[yi + 1, xi + 1, t]
+    )
 
 
 @wp.func
@@ -77,33 +118,24 @@ def sample_lattice(
     dth = two_pi / float(n_theta)
     m = yaw - wp.floor(yaw / two_pi) * two_pi  # yaw mod 2pi in [0, 2pi)
     ft = m / dth
-    t0 = int(wp.floor(ft)) % n_theta
+    ftf = wp.floor(ft)
+    t0 = int(ftf) % n_theta
     t1 = (t0 + 1) % n_theta
-    fth = ft - wp.floor(ft)
+    fth = ft - ftf
     fx = c.frac_x
     fy = c.frac_y
     xi = c.x_idx
     yi = c.y_idx
-    va = (
-        (1.0 - fx) * (1.0 - fy) * field[yi, xi, t0]
-        + fx * (1.0 - fy) * field[yi, xi + 1, t0]
-        + (1.0 - fx) * fy * field[yi + 1, xi, t0]
-        + fx * fy * field[yi + 1, xi + 1, t0]
-    )
-    vb = (
-        (1.0 - fx) * (1.0 - fy) * field[yi, xi, t1]
-        + fx * (1.0 - fy) * field[yi, xi + 1, t1]
-        + (1.0 - fx) * fy * field[yi + 1, xi, t1]
-        + fx * fy * field[yi + 1, xi + 1, t1]
-    )
+    va = _bilinear(field, yi, xi, fx, fy, t0)
+    vb = _bilinear(field, yi, xi, fx, fy, t1)
     return (1.0 - fth) * va + fth * vb
 
 
 @wp.func
-def _knot_bracket(t: int, T: int, n_knots: int):
+def _knot_bracket(t: int, horizon: int, n_knots: int):
     """n_knots control knots evenly spaced over the horizon: the two bracketing step t and the
     interpolation fraction between them. Deterministic -> threads sharing a knot agree."""
-    knot_spacing = float(T - 1) / float(n_knots - 1)
+    knot_spacing = float(horizon - 1) / float(n_knots - 1)
     knot_pos = float(t) / knot_spacing
     knot_lo = int(knot_pos)
     knot_hi = wp.min(knot_lo + 1, n_knots - 1)
@@ -120,20 +152,20 @@ def _sample_omega_kernel(
     wmax: float,
     n_wide: int,
     n_knots: int,
-    n_scen: int,  # K slip scenarios per candidate (1 = non-robust)
-    slip: wp.array2d(dtype=float),  # [K, 2] wheel-speed retention; scenario 0 = (1, 1)
+    n_scen: int,  # slip scenarios per candidate (= n_slip; 1 = non-robust)
+    slip: wp.array2d(dtype=float),  # [n_scen, 2] wheel-speed retention; scenario 0 = (1, 1)
     seed: wp.array(dtype=int),
     omega: wp.array2d(dtype=wp.vec3),
 ):
-    # rollout r = candidate b * K + scenario k: all K scenarios of a candidate share the SAME
-    # sampled control (noise keyed on b), then scenario k scales the wheels by its slip. So the
-    # cost sees how each candidate holds up across the disturbance. K=1 -> b=r, slip=(1,1) (today).
+    # rollout r = candidate b * n_scen + scenario k: all scenarios of a candidate share the SAME
+    # sampled control (noise keyed on b), then scenario k scales the wheels by its slip. So the cost
+    # sees how each candidate holds up across the disturbance. n_scen=1 -> b=r, slip=(1,1) (today).
     t, r = wp.tid()
     n_cand = omega.shape[1] // n_scen
     b = r // n_scen
     k = r % n_scen
-    T = omega.shape[0]
-    knot_lo, knot_hi, frac = _knot_bracket(t, T, n_knots)
+    horizon = omega.shape[0]
+    knot_lo, knot_hi, frac = _knot_bracket(t, horizon, n_knots)
     wheel_l = U[t, 0]
     wheel_r = U[t, 1]
     if b == 0:
@@ -188,7 +220,7 @@ def _cost_kernel(
     n_theta: int,
     cw: CostWeights,
     robot: Robot,  # envelope + feasibility thresholds (shared with the cost-to-go feasibility)
-    T: int,
+    horizon: int,
     Jout: wp.array(dtype=float),
 ):
     r = wp.tid()  # rollout
@@ -200,7 +232,7 @@ def _cost_kernel(
     x_hi = grid.origin_x + float(grid.cells_x) * grid.cell_size - edge
     y_lo = grid.origin_y + edge
     y_hi = grid.origin_y + float(grid.cells_y) * grid.cell_size - edge
-    for t in range(T + 1):
+    for t in range(horizon + 1):
         pose = controlled[t, r]  # (x, y, yaw)
         if cw.out_of_bounds > 0.0:
             # soft wall at the world edge: depth past the margin (V is clamped off-grid, so the
@@ -218,13 +250,13 @@ def _cost_kernel(
         else:
             goal_cost = vl * vl
         run_sum += goal_cost
-        terminal_cost = goal_cost  # last iter (t = T) sticks -> terminal goal cost
+        terminal_cost = goal_cost  # last iter (t = horizon) sticks -> terminal goal cost
     effort_sum = float(0.0)
     smooth_sum = float(0.0)
     penalty_sum = float(0.0)
     prev_l = float(0.0)
     prev_r = float(0.0)
-    for t in range(T):
+    for t in range(horizon):
         wheels = omega[t, r]  # (wL, wR)
         sp2 = wheels[0] * wheels[0] + wheels[1] * wheels[1]
         effort_sum += sp2
@@ -246,14 +278,15 @@ def _cost_kernel(
         roll_viol = wp.max(wp.abs(roll) - robot.max_roll, 0.0)
         climb_viol = wp.max(-pitch - robot.max_pitch_up, 0.0)
         descend_viol = wp.max(pitch - robot.max_pitch_down, 0.0)
-        early = float(T - t) / float(T)  # earlier violations hurt more (imminent)
+        early = float(horizon - t) / float(horizon)  # earlier violations hurt more (imminent)
         penalty_sum += early * (clear_viol + resid_viol + roll_viol + climb_viol + descend_viol)
-    # goal_running is a mean over the horizon; effort/smoothness are raw sums (so they scale with T) --
-    # the weights are tuned to that, mind it if T changes. (Reaching + stopping at the goal, and the
-    # right approach heading, are the cost-to-go + dock controller's job -- no heading/endgame term.)
+    # goal_running is a mean over the horizon; effort/smoothness are raw sums (so they scale with the
+    # horizon) -- the weights are tuned to that, mind it if the horizon changes. (Reaching + stopping at
+    # the goal, and the right approach heading, are the cost-to-go + dock controller's job -- no
+    # heading/endgame term.)
     Jout[r] = (
         cw.goal_terminal * terminal_cost
-        + cw.goal_running * (run_sum / float(T + 1))
+        + cw.goal_running * (run_sum / float(horizon + 1))
         + cw.out_of_bounds * oob_sum
         + cw.effort * effort_sum
         + cw.smoothness * smooth_sum
@@ -261,10 +294,10 @@ def _cost_kernel(
     )
 
 
-# --- Robust eval (option F as risk-aware planning): each candidate is rolled out under K slip
+# --- Robust eval (option F as risk-aware planning): each candidate is rolled out under n_scen slip
 # scenarios; CVaR(J) = mean of its worst m_tail scenarios is the candidate's cost. A path that
 # hugs an obstacle is cheap nominally but its slip fan high-centers -> bad CVaR, so clearance
-# falls out of robustness (no margin set). K=1 -> J_cand = J (today's behaviour). ---
+# falls out of robustness (no margin set). n_scen=1 -> J_cand = J (today's behaviour). ---
 @wp.kernel
 def _cvar_kernel(J: wp.array(dtype=float), n_scen: int, m_tail: int, J_cand: wp.array(dtype=float)):
     b = wp.tid()  # candidate
@@ -321,7 +354,9 @@ def _bisect_init_kernel(
 
 @wp.kernel
 def _count_below_kernel(
-    J: wp.array(dtype=float), tau: wp.array(dtype=float), count: wp.array(dtype=float)
+    J: wp.array(dtype=float),
+    tau: wp.array(dtype=float),
+    count: wp.array(dtype=float),
 ):
     if J[wp.tid()] <= tau[0]:
         wp.atomic_add(count, 0, 1.0)
@@ -379,73 +414,73 @@ class MppiGpu:
 
     def __init__(
         self,
-        sim,
-        weights,
-        sampling=None,  # SamplingConfig (noise / wheel-speed box / elite fraction)
-        robust=None,  # RobustConfig (CVaR over wheel-slip scenarios)
-        n_theta=16,
-        seed=0,
-        profile=False,  # opt-in per-stage CUDA-event timing of the refine loop (tiny event nodes)
+        sim: Simulator,
+        cost: CostParams,  # cost weights (host) -> built into the device CostWeights struct
+        sampling: SamplingConfig = SamplingConfig(),  # noise / wheel-speed box / elite fraction
+        robust: RobustConfig = RobustConfig(),  # CVaR over wheel-slip scenarios
+        n_theta: int = 16,
+        seed: int = 0,
+        profile: bool = False,
     ):
         sampling = sampling or SamplingConfig()
         robust = robust or RobustConfig()
+
         self.sim = sim
-        self.dev = sim.device
-        self.B, self.T = sim.B, sim.T
-        # robust eval (option F): the B rollouts are n_cand candidates x K slip scenarios.
-        # K=1 is non-robust (one scenario, no slip) -> identical to plain MPPI.
-        self.K = int(robust.n_scenarios)
-        if self.B % self.K != 0:
-            raise ValueError(f"sim.B ({self.B}) must be divisible by n_scenarios ({self.K})")
-        self.n_cand = self.B // self.K
-        self.m_tail = max(1, int(round(robust.cvar_beta * self.K)))  # CVaR = mean of worst m_tail
-        self.sigma, self.wmax, self.wmin = sampling.sigma, sampling.wmax, sampling.wmin
-        self.sigma_knot, self.n_knots = sampling.sigma_knot, sampling.n_knots
+        self.device = sim.device
+
+        self.n_rollouts, self.horizon = sim.batch_size, sim.n_steps
+
+        # robust eval (option F): the rollouts are n_cand candidates x n_slip slip scenarios.
+        # n_slip=1 is non-robust (one scenario, no slip) -> identical to plain MPPI.
+        self.n_slip = int(robust.n_slip_samples)
+        if self.n_rollouts % self.n_slip != 0:
+            raise ValueError(
+                f"sim.batch_size ({self.n_rollouts}) must be divisible by n_slip_samples ({self.n_slip})"
+            )
+        self.n_cand = self.n_rollouts // self.n_slip
+        # CVaR = mean of each candidate's worst m_tail slip scenarios
+        self.m_tail = max(1, int(round(robust.cvar_beta * self.n_slip)))
+        self.sampling, self.robust = sampling, robust  # keep the configs; read fields through them
         self.n_wide = int(sampling.wide_frac * self.n_cand)  # candidates drawn from the WIDE prior
+
         # CEM elite count (over candidates)
         self.target_k = float(int(sampling.elite_frac * self.n_cand))
-        w = weights
-        cw = CostWeights()
-        cw.goal_terminal = float(w.get("goal_terminal", 0.0))
-        cw.goal_running = float(w.get("goal_running", 0.0))
-        cw.explore_fallback = float(w.get("explore_fallback", 0.0))
-        # set to the routing field's cap (planner.cw.lattice_cap = ctg._vcap) to arm the fallback
-        cw.lattice_cap = 1e9
-        cw.out_of_bounds = float(w.get("out_of_bounds", 0.0))
-        cw.effort = float(w.get("effort", 0.0))
-        cw.smoothness = float(w.get("smoothness", 0.0))
-        cw.infeasible = float(w.get("infeasible", 0.0))
-        self.cw = cw
+        self.cw = cost.build()  # host CostParams -> device CostWeights struct (weights only)
         # the robot's envelope/shape + feasibility thresholds (max_roll/pitch, roll/pitch cost shape,
         # clear_margin, resid_tol) are read straight from sim.robot in the cost kernel -- not copied here.
+
         self.robot = sim.robot
-        d = self.dev
-        slip = np.ones((self.K, 2), np.float32)  # scenario 0 = no slip; rest sample the disturbance
-        if self.K > 1:
+        # scenario 0 = no slip; the rest sample the disturbance
+        slip = np.ones((self.n_slip, 2), np.float32)
+        if self.n_slip > 1:
             rng = np.random.default_rng(int(seed) + 4242)
-            slip[1:] = rng.uniform(robust.slip_lo, 1.0, (self.K - 1, 2)).astype(np.float32)
-        self.slip = wp.array(slip, dtype=float, device=d)
-        self.U = wp.zeros((self.T, 2), dtype=float, device=d)
-        self.J = wp.zeros(self.B, dtype=float, device=d)  # cost per scenario-rollout
-        self.J_cand = wp.zeros(self.n_cand, dtype=float, device=d)  # CVaR cost per candidate
-        self.jmin = wp.zeros(1, dtype=float, device=d)  # CEM bisection scalars
-        self.jmax = wp.zeros(1, dtype=float, device=d)
-        self.tau_lo = wp.zeros(1, dtype=float, device=d)
-        self.tau_hi = wp.zeros(1, dtype=float, device=d)
-        self.tau = wp.zeros(1, dtype=float, device=d)
-        self.count = wp.zeros(1, dtype=float, device=d)
-        self.seed = wp.array([int(seed)], dtype=int, device=d)
-        self.goal = wp.zeros(2, dtype=float, device=d)
-        ny, nx = sim.elevation.shape
-        self.n_theta = int(n_theta)
-        self.lattice_field = wp.zeros((ny, nx, self.n_theta), dtype=float, device=d)  # V(x,y,theta)
+            slip[1:] = rng.uniform(robust.slip_lo, 1.0, (self.n_slip - 1, 2)).astype(np.float32)
+
+        with wp.ScopedDevice(self.device):
+            self.slip = wp.array(slip, dtype=wp.float32)
+            self.U = wp.zeros((self.horizon, 2), dtype=wp.float32)
+            self.J = wp.zeros(self.n_rollouts, dtype=wp.float32)  # cost per scenario-rollout
+            self.J_cand = wp.zeros(self.n_cand, dtype=wp.float32)  # CVaR cost per candidate
+            self.jmin = wp.zeros(1, dtype=wp.float32)  # CEM bisection scalars
+            self.jmax = wp.zeros(1, dtype=wp.float32)
+            self.tau_lo = wp.zeros(1, dtype=wp.float32)
+            self.tau_hi = wp.zeros(1, dtype=wp.float32)
+            self.tau = wp.zeros(1, dtype=wp.float32)
+            self.count = wp.zeros(1, dtype=wp.float32)
+            self.seed = wp.array([int(seed)], dtype=wp.int32)
+            self.goal = wp.zeros(2, dtype=wp.float32)
+            ny, nx = sim.elevation.shape
+            self.n_theta = int(n_theta)
+            self.lattice_field = wp.zeros((ny, nx, n_theta), dtype=wp.float32)  # V(x,y,theta)
+
         # the grid the cost kernel samples the lattice field on: defaults to the sim grid, but a COARSER
         # grid can be set (set_lattice(V, grid)) so the routing field is solved at low resolution --
         # the rollouts do fine obstacle avoidance, so the global router needn't be sim-resolution.
         self.lattice_grid = sim.grid
         self._graph = None
+
         # opt-in per-stage profiling of the captured refine loop (CUDA-event timing; off = no overhead)
-        self._prof = StageProfiler(self.dev, ("sample", "rollout", "cost", "reweight"), profile)
+        self._prof = StageProfiler(self.device, ("sample", "rollout", "cost", "reweight"), profile)
         self._n_refine_done = 0
 
     def reset_timing(self):
@@ -475,65 +510,68 @@ class MppiGpu:
         defaults to the sim grid. Call before the first replan; on re-solve (moving goal) call again
         with the SAME shape -- it copies into the stable buffer the captured graph reads."""
         if tuple(V.shape) != tuple(self.lattice_field.shape):
-            self.lattice_field = wp.zeros(V.shape, dtype=float, device=self.dev)
+            self.lattice_field = wp.zeros(V.shape, dtype=float, device=self.device)
         wp.copy(self.lattice_field, V)
         if grid is not None:
             self.lattice_grid = grid
 
     def _refine(self):
         """One MPPI iteration: sample -> rollout -> cost -> CEM reweight, all on device."""
-        s, d = self.sim, self.dev
         self._prof.mark(0)
-        wp.launch(_bump_seed_kernel, 1, inputs=[self.seed], device=d)
+        wp.launch(_bump_seed_kernel, 1, inputs=[self.seed], device=self.device)
         wp.launch(
             _sample_omega_kernel,
-            (self.T, self.B),
+            (self.horizon, self.n_rollouts),
             inputs=[
                 self.U,
-                self.sigma,
-                self.sigma_knot,
-                self.wmin,
-                self.wmax,
+                self.sampling.sigma,
+                self.sampling.sigma_knot,
+                self.sampling.wmin,
+                self.sampling.wmax,
                 self.n_wide,
-                self.n_knots,
-                self.K,
+                self.sampling.n_knots,
+                self.n_slip,
                 self.slip,
                 self.seed,
             ],
-            outputs=[s.omega],
-            device=d,
+            outputs=[self.sim.omega],
+            device=self.device,
         )
         self._prof.mark(1)  # sample done
-        s.rollout_launch()
+        self.sim.rollout_launch()
         self._prof.mark(2)  # rollout done
         wp.launch(
             _cost_kernel,
-            self.B,
+            self.n_rollouts,
             inputs=[
-                s.controlled,
-                s.derived,
-                s.clearance,
-                s.residual,
-                s.omega,
+                self.sim.controlled,
+                self.sim.derived,
+                self.sim.clearance,
+                self.sim.residual,
+                self.sim.omega,
                 self.goal,
                 self.lattice_grid,
                 self.lattice_field,
                 self.n_theta,
                 self.cw,
                 self.robot,
-                self.T,
+                self.horizon,
             ],
             outputs=[self.J],
-            device=d,
+            device=self.device,
         )
         self._prof.mark(3)  # cost done
-        # robust eval: reduce each candidate's K scenario costs to its CVaR (K=1 -> J_cand = J)
+        # robust eval: reduce each candidate's slip-scenario costs to its CVaR (n_slip=1 -> J_cand = J)
         wp.launch(
             _cvar_kernel,
             self.n_cand,
-            inputs=[self.J, self.K, self.m_tail],
+            inputs=[
+                self.J,
+                self.n_slip,
+                self.m_tail,
+            ],
             outputs=[self.J_cand],
-            device=d,
+            device=self.device,
         )
         self._cem_reweight()
         self._prof.mark(4)  # reweight (CVaR + CEM) done
@@ -542,57 +580,80 @@ class MppiGpu:
         """Top-k elite mean -> U over CANDIDATES (cost = J_cand, the CVaR): find the threshold
         tau by device-side bisection (#{J_cand <= tau} ~= target_k), then average the elite
         candidates' un-slipped controls (scenario-0 column)."""
-        d, omega = self.dev, self.sim.omega
-        wp.launch(_reset_minmax_kernel, 1, inputs=[self.jmin, self.jmax, self.count], device=d)
-        wp.launch(_minmax_kernel, self.n_cand, inputs=[self.J_cand, self.jmin, self.jmax], device=d)
+
+        wp.launch(
+            _reset_minmax_kernel,
+            1,
+            inputs=[self.jmin, self.jmax, self.count],
+            device=self.device,
+        )
+        wp.launch(
+            _minmax_kernel,
+            self.n_cand,
+            inputs=[self.J_cand, self.jmin, self.jmax],
+            device=self.device,
+        )
         wp.launch(
             _bisect_init_kernel,
             1,
-            inputs=[self.jmin, self.jmax, self.tau_lo, self.tau_hi, self.tau, self.count],
-            device=d,
+            inputs=[
+                self.jmin,
+                self.jmax,
+                self.tau_lo,
+                self.tau_hi,
+                self.tau,
+                self.count,
+            ],
+            device=self.device,
         )
         for _ in range(_N_BISECT):
             wp.launch(
                 _count_below_kernel,
                 self.n_cand,
                 inputs=[self.J_cand, self.tau, self.count],
-                device=d,
+                device=self.device,
             )
             wp.launch(
                 _bisect_step_kernel,
                 1,
                 inputs=[self.count, self.target_k, self.tau_lo, self.tau_hi, self.tau],
-                device=d,
+                device=self.device,
             )
         wp.launch(
-            _count_below_kernel, self.n_cand, inputs=[self.J_cand, self.tau, self.count], device=d
+            _count_below_kernel,
+            self.n_cand,
+            inputs=[self.J_cand, self.tau, self.count],
+            device=self.device,
         )  # final elite count
+
         wp.launch(
             _elite_u_kernel,
-            (self.T, 2),
+            (self.horizon, 2),
             inputs=[
                 self.J_cand,
                 self.tau,
                 self.count,
-                omega,
-                self.K,
-                self.wmin,
-                self.wmax,
+                self.sim.omega,
+                self.n_slip,
+                self.sampling.wmin,
+                self.sampling.wmax,
                 self.n_cand,
                 self.U,
             ],
-            device=d,
+            device=self.device,
         )
 
     def replan(self, state, goal_xy, n_refine):
         """Run n_refine GPU refines from `state` toward world `goal_xy`; updates U in place."""
         self.goal.assign(np.asarray(goal_xy[:2], np.float32))
         self.sim.start_pose.assign(
-            np.ascontiguousarray(np.tile(np.asarray(state, np.float32), (self.B, 1)), np.float32)
+            np.ascontiguousarray(
+                np.tile(np.asarray(state, np.float32), (self.n_rollouts, 1)), np.float32
+            )
         )
-        if self.dev.is_cuda:
+        if self.device.is_cuda:
             if self._graph is None:
-                with wp.ScopedCapture(device=self.dev) as cap:
+                with wp.ScopedCapture(device=self.device) as cap:
                     self._refine()
                 self._graph = cap.graph
             for _ in range(n_refine):
