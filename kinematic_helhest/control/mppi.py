@@ -3,11 +3,11 @@
 The numpy MPPI loop is host-bound: per refine ~15 ms of numpy (cost, noise, omega)
 vs ~2.7 ms of GPU work. These Warp kernels move the whole refine onto the device so
 nothing but the executed pose ever comes back, and the refine is captured as a CUDA
-graph and replayed. `mppi._cost` stays the numpy oracle for the parity test.
+graph and replayed. `reference._cost` stays the numpy oracle for the parity test.
 
 Kernels (all suffixed _kernel):
   _sample_omega  spline-knot noise -> Ub -> writes the rollout's omega buffer (rear -> 0)
-  _cost          per-rollout scalar cost J[B] (goal/tilt/graded-invalid + eff/smooth)
+  _cost          per-rollout scalar cost J[B] (cost-to-go goal V^2 + graded-infeasible + effort/smooth)
   _minmax/_bisect_*/_count_below/_elite_u   CEM reweight (top-k elite mean) of U, on device
   _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
 """
@@ -15,6 +15,7 @@ Kernels (all suffixed _kernel):
 import numpy as np
 import warp as wp
 
+from ..engine.robot import Robot
 from ..engine.terrain import _locate
 from ..engine.terrain import Grid
 from ..profiling import StageProfiler
@@ -132,36 +133,20 @@ def _sample_omega_kernel(
 
 @wp.struct
 class CostWeights:
-    """Per-rollout cost weights + thresholds, baked once (fixed per planner)."""
+    """Per-rollout cost WEIGHTS, baked once (fixed per planner). The robot's envelope + feasibility
+    thresholds (roll/pitch limits, roll/pitch cost shape, clear_margin, resid_tol) come from the Robot
+    struct the kernel is handed -- one source of truth shared with the cost-to-go feasibility."""
 
-    term: float
-    run: float
-    tilt: float
-    head: float
-    lattice: float  # >0 -> goal term is the orientation-aware cost-to-go V(x,y,theta)
-    # >0 -> where V is SATURATED (>= vcap, goal unreachable in-window) fall back to a
-    fallback: float
-    vcap: float  #        direct straight-line pull (weight `fallback`) so the robot explores toward it
-    oob: float  # >0 -> penalize leaving the world (soft wall at the grid edge)
-    endgame: float  # extra terminal weight when the plan ENDS within sqrt(endgame_r2) of the goal
-    # (so the robot commits to the final approach without over-pulling while routing)
-    endgame_r2: float
-    term_v: float  # >0 -> penalize speed at the horizon end (plan should END stopped at the goal)
-    eff: float
-    smooth: float
-    invalid: float
-    tilt_free: float
-    # soft-tilt SHAPE: roll weighted > pitch (the robot's roll-vs-pitch susceptibility); cw.tilt is
-    # the overall gain, tilt_free the per-axis free zone. Mirrors the cost-to-go's graded tilt.
-    roll_cost_weight: float
-    pitch_cost_weight: float
-    clear_margin: float
-    resid_tol: float
-    # robot stability envelope (rad): a rollout pose past these is invalid, same as the cost-to-go
-    # blocks it -- so the field and the rollouts agree about tip-over. Large default = inactive.
-    max_roll: float
-    max_pitch_up: float  # climbing limit (nose up = NEGATIVE pitch)
-    max_pitch_down: float  # descending limit (nose down = positive pitch)
+    goal_terminal: float
+    goal_running: float
+    explore_fallback: float
+    # the cost-to-go's unreachable cap (planner.cw.lattice_cap = ctg._vcap); V >= it means the goal
+    # is unreachable in-window (the field is flat) -> arm the explore_fallback straight-line pull
+    lattice_cap: float
+    out_of_bounds: float
+    effort: float
+    smoothness: float
+    infeasible: float
 
 
 @wp.kernel
@@ -175,16 +160,15 @@ def _cost_kernel(
     grid: Grid,  # geometry for sampling lattice_field at the rollout pose
     lattice_field: wp.array3d(
         dtype=float
-    ),  # [ny, nx, n_theta] V(x,y,theta) (only read when cw.lattice > 0)
+    ),  # [ny, nx, n_theta] cost-to-go V(x,y,theta); the goal cost
     n_theta: int,
     cw: CostWeights,
+    robot: Robot,  # envelope + feasibility thresholds (shared with the cost-to-go feasibility)
     T: int,
     Jout: wp.array(dtype=float),
 ):
     r = wp.tid()  # rollout
     run_sum = float(0.0)
-    tilt_sum = float(0.0)
-    heading_sum = float(0.0)
     oob_sum = float(0.0)
     terminal_cost = float(0.0)
     edge = float(0.4)  # soft-wall margin inside the grid border
@@ -194,63 +178,32 @@ def _cost_kernel(
     y_hi = grid.origin_y + float(grid.cells_y) * grid.cell_size - edge
     for t in range(T + 1):
         pose = controlled[t, r]  # (x, y, yaw)
-        dx = pose[0] - goal[0]
-        dy = pose[1] - goal[1]
-        goal_d2 = dx * dx + dy * dy  # Euclidean; still drives the heading term below
-        if cw.oob > 0.0:
+        if cw.out_of_bounds > 0.0:
             # soft wall at the world edge: depth past the margin (V is clamped off-grid, so the
             # goal term alone doesn't stop the robot driving off the map -- this does).
             oob_sum += wp.max(x_lo - pose[0], 0.0) + wp.max(pose[0] - x_hi, 0.0)
             oob_sum += wp.max(y_lo - pose[1], 0.0) + wp.max(pose[1] - y_hi, 0.0)
-        # goal term: the orientation-aware cost-to-go V(x,y,theta)^2 (routes around the wall) when
-        # enabled, else straight-line distance^2. cw is uniform across rollouts -> warp-coherent.
-        if cw.lattice > 0.0:
-            vl = sample_lattice(lattice_field, grid, n_theta, pose[0], pose[1], pose[2])
-            if cw.fallback > 0.0 and vl >= cw.vcap * 0.9:
-                # routing field SATURATED here (goal unreachable within the window) -> V is flat, so
-                # add a direct straight-line pull toward the goal. The vcap^2 baseline keeps any
-                # reachable cell strictly cheaper (so the robot still prefers routable ground), while
-                # the goal_d2 term gives a gradient to EXPLORE toward the goal instead of creeping.
-                goal_cost = cw.vcap * cw.vcap + cw.fallback * goal_d2
-            else:
-                goal_cost = vl * vl  # orientation-aware: misaligned poses read high -> penalized
+        # goal cost = the orientation-aware cost-to-go V(x,y,theta)^2 (routes around walls; misaligned
+        # poses read high). Where V is SATURATED (>= cap, goal unreachable in-window so the field is
+        # flat) fall back to a straight-line pull -> the robot EXPLORES toward the goal, not creeps.
+        vl = sample_lattice(lattice_field, grid, n_theta, pose[0], pose[1], pose[2])
+        if cw.explore_fallback > 0.0 and vl >= cw.lattice_cap * 0.9:
+            dx = pose[0] - goal[0]
+            dy = pose[1] - goal[1]
+            goal_cost = cw.lattice_cap * cw.lattice_cap + cw.explore_fallback * (dx * dx + dy * dy)
         else:
-            goal_cost = goal_d2
+            goal_cost = vl * vl
         run_sum += goal_cost
         terminal_cost = goal_cost  # last iter (t = T) sticks -> terminal goal cost
-        # tilt + heading are optional; cw is uniform across rollouts, so these guards are
-        # warp-coherent (no divergence) and skip the trig (and the derived read) when off.
-        if cw.tilt > 0.0:
-            # per-axis, roll weighted > pitch: roll is the dangerous axis, so executing a rolled pose
-            # costs more than the same pitch. tilt_free = per-axis free zone (gentle tilt is drivable).
-            pitch = derived[t, r][1]
-            roll = derived[t, r][2]
-            roll_excess = wp.max(wp.abs(roll) - cw.tilt_free, 0.0)
-            pitch_excess = wp.max(wp.abs(pitch) - cw.tilt_free, 0.0)
-            tilt_sum += (
-                cw.roll_cost_weight * roll_excess * roll_excess
-                + cw.pitch_cost_weight * pitch_excess * pitch_excess
-            )
-        if cw.head > 0.0:
-            # heading: penalize facing AWAY from the desired direction (1 - cos angle, in [0, 2]).
-            # Makes "turn the right way" cheaper than "stay", so a forward-only robot commits to a
-            # U-turn / detour (it can't reverse or spin in place).
-            goal_dist = wp.sqrt(goal_d2)
-            if goal_dist > 1e-3:
-                facing = -(wp.cos(pose[2]) * dx + wp.sin(pose[2]) * dy) / goal_dist
-                heading_sum += 1.0 - facing
     effort_sum = float(0.0)
     smooth_sum = float(0.0)
     penalty_sum = float(0.0)
-    term_speed = float(0.0)
     prev_l = float(0.0)
     prev_r = float(0.0)
     for t in range(T):
         wheels = omega[t, r]  # (wL, wR)
         sp2 = wheels[0] * wheels[0] + wheels[1] * wheels[1]
         effort_sum += sp2
-        if t == T - 1:
-            term_speed = sp2  # speed at the horizon end -> 0 means the plan stops (at the goal)
         if t > 0:
             dl = wheels[0] - prev_l
             dr = wheels[1] - prev_r
@@ -260,35 +213,27 @@ def _cost_kernel(
         # GRADED validity (option C): penalize HOW FAR past the margin/tol and HOW EARLY, not a
         # binary flag. De-saturates the cost (it still ranks when every sample violates), and
         # eating into the safety margin costs little while a real penetration costs a lot.
-        clear_viol = wp.max(cw.clear_margin - clearance[t, r], 0.0)
-        resid_viol = wp.max(residual[t, r] - cw.resid_tol, 0.0)
+        clear_viol = wp.max(robot.clear_margin - clearance[t, r], 0.0)
+        resid_viol = wp.max(residual[t, r] - robot.resid_tol, 0.0)
         # roll/pitch stability envelope (same limits as the cost-to-go feasibility): tipping is
         # invalid. climbing is nose-up = NEGATIVE pitch, so the climb limit is on -pitch.
         pitch = derived[t, r][1]
         roll = derived[t, r][2]
-        roll_viol = wp.max(wp.abs(roll) - cw.max_roll, 0.0)
-        climb_viol = wp.max(-pitch - cw.max_pitch_up, 0.0)
-        descend_viol = wp.max(pitch - cw.max_pitch_down, 0.0)
+        roll_viol = wp.max(wp.abs(roll) - robot.max_roll, 0.0)
+        climb_viol = wp.max(-pitch - robot.max_pitch_up, 0.0)
+        descend_viol = wp.max(pitch - robot.max_pitch_down, 0.0)
         early = float(T - t) / float(T)  # earlier violations hurt more (imminent)
         penalty_sum += early * (clear_viol + resid_viol + roll_viol + climb_viol + descend_viol)
-    # endgame commit: boost the terminal weight only when the plan ENDS near the goal, so the robot
-    # commits to the final approach (a weak pull lets it drift past) WITHOUT over-pulling while still
-    # routing (a strong global term cuts narrow gaps too tight).
-    term_weight = cw.term
-    if terminal_cost < cw.endgame_r2:
-        term_weight = cw.term + cw.endgame
-    # run/tilt/heading are means over the horizon; effort/smooth are raw sums (so they scale with
-    # T) -- the weights are tuned to that, mind it if T changes.
+    # goal_running is a mean over the horizon; effort/smoothness are raw sums (so they scale with T) --
+    # the weights are tuned to that, mind it if T changes. (Reaching + stopping at the goal, and the
+    # right approach heading, are the cost-to-go + dock controller's job -- no heading/endgame term.)
     Jout[r] = (
-        term_weight * terminal_cost
-        + cw.run * (run_sum / float(T + 1))
-        + cw.tilt * (tilt_sum / float(T + 1))
-        + cw.head * (heading_sum / float(T + 1))
-        + cw.oob * oob_sum
-        + cw.term_v * term_speed
-        + cw.eff * effort_sum
-        + cw.smooth * smooth_sum
-        + penalty_sum * cw.invalid
+        cw.goal_terminal * terminal_cost
+        + cw.goal_running * (run_sum / float(T + 1))
+        + cw.out_of_bounds * oob_sum
+        + cw.effort * effort_sum
+        + cw.smoothness * smooth_sum
+        + penalty_sum * cw.infeasible
     )
 
 
@@ -414,8 +359,6 @@ class MppiGpu:
         sigma,
         wmax,
         weights,
-        clear_margin,
-        resid_tol,
         seed=0,
         sigma_knot=0.0,
         n_knots=4,
@@ -445,30 +388,19 @@ class MppiGpu:
         self.target_k = float(int(float(elite_frac) * self.n_cand))
         w = weights
         cw = CostWeights()
-        cw.term = float(w.get("term", 0.0))
-        cw.run = float(w.get("run", 0.0))
-        cw.tilt = float(w.get("tilt", 0.0))
-        cw.head = float(w.get("head", 0.0))
-        cw.lattice = float(w.get("lattice", 0.0))
-        cw.fallback = float(w.get("fallback", 0.0))
-        # set to the routing field's cap (planner.cw.vcap = ctg._vcap) to arm the fallback
-        cw.vcap = 1e9
-        cw.oob = float(w.get("oob", 0.0))
-        cw.endgame = float(w.get("endgame", 0.0))
-        cw.endgame_r2 = float(w.get("endgame_r2", 0.0))
-        cw.term_v = float(w.get("term_v", 0.0))
-        cw.eff = float(w.get("eff", 0.0))
-        cw.smooth = float(w.get("smooth", 0.0))
-        cw.invalid = float(w.get("invalid", 0.0))
-        cw.tilt_free = float(w.get("tilt_free", 0.0))
-        cw.roll_cost_weight = float(w.get("roll_cost_weight", 1.0))  # tilt SHAPE: roll > pitch
-        cw.pitch_cost_weight = float(w.get("pitch_cost_weight", 0.5))
-        cw.clear_margin = float(clear_margin)
-        cw.resid_tol = float(resid_tol)
-        cw.max_roll = float(w.get("max_roll", 1e3))  # 1e3 rad = effectively off unless set
-        cw.max_pitch_up = float(w.get("max_pitch_up", 1e3))
-        cw.max_pitch_down = float(w.get("max_pitch_down", 1e3))
+        cw.goal_terminal = float(w.get("goal_terminal", 0.0))
+        cw.goal_running = float(w.get("goal_running", 0.0))
+        cw.explore_fallback = float(w.get("explore_fallback", 0.0))
+        # set to the routing field's cap (planner.cw.lattice_cap = ctg._vcap) to arm the fallback
+        cw.lattice_cap = 1e9
+        cw.out_of_bounds = float(w.get("out_of_bounds", 0.0))
+        cw.effort = float(w.get("effort", 0.0))
+        cw.smoothness = float(w.get("smoothness", 0.0))
+        cw.infeasible = float(w.get("infeasible", 0.0))
         self.cw = cw
+        # the robot's envelope/shape + feasibility thresholds (max_roll/pitch, roll/pitch cost shape,
+        # clear_margin, resid_tol) are read straight from sim.robot in the cost kernel -- not copied here.
+        self.robot = sim.robot
         d = self.dev
         slip = np.ones((self.K, 2), np.float32)  # scenario 0 = no slip; rest sample the disturbance
         if self.K > 1:
@@ -570,6 +502,7 @@ class MppiGpu:
                 self.lattice_field,
                 self.n_theta,
                 self.cw,
+                self.robot,
                 self.T,
             ],
             outputs=[self.J],
@@ -633,31 +566,12 @@ class MppiGpu:
             device=d,
         )
 
-    def _seed_turn_if_facing_away(self, state, goal_xy):
-        """Symmetry break for the behind-goal saddle: if the start faces >120 deg away from
-        the goal, seed the nominal with a hard turn. A forward-only robot facing away can only
-        reach by a U-turn, but the straight nominal is a local optimum the sampler won't leave
-        (it just drives away); the turn seed kicks it into the U-turn basin. Fires only when
-        facing away, so normal (facing-toward) planning keeps its warm-started nominal."""
-        to_goal_x = float(goal_xy[0]) - float(state[0])
-        to_goal_y = float(goal_xy[1]) - float(state[1])
-        dist = np.hypot(to_goal_x, to_goal_y)
-        if dist < 1e-3:
-            return
-        facing = (
-            np.cos(state[2]) * to_goal_x + np.sin(state[2]) * to_goal_y
-        ) / dist  # heading . to-goal
-        if facing < -0.5:
-            self.U.assign(np.tile([self.wmin, self.wmax], (self.T, 1)).astype(np.float32))
-
     def replan(self, state, goal_xy, n_refine):
         """Run n_refine GPU refines from `state` toward world `goal_xy`; updates U in place."""
         self.goal.assign(np.asarray(goal_xy[:2], np.float32))
         self.sim.start_pose.assign(
             np.ascontiguousarray(np.tile(np.asarray(state, np.float32), (self.B, 1)), np.float32)
         )
-        if self.cw.lattice == 0.0:  # the Euclidean turn-seed misfires when the lattice field
-            self._seed_turn_if_facing_away(state, goal_xy)  # already supplies the heading direction
         if self.dev.is_cuda:
             if self._graph is None:
                 with wp.ScopedCapture(device=self.dev) as cap:

@@ -22,21 +22,17 @@ from kinematic_helhest.engine import Simulator
 from kinematic_helhest.engine import SolverParams
 
 _W = dict(
-    term=3.0,
-    run=0.3,
-    head=2.0,
-    invalid=1e5,
-    eff=2e-3,
-    smooth=2e-3,
-    tilt=300.0,
-    tilt_free=np.radians(12.0),
-    roll_cost_weight=1.0,
-    pitch_cost_weight=0.5,
+    goal_terminal=3.0,
+    goal_running=0.3,
+    infeasible=1e5,
+    effort=2e-3,
+    smoothness=2e-3,
     max_roll=np.radians(30.0),
     max_pitch_up=np.radians(45.0),
     max_pitch_down=np.radians(30.0),
 )
 _CM, _RT, _WMAX = 0.05, 1e-2, 4.0
+_LAT_CONST = 5.0  # constant cost-to-go field for parity: V^2 is a known constant on both sides
 
 
 def _build_sim(device, B, T):
@@ -67,30 +63,22 @@ def selftest_cost_parity(device="cuda", B=2048, T=70):
     Ub = np.clip(rng.normal(1.5, _WMAX, (B, T, 2)), -_WMAX, _WMAX).astype(np.float32)
     # same rollout feeds both: assign omega (= Ub) + start, launch, read back for the oracle.
     cc, dd, cl, rs = sim.rollout(_to_omega(Ub), start)
-    J_np, _ = cost_np(cc, dd, cl, rs, Ub, goal, _CM, _RT, _W)
+    J_np, _ = cost_np(cc, dd, cl, rs, Ub, _LAT_CONST, _CM, _RT, _W)
 
     goal_d = wp.array(goal.astype(np.float32), dtype=float, device=device)
     Jg = wp.zeros(B, dtype=float, device=device)
     cw = mg.CostWeights()
-    cw.term, cw.run, cw.tilt, cw.head = _W["term"], _W["run"], _W["tilt"], _W["head"]
-    cw.lattice = 0.0  # no orientation-aware cost-to-go in parity -> Euclidean goal term
-    cw.fallback = 0.0
-    cw.vcap = 1e9  # saturation fallback off (lattice term not exercised in parity)
-    cw.oob = 0.0  # no out-of-bounds penalty in parity
-    cw.endgame = 0.0
-    cw.endgame_r2 = 0.0  # no endgame boost in parity
-    # no terminal-speed penalty in parity (the cost-to-go path is verified e2e, not here)
-    cw.term_v = 0.0
-    cw.eff, cw.smooth, cw.invalid = _W["eff"], _W["smooth"], _W["invalid"]
-    cw.tilt_free, cw.clear_margin, cw.resid_tol = _W["tilt_free"], _CM, _RT
-    cw.roll_cost_weight, cw.pitch_cost_weight = _W["roll_cost_weight"], _W["pitch_cost_weight"]
-    cw.max_roll, cw.max_pitch_up, cw.max_pitch_down = (
-        _W["max_roll"],
-        _W["max_pitch_up"],
-        _W["max_pitch_down"],
+    cw.goal_terminal, cw.goal_running = _W["goal_terminal"], _W["goal_running"]
+    cw.explore_fallback = 0.0  # fallback off in parity (not exercised here; verified e2e)
+    cw.lattice_cap = 1e9
+    cw.out_of_bounds = 0.0  # no out-of-bounds penalty in parity
+    cw.effort, cw.smoothness, cw.infeasible = _W["effort"], _W["smoothness"], _W["infeasible"]
+    # envelope + clear_margin/resid_tol come from sim.robot (RobotParams() defaults match _W/_CM/_RT
+    # exactly, so the GPU kernel and the numpy oracle still agree).
+    # CONSTANT field -> sample_lattice returns _LAT_CONST everywhere, so V^2 is a known constant
+    lat_field = wp.full(
+        (sim.grid.cells_y, sim.grid.cells_x, 16), _LAT_CONST, dtype=float, device=device
     )
-    # unused at lattice=0
-    lat_field = wp.zeros((sim.grid.cells_y, sim.grid.cells_x, 16), dtype=float, device=device)
     wp.launch(
         mg._cost_kernel,
         B,
@@ -105,6 +93,7 @@ def selftest_cost_parity(device="cuda", B=2048, T=70):
             lat_field,
             16,
             cw,
+            sim.robot,
             T,
         ],
         outputs=[Jg],

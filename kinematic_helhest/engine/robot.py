@@ -63,8 +63,8 @@ class RobotParams:  # host-side robot knobs — what you nudge
     com: tuple = (float(DEFAULT_COM[0]), 0.0, 0.0)  # full vec3, independent of mass
     chassis_nx: int = 3
     chassis_ny: int = 3
-    # --- planning capabilities: the robot's own limits, read by the planner/cost-to-go. NOT copied
-    # into the device Robot struct by build() -- the kernels never see these. ---
+    # --- planning capabilities: the robot's own limits. build() copies these into the device Robot
+    # struct, so the cost-to-go feasibility AND the MPPI cost kernels read one shared source. ---
     # tightest forward arc the planner assumes (skid-steer maneuverability)
     min_turn_radius: float = 0.5
     # [rad] lateral tip-over limit (symmetric; narrow track -> strict)

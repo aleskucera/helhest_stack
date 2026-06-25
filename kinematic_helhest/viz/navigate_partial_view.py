@@ -225,8 +225,6 @@ def run(
         0.5,
         4.0,
         _LATTICE_W,
-        0.05,
-        1e-2,
         0,
         sigma_knot=1.0,
         n_knots=4,
@@ -242,7 +240,7 @@ def run(
         route_grid, dynamics.robot_params(), dynamics.planning_solver(), n_theta=24, device=device
     )
     # arm the saturation fallback (explore toward an out-of-window goal)
-    planner.cw.vcap = ctg._vcap
+    planner.cw.lattice_cap = ctg._vcap
     sgrid = GridParams(
         rcnx, rcny, rccell, (ww // 2 - rww // 2) * cell, (wh // 2 - rwh // 2) * cell
     ).build()

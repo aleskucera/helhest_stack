@@ -24,22 +24,16 @@ from .engine import GridParams
 from .engine import Simulator
 
 # lattice routing weights: routing + feasibility only. The terminal dock handles reach+stop, so the
-# endgame cost-patches (endgame/endgame_r2/term_v) are gone -- oob stays as routing-edge safety.
-# max_* = the robot's tip-over envelope (rad), shared with the cost-to-go so they agree on what's safe.
-_rp = dynamics.robot_params()
+# Just the cost WEIGHTS. The robot's tip-over envelope + feasibility thresholds come from the Robot
+# struct (sim.robot), read straight by the cost kernel -- not duplicated into this weight dict.
 _LATTICE_W = dict(
-    term=3.0,
-    run=0.3,
-    head=0.0,
-    invalid=1e5,
-    eff=2e-3,
-    smooth=2e-3,
-    lattice=1.0,
-    oob=50.0,
-    fallback=1.0,  # explore toward the goal where the routing field saturates (vcap)
-    max_roll=_rp.max_roll,
-    max_pitch_up=_rp.max_pitch_up,
-    max_pitch_down=_rp.max_pitch_down,
+    goal_terminal=3.0,
+    goal_running=0.3,
+    infeasible=1e5,
+    effort=2e-3,
+    smoothness=2e-3,
+    out_of_bounds=50.0,
+    explore_fallback=1.0,  # explore toward the goal where the routing field saturates
 )
 
 
@@ -71,8 +65,6 @@ def evaluate(
         0.5,
         4.0,
         _LATTICE_W,
-        0.05,
-        1e-2,
         0,
         sigma_knot=1.0,
         n_knots=4,

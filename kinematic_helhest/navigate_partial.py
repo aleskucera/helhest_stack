@@ -107,8 +107,6 @@ def navigate(
         0.5,
         4.0,
         _LATTICE_W,
-        0.05,
-        1e-2,
         0,
         sigma_knot=1.0,
         n_knots=4,
@@ -133,7 +131,7 @@ def navigate(
         device=device,
     )
     # arm the saturation fallback (explore toward an out-of-window goal)
-    planner.cw.vcap = ctg._vcap
+    planner.cw.lattice_cap = ctg._vcap
     # the routing field expressed in the PLANNING window's local frame: both windows snap to the same
     # fine grid and share the robot's center cell, so their origins differ by a CONSTANT cell offset
     # (frame-independent -> safe to bake into the captured replan graph; sampled poses are planning-local).
