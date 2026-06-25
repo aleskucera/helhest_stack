@@ -10,15 +10,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Interactive viewers (drive*.py, follow.py) + figure/GIF export.
+# Interactive viewers (viz/) + figure/GIF export.
 viz = ["matplotlib>=3.8", "glfw>=2.6", "PyOpenGL>=3.1", "pillow>=10.0"]
-# Rosbag loading for calibration / eval (reference/eval_phase*, data.py).
+# Rosbag loading for calibration / eval (data.py).
 data = ["h5py>=3.0"]
-# Real perception source for the rolling planner (planning/navigate.py --perception).
+# Real perception source (terrain_toolkit) for on-robot maps.
 perception = ["terrain-toolkit"]
 
 [tool.uv.sources]
 terrain-toolkit = { path = "../terrain_toolkit", editable = true }
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
 
 [build-system]
 requires = ["hatchling"]

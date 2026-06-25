@@ -60,6 +60,15 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. Code Style (this project)
+
+`engine/` and `planning/` are the canonical examples of everything below — mirror them.
+
+- **Type hints everywhere.** Annotate every function/method signature — parameters *and* return — including private helpers. Exception: `@wp.kernel` functions carry Warp's own array/scalar annotations; don't add Python hints there. `from __future__ import annotations` is on, so use modern forms (`tuple[float, float]`, `X | None`, `wp.array`).
+- **Formatters: black (line-length 100) + reorder-python-imports** (the conform.nvim setup; black pinned in `pyproject.toml [tool.black]`). Imports are one symbol per line, sorted — `from x import a` / `from x import b`, never `from x import a, b`. Lint with ruff. Run the formatters before committing; don't hand-format against them.
+- **Names carry the meaning.** Prefer a descriptive name that needs no comment to decode (`min_turn_radius`, `clear_margin`, `resid_tol`) over a short name plus an explanation. Keep terse names only for loop indices and math (`r, c, t`, `i, j`, `dx, dy`).
+- **Comments explain WHY, not what.** Match the existing density: short notes on rationale, units, sign conventions, and non-obvious physics/numerics — never a restatement of the code. Keep units and sign conventions explicit (e.g. `# [rad] nose-up = NEGATIVE pitch`). A trailing comment that would push its line past 100 goes on its own line *above* the code (otherwise black wraps the code around it).
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
