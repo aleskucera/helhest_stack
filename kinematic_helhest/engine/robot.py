@@ -1,3 +1,9 @@
+"""Robot model: geometry + mass, host params and the device-side `Robot` struct.
+
+`RobotParams` (host dataclass, what you tune) builds into `Robot` (a `@wp.struct`
+of read-only constants passed into the kernels). The numpy geometry/mass also live
+in the top-level `model.py` for the reference/viz paths; these are the device twin.
+"""
 from dataclasses import dataclass
 
 import numpy as np
@@ -34,6 +40,16 @@ class Robot:
     com: wp.vec3
     mass: wp.float32
     gravity: wp.float32
+    # --- planning capabilities (mirror of the RobotParams fields; the dynamics kernels don't read
+    # these, but carrying them on the built struct lets the planner read one object). ---
+    min_turn_radius: wp.float32
+    max_roll: wp.float32  # radians
+    max_pitch_up: wp.float32
+    max_pitch_down: wp.float32
+    clear_margin: wp.float32
+    resid_tol: wp.float32
+    roll_cost_weight: wp.float32
+    pitch_cost_weight: wp.float32
 
 
 @dataclass(frozen=True)
@@ -46,6 +62,18 @@ class RobotParams:  # host-side robot knobs — what you nudge
     com: tuple = (float(DEFAULT_COM[0]), 0.0, 0.0)  # full vec3, independent of mass
     chassis_nx: int = 3
     chassis_ny: int = 3
+    # --- planning capabilities: the robot's own limits, read by the planner/cost-to-go. NOT copied
+    # into the device Robot struct by build() -- the kernels never see these. ---
+    min_turn_radius: float = 0.5    # tightest forward arc the planner assumes (skid-steer maneuverability)
+    max_roll: float = np.radians(30.0)      # [rad] lateral tip-over limit (symmetric; narrow track -> strict)
+    max_pitch_up: float = np.radians(45.0)  # [rad] climbing limit (nose UP, pitch < 0)
+    max_pitch_down: float = np.radians(30.0)  # [rad] descending limit (nose DOWN, pitch > 0; front-heavy)
+    clear_margin: float = 0.05      # min belly-terrain gap [m]; below it the pose is infeasible (high-centers)
+    resid_tol: float = 1e-2         # settle residual above which the pose is infeasible (can't find a resting pose)
+    # graded cost-to-go penalty per radian of tilt -- roll weighted MORE than pitch (roll is the
+    # dangerous axis), so among feasible poses the router prefers low-roll lines (attack slopes head-on).
+    roll_cost_weight: float = 1.0
+    pitch_cost_weight: float = 0.5
 
     def build(self, device="cuda") -> Robot:
         b, l = self.half_track, self.rear_offset
@@ -60,6 +88,14 @@ class RobotParams:  # host-side robot knobs — what you nudge
         r.com = wp.vec3(*self.com)
         r.mass = self.mass
         r.gravity = self.gravity
+        r.min_turn_radius = self.min_turn_radius
+        r.max_roll = self.max_roll
+        r.max_pitch_up = self.max_pitch_up
+        r.max_pitch_down = self.max_pitch_down
+        r.clear_margin = self.clear_margin
+        r.resid_tol = self.resid_tol
+        r.roll_cost_weight = self.roll_cost_weight
+        r.pitch_cost_weight = self.pitch_cost_weight
         return r
 
     def _chassis_pts(self):
@@ -71,58 +107,3 @@ class RobotParams:  # host-side robot knobs — what you nudge
             for sy in np.linspace(-1, 1, self.chassis_ny)
         ]
         return np.array(pts, np.float32)
-
-
-@wp.struct
-class SolverC:
-    """Device-side settle/integration numerics. All scalars -> safe as a struct.
-
-    `k_turn` (the friction->alpha turning gain) rides along here as a non-diff
-    scalar; promote it to a plain length-1 array only if d/dk is ever needed.
-    """
-
-    newton_iters: wp.int32
-    max_step: wp.float32
-    tilt_clamp: wp.float32
-    dt: wp.float32
-    k_turn: wp.float32
-
-
-@dataclass
-class SolverParams:  # settle/integration numerics — tuning, separate from the robot
-    dt: float = 0.05
-    newton_iters: int = 8
-    max_step: float = 0.2
-    tilt_clamp: float = 1.2
-    k_turn: float = 2.0
-
-    def build(self) -> SolverC:
-        s = SolverC()
-        s.newton_iters = self.newton_iters
-        s.max_step = self.max_step
-        s.tilt_clamp = self.tilt_clamp
-        s.dt = self.dt
-        s.k_turn = self.k_turn
-        return s
-
-
-class Solver:
-    def __init__(
-        self, robot: RobotParams, params: SolverParams = SolverParams(), device="cuda"
-    ) -> None:
-        self.robot = robot.build(device)  # device Robot struct
-        self.solver = params.build()  # device SolverC struct
-        self.p = params  # host params (dt etc. for host-side loops)
-        self.device = device
-
-
-class State:
-    def __init__(self) -> None:
-        self.q: wp.array | None = None  # (x, y, z, roll, pitch, yaw)
-
-        self.contacts: wp.array | None = None  # contacts
-        self.normals: wp.array | None = None  # contact normals
-        self.loads: wp.array | None = None  # contact normal loads [3]
-
-        self.chassis_clearance: wp.float32 | None = None  # Chassis clearance vs raw terrain
-        self.valid: bool | None = None  # not hight-centered (chassis clears)

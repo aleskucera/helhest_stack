@@ -18,6 +18,6 @@ def with_strip(base, low, ywidth=0.18):
     """Copy `base` and set a low-friction strip |y| < ywidth (the rear-wheel
     track at y=0; front wheels at |y|=0.365 stay on the base value)."""
     fm = heightmap.Heightmap(base.H.copy(), (base.x0, base.y0), base.cell)
-    ys = base.y0 + np.arange(base.ny) * base.cell
+    ys = base.y0 + (np.arange(base.ny) + 0.5) * base.cell  # cell centers
     fm.H[np.abs(ys) < ywidth, :] = float(low)
     return fm

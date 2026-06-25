@@ -8,8 +8,8 @@ or wedge into the wall.
 
 Keys:  I fwd  K back  J left  L right   ESC/Q quit ; mouse orbit, scroll zoom.
 
-Run:        python -m kinematic_helhest.follow [--device cuda] [--gx 4 --gy 1.5]
-Shot test:  python -m kinematic_helhest.follow --shot /tmp/follow.png
+Run:        python -m kinematic_helhest.viz.follow [--device cuda] [--gx 4 --gy 1.5]
+Shot test:  python -m kinematic_helhest.viz.follow --shot /tmp/follow.png
 """
 import argparse
 import time
@@ -17,53 +17,52 @@ import time
 import numpy as np
 import warp as wp
 
-from . import friction
-from . import heightmap as hmmod
-from .drive import DT
-from .drive import WIN_H
-from .drive import WIN_W
-from .drive import _commands
-from .drive import _init_gl
-from .drive import _render
-from .drive import build_robot
-from .drive import build_terrain
-from .drive import demo_terrain
-from .drive_warp import WarpDriver
-from .mppi import BatchRollout
-from .mppi import _cost
-from .mppi import _to_omega
-from .warp_engine.solver import SolverParams
+from .. import friction
+from .. import heightmap as hmmod
+from ..engine import GridParams
+from ..engine import RobotParams
+from ..engine import Simulator
+from ..engine import SolverParams
+from ..control.mppi_gpu import MppiGpu
+from .drive import WarpDriver
+from .render import DT
+from .render import WIN_H
+from .render import WIN_W
+from .render import _commands
+from .render import _init_gl
+from .render import _render
+from .render import build_robot
+from .render import build_terrain
 
 
 class Planner:
-    """Re-plans an MPPI horizon trajectory from a given pose to the goal."""
+    """Re-plans an MPPI horizon from a given pose to the goal via the GPU MppiGpu
+    driver (spline-knot sampling + graded cost + CEM reweight), on a static scene."""
 
-    def __init__(self, scene, mu, goal, device="cpu", T=90, B=1024, n_refine=3,
-                 sigma=2.5, lam=0.5, wmax=4.0, clear_margin=0.05, resid_tol=1e-2, seed=0):
-        params = SolverParams(dt=DT, k_turn=2.0, newton_iters=12)
-        self.br = BatchRollout(scene, mu, B, T, params, device=device)
-        self.scene, self.goal = scene, np.asarray(goal[:2], np.float64)
-        self.T, self.B, self.n_refine = T, B, n_refine
-        self.sigma, self.lam, self.wmax = sigma, lam, wmax
-        self.cm, self.rt = clear_margin, resid_tol
-        self.w = dict(term=3.0, run=0.3, invalid=1e5, eff=2e-3, smooth=2e-3)
-        self.U = np.full((T, 2), 1.5, np.float32)
-        self.rng = np.random.default_rng(seed)
+    def __init__(self, scene, mu, goal, device="cpu", T=90, B=4096, n_refine=3,
+                 sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, clear_margin=0.05,
+                 resid_tol=1e-2, seed=0):
+        params = SolverParams(dt=DT, k_turn=2.0, newton_iters=6, atol=1e-4)  # forward-only
+        self.sim = Simulator(
+            RobotParams(), params,
+            GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
+            B, T, device,
+        )
+        self.sim.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32),
+                                      dtype=wp.float32, device=device))
+        self.sim.set_friction(mu)
+        self.goal = np.asarray(goal[:2], np.float64)
+        self.B, self.n_refine = B, n_refine
+        w = dict(term=3.0, run=0.3, head=2.0, invalid=1e5, eff=2e-3, smooth=2e-3)
+        self.drv = MppiGpu(self.sim, sigma, wmax, w, clear_margin, resid_tol, seed,
+                           sigma_knot=sigma_knot, n_knots=n_knots)
+        self.drv.reset_nominal(1.5)
 
     def replan(self, state):
         """state (x,y,yaw) -> predicted path xy [T+1, 2] from the optimized nominal."""
-        B, T = self.B, self.T
-        for _ in range(self.n_refine):
-            eps = self.rng.normal(0.0, self.sigma, (B, T, 2)).astype(np.float32)
-            eps[0] = 0.0
-            Ub = np.clip(self.U[None] + eps, -self.wmax, self.wmax)
-            planar, clear, resid = self.br.rollout(_to_omega(Ub), state)
-            J, _ = _cost(planar, clear, resid, Ub, self.goal, self.cm, self.rt, self.w)
-            beta = np.exp(-(J - J.min()) / self.lam)
-            beta /= beta.sum()
-            self.U = np.clip(np.einsum("b,btc->tc", beta, Ub), -self.wmax, self.wmax).astype(np.float32)
-        planar, _, _ = self.br.rollout(_to_omega(np.tile(self.U, (B, 1, 1))), state)
-        return planar[:, 0, :2].copy()
+        self.drv.replan(state, self.goal, self.n_refine)
+        # nominal (b=0) trajectory from the last refine -- read just that column (cheap).
+        return self.sim.controlled[:, 0].numpy()[:, :2].copy()
 
 
 def _draw_plan(plan_xy, scene, goal):
@@ -101,7 +100,7 @@ def run(shot=None, device="cpu", goal=(4.0, 1.5), replan_every=4, record=None):
     import glfw
     from OpenGL import GL as gl
 
-    hm = demo_terrain()
+    hm = hmmod.demo_terrain()
     mu = friction.uniform(0.8, xlim=(-3.0, 10.0), ylim=(-4.0, 4.0), cell=0.06)
     drv = WarpDriver(hm, mu, init_pose=(0.0, 0.0, 0.0), device=device)
     planner = Planner(hm, mu, goal, device=device)

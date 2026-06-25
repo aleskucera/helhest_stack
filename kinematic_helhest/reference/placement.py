@@ -13,24 +13,15 @@ Pitch nose-up is negative (rotation about +Y tilts +X toward -Z).
 """
 import numpy as np
 
-from .model import chassis_sample_points
-from .model import COM
-from .model import GRAVITY
-from .model import MASS
-from .model import WHEEL_POS
-from .model import WHEEL_RADIUS
+from ..model import chassis_sample_points
+from ..model import COM
+from ..model import euler_zyx
+from ..model import GRAVITY
+from ..model import MASS
+from ..model import WHEEL_POS
+from ..model import WHEEL_RADIUS
 
 CHASSIS_PTS = chassis_sample_points()  # [Np, 3] body-frame bottom-face grid
-
-
-def euler_zyx(yaw, pitch, roll):
-    cz, sz = np.cos(yaw), np.sin(yaw)
-    cy, sy = np.cos(pitch), np.sin(pitch)
-    cx, sx = np.cos(roll), np.sin(roll)
-    Rz = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]])
-    Ry = np.array([[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]])
-    Rx = np.array([[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]])
-    return Rz @ Ry @ Rx
 
 
 def R_to_quat(R):

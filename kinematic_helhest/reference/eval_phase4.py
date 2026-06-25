@@ -14,7 +14,7 @@ import numpy as np
 from .. import data
 from .. import friction
 from .. import heightmap
-from .. import placement
+from . import placement
 from . import rollout
 from . import turning
 from ..model import COM
