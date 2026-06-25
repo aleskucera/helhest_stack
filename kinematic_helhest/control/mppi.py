@@ -1,259 +1,634 @@
-"""Minimal MPPI planner on the kinematic Warp engine (Phase 8, sampling-based).
+"""GPU-resident MPPI inner loop (sample -> rollout -> cost -> reweight) + CUDA graph.
 
-Receding-horizon MPPI: each control cycle samples B noisy wheel-speed sequences,
-rolls them all out in one batched launch, costs them (goal distance + a hard
-validity penalty that does the obstacle/high-center avoidance), reweights with a
-softmax, updates the nominal sequence, executes its first control, shifts, repeats.
+The numpy MPPI loop is host-bound: per refine ~15 ms of numpy (cost, noise, omega)
+vs ~2.7 ms of GPU work. These Warp kernels move the whole refine onto the device so
+nothing but the executed pose ever comes back, and the refine is captured as a CUDA
+graph and replayed. `mppi._cost` stays the numpy oracle for the parity test.
 
-No gradients -- pure forward sampling. The validity flags (high-center /
-infeasible settle, with the tunable resid_tol / clear_margin / tilt_clamp) are
-what steer the robot around the wall.
-
-Demo:  python -m kinematic_helhest.control.mppi [--device cuda] [--out plan.png]
+Kernels (all suffixed _kernel):
+  _sample_omega  spline-knot noise -> Ub -> writes the rollout's omega buffer (rear -> 0)
+  _cost          per-rollout scalar cost J[B] (goal/tilt/graded-invalid + eff/smooth)
+  _minmax/_bisect_*/_count_below/_elite_u   CEM reweight (top-k elite mean) of U, on device
+  _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
 """
-import argparse
-
 import numpy as np
 import warp as wp
 
-from .. import dynamics
-from .. import friction
-from .. import heightmap as hmmod
-from ..engine import GridParams
-from ..engine import Simulator
-from .mppi_gpu import MppiGpu
+from ..engine.terrain import Grid
+from ..engine.terrain import _locate
+from ..profiling import StageProfiler
+
+_N_BISECT = 14  # device-side bisection iterations for the CEM top-k threshold
 
 
-def _to_omega(Ub):
-    """Controls [B, T, 2] (wL, wR) -> omega [T, B, 3] (rear = mean)."""
-    bt = np.transpose(Ub, (1, 0, 2))  # [T, B, 2]
-    rear = bt.mean(2, keepdims=True)
-    return np.concatenate([bt, rear], axis=2).astype(np.float32)
+@wp.func
+def sample_lattice(field: wp.array3d(dtype=float), grid: Grid, n_theta: int,
+                   x: float, y: float, yaw: float):
+    """Trilinear sample of the orientation-aware cost-to-go V(x, y, theta): bilinear in (x, y),
+    linear in the (wrapped) heading. Misaligned poses read high/inf, so MPPI's rollouts prefer an
+    approach the forward-only robot can actually complete."""
+    c = _locate(grid, x, y)
+    two_pi = 6.2831853
+    dth = two_pi / float(n_theta)
+    m = yaw - wp.floor(yaw / two_pi) * two_pi  # yaw mod 2pi in [0, 2pi)
+    ft = m / dth
+    t0 = int(wp.floor(ft)) % n_theta
+    t1 = (t0 + 1) % n_theta
+    fth = ft - wp.floor(ft)
+    fx = c.frac_x
+    fy = c.frac_y
+    xi = c.x_idx
+    yi = c.y_idx
+    va = ((1.0 - fx) * (1.0 - fy) * field[yi, xi, t0]
+          + fx * (1.0 - fy) * field[yi, xi + 1, t0]
+          + (1.0 - fx) * fy * field[yi + 1, xi, t0]
+          + fx * fy * field[yi + 1, xi + 1, t0])
+    vb = ((1.0 - fx) * (1.0 - fy) * field[yi, xi, t1]
+          + fx * (1.0 - fy) * field[yi, xi + 1, t1]
+          + (1.0 - fx) * fy * field[yi + 1, xi, t1]
+          + fx * fy * field[yi + 1, xi + 1, t1])
+    return (1.0 - fth) * va + fth * vb
 
 
-def _cost(controlled, derived, clear, resid, Ub, goal, clear_margin, resid_tol, w):
-    """Per-rollout cost [B]. goal [2]. `derived` is [T+1, B, 3] = (z, pitch, roll).
-
-    `w["tilt"]` (optional) penalizes body tilt past `tilt_free` along the rollout, split
-    PER AXIS with roll weighted > pitch (`roll_cost_weight : pitch_cost_weight`, the robot's
-    shape) — roll is the dangerous axis. The settle gives the true body pitch/roll for each
-    candidate trajectory, so this is trajectory-aware (a diagonal slope crossing rolls
-    differently than a straight climb), not a static per-cell terrain slope.
-    """
-    xy = controlled[:, :, :2]                                  # [T+1, B, 2]
-    d = np.linalg.norm(xy - goal[None, None, :], axis=2)   # [T+1, B]
-    # graded validity (option C): how far past margin/tol, weighted by how early (T,B -> B)
-    T = clear.shape[0]
-    early = ((T - np.arange(T)) / T)[:, None]              # [T, 1]
-    clear_viol = np.maximum(clear_margin - clear, 0.0)     # [T, B]
-    resid_viol = np.maximum(resid - resid_tol, 0.0)        # [T, B]
-    # robot stability envelope (same limits as the cost-to-go): tipping is invalid. climbing is
-    # nose-up = NEGATIVE pitch, so the climb limit is on -pitch. Large default = inactive.
-    pitch, roll = derived[:T, :, 1], derived[:T, :, 2]     # [T, B]
-    roll_viol = np.maximum(np.abs(roll) - w.get("max_roll", 1e3), 0.0)
-    climb_viol = np.maximum(-pitch - w.get("max_pitch_up", 1e3), 0.0)
-    descend_viol = np.maximum(pitch - w.get("max_pitch_down", 1e3), 0.0)
-    inv = (early * (clear_viol + resid_viol + roll_viol + climb_viol + descend_viol)).sum(0)  # [B]
-    eff = (Ub ** 2).sum((1, 2))
-    smooth = (np.diff(Ub, axis=1) ** 2).sum((1, 2))
-    J = w["term"] * d[-1] ** 2 + w["run"] * (d ** 2).mean(0) + w["eff"] * eff + w["smooth"] * smooth
-    if w.get("tilt", 0.0) > 0.0:
-        # split per axis, roll weighted > pitch (the robot's roll-vs-pitch shape): roll is the
-        # dangerous axis. deadzone: tilt below `tilt_free` PER AXIS is free (drivable ramps), so the
-        # robot still climbs gentle slopes to reach a goal; only steep tilt is penalized.
-        roll_over = np.maximum(np.abs(derived[:, :, 2]) - w.get("tilt_free", 0.0), 0.0)   # [T+1, B]
-        pitch_over = np.maximum(np.abs(derived[:, :, 1]) - w.get("tilt_free", 0.0), 0.0)
-        rw, pw = w.get("roll_cost_weight", 1.0), w.get("pitch_cost_weight", 0.5)
-        J = J + w["tilt"] * (rw * roll_over ** 2 + pw * pitch_over ** 2).mean(0)
-    if w.get("head", 0.0) > 0.0:
-        # heading: penalize facing away from the goal (1 - cos angle); drives the U-turn
-        dx = controlled[:, :, 0] - goal[0]; dy = controlled[:, :, 1] - goal[1]  # [T+1, B]
-        dist = np.hypot(dx, dy)
-        cos_align = -(np.cos(controlled[:, :, 2]) * dx + np.sin(controlled[:, :, 2]) * dy) / np.maximum(dist, 1e-3)
-        head = np.where(dist > 1e-3, 1.0 - cos_align, 0.0).mean(0)  # [B]
-        J = J + w["head"] * head
-    return J + inv * w["invalid"], inv > 0
+@wp.func
+def _knot_bracket(t: int, T: int, n_knots: int):
+    """n_knots control knots evenly spaced over the horizon: the two bracketing step t and the
+    interpolation fraction between them. Deterministic -> threads sharing a knot agree."""
+    knot_spacing = float(T - 1) / float(n_knots - 1)
+    knot_pos = float(t) / knot_spacing
+    knot_lo = int(knot_pos)
+    knot_hi = wp.min(knot_lo + 1, n_knots - 1)
+    frac = knot_pos - float(knot_lo)
+    return knot_lo, knot_hi, frac
 
 
-def plan(scene, mu, start, goal, T=60, B=8192, n_refine=3, max_steps=260, dt=0.1,
-         sigma=0.5, sigma_knot=1.0, n_knots=4, wmax=4.0, wmin=0.0, elite_frac=0.02, goal_tol=0.3,
-         device="cuda", seed=0, weights=None, record=False, n_show=60, lattice=False,
-         n_scenarios=1, cvar_beta=0.5, slip_lo=0.6, n_theta=16,
-         tilt=0.0, tilt_free=0.0, lat_flatness_weight=0.0, dock_radius=None, lat_coarsen=1):
-    sim = Simulator(
-        dynamics.robot_params(), dynamics.planning_solver(dt=dt),
-        GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
-        B, T, device,
-    )
-    sim.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32),
-                             dtype=wp.float32, device=device))
-    sim.set_friction(mu)
-    w = weights or dict(term=3.0, run=0.3, head=2.0, invalid=1e5, eff=2e-3, smooth=2e-3)
-    if lattice:  # orientation-aware cost-to-go V(x,y,theta): routing + feasibility only --
-        w = {**w, "lattice": 1.0}  # the terminal dock handles reach+stop, so no endgame cost-patches
-        if weights is None:
-            w["head"] = 0.0    # V(x,y,theta) already encodes the desired heading
-            w["oob"] = 50.0    # soft wall at the grid edge (routing safety, not endgame)
-            rp = dynamics.robot_params()  # rollouts share the robot's tip-over envelope with the cost-to-go
-            w["max_roll"] = rp.max_roll
-            w["max_pitch_up"] = rp.max_pitch_up
-            w["max_pitch_down"] = rp.max_pitch_down
-    if tilt > 0.0:  # per-rollout tilt cost: penalize body tilt past tilt_free [rad] (roll weighted > pitch)
-        rp = dynamics.robot_params()  # one source of the roll-vs-pitch shape (same as the cost-to-go)
-        w = {**w, "tilt": float(tilt), "tilt_free": float(tilt_free),
-             "roll_cost_weight": rp.roll_cost_weight, "pitch_cost_weight": rp.pitch_cost_weight}
-    goal = np.asarray(goal[:2], np.float64)
-    rp = dynamics.robot_params()  # feasibility thresholds live on the robot, not here
-    clear_margin, resid_tol = rp.clear_margin, rp.resid_tol
-    drv = MppiGpu(sim, sigma, wmax, w, clear_margin, resid_tol, seed,
-                  sigma_knot=sigma_knot, n_knots=n_knots, wmin=wmin, elite_frac=elite_frac,
-                  n_scenarios=n_scenarios, cvar_beta=cvar_beta, slip_lo=slip_lo, n_theta=n_theta)
-    drv.reset_nominal(1.5)  # nominal wheel speeds, gentle forward
-    if lattice:  # solve the orientation-aware V(x,y,theta) once (fixed goal), before any replan
-        # the routing field can be solved COARSE (k>1): the rollouts do fine obstacle avoidance, so the
-        # global router needn't be sim-resolution. ~k^3 cheaper -> fast enough to re-solve a moving goal.
-        k = max(1, int(lat_coarsen))
-        if k > 1:
-            cny, cnx, ccell = scene.ny // k, scene.nx // k, scene.cell * k
-            Hc = scene.H[:cny * k, :cnx * k].reshape(cny, k, cnx, k).max(axis=(1, 3))  # max-pool keeps thin walls
-        else:
-            cny, cnx, ccell, Hc = scene.ny, scene.nx, scene.cell, scene.H
-        Hc = np.ascontiguousarray(Hc, np.float32)
-        cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0)
-        from ..planning.costtogo import CostToGo  # feasibility from the robot's own settle
-        clat = CostToGo(cgrid, dynamics.robot_params(), dynamics.planning_solver(dt=dt),
-                                     n_theta=n_theta, flatness_weight=lat_flatness_weight, device=sim.device)
-        Hc = wp.array(Hc, dtype=wp.float32, device=sim.device)  # settle cost-to-go takes a device array
-        drv.set_lattice(clat.compute(Hc, goal), cgrid.build())
-
-    # terminal dock replaces the endgame cost-patches; on by default for lattice (pass 0 to disable)
-    if dock_radius is None:
-        dock_radius = 1.5 if lattice else 0.0
-    dock_sim = None
-    if dock_radius > 0.0:  # terminal stage: a B=1 sim to execute the dock control near the goal
-        from .terminal import dock_control
-        dock_sim = Simulator(dynamics.robot_params(), dynamics.planning_solver(dt=dt),
-                             GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0), 1, 1, device)
-        dock_sim.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device))
-        dock_sim.set_friction(mu)
-
-    state = np.asarray(start, np.float32)        # (x, y, yaw)
-    path = [state.copy()]
-    idx = np.linspace(0, B - 1, n_show).astype(int)  # sampled rollouts to display
-    frames = []
-    reached = False
-    for k in range(max_steps):
-        if np.linalg.norm(state[:2] - goal) < goal_tol:
-            reached = True
-            break
-        if dock_sim is not None and np.linalg.norm(state[:2] - goal) < dock_radius:
-            # hand off from MPPI routing to the terminal dock: decelerate + align to a precise stop
-            omega = dock_control(state, goal, wmax=wmax)
-            cc, _, _, _ = dock_sim.rollout(omega.reshape(1, 1, 3), state)
-            state = cc[1, 0].astype(np.float32).copy()
-            path.append(state.copy())
-            continue
-        drv.replan(state, goal, n_refine)   # the whole MPPI refine, on GPU
-        U = drv.nominal()
-        # the nominal's trajectory is already column b=0 of the last refine's rollout (which
-        # started at `state`); read just that column -- no re-rollout, no full-B readback.
-        nominal = sim.controlled[:, 0].numpy()  # [T+1, 3]
-        if record:  # read back the last refine's fan for the animation (slow path)
-            samp = sim.controlled.numpy()[:, idx, :2].copy()      # [T+1, n_show, 2]
-            badstep = ((sim.clearance.numpy()[:, idx] < clear_margin)
-                       | (sim.residual.numpy()[:, idx] > resid_tol)).copy()  # [T, n_show]
-            frames.append({"state": state.copy(), "samples": samp,
-                           "stepbad": badstep, "chosen": nominal[:, :2].copy()})
-        state = nominal[1].astype(np.float32).copy()  # step-1 pose of the nominal
-        path.append(state.copy())
-        U = np.roll(U, -1, axis=0)
-        U[-1] = U[-2]
-        drv.set_nominal(U)
-    return (np.array(path), reached, frames) if record else (np.array(path), reached)
-
-
-def _plot(scene, path, start, goal, out):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    nx, ny = scene.nx, scene.ny
-    ext = [scene.x0, scene.x0 + nx * scene.cell, scene.y0, scene.y0 + ny * scene.cell]  # cell edges
-    fig, ax = plt.subplots(figsize=(9, 6))
-    ax.imshow(scene.H, origin="lower", extent=ext, cmap="terrain", alpha=0.9)
-    ax.plot(path[:, 0], path[:, 1], "-", color="orange", lw=2.5, label="MPPI path")
-    ax.plot(*start[:2], "o", color="white", mec="k", ms=10, label="start")
-    ax.plot(*goal[:2], "*", color="red", ms=18, label="goal")
-    ax.set_xlabel("x [m]"); ax.set_ylabel("y [m]"); ax.legend(loc="upper left")
-    ax.set_title("MPPI on kinematic engine — detour around the wall")
-    ax.axis("equal"); ax.set_xlim(ext[0], ext[1]); ax.set_ylim(ext[2], ext[3])
-    fig.tight_layout(); fig.savefig(out, dpi=130)
-    print(f"saved {out}")
-
-
-def _animate(scene, frames, path, start, goal, out, stride=3, fps=12):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.animation import FuncAnimation, PillowWriter
-
-    nx, ny = scene.nx, scene.ny
-    ext = [scene.x0, scene.x0 + nx * scene.cell, scene.y0, scene.y0 + ny * scene.cell]  # cell edges
-    sel = list(range(0, len(frames), stride))
-    fig, ax = plt.subplots(figsize=(9, 6))
-
-    def draw(fi):
-        ax.clear()
-        ax.imshow(scene.H, origin="lower", extent=ext, cmap="terrain", alpha=0.9)
-        f = frames[fi]
-        samp = f["samples"].transpose(1, 0, 2)   # [n_show, T+1, 2]
-        bad = f["stepbad"].transpose(1, 0)       # [n_show, T]  per-step violation
-        for s, b in zip(samp, bad):
-            if b.any():
-                j = int(b.argmax())              # first step that goes invalid
-                ax.plot(s[:j + 1, 0], s[:j + 1, 1], "-", lw=0.4, alpha=0.3, color="deepskyblue")
-                ax.plot(s[j:, 0], s[j:, 1], "-", lw=0.5, alpha=0.4, color="crimson")
-            else:
-                ax.plot(s[:, 0], s[:, 1], "-", lw=0.4, alpha=0.3, color="deepskyblue")
-        ax.plot(f["chosen"][:, 0], f["chosen"][:, 1], "-", color="yellow", lw=2.0)  # plan
-        tr = path[:fi + 1]
-        ax.plot(tr[:, 0], tr[:, 1], "-", color="orange", lw=2.5)                    # driven
-        ax.plot(f["state"][0], f["state"][1], "o", color="white", mec="k", ms=9)    # robot
-        ax.plot(*start[:2], "o", color="0.4", ms=7)
-        ax.plot(*goal[:2], "*", color="red", ms=18)
-        ax.set_xlim(-1.0, 6.0); ax.set_ylim(-2.5, 3.0)
-        ax.set_xlabel("x [m]"); ax.set_ylabel("y [m]")
-        ax.set_title(f"MPPI live — blue=valid / red=invalid samples, yellow=plan  (step {fi})")
-
-    anim = FuncAnimation(fig, draw, frames=sel, interval=1000 / fps)
-    anim.save(out, writer=PillowWriter(fps=fps))
-    print(f"saved {out}  ({len(sel)} frames)")
-
-
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--device", default="cuda")
-    ap.add_argument("--out", default="/tmp/mppi.png")
-    ap.add_argument("--gx", type=float, default=4.0)
-    ap.add_argument("--gy", type=float, default=1.5)
-    ap.add_argument("--B", type=int, default=2048)
-    ap.add_argument("--animate", action="store_true", help="save a GIF of the planning")
-    args = ap.parse_args()
-
-    scene = hmmod.demo_terrain()
-    mu = friction.uniform(0.8, xlim=(-3.0, 10.0), ylim=(-4.0, 4.0), cell=0.06)
-    start = np.array([0.0, 0.0, 0.0], np.float32)
-    goal = np.array([args.gx, args.gy], np.float64)
-    out = plan(scene, mu, start, goal, B=args.B, device=args.device, record=args.animate)
-    path, reached = out[0], out[1]
-    d = np.linalg.norm(path[-1, :2] - goal)
-    print(f"reached={reached}  final=({path[-1,0]:+.2f},{path[-1,1]:+.2f})  "
-          f"dist_to_goal={d:.2f}m  steps={len(path)-1}")
-    if args.animate:
-        _animate(scene, out[2], path, start, goal, args.out)
+@wp.kernel
+def _sample_omega_kernel(
+    U: wp.array2d(dtype=float),
+    sigma: float,
+    sigma_knot: float,
+    wmin: float,
+    wmax: float,
+    n_wide: int,
+    n_knots: int,
+    n_scen: int,                     # K slip scenarios per candidate (1 = non-robust)
+    slip: wp.array2d(dtype=float),   # [K, 2] wheel-speed retention; scenario 0 = (1, 1)
+    seed: wp.array(dtype=int),
+    omega: wp.array2d(dtype=wp.vec3),
+):
+    # rollout r = candidate b * K + scenario k: all K scenarios of a candidate share the SAME
+    # sampled control (noise keyed on b), then scenario k scales the wheels by its slip. So the
+    # cost sees how each candidate holds up across the disturbance. K=1 -> b=r, slip=(1,1) (today).
+    t, r = wp.tid()
+    n_cand = omega.shape[1] // n_scen
+    b = r // n_scen
+    k = r % n_scen
+    T = omega.shape[0]
+    knot_lo, knot_hi, frac = _knot_bracket(t, T, n_knots)
+    wheel_l = U[t, 0]
+    wheel_r = U[t, 1]
+    if b == 0:
+        pass  # candidate 0 keeps the nominal (no noise)
+    elif b < n_wide:
+        # WIDE prior (global search): knots sampled UNIFORMLY over the full [wmin, wmax]
+        # forward-arc box, independent of the nominal -> a broad variety of maneuvers
+        # (the whole control space), so the elite can escape local minima.
+        span = wmax - wmin
+        left_lo = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + knot_lo) * 2))
+        left_hi = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + knot_hi) * 2))
+        right_lo = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + knot_lo) * 2 + 1))
+        right_hi = wmin + span * wp.randf(wp.rand_init(seed[0] + 1234, (b * n_knots + knot_hi) * 2 + 1))
+        wheel_l = (1.0 - frac) * left_lo + frac * left_hi
+        wheel_r = (1.0 - frac) * right_lo + frac * right_hi
     else:
-        _plot(scene, path, start, goal, args.out)
+        # NARROW (local refine): SPLINE bias around the nominal + per-step jitter (option A).
+        # Knots keyed on (b, knot) -> shared across t -> a smooth committed maneuver. Recompute
+        # the bracketing knots on the fly (rand_init is deterministic) -- no shared storage.
+        eps_l_lo = wp.randn(wp.rand_init(seed[0], (b * n_knots + knot_lo) * 2))
+        eps_l_hi = wp.randn(wp.rand_init(seed[0], (b * n_knots + knot_hi) * 2))
+        eps_r_lo = wp.randn(wp.rand_init(seed[0], (b * n_knots + knot_lo) * 2 + 1))
+        eps_r_hi = wp.randn(wp.rand_init(seed[0], (b * n_knots + knot_hi) * 2 + 1))
+        wheel_l += sigma_knot * ((1.0 - frac) * eps_l_lo + frac * eps_l_hi)
+        wheel_r += sigma_knot * ((1.0 - frac) * eps_r_lo + frac * eps_r_hi)
+        jitter = wp.rand_init(seed[0] + 9176, t * n_cand + b)  # light per-step jitter (distinct stream)
+        wheel_l += sigma * wp.randn(jitter)
+        wheel_r += sigma * wp.randn(jitter)
+    # apply scenario k's wheel slip, then clamp to the forward-arc box (wmin >= 0 -> no reverse)
+    omega[t, r] = wp.vec3(wp.clamp(wheel_l * slip[k, 0], wmin, wmax),
+                          wp.clamp(wheel_r * slip[k, 1], wmin, wmax), 0.0)
 
 
-if __name__ == "__main__":
-    main()
+@wp.struct
+class CostWeights:
+    """Per-rollout cost weights + thresholds, baked once (fixed per planner)."""
+
+    term: float
+    run: float
+    tilt: float
+    head: float
+    lattice: float  # >0 -> goal term is the orientation-aware cost-to-go V(x,y,theta)
+    fallback: float  # >0 -> where V is SATURATED (>= vcap, goal unreachable in-window) fall back to a
+    vcap: float  #        direct straight-line pull (weight `fallback`) so the robot explores toward it
+    oob: float  # >0 -> penalize leaving the world (soft wall at the grid edge)
+    endgame: float  # extra terminal weight when the plan ENDS within sqrt(endgame_r2) of the goal
+    endgame_r2: float  # (so the robot commits to the final approach without over-pulling while routing)
+    term_v: float  # >0 -> penalize speed at the horizon end (plan should END stopped at the goal)
+    eff: float
+    smooth: float
+    invalid: float
+    tilt_free: float
+    # soft-tilt SHAPE: roll weighted > pitch (the robot's roll-vs-pitch susceptibility); cw.tilt is
+    # the overall gain, tilt_free the per-axis free zone. Mirrors the cost-to-go's graded tilt.
+    roll_cost_weight: float
+    pitch_cost_weight: float
+    clear_margin: float
+    resid_tol: float
+    # robot stability envelope (rad): a rollout pose past these is invalid, same as the cost-to-go
+    # blocks it -- so the field and the rollouts agree about tip-over. Large default = inactive.
+    max_roll: float
+    max_pitch_up: float  # climbing limit (nose up = NEGATIVE pitch)
+    max_pitch_down: float  # descending limit (nose down = positive pitch)
+
+
+@wp.kernel
+def _cost_kernel(
+    controlled: wp.array2d(dtype=wp.vec3),
+    derived: wp.array2d(dtype=wp.vec3),
+    clearance: wp.array2d(dtype=float),
+    residual: wp.array2d(dtype=float),
+    omega: wp.array2d(dtype=wp.vec3),  # Ub in components [0], [1]
+    goal: wp.array(dtype=float),  # [2] world goal (device -> graph-safe, changes per replan)
+    grid: Grid,  # geometry for sampling lattice_field at the rollout pose
+    lattice_field: wp.array3d(dtype=float),  # [ny, nx, n_theta] V(x,y,theta) (only read when cw.lattice > 0)
+    n_theta: int,
+    cw: CostWeights,
+    T: int,
+    Jout: wp.array(dtype=float),
+):
+    r = wp.tid()  # rollout
+    run_sum = float(0.0)
+    tilt_sum = float(0.0)
+    heading_sum = float(0.0)
+    oob_sum = float(0.0)
+    terminal_cost = float(0.0)
+    edge = float(0.4)  # soft-wall margin inside the grid border
+    x_lo = grid.origin_x + edge
+    x_hi = grid.origin_x + float(grid.cells_x) * grid.cell_size - edge
+    y_lo = grid.origin_y + edge
+    y_hi = grid.origin_y + float(grid.cells_y) * grid.cell_size - edge
+    for t in range(T + 1):
+        pose = controlled[t, r]  # (x, y, yaw)
+        dx = pose[0] - goal[0]
+        dy = pose[1] - goal[1]
+        goal_d2 = dx * dx + dy * dy  # Euclidean; still drives the heading term below
+        if cw.oob > 0.0:
+            # soft wall at the world edge: depth past the margin (V is clamped off-grid, so the
+            # goal term alone doesn't stop the robot driving off the map -- this does).
+            oob_sum += wp.max(x_lo - pose[0], 0.0) + wp.max(pose[0] - x_hi, 0.0)
+            oob_sum += wp.max(y_lo - pose[1], 0.0) + wp.max(pose[1] - y_hi, 0.0)
+        # goal term: the orientation-aware cost-to-go V(x,y,theta)^2 (routes around the wall) when
+        # enabled, else straight-line distance^2. cw is uniform across rollouts -> warp-coherent.
+        if cw.lattice > 0.0:
+            vl = sample_lattice(lattice_field, grid, n_theta, pose[0], pose[1], pose[2])
+            if cw.fallback > 0.0 and vl >= cw.vcap * 0.9:
+                # routing field SATURATED here (goal unreachable within the window) -> V is flat, so
+                # add a direct straight-line pull toward the goal. The vcap^2 baseline keeps any
+                # reachable cell strictly cheaper (so the robot still prefers routable ground), while
+                # the goal_d2 term gives a gradient to EXPLORE toward the goal instead of creeping.
+                goal_cost = cw.vcap * cw.vcap + cw.fallback * goal_d2
+            else:
+                goal_cost = vl * vl  # orientation-aware: misaligned poses read high -> penalized
+        else:
+            goal_cost = goal_d2
+        run_sum += goal_cost
+        terminal_cost = goal_cost  # last iter (t = T) sticks -> terminal goal cost
+        # tilt + heading are optional; cw is uniform across rollouts, so these guards are
+        # warp-coherent (no divergence) and skip the trig (and the derived read) when off.
+        if cw.tilt > 0.0:
+            # per-axis, roll weighted > pitch: roll is the dangerous axis, so executing a rolled pose
+            # costs more than the same pitch. tilt_free = per-axis free zone (gentle tilt is drivable).
+            pitch = derived[t, r][1]
+            roll = derived[t, r][2]
+            roll_excess = wp.max(wp.abs(roll) - cw.tilt_free, 0.0)
+            pitch_excess = wp.max(wp.abs(pitch) - cw.tilt_free, 0.0)
+            tilt_sum += (
+                cw.roll_cost_weight * roll_excess * roll_excess
+                + cw.pitch_cost_weight * pitch_excess * pitch_excess
+            )
+        if cw.head > 0.0:
+            # heading: penalize facing AWAY from the desired direction (1 - cos angle, in [0, 2]).
+            # Makes "turn the right way" cheaper than "stay", so a forward-only robot commits to a
+            # U-turn / detour (it can't reverse or spin in place).
+            goal_dist = wp.sqrt(goal_d2)
+            if goal_dist > 1e-3:
+                facing = -(wp.cos(pose[2]) * dx + wp.sin(pose[2]) * dy) / goal_dist
+                heading_sum += 1.0 - facing
+    effort_sum = float(0.0)
+    smooth_sum = float(0.0)
+    penalty_sum = float(0.0)
+    term_speed = float(0.0)
+    prev_l = float(0.0)
+    prev_r = float(0.0)
+    for t in range(T):
+        wheels = omega[t, r]  # (wL, wR)
+        sp2 = wheels[0] * wheels[0] + wheels[1] * wheels[1]
+        effort_sum += sp2
+        if t == T - 1:
+            term_speed = sp2  # speed at the horizon end -> 0 means the plan stops (at the goal)
+        if t > 0:
+            dl = wheels[0] - prev_l
+            dr = wheels[1] - prev_r
+            smooth_sum += dl * dl + dr * dr
+        prev_l = wheels[0]
+        prev_r = wheels[1]
+        # GRADED validity (option C): penalize HOW FAR past the margin/tol and HOW EARLY, not a
+        # binary flag. De-saturates the cost (it still ranks when every sample violates), and
+        # eating into the safety margin costs little while a real penetration costs a lot.
+        clear_viol = wp.max(cw.clear_margin - clearance[t, r], 0.0)
+        resid_viol = wp.max(residual[t, r] - cw.resid_tol, 0.0)
+        # roll/pitch stability envelope (same limits as the cost-to-go feasibility): tipping is
+        # invalid. climbing is nose-up = NEGATIVE pitch, so the climb limit is on -pitch.
+        pitch = derived[t, r][1]
+        roll = derived[t, r][2]
+        roll_viol = wp.max(wp.abs(roll) - cw.max_roll, 0.0)
+        climb_viol = wp.max(-pitch - cw.max_pitch_up, 0.0)
+        descend_viol = wp.max(pitch - cw.max_pitch_down, 0.0)
+        early = float(T - t) / float(T)  # earlier violations hurt more (imminent)
+        penalty_sum += early * (clear_viol + resid_viol + roll_viol + climb_viol + descend_viol)
+    # endgame commit: boost the terminal weight only when the plan ENDS near the goal, so the robot
+    # commits to the final approach (a weak pull lets it drift past) WITHOUT over-pulling while still
+    # routing (a strong global term cuts narrow gaps too tight).
+    term_weight = cw.term
+    if terminal_cost < cw.endgame_r2:
+        term_weight = cw.term + cw.endgame
+    # run/tilt/heading are means over the horizon; effort/smooth are raw sums (so they scale with
+    # T) -- the weights are tuned to that, mind it if T changes.
+    Jout[r] = (
+        term_weight * terminal_cost
+        + cw.run * (run_sum / float(T + 1))
+        + cw.tilt * (tilt_sum / float(T + 1))
+        + cw.head * (heading_sum / float(T + 1))
+        + cw.oob * oob_sum
+        + cw.term_v * term_speed
+        + cw.eff * effort_sum
+        + cw.smooth * smooth_sum
+        + penalty_sum * cw.invalid
+    )
+
+
+# --- Robust eval (option F as risk-aware planning): each candidate is rolled out under K slip
+# scenarios; CVaR(J) = mean of its worst m_tail scenarios is the candidate's cost. A path that
+# hugs an obstacle is cheap nominally but its slip fan high-centers -> bad CVaR, so clearance
+# falls out of robustness (no margin set). K=1 -> J_cand = J (today's behaviour). ---
+@wp.kernel
+def _cvar_kernel(J: wp.array(dtype=float), n_scen: int, m_tail: int, J_cand: wp.array(dtype=float)):
+    b = wp.tid()  # candidate
+    base = b * n_scen
+    acc = float(0.0)
+    for i in range(n_scen):
+        ci = J[base + i]
+        worse = int(0)  # scenarios strictly worse (ties broken by index) -> a clean worst-m set
+        for j in range(n_scen):
+            cj = J[base + j]
+            if cj > ci or (cj == ci and j < i):
+                worse += 1
+        if worse < m_tail:
+            acc += ci
+    J_cand[b] = acc / float(m_tail)
+
+
+# --- CEM reweight (option B): elite = top-k lowest-cost candidates; U = their mean. Rank-based,
+# so the validity penalty can't blow up the weighting (invalid samples just don't make the
+# elite). The top-k threshold tau is found by device-side BISECTION (a host partition would
+# break the CUDA graph): bisect tau until #{J <= tau} ~= target_k. ---
+@wp.kernel
+def _reset_minmax_kernel(
+    jmin: wp.array(dtype=float), jmax: wp.array(dtype=float), count: wp.array(dtype=float)
+):
+    jmin[0] = 1.0e30
+    jmax[0] = -1.0e30
+    count[0] = 0.0
+
+
+@wp.kernel
+def _minmax_kernel(
+    J: wp.array(dtype=float), jmin: wp.array(dtype=float), jmax: wp.array(dtype=float)
+):
+    cost = J[wp.tid()]
+    wp.atomic_min(jmin, 0, cost)
+    wp.atomic_max(jmax, 0, cost)
+
+
+@wp.kernel
+def _bisect_init_kernel(
+    jmin: wp.array(dtype=float),
+    jmax: wp.array(dtype=float),
+    tau_lo: wp.array(dtype=float),
+    tau_hi: wp.array(dtype=float),
+    tau: wp.array(dtype=float),
+    count: wp.array(dtype=float),
+):
+    tau_lo[0] = jmin[0]
+    tau_hi[0] = jmax[0]
+    tau[0] = 0.5 * (jmin[0] + jmax[0])
+    count[0] = 0.0
+
+
+@wp.kernel
+def _count_below_kernel(
+    J: wp.array(dtype=float), tau: wp.array(dtype=float), count: wp.array(dtype=float)
+):
+    if J[wp.tid()] <= tau[0]:
+        wp.atomic_add(count, 0, 1.0)
+
+
+@wp.kernel
+def _bisect_step_kernel(
+    count: wp.array(dtype=float),
+    target_k: float,
+    tau_lo: wp.array(dtype=float),
+    tau_hi: wp.array(dtype=float),
+    tau: wp.array(dtype=float),
+):
+    if count[0] > target_k:
+        tau_hi[0] = tau[0]  # too many below tau -> lower it
+    else:
+        tau_lo[0] = tau[0]  # too few -> raise it
+    tau[0] = 0.5 * (tau_lo[0] + tau_hi[0])
+    count[0] = 0.0  # reset for the next count pass
+
+
+@wp.kernel
+def _elite_u_kernel(
+    J_cand: wp.array(dtype=float),
+    tau: wp.array(dtype=float),
+    count: wp.array(dtype=float),
+    omega: wp.array2d(dtype=wp.vec3),
+    n_scen: int,
+    wmin: float,
+    wmax: float,
+    n_cand: int,
+    U: wp.array2d(dtype=float),
+):
+    t, wheel = wp.tid()  # (timestep, wheel: 0=L, 1=R)
+    elite_sum = float(0.0)
+    for b in range(n_cand):
+        if J_cand[b] <= tau[0]:  # elite candidate
+            elite_sum += omega[t, b * n_scen][wheel]  # scenario 0 = the un-slipped control
+    U[t, wheel] = wp.clamp(elite_sum / count[0], wmin, wmax)  # unweighted elite mean (forward arcs)
+
+
+@wp.kernel
+def _bump_seed_kernel(seed: wp.array(dtype=int)):
+    seed[0] = seed[0] + 1
+
+
+class MppiGpu:
+    """GPU-resident MPPI: owns the nominal control `U` + scratch on device and runs the
+    refine (sample -> rollout -> cost -> CEM reweight) entirely on the GPU. On CUDA
+    the refine is captured once and replayed as a graph (the RNG counter is bumped
+    in-graph, so each replay draws fresh noise); on CPU it runs eager. Wraps a Simulator.
+
+    `goal` and `start_pose` are device arrays set per replan, so the captured graph picks
+    up new values; the weights/sigma/wmax/elite_frac are baked at capture (fixed per planner)."""
+
+    def __init__(
+        self,
+        sim,
+        sigma,
+        wmax,
+        weights,
+        clear_margin,
+        resid_tol,
+        seed=0,
+        sigma_knot=0.0,
+        n_knots=4,
+        elite_frac=0.02,
+        wmin=0.0,
+        wide_frac=0.25,
+        n_scenarios=1,
+        cvar_beta=0.5,
+        slip_lo=0.6,
+        n_theta=16,
+        profile=False,  # opt-in per-stage CUDA-event timing of the refine loop (tiny event nodes)
+    ):
+        self.sim = sim
+        self.dev = sim.device
+        self.B, self.T = sim.B, sim.T
+        # robust eval (option F): the B rollouts are n_cand candidates x K slip scenarios.
+        # K=1 is non-robust (one scenario, no slip) -> identical to plain MPPI.
+        self.K = int(n_scenarios)
+        if self.B % self.K != 0:
+            raise ValueError(f"sim.B ({self.B}) must be divisible by n_scenarios ({self.K})")
+        self.n_cand = self.B // self.K
+        self.m_tail = max(1, int(round(float(cvar_beta) * self.K)))  # CVaR = mean of worst m_tail
+        self.sigma, self.wmax, self.wmin = float(sigma), float(wmax), float(wmin)
+        self.sigma_knot, self.n_knots = float(sigma_knot), int(n_knots)
+        self.n_wide = int(float(wide_frac) * self.n_cand)  # candidates drawn from the WIDE prior
+        self.target_k = float(int(float(elite_frac) * self.n_cand))  # CEM elite count (over candidates)
+        w = weights
+        cw = CostWeights()
+        cw.term = float(w.get("term", 0.0))
+        cw.run = float(w.get("run", 0.0))
+        cw.tilt = float(w.get("tilt", 0.0))
+        cw.head = float(w.get("head", 0.0))
+        cw.lattice = float(w.get("lattice", 0.0))
+        cw.fallback = float(w.get("fallback", 0.0))
+        cw.vcap = 1e9  # set to the routing field's cap (planner.cw.vcap = ctg._vcap) to arm the fallback
+        cw.oob = float(w.get("oob", 0.0))
+        cw.endgame = float(w.get("endgame", 0.0))
+        cw.endgame_r2 = float(w.get("endgame_r2", 0.0))
+        cw.term_v = float(w.get("term_v", 0.0))
+        cw.eff = float(w.get("eff", 0.0))
+        cw.smooth = float(w.get("smooth", 0.0))
+        cw.invalid = float(w.get("invalid", 0.0))
+        cw.tilt_free = float(w.get("tilt_free", 0.0))
+        cw.roll_cost_weight = float(w.get("roll_cost_weight", 1.0))  # tilt SHAPE: roll > pitch
+        cw.pitch_cost_weight = float(w.get("pitch_cost_weight", 0.5))
+        cw.clear_margin = float(clear_margin)
+        cw.resid_tol = float(resid_tol)
+        cw.max_roll = float(w.get("max_roll", 1e3))  # 1e3 rad = effectively off unless set
+        cw.max_pitch_up = float(w.get("max_pitch_up", 1e3))
+        cw.max_pitch_down = float(w.get("max_pitch_down", 1e3))
+        self.cw = cw
+        d = self.dev
+        slip = np.ones((self.K, 2), np.float32)  # scenario 0 = no slip; rest sample the disturbance
+        if self.K > 1:
+            rng = np.random.default_rng(int(seed) + 4242)
+            slip[1:] = rng.uniform(float(slip_lo), 1.0, (self.K - 1, 2)).astype(np.float32)
+        self.slip = wp.array(slip, dtype=float, device=d)
+        self.U = wp.zeros((self.T, 2), dtype=float, device=d)
+        self.J = wp.zeros(self.B, dtype=float, device=d)            # cost per scenario-rollout
+        self.J_cand = wp.zeros(self.n_cand, dtype=float, device=d)  # CVaR cost per candidate
+        self.jmin = wp.zeros(1, dtype=float, device=d)  # CEM bisection scalars
+        self.jmax = wp.zeros(1, dtype=float, device=d)
+        self.tau_lo = wp.zeros(1, dtype=float, device=d)
+        self.tau_hi = wp.zeros(1, dtype=float, device=d)
+        self.tau = wp.zeros(1, dtype=float, device=d)
+        self.count = wp.zeros(1, dtype=float, device=d)
+        self.seed = wp.array([int(seed)], dtype=int, device=d)
+        self.goal = wp.zeros(2, dtype=float, device=d)
+        ny, nx = sim.elevation.shape
+        self.n_theta = int(n_theta)
+        self.lattice_field = wp.zeros((ny, nx, self.n_theta), dtype=float, device=d)  # V(x,y,theta)
+        # the grid the cost kernel samples the lattice field on: defaults to the sim grid, but a COARSER
+        # grid can be set (set_lattice(V, grid)) so the routing field is solved at low resolution --
+        # the rollouts do fine obstacle avoidance, so the global router needn't be sim-resolution.
+        self.lattice_grid = sim.grid
+        self._graph = None
+        # opt-in per-stage profiling of the captured refine loop (CUDA-event timing; off = no overhead)
+        self._prof = StageProfiler(self.dev, ("sample", "rollout", "cost", "reweight"), profile)
+        self._n_refine_done = 0
+
+    def reset_timing(self):
+        """Clear the accumulated per-stage refine timings (e.g. after a warmup replan)."""
+        self._prof.reset()
+
+    def timing_stats(self):
+        """Per-stage refine timing over profiled replans (CUDA + profile=True), first refine excluded:
+        {stage: {"mean_ms", "std_ms", "n"}} for sample / rollout / cost / reweight. Use the means (the
+        event reads sync, so a profiling run is serialized -- its wall-clock isn't the real rate)."""
+        return self._prof.stats()
+
+    def reset_nominal(self, value=1.5):
+        self.U.fill_(float(value))
+
+    def nominal(self):
+        """The current nominal control U [T, 2], on host."""
+        return self.U.numpy()
+
+    def set_nominal(self, U_host):
+        self.U.assign(np.ascontiguousarray(U_host, np.float32))
+
+    def set_lattice(self, V, grid=None):
+        """Copy the orientation-aware cost-to-go V[ny', nx', n_theta] into the stable buffer the cost
+        kernel reads. `grid` is the Grid V was solved on (a coarse grid for a low-res routing field);
+        defaults to the sim grid. Call before the first replan; on re-solve (moving goal) call again
+        with the SAME shape -- it copies into the stable buffer the captured graph reads."""
+        if tuple(V.shape) != tuple(self.lattice_field.shape):
+            self.lattice_field = wp.zeros(V.shape, dtype=float, device=self.dev)
+        wp.copy(self.lattice_field, V)
+        if grid is not None:
+            self.lattice_grid = grid
+
+    def _refine(self):
+        """One MPPI iteration: sample -> rollout -> cost -> CEM reweight, all on device."""
+        s, d = self.sim, self.dev
+        self._prof.mark(0)
+        wp.launch(_bump_seed_kernel, 1, inputs=[self.seed], device=d)
+        wp.launch(
+            _sample_omega_kernel,
+            (self.T, self.B),
+            inputs=[
+                self.U,
+                self.sigma,
+                self.sigma_knot,
+                self.wmin,
+                self.wmax,
+                self.n_wide,
+                self.n_knots,
+                self.K,
+                self.slip,
+                self.seed,
+            ],
+            outputs=[s.omega],
+            device=d,
+        )
+        self._prof.mark(1)  # sample done
+        s.rollout_launch()
+        self._prof.mark(2)  # rollout done
+        wp.launch(
+            _cost_kernel,
+            self.B,
+            inputs=[
+                s.controlled,
+                s.derived,
+                s.clearance,
+                s.residual,
+                s.omega,
+                self.goal,
+                self.lattice_grid,
+                self.lattice_field,
+                self.n_theta,
+                self.cw,
+                self.T,
+            ],
+            outputs=[self.J],
+            device=d,
+        )
+        self._prof.mark(3)  # cost done
+        # robust eval: reduce each candidate's K scenario costs to its CVaR (K=1 -> J_cand = J)
+        wp.launch(_cvar_kernel, self.n_cand, inputs=[self.J, self.K, self.m_tail],
+                  outputs=[self.J_cand], device=d)
+        self._cem_reweight()
+        self._prof.mark(4)  # reweight (CVaR + CEM) done
+
+    def _cem_reweight(self):
+        """Top-k elite mean -> U over CANDIDATES (cost = J_cand, the CVaR): find the threshold
+        tau by device-side bisection (#{J_cand <= tau} ~= target_k), then average the elite
+        candidates' un-slipped controls (scenario-0 column)."""
+        d, omega = self.dev, self.sim.omega
+        wp.launch(_reset_minmax_kernel, 1, inputs=[self.jmin, self.jmax, self.count], device=d)
+        wp.launch(_minmax_kernel, self.n_cand, inputs=[self.J_cand, self.jmin, self.jmax], device=d)
+        wp.launch(
+            _bisect_init_kernel,
+            1,
+            inputs=[self.jmin, self.jmax, self.tau_lo, self.tau_hi, self.tau, self.count],
+            device=d,
+        )
+        for _ in range(_N_BISECT):
+            wp.launch(_count_below_kernel, self.n_cand, inputs=[self.J_cand, self.tau, self.count], device=d)
+            wp.launch(
+                _bisect_step_kernel,
+                1,
+                inputs=[self.count, self.target_k, self.tau_lo, self.tau_hi, self.tau],
+                device=d,
+            )
+        wp.launch(
+            _count_below_kernel, self.n_cand, inputs=[self.J_cand, self.tau, self.count], device=d
+        )  # final elite count
+        wp.launch(
+            _elite_u_kernel,
+            (self.T, 2),
+            inputs=[self.J_cand, self.tau, self.count, omega, self.K,
+                    self.wmin, self.wmax, self.n_cand, self.U],
+            device=d,
+        )
+
+    def _seed_turn_if_facing_away(self, state, goal_xy):
+        """Symmetry break for the behind-goal saddle: if the start faces >120 deg away from
+        the goal, seed the nominal with a hard turn. A forward-only robot facing away can only
+        reach by a U-turn, but the straight nominal is a local optimum the sampler won't leave
+        (it just drives away); the turn seed kicks it into the U-turn basin. Fires only when
+        facing away, so normal (facing-toward) planning keeps its warm-started nominal."""
+        to_goal_x = float(goal_xy[0]) - float(state[0])
+        to_goal_y = float(goal_xy[1]) - float(state[1])
+        dist = np.hypot(to_goal_x, to_goal_y)
+        if dist < 1e-3:
+            return
+        facing = (np.cos(state[2]) * to_goal_x + np.sin(state[2]) * to_goal_y) / dist  # heading . to-goal
+        if facing < -0.5:
+            self.U.assign(np.tile([self.wmin, self.wmax], (self.T, 1)).astype(np.float32))
+
+    def replan(self, state, goal_xy, n_refine):
+        """Run n_refine GPU refines from `state` toward world `goal_xy`; updates U in place."""
+        self.goal.assign(np.asarray(goal_xy[:2], np.float32))
+        self.sim.start_pose.assign(
+            np.ascontiguousarray(np.tile(np.asarray(state, np.float32), (self.B, 1)), np.float32)
+        )
+        if self.cw.lattice == 0.0:  # the Euclidean turn-seed misfires when the lattice field
+            self._seed_turn_if_facing_away(state, goal_xy)  # already supplies the heading direction
+        if self.dev.is_cuda:
+            if self._graph is None:
+                with wp.ScopedCapture(device=self.dev) as cap:
+                    self._refine()
+                self._graph = cap.graph
+            for _ in range(n_refine):
+                wp.capture_launch(self._graph)
+                self._n_refine_done += 1
+                if self._prof.enabled and self._n_refine_done > 1:  # skip the first (cold) refine
+                    self._prof.accumulate()
+        else:
+            for _ in range(n_refine):
+                self._refine()
+        return self.U

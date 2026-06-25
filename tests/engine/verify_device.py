@@ -26,7 +26,7 @@ from kinematic_helhest.engine import Simulator
 from kinematic_helhest.engine import SolverParams
 from kinematic_helhest.engine.envelope import _contact_kernel
 from kinematic_helhest.engine.envelope import _gather_kernel
-from kinematic_helhest.control.mppi import _to_omega
+from kinematic_helhest.control.reference import _to_omega
 
 
 def wheel_envelope(elevation, cell_size, wheel_radius, device="cpu"):

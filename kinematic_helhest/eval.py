@@ -19,7 +19,7 @@ from . import worlds as W
 from .driver import WarpDriver
 from .engine import GridParams
 from .engine import Simulator
-from .control.mppi_gpu import MppiGpu
+from .control.mppi import MppiGpu
 from .control.terminal import dock_control
 
 # lattice routing weights: routing + feasibility only. The terminal dock handles reach+stop, so the

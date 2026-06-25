@@ -1,11 +1,11 @@
-"""GPU MPPI inner loop (mppi_gpu) vs the numpy oracle (mppi._cost + numpy reweight).
+"""GPU MPPI inner loop (mppi) vs the numpy oracle (reference._cost + numpy reweight).
 
 The GPU RNG differs from numpy's, so trajectories can't be compared bit-for-bit.
 Instead this checks the two host-replaceable pieces on *identical* inputs:
   * cost     : GPU `_cost` kernel J[B] vs numpy `_cost` on the same rollout + Ub
   * reweight : GPU jmin/softmax/weighted-U vs numpy softmax on the same J + Ub
 
-Run:  python -m tests.planning.test_mppi_gpu
+Run:  python -m tests.control.test_mppi
 """
 import numpy as np
 import warp as wp
@@ -16,9 +16,9 @@ from kinematic_helhest.engine import GridParams
 from kinematic_helhest.engine import RobotParams
 from kinematic_helhest.engine import Simulator
 from kinematic_helhest.engine import SolverParams
-from kinematic_helhest.control import mppi_gpu as mg
-from kinematic_helhest.control.mppi import _cost as cost_np
-from kinematic_helhest.control.mppi import _to_omega
+from kinematic_helhest.control import mppi as mg
+from kinematic_helhest.control.reference import _cost as cost_np
+from kinematic_helhest.control.reference import _to_omega
 
 _W = dict(term=3.0, run=0.3, head=2.0, invalid=1e5, eff=2e-3, smooth=2e-3,
           tilt=300.0, tilt_free=np.radians(12.0), roll_cost_weight=1.0, pitch_cost_weight=0.5,

@@ -18,7 +18,7 @@ import warp as wp
 
 from . import dynamics
 from . import worlds as W
-from .control.mppi_gpu import MppiGpu
+from .control.mppi import MppiGpu
 from .control.terminal import dock_control
 from .driver import WarpDriver
 from .engine import GridParams
