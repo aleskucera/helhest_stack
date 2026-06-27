@@ -78,6 +78,46 @@ class MultiScanMap:
         self.known |= known
 
 
+def crop_window(mm, scene, rx, ry, ww, wh, cell):
+    """Fixed (wh x ww) window centered on the robot, cropped from the world-frame map (out-of-world
+    cells stay unknown). Returns (elev, known, wx0, wy0) -- wx0/wy0 is the window's world origin, so
+    a world point maps to window-LOCAL coords as P - (wx0, wy0)."""
+    c0 = int(round((rx - scene.x0) / cell)) - ww // 2
+    r0 = int(round((ry - scene.y0) / cell)) - wh // 2
+    elev = np.zeros((wh, ww), np.float32)
+    known = np.zeros((wh, ww), bool)
+    sr0, sr1 = max(0, r0), min(scene.ny, r0 + wh)  # overlap of window with the world array
+    sc0, sc1 = max(0, c0), min(scene.nx, c0 + ww)
+    if sr1 > sr0 and sc1 > sc0:
+        dr, dc = sr0 - r0, sc0 - c0
+        elev[dr : dr + (sr1 - sr0), dc : dc + (sc1 - sc0)] = mm.elev[sr0:sr1, sc0:sc1]
+        known[dr : dr + (sr1 - sr0), dc : dc + (sc1 - sc0)] = mm.known[sr0:sr1, sc0:sc1]
+    return elev, known, scene.x0 + c0 * cell, scene.y0 + r0 * cell
+
+
+def drift_scan(obs, known, x0, y0, cell, rx, ry, dx, dy, dyaw):
+    """Apply an accumulated SE(2) drift -- rotation `dyaw` about the robot + translation (dx, dy) -- to
+    a rasterized scan, then re-rasterize. The GLOBAL map then smears like a drifting pose estimate
+    (rotation INCLUDED), while the live LOCAL scan is left untouched (the whole point of the split).
+    """
+    ri, ci = np.nonzero(known)
+    if ri.size == 0:
+        return obs, known
+    px, py = x0 + ci * cell, y0 + ri * cell
+    c, s = np.cos(dyaw), np.sin(dyaw)
+    qx = rx + c * (px - rx) - s * (py - ry) + dx  # rotate about the robot, then translate
+    qy = ry + s * (px - rx) + c * (py - ry) + dy
+    qr = np.round((qy - y0) / cell).astype(int)
+    qc = np.round((qx - x0) / cell).astype(int)
+    ny, nx = known.shape
+    ok = (qr >= 0) & (qr < ny) & (qc >= 0) & (qc < nx)
+    o = np.zeros_like(obs)
+    k = np.zeros_like(known)
+    o[qr[ok], qc[ok]] = obs[ri[ok], ci[ok]]
+    k[qr[ok], qc[ok]] = True
+    return o, k
+
+
 def _poses_along(traj, start, n):
     """Subsample a path [M,2] to n poses (x, y, yaw); yaw from the local tangent."""
     idx = np.linspace(0, len(traj) - 1, n).astype(int)
@@ -104,7 +144,7 @@ def run(
     from .. import worlds as W
     from ..engine import GridParams
     from ..planning.costtogo import CostToGo
-    from ..viz.costfield import _trace_optimal
+    from ..planning.lattice_solver import trace_optimal
 
     wp.init()
     builder, start, goal = W.WORLDS[world]
@@ -128,7 +168,7 @@ def run(
         device=device,
     )
     ctg.compute(wp.array(Hc, dtype=wp.float32, device=device), goalv)
-    traj = _trace_optimal(ctg, start, 24, cnx, cny, scene.x0, scene.y0, ccell)
+    traj = trace_optimal(ctg, start, 24, cnx, cny, scene.x0, scene.y0, ccell)
     poses = _poses_along(traj, start, n_scans)
 
     mm = MultiScanMap(scene.ny, scene.nx)

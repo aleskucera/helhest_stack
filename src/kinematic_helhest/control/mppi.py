@@ -103,6 +103,19 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         return cw
 
 
+# The lattice-routing cost tuning the demos share (routing + feasibility only; the dock handles
+# reach+stop). NOT the dataclass default -- CostParams() is all-zeros on purpose (0 = term off).
+ROUTING_COST_PARAMS = CostParams(
+    goal_terminal=3.0,
+    goal_running=0.3,
+    infeasible=1e5,
+    effort=2e-3,
+    smoothness=2e-3,
+    out_of_bounds=50.0,
+    explore_fallback=1.0,  # explore toward the goal where the routing field saturates
+)
+
+
 @wp.func
 def _bilinear(field: wp.array3d(dtype=float), yi: int, xi: int, fx: float, fy: float, t: int):
     """Bilinear read of the heading-t slice field[:, :, t] at the fractional cell (yi + fy, xi + fx)."""
