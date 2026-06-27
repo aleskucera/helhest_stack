@@ -4,8 +4,8 @@ add an odometry-like perturbation, and check that ICP recovers the true pose."""
 import argparse
 
 import numpy as np
-
-from terrain_toolkit import IcpAligner, IcpConfig
+from terrain_toolkit import IcpAligner
+from terrain_toolkit import IcpConfig
 
 
 def make_scene_cloud(n: int, seed: int) -> np.ndarray:

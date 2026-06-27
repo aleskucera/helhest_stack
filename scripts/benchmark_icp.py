@@ -9,8 +9,8 @@ import time
 
 import numpy as np
 import warp as wp
-
-from terrain_toolkit import IcpAligner, IcpConfig
+from terrain_toolkit import IcpAligner
+from terrain_toolkit import IcpConfig
 
 
 def rpy_to_R(roll: float, pitch: float, yaw: float) -> np.ndarray:
@@ -42,16 +42,31 @@ def main() -> None:
     p.add_argument("--runs", type=int, default=20)
     p.add_argument("--warmup", type=int, default=3)
     p.add_argument("--max-iters", type=int, default=30)
-    p.add_argument("--subsample", type=int, default=None,
-                   help="Optional random subsample of both clouds (for scaling studies)")
-    p.add_argument("--voxel", type=float, default=None,
-                   help="Voxel downsample size (m) applied to source inside ICP.")
-    p.add_argument("--voxel-target", action="store_true",
-                   help="Also voxel-downsample the target cloud.")
-    p.add_argument("--fixed-bounds", action="store_true",
-                   help="Use fixed voxel bounds instead of per-call min/max.")
-    p.add_argument("--no-profile", action="store_true",
-                   help="Skip per-stage profiling (avoids per-stage wp.synchronize overhead).")
+    p.add_argument(
+        "--subsample",
+        type=int,
+        default=None,
+        help="Optional random subsample of both clouds (for scaling studies)",
+    )
+    p.add_argument(
+        "--voxel",
+        type=float,
+        default=None,
+        help="Voxel downsample size (m) applied to source inside ICP.",
+    )
+    p.add_argument(
+        "--voxel-target", action="store_true", help="Also voxel-downsample the target cloud."
+    )
+    p.add_argument(
+        "--fixed-bounds",
+        action="store_true",
+        help="Use fixed voxel bounds instead of per-call min/max.",
+    )
+    p.add_argument(
+        "--no-profile",
+        action="store_true",
+        help="Skip per-stage profiling (avoids per-stage wp.synchronize overhead).",
+    )
     p.add_argument("--verbose-once", action="store_true")
     args = p.parse_args()
 
@@ -94,8 +109,14 @@ def main() -> None:
         pad = 5.0
         mn = target.min(axis=0) - pad
         mx = target.max(axis=0) + pad
-        bounds = (float(mn[0]), float(mx[0]), float(mn[1]), float(mx[1]),
-                  float(mn[2]), float(mx[2]))
+        bounds = (
+            float(mn[0]),
+            float(mx[0]),
+            float(mn[1]),
+            float(mx[1]),
+            float(mn[2]),
+            float(mx[2]),
+        )
 
     cfg = IcpConfig(
         max_iters=args.max_iters,
@@ -140,23 +161,35 @@ def main() -> None:
     print(f"Points (target): {len(target):,}  (source): {len(source):,}")
     print(f"Runs: {args.runs} timed ({args.warmup} warmup) — max {args.max_iters} iters/run")
     print()
-    print(f"Total time per align : mean={total_times.mean():.2f} ms  "
-          f"median={np.median(total_times):.2f} ms  "
-          f"min={total_times.min():.2f} ms  max={total_times.max():.2f} ms")
+    print(
+        f"Total time per align : mean={total_times.mean():.2f} ms  "
+        f"median={np.median(total_times):.2f} ms  "
+        f"min={total_times.min():.2f} ms  max={total_times.max():.2f} ms"
+    )
     print(f"Iterations per align : mean={mean_iters:.1f}  min={iters.min()}  max={iters.max()}")
     print(f"Time per iteration   : ~{total_times.mean() / mean_iters:.2f} ms")
     print()
-    print(f"Final pose error     : rot={np.mean(rot_errs):.4f} deg  "
-          f"trans={np.mean(trans_errs) * 1000:.2f} mm")
+    print(
+        f"Final pose error     : rot={np.mean(rot_errs):.4f} deg  "
+        f"trans={np.mean(trans_errs) * 1000:.2f} mm"
+    )
 
     print()
     print("Per-stage timing (mean ms per align):")
     order = [
         "voxel_downsample",
-        "vx_cpu_setup", "vx_zero_buffers", "vx_upload",
-        "vx_accumulate", "vx_compact", "vx_readback",
-        "upload", "grid_build", "normals",
-        "launch_kernels", "gpu_sync", "cpu_solve",
+        "vx_cpu_setup",
+        "vx_zero_buffers",
+        "vx_upload",
+        "vx_accumulate",
+        "vx_compact",
+        "vx_readback",
+        "upload",
+        "grid_build",
+        "normals",
+        "launch_kernels",
+        "gpu_sync",
+        "cpu_solve",
     ]
     for key in order:
         v = profile_sum.get(key, 0.0) / args.runs

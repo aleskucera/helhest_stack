@@ -3,8 +3,8 @@ import argparse
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
-from terrain_toolkit import TerrainPipeline, TraversabilityConfig
+from terrain_toolkit import TerrainPipeline
+from terrain_toolkit import TraversabilityConfig
 
 BOUNDS = (-5.0, 5.0, -5.0, 5.0)
 RESOLUTION = 0.1
@@ -66,8 +66,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--outlier-std", type=float, default=None)
     p.add_argument("--dropout-frac", type=float, default=None)
     p.add_argument("--smooth-sigma", type=float, default=1.5)
-    p.add_argument("--cloud-max-points", type=int, default=20_000,
-                   help="Downsample cap for the raw cloud scatter.")
+    p.add_argument(
+        "--cloud-max-points",
+        type=int,
+        default=20_000,
+        help="Downsample cap for the raw cloud scatter.",
+    )
     args = p.parse_args()
     cfg = dict(presets[args.preset])
     for k in ("noise_std", "outlier_frac", "outlier_std", "dropout_frac"):
@@ -109,8 +113,7 @@ def main() -> None:
         "Roughness cost",
         "Traversability (combined)",
     )
-    fig = make_subplots(rows=2, cols=4, specs=specs, subplot_titles=titles,
-                        vertical_spacing=0.08)
+    fig = make_subplots(rows=2, cols=4, specs=specs, subplot_titles=titles, vertical_spacing=0.08)
 
     # --- Row 1: 3D surfaces + raw cloud ---
     if len(pts) > args.cloud_max_points:
@@ -120,19 +123,25 @@ def main() -> None:
         sub = pts
     fig.add_trace(
         go.Scatter3d(
-            x=sub[:, 0], y=sub[:, 1], z=sub[:, 2],
+            x=sub[:, 0],
+            y=sub[:, 1],
+            z=sub[:, 2],
             mode="markers",
             marker=dict(size=1.2, color=sub[:, 2], colorscale="Viridis"),
             showlegend=False,
         ),
-        row=1, col=1,
+        row=1,
+        col=1,
     )
-    fig.add_trace(go.Surface(x=x, y=y, z=tm.max, colorscale="Viridis", showscale=False),
-                  row=1, col=2)
-    fig.add_trace(go.Surface(x=x, y=y, z=tm.mean, colorscale="Viridis", showscale=False),
-                  row=1, col=3)
-    fig.add_trace(go.Surface(x=x, y=y, z=tm.elevation, colorscale="Viridis", showscale=False),
-                  row=1, col=4)
+    fig.add_trace(
+        go.Surface(x=x, y=y, z=tm.max, colorscale="Viridis", showscale=False), row=1, col=2
+    )
+    fig.add_trace(
+        go.Surface(x=x, y=y, z=tm.mean, colorscale="Viridis", showscale=False), row=1, col=3
+    )
+    fig.add_trace(
+        go.Surface(x=x, y=y, z=tm.elevation, colorscale="Viridis", showscale=False), row=1, col=4
+    )
 
     # --- Row 2: 3D surfaces colored by cost (z = elevation, color = cost) ---
     cost_scale = "RdYlGn_r"  # green (0) = cheap, red (1) = expensive
@@ -145,22 +154,27 @@ def main() -> None:
     for col, (name, cost) in enumerate(cost_layers, start=1):
         fig.add_trace(
             go.Surface(
-                x=x, y=y,
+                x=x,
+                y=y,
                 z=tm.elevation,
                 surfacecolor=cost,
                 colorscale=cost_scale,
-                cmin=0.0, cmax=1.0,
+                cmin=0.0,
+                cmax=1.0,
                 showscale=(col == 4),
                 colorbar=dict(title="cost", len=0.45, y=0.22) if col == 4 else None,
             ),
-            row=2, col=col,
+            row=2,
+            col=col,
         )
 
     # --- Layout ---
-    zmin = float(np.nanmin([np.nanmin(tm.max), np.nanmin(tm.mean),
-                             np.nanmin(tm.elevation), pts[:, 2].min()]))
-    zmax = float(np.nanmax([np.nanmax(tm.max), np.nanmax(tm.mean),
-                             np.nanmax(tm.elevation), pts[:, 2].max()]))
+    zmin = float(
+        np.nanmin([np.nanmin(tm.max), np.nanmin(tm.mean), np.nanmin(tm.elevation), pts[:, 2].min()])
+    )
+    zmax = float(
+        np.nanmax([np.nanmax(tm.max), np.nanmax(tm.mean), np.nanmax(tm.elevation), pts[:, 2].max()])
+    )
     scene = dict(
         xaxis=dict(range=[xmin, xmax]),
         yaxis=dict(range=[ymin, ymax]),
@@ -170,7 +184,7 @@ def main() -> None:
     scene_keys = {f"scene{i}" if i > 1 else "scene": scene for i in range(1, 9)}
     fig.update_layout(
         title=f"Terrain pipeline [{args.preset}] "
-              f"({tm.max.shape[1]}×{tm.max.shape[0]} @ {RESOLUTION} m/cell)",
+        f"({tm.max.shape[1]}×{tm.max.shape[0]} @ {RESOLUTION} m/cell)",
         height=900,
         **scene_keys,
     )

@@ -1,8 +1,9 @@
 """Minimal example: configure and run the full terrain pipeline on synthetic data."""
 
 import numpy as np
-
-from terrain_toolkit import FilterConfig, TerrainPipeline, TraversabilityConfig
+from terrain_toolkit import FilterConfig
+from terrain_toolkit import TerrainPipeline
+from terrain_toolkit import TraversabilityConfig
 
 # ---------------------------------------------------------------------------
 # Configuration — every parameter explicit

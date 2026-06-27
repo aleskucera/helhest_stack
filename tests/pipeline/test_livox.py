@@ -2,9 +2,9 @@ import argparse
 
 import numpy as np
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from terrain_toolkit import gaussian_smooth
 from terrain_toolkit import HeightMapBuilder
-from plotly.subplots import make_subplots
 
 
 def parse_args() -> argparse.Namespace:

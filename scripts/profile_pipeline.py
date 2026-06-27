@@ -12,22 +12,19 @@ import time
 
 import numpy as np
 import warp as wp
-
-from terrain_toolkit.heightmap import HeightMapBuilder, gaussian_smooth, multigrid_inpaint
-from terrain_toolkit.outlier import (
-    OutlierFilterConfig,
-    RadiusOutlierFilter,
-    RadiusOutlierFilterConfig,
-    StatisticalOutlierFilter,
-)
-from terrain_toolkit.traversability import (
-    FilterConfig,
-    GeometricTraversabilityAnalyzer,
-    ObstacleInflator,
-    SupportRatioMask,
-    TemporalGate,
-    TraversabilityConfig,
-)
+from terrain_toolkit.heightmap import gaussian_smooth
+from terrain_toolkit.heightmap import HeightMapBuilder
+from terrain_toolkit.heightmap import multigrid_inpaint
+from terrain_toolkit.outlier import OutlierFilterConfig
+from terrain_toolkit.outlier import RadiusOutlierFilter
+from terrain_toolkit.outlier import RadiusOutlierFilterConfig
+from terrain_toolkit.outlier import StatisticalOutlierFilter
+from terrain_toolkit.traversability import FilterConfig
+from terrain_toolkit.traversability import GeometricTraversabilityAnalyzer
+from terrain_toolkit.traversability import ObstacleInflator
+from terrain_toolkit.traversability import SupportRatioMask
+from terrain_toolkit.traversability import TemporalGate
+from terrain_toolkit.traversability import TraversabilityConfig
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,7 +36,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--frames", type=int, default=100)
     p.add_argument("--warmup", type=int, default=10)
     p.add_argument("--no-outlier", action="store_true")
-    p.add_argument("--sor", action="store_true", help="use StatisticalOutlierFilter instead of default ROR")
+    p.add_argument(
+        "--sor", action="store_true", help="use StatisticalOutlierFilter instead of default ROR"
+    )
     return p.parse_args()
 
 
@@ -99,33 +98,42 @@ def main() -> None:
     def one_frame(sw: Stopwatch | None):
         # 1. Upload
         pts_wp = wp.array(np.ascontiguousarray(pts, dtype=np.float32), dtype=wp.vec3)
-        if sw: sw.lap("upload")
+        if sw:
+            sw.lap("upload")
         # 2. Outlier
         if outlier is not None:
             pts_wp = outlier.apply(pts_wp)
-            if sw: sw.lap("outlier")
+            if sw:
+                sw.lap("outlier")
         # 3. Rasterize
         layers = builder.build(pts_wp)
         primary = layers.max
-        if sw: sw.lap("heightmap_build")
+        if sw:
+            sw.lap("heightmap_build")
         # 4. Multigrid inpaint
         elevation = multigrid_inpaint(primary)
-        if sw: sw.lap("inpaint")
+        if sw:
+            sw.lap("inpaint")
         # 5. Gaussian smooth
         elevation = gaussian_smooth(elevation, sigma=args.smooth_sigma)
-        if sw: sw.lap("smooth")
+        if sw:
+            sw.lap("smooth")
         # 6. Traversability analyzer
         costs = analyzer.compute(elevation)
-        if sw: sw.lap("analyzer")
+        if sw:
+            sw.lap("analyzer")
         # 7. Obstacle inflate
         inflated = inflator.apply(costs.total)
-        if sw: sw.lap("inflate")
+        if sw:
+            sw.lap("inflate")
         # 8. Temporal gate (does internal sync+readback)
         gate.is_stable(inflated)
-        if sw: sw.lap("temporal_gate")
+        if sw:
+            sw.lap("temporal_gate")
         # 9. Support mask
         total = mask.apply(primary, inflated)
-        if sw: sw.lap("support_mask")
+        if sw:
+            sw.lap("support_mask")
         # 10. Download
         out = {
             "max": layers.max.numpy().copy(),
@@ -138,7 +146,8 @@ def main() -> None:
             "roughness": costs.roughness.numpy().copy(),
             "traversability": total.numpy().copy(),
         }
-        if sw: sw.lap("download")
+        if sw:
+            sw.lap("download")
         return out
 
     # Warmup (JIT, first-frame allocations, etc.)

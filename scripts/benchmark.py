@@ -2,8 +2,8 @@ import time
 
 import numpy as np
 import warp as wp
-
 from terrain_toolkit import HeightMapBuilder
+
 from test_synthetic import make_synthetic_cloud
 
 BOUNDS = (-5.0, 5.0, -5.0, 5.0)
