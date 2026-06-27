@@ -6,6 +6,7 @@ from typing import Literal
 import numpy as np
 import warp as wp
 
+from .gridmap import GridMap
 from .heightmap import FlatGroundFootprint
 from .heightmap import FootprintConfig
 from .heightmap import gaussian_smooth
@@ -90,6 +91,12 @@ class TerrainMap:
                 d[name] = arr
         return d
 
+    def as_gridmap(self) -> GridMap:
+        """The elevation layer as the shared `GridMap` contract: origin = (xmin, ymin)
+        from `bounds`, cell = `resolution`."""
+        xmin, _, ymin, _ = self.bounds
+        return GridMap(elevation=self.elevation, origin=(xmin, ymin), cell=self.resolution)
+
 
 @dataclass
 class TerrainMapGPU:
@@ -113,6 +120,13 @@ class TerrainMapGPU:
     slope_cost: wp.array | None = None
     step_cost: wp.array | None = None
     roughness_cost: wp.array | None = None
+
+    def as_gridmap(self) -> GridMap:
+        """The (device-resident) elevation layer as the shared `GridMap` contract: origin =
+        (xmin, ymin) from `bounds`, cell = `resolution`. The handle stays BORROWED -- valid
+        only until the next `process()`; `wp.clone()` it to retain across frames."""
+        xmin, _, ymin, _ = self.bounds
+        return GridMap(elevation=self.elevation, origin=(xmin, ymin), cell=self.resolution)
 
 
 class TerrainPipeline:

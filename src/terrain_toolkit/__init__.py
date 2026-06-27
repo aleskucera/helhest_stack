@@ -1,3 +1,4 @@
+from .gridmap import GridMap
 from .heightmap import diffuse_inpaint
 from .heightmap import FlatGroundFootprint
 from .heightmap import FootprintConfig
@@ -31,6 +32,7 @@ __all__ = [
     "FlatGroundFootprint",
     "FootprintConfig",
     "GeometricTraversabilityAnalyzer",
+    "GridMap",
     "HeightMapBuilder",
     "HeightMapLayers",
     "IcpAligner",
