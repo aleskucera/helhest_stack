@@ -7,13 +7,11 @@ import numpy as np
 import warp as wp
 
 from ..grid_utils import meters_to_cells
-from .kernels import (
-    combine_costs_kernel,
-    compute_roughness_kernel,
-    compute_slope_sobel_kernel,
-    compute_step_height_cost_kernel,
-    morph_op_kernel,
-)
+from .kernels import combine_costs_kernel
+from .kernels import compute_roughness_kernel
+from .kernels import compute_slope_sobel_kernel
+from .kernels import compute_step_height_cost_kernel
+from .kernels import morph_op_kernel
 
 
 @dataclass
@@ -101,7 +99,10 @@ class GeometricTraversabilityAnalyzer:
             self._eroded = wp.zeros(self.shape, dtype=wp.float32)
 
         self._costs = TraversabilityCosts(
-            slope=self._slope, step=self._step, roughness=self._rough, total=self._total,
+            slope=self._slope,
+            step=self._step,
+            roughness=self._rough,
+            total=self._total,
         )
 
     def compute(self, heightmap: np.ndarray | wp.array) -> TraversabilityCosts:
@@ -114,7 +115,8 @@ class GeometricTraversabilityAnalyzer:
         else:
             elev = wp.array(
                 np.ascontiguousarray(heightmap, dtype=np.float32),
-                dtype=wp.float32, device=self.device,
+                dtype=wp.float32,
+                device=self.device,
             )
 
         cfg = self.config

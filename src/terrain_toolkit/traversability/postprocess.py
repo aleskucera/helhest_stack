@@ -7,12 +7,10 @@ import numpy as np
 import warp as wp
 
 from ..grid_utils import meters_to_cells
-from .kernels import (
-    count_obstacles_kernel,
-    inflate_obstacles_kernel,
-    occlusion_mask_kernel,
-    support_ratio_mask_kernel,
-)
+from .kernels import count_obstacles_kernel
+from .kernels import inflate_obstacles_kernel
+from .kernels import occlusion_mask_kernel
+from .kernels import support_ratio_mask_kernel
 
 
 @dataclass
@@ -52,8 +50,8 @@ class OcclusionConfig:
     """
 
     sensor_xy: tuple[float, float] = (0.0, 0.0)  # sensor position in grid frame (m)
-    sensor_z: float = 0.5                        # sensor height above the grid origin (m)
-    angle_eps_rad: float = 0.01                  # horizon margin; guards flat-ground noise
+    sensor_z: float = 0.5  # sensor height above the grid origin (m)
+    angle_eps_rad: float = 0.01  # horizon margin; guards flat-ground noise
 
 
 def _as_gpu(arr: np.ndarray | wp.array, device: wp.context.Device) -> wp.array:
@@ -61,7 +59,8 @@ def _as_gpu(arr: np.ndarray | wp.array, device: wp.context.Device) -> wp.array:
         return arr
     return wp.array(
         np.ascontiguousarray(arr, dtype=np.float32),
-        dtype=wp.float32, device=device,
+        dtype=wp.float32,
+        device=device,
     )
 
 
@@ -91,9 +90,7 @@ class ObstacleInflator:
 
         sigma_cells = self.config.inflation_sigma_m / resolution
         self.radius_cells = int(math.ceil(3.0 * sigma_cells))
-        self.inv_two_sigma_sq = (
-            1.0 / (2.0 * sigma_cells * sigma_cells) if sigma_cells > 0 else 0.0
-        )
+        self.inv_two_sigma_sq = 1.0 / (2.0 * sigma_cells * sigma_cells) if sigma_cells > 0 else 0.0
 
         with wp.ScopedDevice(self.device):
             self._inflated = wp.zeros(self.shape, dtype=wp.float32)
@@ -198,7 +195,8 @@ class SupportRatioMask:
         self.device = device if device is not None else wp.get_device()
 
         self.support_radius_cells = meters_to_cells(
-            self.config.support_radius_m, resolution,
+            self.config.support_radius_m,
+            resolution,
         )
 
         with wp.ScopedDevice(self.device):
@@ -273,8 +271,11 @@ class OcclusionMask:
     ) -> wp.array:
         """`raw_elevation` is the pre-inpaint heightmap (NaN in unmeasured cells);
         `elevation` is the inpainted heightmap used for the line-of-sight march."""
-        if (raw_elevation.shape != self.shape or elevation.shape != self.shape
-                or cost_map.shape != self.shape):
+        if (
+            raw_elevation.shape != self.shape
+            or elevation.shape != self.shape
+            or cost_map.shape != self.shape
+        ):
             raise ValueError("raw_elevation, elevation and cost_map must match mask shape")
 
         raw_wp = _as_gpu(raw_elevation, self.device)

@@ -115,9 +115,15 @@ def estimate_normals_kernel(
 
     inv_n = 1.0 / float(count)
     C = wp.mat33(
-        c00 * inv_n, c01 * inv_n, c02 * inv_n,
-        c01 * inv_n, c11 * inv_n, c12 * inv_n,
-        c02 * inv_n, c12 * inv_n, c22 * inv_n,
+        c00 * inv_n,
+        c01 * inv_n,
+        c02 * inv_n,
+        c01 * inv_n,
+        c11 * inv_n,
+        c12 * inv_n,
+        c02 * inv_n,
+        c12 * inv_n,
+        c22 * inv_n,
     )
 
     # Largest eigenvector of C.

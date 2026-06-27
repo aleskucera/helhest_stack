@@ -1,4 +1,5 @@
 """Launch terrain_toolkit_ros with Ouster-tuned defaults."""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -166,23 +167,28 @@ def generate_launch_description() -> LaunchDescription:
         ),
         # Occlusion (line-of-sight) masking
         DeclareLaunchArgument(
-            "occlusion_enable", default_value="false",
+            "occlusion_enable",
+            default_value="false",
             description="NaN-out cost in the line-of-sight shadow of obstacles",
         ),
         DeclareLaunchArgument(
-            "occlusion_sensor_x", default_value="0.0",
+            "occlusion_sensor_x",
+            default_value="0.0",
             description="Sensor x in the gravity-aligned grid frame (m)",
         ),
         DeclareLaunchArgument(
-            "occlusion_sensor_y", default_value="0.0",
+            "occlusion_sensor_y",
+            default_value="0.0",
             description="Sensor y in the gravity-aligned grid frame (m)",
         ),
         DeclareLaunchArgument(
-            "occlusion_sensor_z", default_value="0.5",
+            "occlusion_sensor_z",
+            default_value="0.5",
             description="Sensor height above the grid origin (m)",
         ),
         DeclareLaunchArgument(
-            "occlusion_angle_eps_deg", default_value="0.6",
+            "occlusion_angle_eps_deg",
+            default_value="0.6",
             description="View-angle margin guarding flat-ground noise (deg)",
         ),
         # Flat ground footprint

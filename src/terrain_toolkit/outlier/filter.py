@@ -6,11 +6,9 @@ from dataclasses import dataclass
 import numpy as np
 import warp as wp
 
-from .kernels import (
-    compact_inliers_kernel,
-    mean_dist_in_radius_kernel,
-    radius_outlier_filter_kernel,
-)
+from .kernels import compact_inliers_kernel
+from .kernels import mean_dist_in_radius_kernel
+from .kernels import radius_outlier_filter_kernel
 
 
 @dataclass
@@ -48,7 +46,8 @@ def _hashgrid_dims_from_points(points_np: np.ndarray, radius: float) -> tuple[in
 
 
 def _hashgrid_dims_from_bounds(
-    bounds: tuple[float, float, float, float, float, float], radius: float,
+    bounds: tuple[float, float, float, float, float, float],
+    radius: float,
 ) -> tuple[int, int, int]:
     xmin, xmax, ymin, ymax, zmin, zmax = bounds
     extent = np.array([xmax - xmin, ymax - ymin, zmax - zmin], dtype=np.float64)

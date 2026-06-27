@@ -6,7 +6,8 @@ from dataclasses import dataclass
 import numpy as np
 import warp as wp
 
-from .kernels import finalize_kernel, rasterize_all_kernel
+from .kernels import finalize_kernel
+from .kernels import rasterize_all_kernel
 
 
 @dataclass
@@ -71,7 +72,10 @@ class HeightMapBuilder:
             self._mean = wp.empty(self.shape, dtype=wp.float32)
 
         self._layers = HeightMapLayers(
-            max=self._max, mean=self._mean, min=self._min, count=self._count,
+            max=self._max,
+            mean=self._mean,
+            min=self._min,
+            count=self._count,
         )
 
     def build(self, points: np.ndarray | wp.array) -> HeightMapLayers:

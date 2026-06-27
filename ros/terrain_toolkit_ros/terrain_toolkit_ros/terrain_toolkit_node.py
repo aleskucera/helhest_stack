@@ -11,32 +11,26 @@ from __future__ import annotations
 
 import numpy as np
 import rclpy
-from rclpy.node import Node
-from rcl_interfaces.msg import (
-    FloatingPointRange,
-    IntegerRange,
-    ParameterDescriptor,
-    SetParametersResult,
-)
-
 import tf2_ros
-from tf2_ros import TransformException
 from geometry_msgs.msg import TransformStamped
-
-from sensor_msgs.msg import PointCloud2, PointField
+from rcl_interfaces.msg import FloatingPointRange
+from rcl_interfaces.msg import IntegerRange
+from rcl_interfaces.msg import ParameterDescriptor
+from rcl_interfaces.msg import SetParametersResult
+from rclpy.node import Node
+from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import PointField
 from sensor_msgs_py import point_cloud2 as pc2
 from std_msgs.msg import Header
-
-from terrain_toolkit import (
-    FilterConfig,
-    FootprintConfig,
-    OcclusionConfig,
-    OutlierFilterConfig,
-    RadiusOutlierFilterConfig,
-    TerrainMap,
-    TerrainPipeline,
-    TraversabilityConfig,
-)
+from terrain_toolkit import FilterConfig
+from terrain_toolkit import FootprintConfig
+from terrain_toolkit import OcclusionConfig
+from terrain_toolkit import OutlierFilterConfig
+from terrain_toolkit import RadiusOutlierFilterConfig
+from terrain_toolkit import TerrainMap
+from terrain_toolkit import TerrainPipeline
+from terrain_toolkit import TraversabilityConfig
+from tf2_ros import TransformException
 
 
 def _quaternion_to_matrix(x: float, y: float, z: float, w: float) -> np.ndarray:
@@ -45,35 +39,67 @@ def _quaternion_to_matrix(x: float, y: float, z: float, w: float) -> np.ndarray:
     xx, yy, zz = x * x * s, y * y * s, z * z * s
     xy, xz, yz = x * y * s, x * z * s, y * z * s
     wx, wy, wz = w * x * s, w * y * s, w * z * s
-    return np.array([
-        [1.0 - (yy + zz), xy - wz,         xz + wy,         0.0],
-        [xy + wz,         1.0 - (xx + zz), yz - wx,         0.0],
-        [xz - wy,         yz + wx,         1.0 - (xx + yy), 0.0],
-        [0.0,             0.0,             0.0,             1.0],
-    ], dtype=np.float64)
+    return np.array(
+        [
+            [1.0 - (yy + zz), xy - wz, xz + wy, 0.0],
+            [xy + wz, 1.0 - (xx + zz), yz - wx, 0.0],
+            [xz - wy, yz + wx, 1.0 - (xx + yy), 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
 
 
 # Parameters that require rebuilding the TerrainPipeline when changed.
-_PIPELINE_PARAMS = frozenset({
-    "device",
-    "resolution", "x_range", "y_range",
-    "z_max", "primary", "inpaint", "inpaint_coarse_iters", "inpaint_iters_per_level", "smooth_sigma",
-    "outlier_enable", "outlier_type",
-    "outlier_search_radius_m", "outlier_min_neighbors", "outlier_std_multiplier",
-    "trav_enable",
-    "trav_max_slope_deg", "trav_max_step_height_m", "trav_max_drop_height_m", "trav_max_roughness_m",
-    "trav_step_window_radius_m", "trav_roughness_window_radius_m",
-    "trav_slope_weight", "trav_step_weight", "trav_roughness_weight",
-    "filter_enable",
-    "filter_support_radius_m", "filter_support_ratio", "filter_inflation_sigma_m",
-    "filter_obstacle_threshold", "filter_obstacle_growth_threshold",
-    "filter_rejection_limit_frames", "filter_min_obstacle_baseline",
-    "occlusion_enable", "occlusion_sensor_x", "occlusion_sensor_y", "occlusion_sensor_z",
-    "occlusion_angle_eps_deg",
-    "footprint_enable", "footprint_robot_height",
-    "footprint_half_x", "footprint_half_y",
-    "footprint_center_x", "footprint_center_y", "footprint_mode",
-})
+_PIPELINE_PARAMS = frozenset(
+    {
+        "device",
+        "resolution",
+        "x_range",
+        "y_range",
+        "z_max",
+        "primary",
+        "inpaint",
+        "inpaint_coarse_iters",
+        "inpaint_iters_per_level",
+        "smooth_sigma",
+        "outlier_enable",
+        "outlier_type",
+        "outlier_search_radius_m",
+        "outlier_min_neighbors",
+        "outlier_std_multiplier",
+        "trav_enable",
+        "trav_max_slope_deg",
+        "trav_max_step_height_m",
+        "trav_max_drop_height_m",
+        "trav_max_roughness_m",
+        "trav_step_window_radius_m",
+        "trav_roughness_window_radius_m",
+        "trav_slope_weight",
+        "trav_step_weight",
+        "trav_roughness_weight",
+        "filter_enable",
+        "filter_support_radius_m",
+        "filter_support_ratio",
+        "filter_inflation_sigma_m",
+        "filter_obstacle_threshold",
+        "filter_obstacle_growth_threshold",
+        "filter_rejection_limit_frames",
+        "filter_min_obstacle_baseline",
+        "occlusion_enable",
+        "occlusion_sensor_x",
+        "occlusion_sensor_y",
+        "occlusion_sensor_z",
+        "occlusion_angle_eps_deg",
+        "footprint_enable",
+        "footprint_robot_height",
+        "footprint_half_x",
+        "footprint_half_y",
+        "footprint_center_x",
+        "footprint_center_y",
+        "footprint_mode",
+    }
+)
 
 
 class TerrainToolkitNode(Node):
@@ -102,7 +128,10 @@ class TerrainToolkitNode(Node):
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         self.sub = self.create_subscription(
-            PointCloud2, self.lidar_topic, self._cloud_callback, 10,
+            PointCloud2,
+            self.lidar_topic,
+            self._cloud_callback,
+            10,
         )
         self.pub = self.create_publisher(PointCloud2, "terrain_map", 10)
 
@@ -136,19 +165,28 @@ class TerrainToolkitNode(Node):
         self.declare_parameter("lidar_topic", "/lidar/points", sp("PointCloud2 input topic"))
         self.declare_parameter("map_frame", "map", sp("Map TF frame (unused)"))
         self.declare_parameter(
-            "robot_frame_ga", "base_link",
-            sp("Gravity-aligned robot TF frame the heightmap is built in "
-               "(use a real gravity-aligned frame on non-flat terrain)"),
+            "robot_frame_ga",
+            "base_link",
+            sp(
+                "Gravity-aligned robot TF frame the heightmap is built in "
+                "(use a real gravity-aligned frame on non-flat terrain)"
+            ),
         )
         self.declare_parameter(
-            "robot_frame", "base_link",
+            "robot_frame",
+            "base_link",
             sp("Normal (un-leveled) robot body TF frame; used for the flat-footprint plane"),
         )
-        self.declare_parameter("square_half_size", 10.0, fp("Half-side of square ROI (m)", 0.5, 200.0))
         self.declare_parameter(
-            "device", "auto",
-            sp("Warp compute device: 'auto', 'cpu', or 'cuda:N'. "
-               "'auto' = CUDA if available else CPU. Outlier filtering requires CUDA."),
+            "square_half_size", 10.0, fp("Half-side of square ROI (m)", 0.5, 200.0)
+        )
+        self.declare_parameter(
+            "device",
+            "auto",
+            sp(
+                "Warp compute device: 'auto', 'cpu', or 'cuda:N'. "
+                "'auto' = CUDA if available else CPU. Outlier filtering requires CUDA."
+            ),
         )
 
         # Grid
@@ -157,102 +195,300 @@ class TerrainToolkitNode(Node):
         self.declare_parameter("y_range", 12.0, fp("Grid half-extent in y (m)", 0.0, 50.0))
 
         # Pipeline
-        self.declare_parameter("z_max", 1.0, fp("Discard points above this height (m)", -10.0, 50.0))
+        self.declare_parameter(
+            "z_max", 1.0, fp("Discard points above this height (m)", -10.0, 50.0)
+        )
         self.declare_parameter("primary", "max", sp("Height reduction: 'max' | 'mean' | 'min'"))
         self.declare_parameter("inpaint", True, sp("Enable multigrid inpainting"))
-        self.declare_parameter("inpaint_coarse_iters", 200, ip("Inpaint coarse iterations", 1, 10_000))
-        self.declare_parameter("inpaint_iters_per_level", 50, ip("Inpaint iterations per pyramid level", 1, 5_000))
+        self.declare_parameter(
+            "inpaint_coarse_iters", 200, ip("Inpaint coarse iterations", 1, 10_000)
+        )
+        self.declare_parameter(
+            "inpaint_iters_per_level", 50, ip("Inpaint iterations per pyramid level", 1, 5_000)
+        )
         self.declare_parameter("smooth_sigma", 0.8, fp("Gaussian smoothing sigma (m)", 0.0, 10.0))
 
         # Outlier filter
-        self.declare_parameter("outlier_enable", True, sp("Enable outlier filtering before gridding"))
-        self.declare_parameter("outlier_type", "ror", sp("Outlier algorithm: 'ror' (radius) | 'sor' (statistical)"))
-        self.declare_parameter("outlier_search_radius_m", 0.25, fp("Neighbor search radius (m)", 0.01, 5.0))
-        self.declare_parameter("outlier_min_neighbors", 10, ip("Min neighbors within radius to keep a point", 1, 1000))
-        self.declare_parameter("outlier_std_multiplier", 1.0, fp("SOR std multiplier (ignored for ROR)", 0.0, 10.0))
+        self.declare_parameter(
+            "outlier_enable", True, sp("Enable outlier filtering before gridding")
+        )
+        self.declare_parameter(
+            "outlier_type", "ror", sp("Outlier algorithm: 'ror' (radius) | 'sor' (statistical)")
+        )
+        self.declare_parameter(
+            "outlier_search_radius_m", 0.25, fp("Neighbor search radius (m)", 0.01, 5.0)
+        )
+        self.declare_parameter(
+            "outlier_min_neighbors", 10, ip("Min neighbors within radius to keep a point", 1, 1000)
+        )
+        self.declare_parameter(
+            "outlier_std_multiplier", 1.0, fp("SOR std multiplier (ignored for ROR)", 0.0, 10.0)
+        )
 
         # Traversability
         self.declare_parameter("trav_enable", True, sp("Compute traversability cost layers"))
-        self.declare_parameter("trav_max_slope_deg", 60.0, fp("Slope that saturates cost to 1 (deg)", 0.0, 90.0))
-        self.declare_parameter("trav_max_step_height_m", 0.55, fp("Upward step height saturating cost to 1 (m)", 0.0, 5.0))
-        self.declare_parameter("trav_max_drop_height_m", 0.3, fp("Downward drop height saturating cost to 1 (m)", 0.0, 5.0))
-        self.declare_parameter("trav_max_roughness_m", 0.2, fp("Roughness saturating cost to 1 (m)", 0.0, 5.0))
-        self.declare_parameter("trav_step_window_radius_m", 0.15, fp("Morphological window radius for step detection (m)", 0.01, 5.0))
-        self.declare_parameter("trav_roughness_window_radius_m", 0.3, fp("Window radius for roughness std-dev (m)", 0.01, 5.0))
-        self.declare_parameter("trav_slope_weight", 0.2, fp("Slope weight in combined cost", 0.0, 1.0))
-        self.declare_parameter("trav_step_weight", 0.2, fp("Step weight in combined cost", 0.0, 1.0))
-        self.declare_parameter("trav_roughness_weight", 0.6, fp("Roughness weight in combined cost", 0.0, 1.0))
+        self.declare_parameter(
+            "trav_max_slope_deg", 60.0, fp("Slope that saturates cost to 1 (deg)", 0.0, 90.0)
+        )
+        self.declare_parameter(
+            "trav_max_step_height_m",
+            0.55,
+            fp("Upward step height saturating cost to 1 (m)", 0.0, 5.0),
+        )
+        self.declare_parameter(
+            "trav_max_drop_height_m",
+            0.3,
+            fp("Downward drop height saturating cost to 1 (m)", 0.0, 5.0),
+        )
+        self.declare_parameter(
+            "trav_max_roughness_m", 0.2, fp("Roughness saturating cost to 1 (m)", 0.0, 5.0)
+        )
+        self.declare_parameter(
+            "trav_step_window_radius_m",
+            0.15,
+            fp("Morphological window radius for step detection (m)", 0.01, 5.0),
+        )
+        self.declare_parameter(
+            "trav_roughness_window_radius_m",
+            0.3,
+            fp("Window radius for roughness std-dev (m)", 0.01, 5.0),
+        )
+        self.declare_parameter(
+            "trav_slope_weight", 0.2, fp("Slope weight in combined cost", 0.0, 1.0)
+        )
+        self.declare_parameter(
+            "trav_step_weight", 0.2, fp("Step weight in combined cost", 0.0, 1.0)
+        )
+        self.declare_parameter(
+            "trav_roughness_weight", 0.6, fp("Roughness weight in combined cost", 0.0, 1.0)
+        )
 
         # Temporal filter
-        self.declare_parameter("filter_enable", True, sp("Enable obstacle inflation + support-ratio + temporal gate"))
-        self.declare_parameter("filter_support_radius_m", 0.5, fp("Neighborhood radius for support check (m)", 0.0, 10.0))
-        self.declare_parameter("filter_support_ratio", 0.5, fp("Min fraction of measured cells to keep", 0.0, 1.0))
-        self.declare_parameter("filter_inflation_sigma_m", 0.3, fp("Gaussian sigma for obstacle dilation (m)", 0.0, 10.0))
-        self.declare_parameter("filter_obstacle_threshold", 0.8, fp("Cost above which a cell is an obstacle source", 0.0, 1.0))
-        self.declare_parameter("filter_obstacle_growth_threshold", 2.0, fp("Reject frame if obstacle count grows by this factor", 1.0, 100.0))
-        self.declare_parameter("filter_rejection_limit_frames", 5, ip("Force-accept after this many consecutive rejections", 1, 1000))
-        self.declare_parameter("filter_min_obstacle_baseline", 10, ip("Skip hysteresis until this many obstacles seen", 0, 100_000))
+        self.declare_parameter(
+            "filter_enable", True, sp("Enable obstacle inflation + support-ratio + temporal gate")
+        )
+        self.declare_parameter(
+            "filter_support_radius_m",
+            0.5,
+            fp("Neighborhood radius for support check (m)", 0.0, 10.0),
+        )
+        self.declare_parameter(
+            "filter_support_ratio", 0.5, fp("Min fraction of measured cells to keep", 0.0, 1.0)
+        )
+        self.declare_parameter(
+            "filter_inflation_sigma_m",
+            0.3,
+            fp("Gaussian sigma for obstacle dilation (m)", 0.0, 10.0),
+        )
+        self.declare_parameter(
+            "filter_obstacle_threshold",
+            0.8,
+            fp("Cost above which a cell is an obstacle source", 0.0, 1.0),
+        )
+        self.declare_parameter(
+            "filter_obstacle_growth_threshold",
+            2.0,
+            fp("Reject frame if obstacle count grows by this factor", 1.0, 100.0),
+        )
+        self.declare_parameter(
+            "filter_rejection_limit_frames",
+            5,
+            ip("Force-accept after this many consecutive rejections", 1, 1000),
+        )
+        self.declare_parameter(
+            "filter_min_obstacle_baseline",
+            10,
+            ip("Skip hysteresis until this many obstacles seen", 0, 100_000),
+        )
 
         # Occlusion (line-of-sight) masking
-        self.declare_parameter("occlusion_enable", False, sp("NaN-out cost in the line-of-sight shadow of obstacles"))
-        self.declare_parameter("occlusion_sensor_x", 0.0, fp("Sensor x in the gravity-aligned grid frame (m)", -10.0, 10.0))
-        self.declare_parameter("occlusion_sensor_y", 0.0, fp("Sensor y in the gravity-aligned grid frame (m)", -10.0, 10.0))
-        self.declare_parameter("occlusion_sensor_z", 0.5, fp("Sensor height above the grid origin (m)", 0.0, 10.0))
-        self.declare_parameter("occlusion_angle_eps_deg", 0.6, fp("View-angle margin guarding flat-ground noise (deg)", 0.0, 30.0))
+        self.declare_parameter(
+            "occlusion_enable", False, sp("NaN-out cost in the line-of-sight shadow of obstacles")
+        )
+        self.declare_parameter(
+            "occlusion_sensor_x",
+            0.0,
+            fp("Sensor x in the gravity-aligned grid frame (m)", -10.0, 10.0),
+        )
+        self.declare_parameter(
+            "occlusion_sensor_y",
+            0.0,
+            fp("Sensor y in the gravity-aligned grid frame (m)", -10.0, 10.0),
+        )
+        self.declare_parameter(
+            "occlusion_sensor_z", 0.5, fp("Sensor height above the grid origin (m)", 0.0, 10.0)
+        )
+        self.declare_parameter(
+            "occlusion_angle_eps_deg",
+            0.6,
+            fp("View-angle margin guarding flat-ground noise (deg)", 0.0, 30.0),
+        )
 
         # Flat ground footprint
-        self.declare_parameter("footprint_enable", False, sp("Force a flat ground patch under the robot"))
-        self.declare_parameter("footprint_robot_height", 0.4, fp("Vertical distance robot frame → ground (m)", -5.0, 5.0))
-        self.declare_parameter("footprint_half_x", 0.5, fp("Footprint half-extent along x (m)", 0.01, 10.0))
-        self.declare_parameter("footprint_half_y", 0.5, fp("Footprint half-extent along y (m)", 0.01, 10.0))
-        self.declare_parameter("footprint_center_x", 0.0, fp("Footprint center offset along x (m)", -10.0, 10.0))
-        self.declare_parameter("footprint_center_y", 0.0, fp("Footprint center offset along y (m)", -10.0, 10.0))
-        self.declare_parameter("footprint_mode", "overwrite", sp("Footprint fill mode: 'overwrite' | 'fill'"))
+        self.declare_parameter(
+            "footprint_enable", False, sp("Force a flat ground patch under the robot")
+        )
+        self.declare_parameter(
+            "footprint_robot_height",
+            0.4,
+            fp("Vertical distance robot frame → ground (m)", -5.0, 5.0),
+        )
+        self.declare_parameter(
+            "footprint_half_x", 0.5, fp("Footprint half-extent along x (m)", 0.01, 10.0)
+        )
+        self.declare_parameter(
+            "footprint_half_y", 0.5, fp("Footprint half-extent along y (m)", 0.01, 10.0)
+        )
+        self.declare_parameter(
+            "footprint_center_x", 0.0, fp("Footprint center offset along x (m)", -10.0, 10.0)
+        )
+        self.declare_parameter(
+            "footprint_center_y", 0.0, fp("Footprint center offset along y (m)", -10.0, 10.0)
+        )
+        self.declare_parameter(
+            "footprint_mode", "overwrite", sp("Footprint fill mode: 'overwrite' | 'fill'")
+        )
 
     def _read_parameters(self) -> dict:
         keys = [
-            "lidar_topic", "map_frame", "robot_frame_ga", "robot_frame", "square_half_size", "device",
-            "resolution", "x_range", "y_range",
-            "z_max", "primary", "inpaint", "inpaint_coarse_iters", "inpaint_iters_per_level", "smooth_sigma",
-            "outlier_enable", "outlier_type",
-            "outlier_search_radius_m", "outlier_min_neighbors", "outlier_std_multiplier",
+            "lidar_topic",
+            "map_frame",
+            "robot_frame_ga",
+            "robot_frame",
+            "square_half_size",
+            "device",
+            "resolution",
+            "x_range",
+            "y_range",
+            "z_max",
+            "primary",
+            "inpaint",
+            "inpaint_coarse_iters",
+            "inpaint_iters_per_level",
+            "smooth_sigma",
+            "outlier_enable",
+            "outlier_type",
+            "outlier_search_radius_m",
+            "outlier_min_neighbors",
+            "outlier_std_multiplier",
             "trav_enable",
-            "trav_max_slope_deg", "trav_max_step_height_m", "trav_max_drop_height_m", "trav_max_roughness_m",
-            "trav_step_window_radius_m", "trav_roughness_window_radius_m",
-            "trav_slope_weight", "trav_step_weight", "trav_roughness_weight",
+            "trav_max_slope_deg",
+            "trav_max_step_height_m",
+            "trav_max_drop_height_m",
+            "trav_max_roughness_m",
+            "trav_step_window_radius_m",
+            "trav_roughness_window_radius_m",
+            "trav_slope_weight",
+            "trav_step_weight",
+            "trav_roughness_weight",
             "filter_enable",
-            "filter_support_radius_m", "filter_support_ratio", "filter_inflation_sigma_m",
-            "filter_obstacle_threshold", "filter_obstacle_growth_threshold",
-            "filter_rejection_limit_frames", "filter_min_obstacle_baseline",
-            "occlusion_enable", "occlusion_sensor_x", "occlusion_sensor_y", "occlusion_sensor_z",
+            "filter_support_radius_m",
+            "filter_support_ratio",
+            "filter_inflation_sigma_m",
+            "filter_obstacle_threshold",
+            "filter_obstacle_growth_threshold",
+            "filter_rejection_limit_frames",
+            "filter_min_obstacle_baseline",
+            "occlusion_enable",
+            "occlusion_sensor_x",
+            "occlusion_sensor_y",
+            "occlusion_sensor_z",
             "occlusion_angle_eps_deg",
-            "footprint_enable", "footprint_robot_height",
-            "footprint_half_x", "footprint_half_y",
-            "footprint_center_x", "footprint_center_y", "footprint_mode",
+            "footprint_enable",
+            "footprint_robot_height",
+            "footprint_half_x",
+            "footprint_half_y",
+            "footprint_center_x",
+            "footprint_center_y",
+            "footprint_mode",
         ]
         return {k: self.get_parameter(k).value for k in keys}
 
     def _log_config(self, p: dict) -> None:
         groups: list[tuple[str, list[str]]] = [
-            ("ROS / sensor",   ["lidar_topic", "map_frame", "robot_frame_ga", "robot_frame", "square_half_size", "device"]),
-            ("Grid",           ["resolution", "x_range", "y_range"]),
-            ("Pipeline",       ["z_max", "primary", "inpaint", "inpaint_coarse_iters",
-                                "inpaint_iters_per_level", "smooth_sigma"]),
-            ("Outlier",        ["outlier_enable", "outlier_type", "outlier_search_radius_m",
-                                "outlier_min_neighbors", "outlier_std_multiplier"]),
-            ("Traversability", ["trav_enable", "trav_max_slope_deg", "trav_max_step_height_m",
-                                "trav_max_drop_height_m", "trav_max_roughness_m",
-                                "trav_step_window_radius_m", "trav_roughness_window_radius_m",
-                                "trav_slope_weight", "trav_step_weight", "trav_roughness_weight"]),
-            ("Temporal filter",["filter_enable", "filter_support_radius_m", "filter_support_ratio",
-                                "filter_inflation_sigma_m", "filter_obstacle_threshold",
-                                "filter_obstacle_growth_threshold", "filter_rejection_limit_frames",
-                                "filter_min_obstacle_baseline"]),
-            ("Occlusion",      ["occlusion_enable", "occlusion_sensor_x", "occlusion_sensor_y",
-                                "occlusion_sensor_z", "occlusion_angle_eps_deg"]),
-            ("Footprint",      ["footprint_enable", "footprint_robot_height",
-                                "footprint_half_x", "footprint_half_y",
-                                "footprint_center_x", "footprint_center_y", "footprint_mode"]),
+            (
+                "ROS / sensor",
+                [
+                    "lidar_topic",
+                    "map_frame",
+                    "robot_frame_ga",
+                    "robot_frame",
+                    "square_half_size",
+                    "device",
+                ],
+            ),
+            ("Grid", ["resolution", "x_range", "y_range"]),
+            (
+                "Pipeline",
+                [
+                    "z_max",
+                    "primary",
+                    "inpaint",
+                    "inpaint_coarse_iters",
+                    "inpaint_iters_per_level",
+                    "smooth_sigma",
+                ],
+            ),
+            (
+                "Outlier",
+                [
+                    "outlier_enable",
+                    "outlier_type",
+                    "outlier_search_radius_m",
+                    "outlier_min_neighbors",
+                    "outlier_std_multiplier",
+                ],
+            ),
+            (
+                "Traversability",
+                [
+                    "trav_enable",
+                    "trav_max_slope_deg",
+                    "trav_max_step_height_m",
+                    "trav_max_drop_height_m",
+                    "trav_max_roughness_m",
+                    "trav_step_window_radius_m",
+                    "trav_roughness_window_radius_m",
+                    "trav_slope_weight",
+                    "trav_step_weight",
+                    "trav_roughness_weight",
+                ],
+            ),
+            (
+                "Temporal filter",
+                [
+                    "filter_enable",
+                    "filter_support_radius_m",
+                    "filter_support_ratio",
+                    "filter_inflation_sigma_m",
+                    "filter_obstacle_threshold",
+                    "filter_obstacle_growth_threshold",
+                    "filter_rejection_limit_frames",
+                    "filter_min_obstacle_baseline",
+                ],
+            ),
+            (
+                "Occlusion",
+                [
+                    "occlusion_enable",
+                    "occlusion_sensor_x",
+                    "occlusion_sensor_y",
+                    "occlusion_sensor_z",
+                    "occlusion_angle_eps_deg",
+                ],
+            ),
+            (
+                "Footprint",
+                [
+                    "footprint_enable",
+                    "footprint_robot_height",
+                    "footprint_half_x",
+                    "footprint_half_y",
+                    "footprint_center_x",
+                    "footprint_center_y",
+                    "footprint_mode",
+                ],
+            ),
         ]
         lines = ["TerrainToolkitNode configuration:"]
         for title, keys in groups:
@@ -336,6 +572,7 @@ class TerrainToolkitNode(Node):
         device_param = p["device"]
         if device_param == "auto":
             import warp as wp
+
             device_arg = "cuda:0" if wp.is_cuda_available() else "cpu"
         else:
             device_arg = device_param
@@ -366,7 +603,15 @@ class TerrainToolkitNode(Node):
         merged = self._read_parameters()
         merged.update(new_values)
 
-        for attr in ("map_frame", "robot_frame_ga", "robot_frame", "resolution", "x_range", "y_range", "square_half_size"):
+        for attr in (
+            "map_frame",
+            "robot_frame_ga",
+            "robot_frame",
+            "resolution",
+            "x_range",
+            "y_range",
+            "square_half_size",
+        ):
             if attr in new_values:
                 setattr(self, attr, new_values[attr])
 
@@ -374,7 +619,10 @@ class TerrainToolkitNode(Node):
             self.destroy_subscription(self.sub)
             self.lidar_topic = new_values["lidar_topic"]
             self.sub = self.create_subscription(
-                PointCloud2, self.lidar_topic, self._cloud_callback, 10,
+                PointCloud2,
+                self.lidar_topic,
+                self._cloud_callback,
+                10,
             )
             self.get_logger().info(f"Resubscribed to {self.lidar_topic}")
 
@@ -397,7 +645,9 @@ class TerrainToolkitNode(Node):
 
         try:
             self.tf_buffer.lookup_transform(
-                self.robot_frame_ga, source_frame, stamp,
+                self.robot_frame_ga,
+                source_frame,
+                stamp,
                 timeout=rclpy.duration.Duration(seconds=0.1),
             )
         except TransformException as exc:
@@ -413,7 +663,8 @@ class TerrainToolkitNode(Node):
 
         try:
             terrain_map: TerrainMap = self.pipe.process(
-                points_xyz, footprint_plane=footprint_plane,
+                points_xyz,
+                footprint_plane=footprint_plane,
             )
         except Exception as exc:
             self.get_logger().error(f"terrain_toolkit error: {exc}")
@@ -447,7 +698,9 @@ class TerrainToolkitNode(Node):
 
         try:
             tf = self.tf_buffer.lookup_transform(
-                self.robot_frame_ga, self.robot_frame, stamp,
+                self.robot_frame_ga,
+                self.robot_frame,
+                stamp,
                 timeout=rclpy.duration.Duration(seconds=0.1),
             )
         except TransformException as exc:
@@ -476,8 +729,9 @@ class TerrainToolkitNode(Node):
     # ------------------------------------------------------------------
 
     def pointcloud2_to_xyz_array(self, msg: PointCloud2) -> np.ndarray:
-        pc = pc2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True,
-                             reshape_organized_cloud=False)
+        pc = pc2.read_points(
+            msg, field_names=("x", "y", "z"), skip_nans=True, reshape_organized_cloud=False
+        )
         if isinstance(pc, np.ndarray) and pc.dtype.names is not None:
             xyz = np.stack([pc["x"], pc["y"], pc["z"]], axis=-1)
         else:
@@ -534,10 +788,14 @@ class TerrainToolkitNode(Node):
         fields: list[PointField] = []
         offset = 0
         for name in ("x", "y", "z"):
-            fields.append(PointField(name=name, offset=offset, datatype=PointField.FLOAT32, count=1))
+            fields.append(
+                PointField(name=name, offset=offset, datatype=PointField.FLOAT32, count=1)
+            )
             offset += 4
         for name in layer_names:
-            fields.append(PointField(name=name, offset=offset, datatype=PointField.FLOAT32, count=1))
+            fields.append(
+                PointField(name=name, offset=offset, datatype=PointField.FLOAT32, count=1)
+            )
             offset += 4
 
         header = Header()
@@ -568,7 +826,9 @@ class TerrainToolkitNode(Node):
     ) -> np.ndarray | None:
         try:
             transform: TransformStamped = tf_buffer.lookup_transform(
-                target_frame, cloud_msg.header.frame_id, cloud_msg.header.stamp,
+                target_frame,
+                cloud_msg.header.frame_id,
+                cloud_msg.header.stamp,
             )
         except TransformException as exc:
             self.get_logger().error(f"TF lookup failed in transform: {exc}")

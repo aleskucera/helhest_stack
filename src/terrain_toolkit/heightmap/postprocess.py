@@ -5,12 +5,10 @@ import math
 import numpy as np
 import warp as wp
 
-from .kernels import (
-    blur_axis_kernel,
-    diffuse_step_kernel,
-    downsample_kernel,
-    upsample_inject_kernel,
-)
+from .kernels import blur_axis_kernel
+from .kernels import diffuse_step_kernel
+from .kernels import downsample_kernel
+from .kernels import upsample_inject_kernel
 
 
 def _as_wp_float32(heightmap: np.ndarray | wp.array) -> tuple[wp.array, bool]:
@@ -91,8 +89,11 @@ def multigrid_inpaint(
     for lvl in range(len(levels) - 2, -1, -1):
         fine, fine_fixed = levels[lvl]
         coarse_solved = levels[lvl + 1][0]
-        wp.launch(upsample_inject_kernel, dim=(fine.shape[0], fine.shape[1]),
-                  inputs=[coarse_solved, fine, fine_fixed])
+        wp.launch(
+            upsample_inject_kernel,
+            dim=(fine.shape[0], fine.shape[1]),
+            inputs=[coarse_solved, fine, fine_fixed],
+        )
         b = wp.zeros_like(fine)
         fine = _run_diffusion(fine, b, fine_fixed, iters_per_level)
         levels[lvl] = (fine, fine_fixed)
@@ -105,7 +106,8 @@ def multigrid_inpaint(
 
 
 def diffuse_inpaint(
-    heightmap: np.ndarray | wp.array, max_iters: int = 500,
+    heightmap: np.ndarray | wp.array,
+    max_iters: int = 500,
 ) -> np.ndarray | wp.array:
     """Fill NaN cells by iterative diffusion from known cells (Laplace inpainting).
 
@@ -141,7 +143,9 @@ def diffuse_inpaint(
 
 
 def gaussian_smooth(
-    heightmap: np.ndarray | wp.array, sigma: float = 1.0, truncate: float = 3.0,
+    heightmap: np.ndarray | wp.array,
+    sigma: float = 1.0,
+    truncate: float = 3.0,
 ) -> np.ndarray | wp.array:
     """NaN-aware separable Gaussian blur on a 2D heightmap (sigma in cells)."""
     if sigma <= 0.0:

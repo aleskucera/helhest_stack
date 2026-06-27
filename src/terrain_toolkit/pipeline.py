@@ -8,8 +8,8 @@ import warp as wp
 
 from .heightmap import FlatGroundFootprint
 from .heightmap import FootprintConfig
-from .heightmap import HeightMapBuilder
 from .heightmap import gaussian_smooth
+from .heightmap import HeightMapBuilder
 from .heightmap import multigrid_inpaint
 from .outlier import OutlierFilterConfig
 from .outlier import RadiusOutlierFilter
@@ -27,15 +27,27 @@ from .traversability import TraversabilityConfig
 PrimaryLayer = Literal["max", "mean", "min"]
 
 LayerName = Literal[
-    "max", "mean", "min", "count",
+    "max",
+    "mean",
+    "min",
+    "count",
     "elevation",
-    "slope_cost", "step_cost", "roughness_cost", "traversability",
+    "slope_cost",
+    "step_cost",
+    "roughness_cost",
+    "traversability",
 ]
 
 _ALL_LAYERS: tuple[str, ...] = (
-    "max", "mean", "min", "count",
+    "max",
+    "mean",
+    "min",
+    "count",
     "elevation",
-    "slope_cost", "step_cost", "roughness_cost", "traversability",
+    "slope_cost",
+    "step_cost",
+    "roughness_cost",
+    "traversability",
 )
 _COST_LAYERS: frozenset[str] = frozenset(
     ("slope_cost", "step_cost", "roughness_cost", "traversability"),
@@ -168,9 +180,7 @@ class TerrainPipeline:
         else:
             unknown = set(layers) - set(_ALL_LAYERS)
             if unknown:
-                raise ValueError(
-                    f"unknown layer names {sorted(unknown)}; valid: {_ALL_LAYERS}"
-                )
+                raise ValueError(f"unknown layer names {sorted(unknown)}; valid: {_ALL_LAYERS}")
             selected = set(layers)
         if traversability is None:
             selected -= _COST_LAYERS
@@ -186,7 +196,9 @@ class TerrainPipeline:
         self.inpaint_coarse_iters = inpaint_coarse_iters
 
         self.builder = HeightMapBuilder(
-            resolution=resolution, bounds=bounds, device=self.device,
+            resolution=resolution,
+            bounds=bounds,
+            device=self.device,
         )
         self.height = self.builder.height
         self.width = self.builder.width
@@ -283,7 +295,8 @@ class TerrainPipeline:
         """Run all GPU stages and return the device buffers (no download)."""
         # Single upload to the active device — every stage below consumes wp.array.
         pts_wp = wp.array(
-            np.ascontiguousarray(points, dtype=np.float32), dtype=wp.vec3,
+            np.ascontiguousarray(points, dtype=np.float32),
+            dtype=wp.vec3,
         )
         if self.outlier_filter is not None:
             pts_wp = self.outlier_filter.apply(pts_wp)
@@ -382,5 +395,7 @@ class TerrainPipeline:
             traversability=trav if (trav is not None and "traversability" in sel) else None,
             slope_cost=costs["slope"] if (costs is not None and "slope_cost" in sel) else None,
             step_cost=costs["step"] if (costs is not None and "step_cost" in sel) else None,
-            roughness_cost=costs["roughness"] if (costs is not None and "roughness_cost" in sel) else None,
+            roughness_cost=(
+                costs["roughness"] if (costs is not None and "roughness_cost" in sel) else None
+            ),
         )

@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 
 import numpy as np
 import warp as wp
 
-from .kernels import (
-    accumulate_system_kernel,
-    estimate_normals_kernel,
-    transform_points_kernel,
-    voxel_accumulate_kernel,
-    voxel_compact_kernel,
-)
+from .kernels import accumulate_system_kernel
+from .kernels import estimate_normals_kernel
+from .kernels import transform_points_kernel
+from .kernels import voxel_accumulate_kernel
+from .kernels import voxel_compact_kernel
 
 
 @dataclass
@@ -109,9 +108,7 @@ class IcpResult:
 
 
 def _skew(v: np.ndarray) -> np.ndarray:
-    return np.array(
-        [[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]], dtype=np.float64
-    )
+    return np.array([[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]], dtype=np.float64)
 
 
 def _exp_se3(xi: np.ndarray) -> np.ndarray:
@@ -125,11 +122,15 @@ def _exp_se3(xi: np.ndarray) -> np.ndarray:
         V = np.eye(3) + 0.5 * W
     else:
         W2 = W @ W
-        R = np.eye(3) + (math.sin(theta) / theta) * W + ((1.0 - math.cos(theta)) / (theta * theta)) * W2
+        R = (
+            np.eye(3)
+            + (math.sin(theta) / theta) * W
+            + ((1.0 - math.cos(theta)) / (theta * theta)) * W2
+        )
         V = (
             np.eye(3)
             + ((1.0 - math.cos(theta)) / (theta * theta)) * W
-            + ((theta - math.sin(theta)) / (theta ** 3)) * W2
+            + ((theta - math.sin(theta)) / (theta**3)) * W2
         )
     T = np.eye(4)
     T[:3, :3] = R
@@ -286,9 +287,13 @@ class IcpAligner:
         grid_radius = max(cfg.max_correspondence_dist_m, cfg.normal_radius_m)
         timings: dict[str, float] = {
             "voxel_downsample": 0.0,
-            "upload": 0.0, "grid_build": 0.0, "normals": 0.0,
-            "launch_kernels": 0.0, "gpu_sync": 0.0,
-            "cpu_solve": 0.0, "bookkeeping": 0.0,
+            "upload": 0.0,
+            "grid_build": 0.0,
+            "normals": 0.0,
+            "launch_kernels": 0.0,
+            "gpu_sync": 0.0,
+            "cpu_solve": 0.0,
+            "bookkeeping": 0.0,
         }
 
         if cfg.voxel_size_m is not None and cfg.voxel_size_m > 0.0:
@@ -343,7 +348,11 @@ class IcpAligner:
             cost_wp = wp.zeros(1, dtype=wp.float32)
             inliers_wp = wp.zeros(1, dtype=wp.int32)
 
-            T = np.eye(4, dtype=np.float64) if init_pose is None else np.asarray(init_pose, dtype=np.float64).copy()
+            T = (
+                np.eye(4, dtype=np.float64)
+                if init_pose is None
+                else np.asarray(init_pose, dtype=np.float64).copy()
+            )
 
             converged = False
             final_cost = float("inf")

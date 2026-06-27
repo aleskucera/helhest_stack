@@ -4,6 +4,7 @@ Run inside the apptainer + sourced dev-shell:
 
     python3 ~/projects/terrain_toolkit/ros/inspect_cloud.py
 """
+
 import struct
 import time
 
