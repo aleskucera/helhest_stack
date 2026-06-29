@@ -138,7 +138,7 @@ class BaseSimulator:
 
     def set_friction(self, friction_hm: np.ndarray) -> None:
         """Per-cell friction from a numpy Heightmap matching the grid (copied in place). 2D only --
-        the batched differentiable sim uses `set_friction_batched`."""
+        `DifferentiableSimulator` overrides this to take a [B, ny, nx] device `wp.array`."""
         self.friction.assign(np.ascontiguousarray(friction_hm.H, np.float32))
 
 
@@ -231,7 +231,7 @@ class DifferentiableSimulator(BaseSimulator):
 
         sim = DifferentiableSimulator(robot, solver, grid, B, T, device)
         sim.set_terrain(elev_stack)              # elev_stack is [B, ny, nx]
-        sim.set_friction_batched(mu_stack)       # or set_uniform_friction(value)
+        sim.set_friction(mu_stack)               # mu_stack is a [B, ny, nx] wp.array; or set_uniform_friction(value)
         sim.wheel_omega.assign(...); sim.start_pose.assign(...)
         sim.rollout_taped(my_loss_fn); sim.backward()   # loss_fn defaults to demo_loss
         g = sim.friction.grad.numpy()            # d(loss)/d(friction), shape [B, ny, nx]
@@ -264,17 +264,20 @@ class DifferentiableSimulator(BaseSimulator):
         device: Device | str | None = None,
     ):
         super().__init__(robot_params, solver_params, grid_params, batch_size, n_steps, device)
+
         if not self.device.is_cuda:
             raise RuntimeError(
                 "DifferentiableSimulator is CUDA-only: the tiled arg-max contact needs GPU shared "
                 "memory. Build it with device='cuda'."
             )
+
         self.tape: wp.Tape | None = None
         self._loss: wp.array | None = None
 
         ny, nx = self.cells_y, self.cells_x
         R, T = self.env_radius, DILATE_TILE
         dy, dx, cap = wheel_offset_table(R, self.cell_size, self.wheel_radius)
+
         # `_best_k` is the off-tape contact (arg-max offset per cell); the offset table feeds both the
         # tiled contact and the gather. Edge-padded, tile-aligned halo buffer for the tiled contact.
         self._tiled_contact = make_tiled_contact(R, T)
@@ -284,13 +287,12 @@ class DifferentiableSimulator(BaseSimulator):
             self.elevation = wp.zeros((batch_size, ny, nx), dtype=wp.float32, requires_grad=True)
             self.envelope = wp.zeros((batch_size, ny, nx), dtype=wp.float32, requires_grad=True)
             self.friction = wp.zeros((batch_size, ny, nx), dtype=wp.float32, requires_grad=True)
-            self._best_k = wp.zeros(
-                (batch_size, ny, nx), dtype=wp.float32
-            )  # contact offset (no grad)
+            self._best_k = wp.zeros((batch_size, ny, nx), dtype=wp.float32)  # contact offset
             self._elev_pad = wp.zeros((batch_size, pny, pnx), dtype=wp.float32)
             self._off_dy = wp.array(dy, dtype=wp.int32)
             self._off_dx = wp.array(dx, dtype=wp.int32)
             self._off_cap = wp.array(cap, dtype=wp.float32)
+
         # State/diagnostic buffers carry grad; controls + start pose do NOT (no control gradients).
         self._alloc_rollout_buffers(requires_grad=True, control_grad=False)
 
@@ -332,9 +334,11 @@ class DifferentiableSimulator(BaseSimulator):
         self._contact()
         self._gather()
 
-    def set_friction_batched(self, friction: np.ndarray) -> None:
-        """Batched mode: per-rollout friction from a [B, ny, nx] numpy stack (copied in place)."""
-        self.friction.assign(np.ascontiguousarray(friction, np.float32))
+    def set_friction(self, friction: wp.array) -> None:
+        """Per-rollout friction from a [B, ny, nx] device array (copied in place). Overrides the
+        base Heightmap setter: friction is a differentiable calibration target, so it's set from a
+        wp.array (typically the current on-device estimate), matching `set_terrain`."""
+        wp.copy(self.friction, friction)
 
     def rollout_taped(self, loss_fn: Callable = demo_loss) -> wp.array:
         """Record init + T per-step launches + `loss_fn(self)` on a fresh tape; return the loss

@@ -54,8 +54,9 @@ def _build(cls, scene, mu, B, T, device, dt):
     )
     if isinstance(sim, DifferentiableSimulator):
         elev = np.ascontiguousarray(np.broadcast_to(scene.H, (B, *scene.H.shape)), np.float32)
+        fric = np.ascontiguousarray(np.broadcast_to(mu.H, (B, *mu.H.shape)), np.float32)
         sim.set_terrain(wp.array(elev, dtype=wp.float32, device=device))
-        sim.set_friction_batched(np.broadcast_to(mu.H, (B, *mu.H.shape)))
+        sim.set_friction(wp.array(fric, dtype=wp.float32, device=device))
     else:
         sim.set_terrain(
             wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
