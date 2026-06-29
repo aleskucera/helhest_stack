@@ -21,8 +21,8 @@ from kinematic_helhest import worlds as W
 from kinematic_helhest.control.mppi import CostParams
 from kinematic_helhest.control.mppi import MppiGpu
 from kinematic_helhest.control.mppi import RobustConfig
+from kinematic_helhest.engine import ForwardSimulator
 from kinematic_helhest.engine import GridParams
-from kinematic_helhest.engine import Simulator
 
 from ._common import build_routing
 from ._common import build_scene
@@ -33,7 +33,9 @@ DT = dynamics.DT  # control timestep [s]
 
 def _planner(scene, mu, B, T, K, n_theta, V, grid, device):
     sim_grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
-    sim = Simulator(dynamics.robot_params(), dynamics.planning_solver(), sim_grid, B, T, device)
+    sim = ForwardSimulator(
+        dynamics.robot_params(), dynamics.planning_solver(), sim_grid, B, T, device
+    )
     sim.set_terrain(
         wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
     )

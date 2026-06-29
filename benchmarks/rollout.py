@@ -1,7 +1,7 @@
 """Timing benchmark for the kinematic rollout: forward (fused) vs forward (taped) vs backward.
 
 Three paths, same dynamics:
-  - fused   : `Simulator.rollout_launch` -- one fused `rollout_kernel`, the graph-capturable
+  - fused   : `ForwardSimulator.rollout_launch` -- one fused `rollout_kernel`, the graph-capturable
               production path (register carry, not autodiffable).
   - taped   : `DifferentiableSimulator.rollout_taped` -- per-step `step_kernel` recorded on a
               `wp.Tape` plus the loss. The forward cost you pay to enable backprop.
@@ -9,7 +9,7 @@ Three paths, same dynamics:
 
 Reports ms/rollout, the backward/fused ratio (the number that matters for calibration cost),
 and the fused forward real-time factor (simulated seconds per wall-second = B*T*dt / wall).
-Sweeps batch B and horizon T independently, on CPU and (if present) CUDA.
+Sweeps batch B and horizon T independently. CUDA-only (DifferentiableSimulator is GPU-only).
 
 Wall-clock is independent of `dt` (it only scales the integrated velocities), so the timings hold
 for any `dt`; only the real-time factor moves with it -- set it with `--dt` (default 0.1).
@@ -26,9 +26,9 @@ from kinematic_helhest import friction
 from kinematic_helhest import heightmap as hmmod
 from kinematic_helhest.control.reference import _to_wheel_omega
 from kinematic_helhest.engine import DifferentiableSimulator
+from kinematic_helhest.engine import ForwardSimulator
 from kinematic_helhest.engine import GridParams
 from kinematic_helhest.engine import RobotParams
-from kinematic_helhest.engine import Simulator
 from kinematic_helhest.engine import SolverParams
 
 NEWTON_ITERS = 12
@@ -41,7 +41,9 @@ def _scene():
 
 
 def _build(cls, scene, mu, B, T, device, dt):
-    """A built simulator of `cls` with terrain/friction set and controls/start pose loaded."""
+    """A built simulator of `cls` with terrain/friction set and controls/start pose loaded.
+    DifferentiableSimulator is always per-rollout terrain, so its terrain/friction are broadcast to
+    [B, ny, nx] (B copies of the same field -- B x the memory, which caps its batch sweep)."""
     sim = cls(
         RobotParams(),
         SolverParams(dt=dt, k_turn=2.0, newton_iters=NEWTON_ITERS),
@@ -50,10 +52,15 @@ def _build(cls, scene, mu, B, T, device, dt):
         T,
         device,
     )
-    sim.set_terrain(
-        wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
-    )
-    sim.set_friction(mu)
+    if isinstance(sim, DifferentiableSimulator):
+        elev = np.ascontiguousarray(np.broadcast_to(scene.H, (B, *scene.H.shape)), np.float32)
+        sim.set_terrain(wp.array(elev, dtype=wp.float32, device=device))
+        sim.set_friction_batched(np.broadcast_to(mu.H, (B, *mu.H.shape)))
+    else:
+        sim.set_terrain(
+            wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
+        )
+        sim.set_friction(mu)
     sim.wheel_omega.assign(
         np.ascontiguousarray(_to_wheel_omega(np.full((B, T, 2), 2.0, np.float32)), np.float32)
     )
@@ -74,7 +81,7 @@ def _time(fn, reps, device):
 
 
 def _bench(scene, mu, B, T, device, dt, reps):
-    fused = _build(Simulator, scene, mu, B, T, device, dt)
+    fused = _build(ForwardSimulator, scene, mu, B, T, device, dt)
     diff = _build(DifferentiableSimulator, scene, mu, B, T, device, dt)
     diff.rollout_taped()  # record once so backward has a tape to replay during its warmup
     t_fused = _time(fused.rollout_launch, reps, device)
@@ -105,42 +112,42 @@ def main():
     dt = args.dt
 
     wp.init()
+    if not wp.is_cuda_available():
+        print(
+            "CUDA not available -- DifferentiableSimulator (taped/backward) is GPU-only. Skipping."
+        )
+        return
+    device = "cuda"
     scene, mu = _scene()
-    devices = ["cpu"] + (["cuda"] if wp.is_cuda_available() else [])
-    for device in devices:
-        # CPU is single-host-threaded per launch; keep B/T and reps modest so it finishes quickly.
-        if device == "cpu":
-            batch_sweep, fixed_T = [64, 256, 512], 40
-            horizon_sweep, fixed_B = [20, 40, 80], 256
-            reps = 5
-        else:
-            batch_sweep, fixed_T = [512, 2048, 8192], 40
-            horizon_sweep, fixed_B = [20, 40, 80, 160], 2048
-            reps = 20
+    # batched-terrain DifferentiableSimulator is B x the grid memory, so cap B at 2048
+    # (B=8192 would need ~6 GB for the taped/backward sims on the demo grid).
+    batch_sweep, fixed_T = [512, 1024, 2048], 40
+    horizon_sweep, fixed_B = [20, 40, 80, 160], 2048
+    reps = 20
 
-        print(
-            f"\n=== device={device}  dt={dt:.2f}  grid={scene.ny}x{scene.nx}  "
-            f"newton_iters={NEWTON_ITERS}  reps={reps} ==="
-        )
-        rows = []  # (B, T, tf, tt, tb) across both sweeps, for the summary
-        print(f"  batch sweep (T={fixed_T}):")
-        _header()
-        for B in batch_sweep:
-            t = _bench(scene, mu, B, fixed_T, device, dt, reps)
-            rows.append((B, fixed_T, *t))
-            _row(B, fixed_T, *t, dt)
-        print(f"  horizon sweep (B={fixed_B}):")
-        _header()
-        for T in horizon_sweep:
-            t = _bench(scene, mu, fixed_B, T, device, dt, reps)
-            rows.append((fixed_B, T, *t))
-            _row(fixed_B, T, *t, dt)
+    print(
+        f"\n=== device={device}  dt={dt:.2f}  grid={scene.ny}x{scene.nx}  "
+        f"newton_iters={NEWTON_ITERS}  reps={reps} ==="
+    )
+    rows = []  # (B, T, tf, tt, tb) across both sweeps, for the summary
+    print(f"  batch sweep (T={fixed_T}):")
+    _header()
+    for B in batch_sweep:
+        t = _bench(scene, mu, B, fixed_T, device, dt, reps)
+        rows.append((B, fixed_T, *t))
+        _row(B, fixed_T, *t, dt)
+    print(f"  horizon sweep (B={fixed_B}):")
+    _header()
+    for T in horizon_sweep:
+        t = _bench(scene, mu, fixed_B, T, device, dt, reps)
+        rows.append((fixed_B, T, *t))
+        _row(fixed_B, T, *t, dt)
 
-        B, T, tf, tt, tb = max(rows, key=lambda r: r[0] * r[1] * dt / r[2])  # peak RTF row
-        print(
-            f"  peak: {B*T*dt/tf:.1e}x real-time @ B={B},T={T};  "
-            f"grad step (taped+bwd) = {(tt+tb)/tf:.1f}x fused"
-        )
+    B, T, tf, tt, tb = max(rows, key=lambda r: r[0] * r[1] * dt / r[2])  # peak RTF row
+    print(
+        f"  peak: {B*T*dt/tf:.1e}x real-time @ B={B},T={T};  "
+        f"grad step (taped+bwd) = {(tt+tb)/tf:.1f}x fused"
+    )
 
 
 if __name__ == "__main__":
