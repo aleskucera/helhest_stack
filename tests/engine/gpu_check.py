@@ -18,15 +18,31 @@ import time
 
 import numpy as np
 import warp as wp
+from kinematic_helhest import dynamics
 from kinematic_helhest import friction
 from kinematic_helhest import heightmap as hmmod
 from kinematic_helhest.control.reference import _to_wheel_omega
+from kinematic_helhest.engine import DifferentiableSimulator
 from kinematic_helhest.engine import ForwardSimulator
 from kinematic_helhest.engine import GridParams
 from kinematic_helhest.engine import RobotParams
 from kinematic_helhest.engine import SolverParams
 
 from tests.engine.gradients import dsettle_dHenv
+
+
+@wp.kernel
+def _cot_loss(
+    controlled: wp.array2d(dtype=wp.vec3),
+    derived: wp.array2d(dtype=wp.vec3),
+    cc: wp.array2d(dtype=wp.vec3),
+    cd: wp.array2d(dtype=wp.vec3),
+    loss: wp.array(dtype=float),
+):
+    """Scalar surrogate loss = <controlled, cc> + <derived, cd>: its backward seeds exactly the
+    cotangents (cc, cd) on the state buffers -- the reference for backward_from_cotangents."""
+    t, b = wp.tid()
+    wp.atomic_add(loss, 0, wp.dot(controlled[t, b], cc[t, b]) + wp.dot(derived[t, b], cd[t, b]))
 
 
 def _sim(scene, mu, B, T, device):
@@ -106,16 +122,78 @@ def time_rollout(B=2048, T=70, reps=30):
     )
 
 
+def check_vjp():
+    """DifferentiableSimulator's VJP boundary: backward_from_cotangents(cc, cd) must give the same
+    input grads as a scalar-loss backward whose loss = <controlled, cc> + <derived, cd>."""
+    scene = hmmod.ramp_scene()
+    ny, nx = scene.H.shape
+    B, T = 3, 14
+    grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
+    omega = _to_wheel_omega(np.tile(np.array([1.5, 2.5], np.float32), (B, T, 1)))
+    rng = np.random.default_rng(0)
+    cc = rng.standard_normal((T + 1, B, 3)).astype(np.float32)
+    cd = rng.standard_normal((T + 1, B, 3)).astype(np.float32)
+
+    def build():
+        sim = DifferentiableSimulator(
+            dynamics.robot_params(), dynamics.execution_solver(), grid, B, T, "cuda"
+        )
+        sim.set_terrain(
+            wp.array(
+                np.broadcast_to(scene.H, (B, ny, nx)).astype(np.float32),
+                dtype=wp.float32,
+                device="cuda",
+            )
+        )
+        sim.set_uniform_friction(0.8)
+        sim.wheel_omega.assign(np.ascontiguousarray(omega, np.float32))
+        sim.start_pose.assign(np.tile(np.asarray((-1.0, 0.0, 0.0), np.float32), (B, 1)))
+        return sim
+
+    ccw = wp.array(cc, dtype=wp.vec3, device="cuda")
+    cdw = wp.array(cd, dtype=wp.vec3, device="cuda")
+
+    ref = build()  # scalar-loss reference
+
+    def loss_fn(s):
+        loss = wp.zeros(1, dtype=float, device="cuda", requires_grad=True)
+        wp.launch(
+            _cot_loss,
+            (T + 1, B),
+            inputs=[s.controlled, s.derived, ccw, cdw],
+            outputs=[loss],
+            device="cuda",
+        )
+        return loss
+
+    ref.rollout_taped(loss_fn)
+    ref.backward()
+    g_ref_e, g_ref_m = ref.elevation.grad.numpy(), ref.friction.grad.numpy()
+
+    sim = build()  # VJP path
+    sim.rollout_taped(loss_fn=None)
+    sim.backward_from_cotangents(
+        wp.array(cc, dtype=wp.vec3, device="cuda"), wp.array(cd, dtype=wp.vec3, device="cuda")
+    )
+    de = np.abs(sim.elevation.grad.numpy() - g_ref_e).max()
+    dm = np.abs(sim.friction.grad.numpy() - g_ref_m).max()
+    print(f"  VJP vs scalar-loss  d/delev={de:.2e}  d/dfric={dm:.2e}")
+    assert max(de, dm) < 1e-5, (de, dm)
+    print("  VJP parity OK")
+
+
 def main():
     wp.init()
     if not wp.is_cuda_available():
         print("CUDA not available — skipping GPU check.")
         return
-    print("[1/3] forward parity")
+    print("[1/4] forward parity")
     check_forward_parity()
-    print("[2/3] adjoint parity")
+    print("[2/4] adjoint parity")
     check_adjoint_parity()
-    print("[3/3] throughput")
+    print("[3/4] VJP (backward_from_cotangents)")
+    check_vjp()
+    print("[4/4] throughput")
     time_rollout()
     print("GPU check: ALL OK")
 

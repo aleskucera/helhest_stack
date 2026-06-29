@@ -345,14 +345,16 @@ class DifferentiableSimulator(BaseSimulator):
         ), f"friction {friction.shape} must match the sim's [B, ny, nx] {self.friction.shape}"
         wp.copy(self.friction, friction)
 
-    def rollout_taped(self, loss_fn: Callable = demo_loss) -> wp.array:
-        """Record init + T per-step launches + `loss_fn(self)` on a fresh tape; return the loss
-        array. `self.wheel_omega`/`self.start_pose` must already hold the controls/init pose.
+    def rollout_taped(self, loss_fn: Callable | None = demo_loss) -> wp.array | None:
+        """Record init + T per-step launches (+ optional `loss_fn(self)`) on a fresh tape; return the
+        loss array (or None). `self.wheel_omega`/`self.start_pose` must already hold controls/pose.
 
-        `loss_fn` is called INSIDE the tape's `with` block, so its `wp.launch`es are recorded and
-        `backward` can connect the loss to the inputs. It takes this simulator and returns the [1]
-        loss array; defaults to `demo_loss` (sum of final-row x). The loss is injected rather
-        than fixed because the objective is domain-specific (calibration vs benchmark).
+        Two backward paths follow:
+          - scalar loss: pass a `loss_fn` (default `demo_loss`); it runs INSIDE the tape so its
+            launches are recorded, then call `backward()`. Injected (not fixed) because the
+            objective is domain-specific (calibration vs benchmark).
+          - VJP / framework bridge (torch, jax, ...): pass `loss_fn=None` to just record the
+            rollout, then seed output cotangents via `backward_from_cotangents(...)`.
 
         The arg-max CONTACT is recomputed off-tape here (fresh for the current `elevation`, so
         in-place parameter updates need no `set_terrain`), then the cheap GATHER runs ON the tape so
@@ -394,15 +396,36 @@ class DifferentiableSimulator(BaseSimulator):
                     ],
                     device=self.device,
                 )
-            self._loss = loss_fn(self)
+            self._loss = loss_fn(self) if loss_fn is not None else None
         return self._loss
 
     def backward(self) -> None:
-        """Backprop the recorded loss. Gradients land in the `.grad` of the terrain
-        (envelope/friction/elevation) and the state buffers."""
-        if self._loss is None:
+        """Backprop the recorded scalar loss. Gradients land in the `.grad` of the terrain
+        (elevation/friction) and the state buffers. Use `backward_from_cotangents` instead if you
+        recorded with `loss_fn=None`."""
+        if self.tape is None:
             raise RuntimeError("call rollout_taped() before backward()")
+        if self._loss is None:
+            raise RuntimeError(
+                "no scalar loss recorded (rollout_taped(loss_fn=None)); use backward_from_cotangents"
+            )
         self.tape.backward(loss=self._loss)
+
+    def backward_from_cotangents(self, adj_controlled: wp.array, adj_derived: wp.array) -> None:
+        """VJP boundary for a framework bridge (torch/jax autograd): seed output cotangents on the
+        state buffers and backprop. `adj_controlled`/`adj_derived` are [T+1, B] vec3 = dL/d(controlled)
+        and dL/d(derived) from downstream; gradients land in `elevation.grad`/`friction.grad`. Record
+        with `rollout_taped(loss_fn=None)` first. (Seeds via Warp's `grads=` dict -- no scalar loss.)
+        """
+        if self.tape is None:
+            raise RuntimeError("call rollout_taped(loss_fn=None) before backward_from_cotangents()")
+        assert (
+            adj_controlled.shape == self.controlled.shape
+        ), f"adj_controlled {adj_controlled.shape} must match controlled {self.controlled.shape}"
+        assert (
+            adj_derived.shape == self.derived.shape
+        ), f"adj_derived {adj_derived.shape} must match derived {self.derived.shape}"
+        self.tape.backward(grads={self.controlled: adj_controlled, self.derived: adj_derived})
 
     def zero_grad(self) -> None:
         """Zero the grads recorded on the tape (call between optimizer iterations)."""
