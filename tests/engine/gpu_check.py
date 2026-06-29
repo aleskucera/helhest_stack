@@ -27,6 +27,7 @@ from kinematic_helhest.engine import ForwardSimulator
 from kinematic_helhest.engine import GridParams
 from kinematic_helhest.engine import RobotParams
 from kinematic_helhest.engine import SolverParams
+from kinematic_helhest.engine.simulator import demo_loss
 
 from tests.engine.gradients import dsettle_dHenv
 
@@ -43,6 +44,12 @@ def _cot_loss(
     cotangents (cc, cd) on the state buffers -- the reference for backward_from_cotangents."""
     t, b = wp.tid()
     wp.atomic_add(loss, 0, wp.dot(controlled[t, b], cc[t, b]) + wp.dot(derived[t, b], cd[t, b]))
+
+
+@wp.kernel
+def _final_z(derived: wp.array2d(dtype=wp.vec3), step: int, loss: wp.array(dtype=float)):
+    b = wp.tid()
+    wp.atomic_add(loss, 0, derived[step, b][0])  # sum of final-row z -> elevation-sensitive
 
 
 def _sim(scene, mu, B, T, device):
@@ -182,18 +189,93 @@ def check_vjp():
     print("  VJP parity OK")
 
 
+def check_bt_grad_fd():
+    """FD-check the BATCHED gradients (step_kernel_bt / DifferentiableSimulator) -- the path
+    batched-vs-solo and the 2D step_kernel FD oracle don't cover: friction (final-x loss + a turn)
+    and raw elevation (final-z loss). A fresh sim per evaluation (no grad accumulation), and a
+    coarse-enough eps that float32 cancellation doesn't dominate (the error grows at smaller eps).
+    """
+    scene = hmmod.ramp_scene()
+    ny, nx = scene.H.shape
+    B, T = 2, 18
+    grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
+    omega = _to_wheel_omega(
+        np.tile(np.array([1.0, 3.0], np.float32), (B, T, 1))
+    )  # turn -> friction matters
+    elev0 = np.broadcast_to(scene.H, (B, ny, nx)).astype(np.float32)
+    fric0 = np.full((B, ny, nx), 0.8, np.float32)
+
+    def run(elev, fric, loss_fn, grad_of):
+        s = DifferentiableSimulator(
+            dynamics.robot_params(), dynamics.execution_solver(), grid, B, T, "cuda"
+        )
+        s.set_terrain(wp.array(np.ascontiguousarray(elev), dtype=wp.float32, device="cuda"))
+        s.set_friction(wp.array(np.ascontiguousarray(fric), dtype=wp.float32, device="cuda"))
+        s.wheel_omega.assign(np.ascontiguousarray(omega, np.float32))
+        s.start_pose.assign(np.tile(np.asarray((-1.0, 0.0, 0.0), np.float32), (B, 1)))
+        L = float(s.rollout_taped(loss_fn).numpy()[0])
+        if grad_of is None:
+            return L
+        s.backward()
+        return s.friction.grad.numpy() if grad_of == "fric" else s.elevation.grad.numpy()
+
+    def fd_check(name, loss_fn, grad_of, base, perturb, eps=1e-2):
+        g = run(elev0, fric0, loss_fn, grad_of)
+        worst = 0.0
+        for b, iy, ix in list(zip(*np.where(np.abs(g) > np.abs(g).max() * 0.3)))[:6]:
+            lp = run(*perturb(b, iy, ix, +eps), loss_fn, None)
+            lm = run(*perturb(b, iy, ix, -eps), loss_fn, None)
+            fd = (lp - lm) / (2 * eps)
+            worst = max(worst, abs(g[b, iy, ix] - fd) / (abs(fd) + 1e-9))
+        print(f"  {name} vs FD: worst rel err = {worst:.2%}")
+        assert worst < 0.05, worst
+
+    fd_check(
+        "friction (final-x)",
+        demo_loss,  # sum of final-row x
+        "fric",
+        fric0,
+        lambda b, iy, ix, e: (elev0, _bump(fric0, b, iy, ix, e)),
+    )
+
+    def final_z(s):
+        loss = wp.zeros(1, dtype=float, device="cuda", requires_grad=True)
+        wp.launch(_final_z, B, inputs=[s.derived, s.n_steps], outputs=[loss], device="cuda")
+        return loss
+
+    # elevation goes through the dilation ARG-MAX, so a coarse eps can flip the winning contact
+    # cell (FD then straddles the subgradient discontinuity); use a finer eps than friction.
+    fd_check(
+        "elevation (final-z)",
+        final_z,
+        "elev",
+        elev0,
+        lambda b, iy, ix, e: (_bump(elev0, b, iy, ix, e), fric0),
+        eps=1e-3,
+    )
+    print("  batched grad FD OK")
+
+
+def _bump(arr, b, iy, ix, e):
+    out = arr.copy()
+    out[b, iy, ix] += e
+    return out
+
+
 def main():
     wp.init()
     if not wp.is_cuda_available():
         print("CUDA not available — skipping GPU check.")
         return
-    print("[1/4] forward parity")
+    print("[1/5] forward parity")
     check_forward_parity()
-    print("[2/4] adjoint parity")
+    print("[2/5] adjoint parity")
     check_adjoint_parity()
-    print("[3/4] VJP (backward_from_cotangents)")
+    print("[3/5] VJP (backward_from_cotangents)")
     check_vjp()
-    print("[4/4] throughput")
+    print("[4/5] batched grad vs finite-diff")
+    check_bt_grad_fd()
+    print("[5/5] throughput")
     time_rollout()
     print("GPU check: ALL OK")
 
