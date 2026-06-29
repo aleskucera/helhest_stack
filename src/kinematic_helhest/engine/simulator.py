@@ -328,19 +328,18 @@ class DifferentiableSimulator(BaseSimulator):
         )
 
     def set_terrain(self, elevation: wp.array) -> None:
-        """A [B, ny, nx] device stack -- copied in, then the off-tape arg-max CONTACT (-> best_k).
-        The gather (envelope) runs only on the tape in `rollout_taped`, reusing this contact, so
-        re-call `set_terrain` after changing `elevation`. (envelope is NOT computed here.)"""
+        """Load a [B, ny, nx] device stack into the owned `elevation` buffer (copy + shape check).
+        A convenience init helper -- `elevation` is a public calibration parameter you may also
+        modify in place; `rollout_taped` re-derives the contact from it each call either way."""
         assert (
             elevation.shape == self.elevation.shape
         ), f"elevation {elevation.shape} must match the sim's [B, ny, nx] {self.elevation.shape}"
         wp.copy(self.elevation, elevation)
-        self._contact()
 
     def set_friction(self, friction: wp.array) -> None:
-        """Per-rollout friction from a [B, ny, nx] device array (copied in place). Overrides the
-        base Heightmap setter: friction is a differentiable calibration target, so it's set from a
-        wp.array (typically the current on-device estimate), matching `set_terrain`."""
+        """Load a [B, ny, nx] device stack into the owned `friction` buffer (copy + shape check).
+        Like `set_terrain`, a convenience init helper for a public calibration parameter you may
+        also modify in place. Overrides the base Heightmap setter (friction here is a wp.array)."""
         assert (
             friction.shape == self.friction.shape
         ), f"friction {friction.shape} must match the sim's [B, ny, nx] {self.friction.shape}"
@@ -355,9 +354,11 @@ class DifferentiableSimulator(BaseSimulator):
         loss array; defaults to `demo_loss` (sum of final-row x). The loss is injected rather
         than fixed because the objective is domain-specific (calibration vs benchmark).
 
-        The cheap GATHER is re-run ON the tape (the arg-max CONTACT from `set_terrain` stays
-        off-tape, fixed) so `d(loss)/d(raw elevation)` connects through envelope = elevation[contact]
-        -- its scatter adjoint is the analytical gradient. `set_terrain` must have run first."""
+        The arg-max CONTACT is recomputed off-tape here (fresh for the current `elevation`, so
+        in-place parameter updates need no `set_terrain`), then the cheap GATHER runs ON the tape so
+        `d(loss)/d(raw elevation)` connects through envelope = elevation[contact] -- its scatter
+        adjoint is the analytical gradient. `elevation`/`friction` must already be set."""
+        self._contact()  # off-tape arg-max -> best_k, fresh for the current elevation
         self.tape = wp.Tape()
         with self.tape:
             self._gather()  # on-tape: envelope = elev[contact] + cap; scatter adjoint -> d/d elevation
