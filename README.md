@@ -111,3 +111,7 @@ Built in phases, each independently verifiable:
   via the `valid` flag, not resolved by lifting a wheel. This keeps the settle a
   clean wheels-only 3×3 equality solve (no chassis complementarity), which in turn
   keeps the implicit (IFT) gradient simple.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
