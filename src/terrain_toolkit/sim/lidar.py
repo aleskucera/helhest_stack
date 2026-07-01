@@ -14,6 +14,8 @@ from dataclasses import dataclass
 import numpy as np
 import warp as wp
 
+from ..sensor import LidarSensorConfig
+
 wp.init()
 
 _MISS = wp.constant(1.0e30)
@@ -21,51 +23,54 @@ _MISS = wp.constant(1.0e30)
 
 @wp.func
 def _hit_bounded_plane(
-    o: wp.vec3,
-    d: wp.vec3,
+    origin: wp.vec3,
+    direction: wp.vec3,
     axis: int,
-    value: float,
-    a_lo: float,
-    a_hi: float,  # bounds on the first other axis
-    b_lo: float,
-    b_hi: float,  # bounds on the second other axis
+    plane_value: float,
+    u_lo: float,
+    u_hi: float,  # window bounds on the first in-plane axis
+    v_lo: float,
+    v_hi: float,  # window bounds on the second in-plane axis
 ) -> float:
     """Distance to an axis-aligned plane, valid only inside a 2D window (else miss)."""
-    denom = d[axis]
-    if wp.abs(denom) < 1.0e-9:
+    dir_along_axis = direction[axis]
+    if wp.abs(dir_along_axis) < 1.0e-9:
         return _MISS
-    t = (value - o[axis]) / denom
-    if t <= 1.0e-3:
+    dist = (plane_value - origin[axis]) / dir_along_axis
+    if dist <= 1.0e-3:
         return _MISS
-    p = o + t * d
-    # The two axes that are NOT `axis`.
-    a = (axis + 1) % 3
-    b = (axis + 2) % 3
-    if p[a] < a_lo or p[a] > a_hi or p[b] < b_lo or p[b] > b_hi:
+    point = origin + dist * direction
+    # The two axes spanning the plane (the ones that are NOT `axis`).
+    axis_u = (axis + 1) % 3
+    axis_v = (axis + 2) % 3
+    if point[axis_u] < u_lo or point[axis_u] > u_hi:
         return _MISS
-    return t
+    if point[axis_v] < v_lo or point[axis_v] > v_hi:
+        return _MISS
+    return dist
 
 
 @wp.func
-def _hit_aabb(o: wp.vec3, d: wp.vec3, lo: wp.vec3, hi: wp.vec3) -> float:
+def _hit_aabb(origin: wp.vec3, direction: wp.vec3, box_lo: wp.vec3, box_hi: wp.vec3) -> float:
     """Slab-method nearest entry distance for a ray/AABB (miss → _MISS)."""
-    tmin = float(-1.0e30)
-    tmax = float(1.0e30)
-    for a in range(3):
-        if wp.abs(d[a]) < 1.0e-12:
-            if o[a] < lo[a] or o[a] > hi[a]:
+    t_near = float(-1.0e30)
+    t_far = float(1.0e30)
+    for axis in range(3):
+        if wp.abs(direction[axis]) < 1.0e-12:
+            # Ray parallel to this slab: miss if the origin is outside it.
+            if origin[axis] < box_lo[axis] or origin[axis] > box_hi[axis]:
                 return _MISS
         else:
-            inv = 1.0 / d[a]
-            t1 = (lo[a] - o[a]) * inv
-            t2 = (hi[a] - o[a]) * inv
-            tmin = wp.max(tmin, wp.min(t1, t2))
-            tmax = wp.min(tmax, wp.max(t1, t2))
-    if tmax < wp.max(tmin, 0.0) or tmax <= 1.0e-3:
+            inv_dir = 1.0 / direction[axis]
+            t_lo = (box_lo[axis] - origin[axis]) * inv_dir
+            t_hi = (box_hi[axis] - origin[axis]) * inv_dir
+            t_near = wp.max(t_near, wp.min(t_lo, t_hi))
+            t_far = wp.min(t_far, wp.max(t_lo, t_hi))
+    if t_far < wp.max(t_near, 0.0) or t_far <= 1.0e-3:
         return _MISS
-    if tmin > 1.0e-3:
-        return tmin
-    return tmax
+    if t_near > 1.0e-3:
+        return t_near
+    return t_far
 
 
 @wp.kernel
@@ -90,41 +95,59 @@ def raycast_kernel(
     seed: wp.int32,
     out_points: wp.array(dtype=wp.vec3),
     out_valid: wp.array(dtype=wp.int32),
+    out_free: wp.array(dtype=wp.vec3),
 ):
-    """Nearest primitive hit per beam, with dropout + range-dependent noise."""
-    i = wp.tid()
-    # Rotate the local beam into the world by the sensor yaw (about +z).
-    dl = dirs[i]
-    c = wp.cos(yaw)
-    s = wp.sin(yaw)
-    d = wp.vec3(c * dl[0] - s * dl[1], s * dl[0] + c * dl[1], dl[2])
+    """Nearest primitive hit per beam, with dropout + range-dependent noise.
 
-    t = _MISS
-    tg = _hit_bounded_plane(origin, d, 2, ground_z, gx_lo, gx_hi, gy_lo, gy_hi)
-    if tg < t:
-        t = tg
-    for j in range(n_boxes):
-        tb = _hit_aabb(origin, d, boxes_lo[j], boxes_hi[j])
-        if tb < t:
-            t = tb
+    Also writes `out_free`: the free-space frontier along each beam — the surface
+    hit, or the max-range point if the beam sees nothing. Rendering these into a
+    range image gives free-space evidence (a no-return beam proves empty space out
+    to max range), which is what lets ray-carving remove points with no background
+    behind them (e.g. the top of a person against open sky).
+    """
+    beam = wp.tid()
+    # Rotate the local beam into the world by the sensor yaw (about +z).
+    local_dir = dirs[beam]
+    cos_yaw = wp.cos(yaw)
+    sin_yaw = wp.sin(yaw)
+    direction = wp.vec3(
+        cos_yaw * local_dir[0] - sin_yaw * local_dir[1],
+        sin_yaw * local_dir[0] + cos_yaw * local_dir[1],
+        local_dir[2],
+    )
+
+    hit_dist = _MISS
+    ground_dist = _hit_bounded_plane(origin, direction, 2, ground_z, gx_lo, gx_hi, gy_lo, gy_hi)
+    if ground_dist < hit_dist:
+        hit_dist = ground_dist
+    for box in range(n_boxes):
+        box_dist = _hit_aabb(origin, direction, boxes_lo[box], boxes_hi[box])
+        if box_dist < hit_dist:
+            hit_dist = box_dist
+
+    # Free-space frontier: the surface, or max_range when the beam sees nothing.
+    if hit_dist >= _MISS or hit_dist > max_range:
+        out_free[beam] = origin + max_range * direction
+    else:
+        out_free[beam] = origin + hit_dist * direction
 
     # No hit, or the surface is outside the sensor's [min, max] range window.
-    if t >= _MISS or t < min_range or t > max_range:
-        out_valid[i] = 0
+    if hit_dist >= _MISS or hit_dist < min_range or hit_dist > max_range:
+        out_valid[beam] = 0
         return
 
     # Draw dropout first, then noise, so the stream is deterministic per beam.
-    state = wp.rand_init(seed, i)
-    if wp.randf(state) < dropout:
-        out_valid[i] = 0
+    rng = wp.rand_init(seed, beam)
+    if wp.randf(rng) < dropout:
+        out_valid[beam] = 0
         return
     # Range precision degrades with distance: sigma(r) = base + quad*r², capped.
-    sigma = noise_base + noise_quad * t * t
-    if sigma > noise_max:
-        sigma = noise_max
-    t = t + sigma * wp.randn(state)  # noise is along the beam
-    out_points[i] = origin + t * d
-    out_valid[i] = 1
+    noise_sigma = noise_base + noise_quad * hit_dist * hit_dist
+    if noise_sigma > noise_max:
+        noise_sigma = noise_max
+    hit_dist = hit_dist + noise_sigma * wp.randn(rng)  # noise is along the beam
+    out_points[beam] = origin + hit_dist * direction
+    out_valid[beam] = 1
 
 
 @dataclass
@@ -175,7 +198,35 @@ class PrimitiveLidar:
             self._dirs = wp.array(np.ascontiguousarray(directions, dtype=np.float32), dtype=wp.vec3)
             self._out_pts = wp.empty(n, dtype=wp.vec3)
             self._out_valid = wp.empty(n, dtype=wp.int32)
+            self._out_free = wp.empty(n, dtype=wp.vec3)
         self._n = n
+
+    @classmethod
+    def from_sensor(
+        cls,
+        sensor: LidarSensorConfig,
+        directions: np.ndarray,
+        *,
+        ground: GroundSpec,
+        dropout: float = 0.0,
+        device: wp.context.Device | None = None,
+    ) -> PrimitiveLidar:
+        """Build a lidar whose range window and noise model come from `sensor`.
+
+        `directions` (the beam layout) and `ground` (the sim scene) aren't sensor
+        properties, so they're passed here; `dropout` isn't a datasheet figure.
+        """
+        return cls(
+            directions,
+            ground=ground,
+            noise_std=sensor.range_noise_base_m,
+            range_noise_quad=sensor.range_noise_quad_m,
+            range_noise_max=sensor.range_noise_max_m,
+            dropout=dropout,
+            min_range=sensor.min_range_m,
+            max_range=sensor.max_range_m,
+            device=device,
+        )
 
     def scan(
         self,
@@ -184,20 +235,37 @@ class PrimitiveLidar:
         boxes_lo: np.ndarray,
         boxes_hi: np.ndarray,
         seed: int,
-    ) -> np.ndarray:
+        with_frontier: bool = False,
+        return_device: bool = False,
+    ) -> (
+        np.ndarray  # default: kept hits (N, 3)
+        | tuple[np.ndarray, np.ndarray]  # with_frontier: (hits, frontier)
+        | tuple[wp.array, wp.array, wp.array]  # return_device: (points, valid, free)
+    ):
         """Cast from `origin` with heading `yaw` against boxes `[boxes_lo, boxes_hi]`.
 
         `boxes_lo`/`boxes_hi` are (M, 3) AABB corners (M may be 0). Returns kept
-        hit points (N, 3).
+        hit points (N, 3). With `with_frontier=True`, also returns the per-beam
+        free-space frontier points (B, 3) (surface hit or max-range on a miss),
+        for ray-carving free space.
+
+        With `return_device=True`, skips the host copy and returns the live device
+        buffers `(points, valid, free)` as `wp.array`s (all length B; `points`/`free`
+        are indexed by `valid`) — valid only until the next `scan()`. This keeps the
+        per-frame pipeline on-device (no host round trip).
         """
         boxes_lo = np.ascontiguousarray(boxes_lo, dtype=np.float32).reshape(-1, 3)
         boxes_hi = np.ascontiguousarray(boxes_hi, dtype=np.float32).reshape(-1, 3)
         n_boxes = len(boxes_lo)
-        g = self.ground
+        ground = self.ground
         with wp.ScopedDevice(self.device):
             # Warp arrays must be non-empty; pad to length 1 when there are no boxes.
-            lo_wp = wp.array(boxes_lo if n_boxes else np.zeros((1, 3), np.float32), dtype=wp.vec3)
-            hi_wp = wp.array(boxes_hi if n_boxes else np.zeros((1, 3), np.float32), dtype=wp.vec3)
+            boxes_lo_wp = wp.array(
+                boxes_lo if n_boxes else np.zeros((1, 3), np.float32), dtype=wp.vec3
+            )
+            boxes_hi_wp = wp.array(
+                boxes_hi if n_boxes else np.zeros((1, 3), np.float32), dtype=wp.vec3
+            )
             wp.launch(
                 raycast_kernel,
                 dim=self._n,
@@ -205,13 +273,13 @@ class PrimitiveLidar:
                     wp.vec3(*np.asarray(origin, dtype=np.float64).tolist()),
                     float(yaw),
                     self._dirs,
-                    float(g.z),
-                    float(g.x_range[0]),
-                    float(g.x_range[1]),
-                    float(g.y_range[0]),
-                    float(g.y_range[1]),
-                    lo_wp,
-                    hi_wp,
+                    float(ground.z),
+                    float(ground.x_range[0]),
+                    float(ground.x_range[1]),
+                    float(ground.y_range[0]),
+                    float(ground.y_range[1]),
+                    boxes_lo_wp,
+                    boxes_hi_wp,
                     int(n_boxes),
                     self.noise_std,
                     self.range_noise_quad,
@@ -221,8 +289,14 @@ class PrimitiveLidar:
                     self.max_range,
                     int(seed),
                 ],
-                outputs=[self._out_pts, self._out_valid],
+                outputs=[self._out_pts, self._out_valid, self._out_free],
             )
+            if return_device:
+                # Live device buffers, no host copy (valid until the next scan()).
+                return self._out_pts, self._out_valid, self._out_free
             wp.synchronize()
             valid = self._out_valid.numpy().astype(bool)
-            return self._out_pts.numpy()[valid]
+            hits = self._out_pts.numpy()[valid]
+            if with_frontier:
+                return hits, self._out_free.numpy().copy()
+            return hits

@@ -12,6 +12,7 @@ from .icp import IcpAligner
 from .icp import IcpConfig
 from .icp import IcpResult
 from .icp import voxel_downsample
+from .mapping import DeviceMapAccumulator
 from .outlier import OutlierFilterConfig
 from .outlier import RadiusOutlierFilter
 from .outlier import RadiusOutlierFilterConfig
@@ -19,6 +20,7 @@ from .outlier import StatisticalOutlierFilter
 from .pipeline import TerrainMap
 from .pipeline import TerrainMapGPU
 from .pipeline import TerrainPipeline
+from .sensor import LidarSensorConfig
 from .sim import GroundSpec
 from .sim import PrimitiveLidar
 from .traversability import FilterConfig
@@ -32,6 +34,7 @@ from .traversability import TraversabilityConfig
 from .traversability import TraversabilityCosts
 
 __all__ = [
+    "DeviceMapAccumulator",
     "DynamicFilterConfig",
     "DynamicPointFilter",
     "FilterConfig",
@@ -45,6 +48,7 @@ __all__ = [
     "IcpAligner",
     "IcpConfig",
     "IcpResult",
+    "LidarSensorConfig",
     "ObstacleInflator",
     "OcclusionConfig",
     "OcclusionMask",
