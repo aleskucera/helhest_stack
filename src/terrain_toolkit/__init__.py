@@ -1,3 +1,5 @@
+from .dynamic import DynamicFilterConfig
+from .dynamic import DynamicPointFilter
 from .gridmap import GridMap
 from .heightmap import diffuse_inpaint
 from .heightmap import FlatGroundFootprint
@@ -17,6 +19,8 @@ from .outlier import StatisticalOutlierFilter
 from .pipeline import TerrainMap
 from .pipeline import TerrainMapGPU
 from .pipeline import TerrainPipeline
+from .sim import GroundSpec
+from .sim import PrimitiveLidar
 from .traversability import FilterConfig
 from .traversability import GeometricTraversabilityAnalyzer
 from .traversability import ObstacleInflator
@@ -28,11 +32,14 @@ from .traversability import TraversabilityConfig
 from .traversability import TraversabilityCosts
 
 __all__ = [
+    "DynamicFilterConfig",
+    "DynamicPointFilter",
     "FilterConfig",
     "FlatGroundFootprint",
     "FootprintConfig",
     "GeometricTraversabilityAnalyzer",
     "GridMap",
+    "GroundSpec",
     "HeightMapBuilder",
     "HeightMapLayers",
     "IcpAligner",
@@ -42,6 +49,7 @@ __all__ = [
     "OcclusionConfig",
     "OcclusionMask",
     "OutlierFilterConfig",
+    "PrimitiveLidar",
     "RadiusOutlierFilter",
     "RadiusOutlierFilterConfig",
     "StatisticalOutlierFilter",
