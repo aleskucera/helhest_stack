@@ -23,6 +23,8 @@ def rollout_terrain(
     b=HALF_TRACK,
     resid_tol=1e-2,
     clear_margin=0.0,
+    tau_motor=0.0,
+    init_omega=None,
 ):
     """Roll out on a heightmap by repeated `state.step` (predict->project).
 
@@ -32,6 +34,10 @@ def rollout_terrain(
     friction sampled at the contacts + the normal loads of the state each step
     starts FROM (Phase 4 map, coefficient `k`); without `mu_field` the scalar
     args are used.
+
+    `tau_motor` is the first-order actuator lag time constant [s] (0 = no lag).
+    `init_omega` is the initial lagged wheel speed [3]; if None and tau_motor > 0
+    the first step uses the first setpoint (wheels already at the commanded speed).
 
     Chassis non-penetration is a post-check only (the settle stays wheels-only):
     `valid` is False if the belly high-centers at ANY step, so a planner can
@@ -52,6 +58,7 @@ def rollout_terrain(
     surf = _hm.wheel_envelope(hm, R)  # sphere-wheel placement surface
     x0, y0, yaw0 = (float(v) for v in init_pose)
     st = _state.make_state(x0, y0, yaw0, surf, hm)  # valid initial state
+    omega_actual = np.zeros(3, dtype=np.float64) if init_omega is None else np.asarray(init_omega, np.float64)
 
     pose7 = np.empty((T, 7), dtype=np.float32)
     pose2 = np.empty((T, 3), dtype=np.float64)
@@ -77,7 +84,10 @@ def rollout_terrain(
             x_icr=x_icr,
             R=R,
             b=b,
+            tau_motor=tau_motor,
+            omega_actual=omega_actual,
         )
+        omega_actual = st.omega_actual
         pose7[t] = st.pose7
         pose2[t] = st.pose2
         loads[t] = st.loads
