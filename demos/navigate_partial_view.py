@@ -36,8 +36,6 @@ from kinematic_helhest.engine import ForwardSimulator
 from kinematic_helhest.engine import GridParams
 from kinematic_helhest.heightmap import Heightmap
 from kinematic_helhest.perception.lidar import crop_window
-from kinematic_helhest.perception.lidar import drift_scan
-from kinematic_helhest.perception.lidar import MultiScanMap
 from kinematic_helhest.planning.costtogo import CostToGo
 from kinematic_helhest.planning.lattice_solver import trace_optimal
 from kinematic_helhest.viz.render import _commands
@@ -47,6 +45,16 @@ from kinematic_helhest.viz.render import build_robot
 from kinematic_helhest.viz.render import build_terrain
 
 PW, PH = 900, 780  # each window's size
+
+
+def _se2_points(pts, rx, ry, dx, dy, dyaw):
+    """Apply an accumulated SE(2) drift (rotate dyaw about the robot, then translate) to a point
+    cloud -- the point-cloud analogue of drift_scan, for smearing the accumulated global map."""
+    c, s = np.cos(dyaw), np.sin(dyaw)
+    x, y = pts[:, 0] - rx, pts[:, 1] - ry
+    qx = rx + c * x - s * y + dx
+    qy = ry + s * x + c * y + dy
+    return np.column_stack([qx, qy, pts[:, 2]]).astype(np.float32)
 
 
 def _view(cam, st, w, h):
@@ -216,6 +224,7 @@ def run(
     mu = W.matching_friction(scene)
     # perception front-end: terrain_toolkit's real OSDome 3D ray-cast, rasterized for the global
     # routing map, and inpaint + confidence masks (occlusion & support) for the local planning map.
+    from kinematic_helhest.perception.terrain_lidar import TerrainAccumMap
     from kinematic_helhest.perception.terrain_lidar import TerrainInpaintMap
     from kinematic_helhest.perception.terrain_lidar import TerrainLidar
 
@@ -251,8 +260,9 @@ def run(
     sgrid = GridParams(
         rcnx, rcny, rccell, (ww // 2 - rww // 2) * cell, (wh // 2 - rwh // 2) * cell
     ).build()
-    mm = MultiScanMap(scene.ny, scene.nx)  # GLOBAL routing map (drift-prone)
-    local = inpaint_map  # LOCAL map the MPPI plans on (rebuilt per frame from the last-N scans)
+    # GLOBAL routing map: terrain_toolkit rolling accumulator (25 m radius) -> inpaint + occlusion
+    mm = TerrainAccumMap(scene, radius_m=25.0, device=device)
+    local = inpaint_map  # LOCAL map the MPPI plans on (rebuilt per frame from the current scan)
     rng = np.random.default_rng(0)
     drift_x = drift_y = drift_yaw = 0.0  # accumulated SE(2) global-map drift (m, m, rad)
     stepB = max(1, plan_sim.batch_size // max(1, fan_n))
@@ -326,22 +336,20 @@ def run(
         d = float(np.hypot(rx - goal[0], ry - goal[1]))
 
         if d >= 0.3:
-            obs, known = tlidar.scan((rx, ry, yaw))  # rasterized scan -> global routing map
+            pts = tlidar.scan_points((rx, ry, yaw))  # raw hit cloud -> feeds both maps
             if drift > 0.0:
                 drift_x += float(rng.normal(0.0, drift))
                 drift_y += float(rng.normal(0.0, drift))
-                # coupled rotational drift (rad/step)
-                drift_yaw += float(rng.normal(0.0, 0.1 * drift))
-                gobs, gkn = drift_scan(
-                    obs, known, scene.x0, scene.y0, cell, rx, ry, drift_x, drift_y, drift_yaw
-                )
+                drift_yaw += float(rng.normal(0.0, 0.1 * drift))  # coupled rotational drift
+                gpts = _se2_points(pts, rx, ry, drift_x, drift_y, drift_yaw)
+                gcenter = (rx + drift_x, ry + drift_y)
             else:
-                gobs, gkn = obs, known
-            mm.integrate(gobs, gkn)
-            # local planning map = terrain_toolkit inpaint + confidence masks (occlusion & support)
-            # over the CURRENT single scan -- so it holds only trusted cells and the occlusion mask's
-            # single viewpoint is exactly this scan's pose (no multi-view approximation)
-            inpaint_map.update(tlidar.last_points, (rx, ry), tlidar.last_sensor_z)
+                gpts, gcenter = pts, (rx, ry)
+            # GLOBAL routing map: roll the accumulator in the (possibly drifted) belief frame
+            mm.integrate(gpts, gcenter, tlidar.last_sensor_z)
+            # LOCAL MPPI map: current single scan at the TRUE pose (drift-free); confidence-gated so
+            # it holds only trusted cells, occlusion viewpoint is exactly this scan's pose
+            inpaint_map.update(pts, (rx, ry), tlidar.last_sensor_z)
             local = inpaint_map
             elev, kn, wx0, wy0 = crop_window(local, scene, rx, ry, ww, wh, cell)
             elev = np.where(kn, elev, 0.0).astype(np.float32)

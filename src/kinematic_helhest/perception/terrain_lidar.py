@@ -73,11 +73,10 @@ class TerrainLidar:
         )
         self._seed = 0
 
-    def scan(self, pose: tuple[float, float, float]) -> tuple[np.ndarray, np.ndarray]:
-        """One scan from world pose (x, y, yaw) -> (obs[ny,nx] float32, known[ny,nx] bool),
-        matching lidar_scan's output and frame. Sensor sits mount_height above local ground.
-        The raw hit cloud + sensor height are stashed on `last_points` / `last_sensor_z` for a
-        point-cloud consumer (e.g. TerrainInpaintMap)."""
+    def scan_points(self, pose: tuple[float, float, float]) -> np.ndarray:
+        """One scan from world pose (x, y, yaw) -> raw hit cloud (N, 3). The cloud and sensor height
+        are also stashed on `last_points` / `last_sensor_z`. Sensor sits mount_height above local
+        ground. This is the point-cloud front-end for TerrainInpaintMap / TerrainAccumMap."""
         px, py, yaw = float(pose[0]), float(pose[1]), float(pose[2])
         gz = float(self.scene.sample(px, py))  # local ground -> sensor height
         self.last_sensor_z = gz + self.mount_height
@@ -85,6 +84,12 @@ class TerrainLidar:
         hits = self._lidar.scan(origin, yaw, self._boxes_lo, self._boxes_hi, seed=self._seed)
         self._seed += 1
         self.last_points = hits
+        return hits
+
+    def scan(self, pose: tuple[float, float, float]) -> tuple[np.ndarray, np.ndarray]:
+        """One scan -> (obs[ny,nx] float32, known[ny,nx] bool), the rasterized grid matching
+        lidar_scan's output and frame."""
+        hits = self.scan_points(pose)
         if len(hits) == 0:
             return np.zeros((self.ny, self.nx), np.float32), np.zeros((self.ny, self.nx), bool)
         obs, known = rasterize(hits, self.x0, self.y0, self.cell, self.ny, self.nx)
@@ -182,3 +187,57 @@ class TerrainInpaintMap:
         else:  # 'flat': untrusted cells fall through to the caller's optimism fill
             self.known = occ_ok & support_ok
             self.elev = elev
+
+
+class TerrainAccumMap:
+    """Rolling accumulated map -- terrain_toolkit's DeviceMapAccumulator (perception + mapping)
+    feeding the SAME inpaint + confidence pipeline as TerrainInpaintMap. A drop-in for MultiScanMap
+    (exposes `.elev`/`.known` and `.integrate`), so motion_toolkit's routing path (crop_window ->
+    cost-to-go) is unchanged. With this, terrain_toolkit owns BOTH maps (local single-scan and this
+    global accumulated one); motion_toolkit owns crop / routing / control.
+
+    The map is ROLLING like a real sensor: only points within `radius_m` of the robot are kept
+    (voxel-thinned to `voxel_m`), so terrain the robot drove far past is forgotten."""
+
+    def __init__(
+        self,
+        scene: Heightmap,
+        *,
+        radius_m: float = 25.0,
+        voxel_m: float = 0.15,
+        device: str = "cuda",
+        **inpaint_kwargs: object,
+    ) -> None:
+        from terrain_toolkit import DeviceMapAccumulator
+
+        # The accumulated cloud is voxel-thinned, so per-cell measurement density is a poor trust
+        # signal (every cell looks thinly supported) -- disable the support mask here and let
+        # OCCLUSION be the gate. The single-scan MPPI map keeps support (dense raw returns).
+        inpaint_kwargs.setdefault("support_ratio", 0.0)
+        self._device = wp.get_device(device)
+        self._acc = DeviceMapAccumulator(voxel_m, radius_m, device=self._device)
+        self._map = TerrainInpaintMap(scene, device=device, **inpaint_kwargs)
+        self._map_wp = None  # accumulated cloud, resident on device across frames
+
+    @property
+    def elev(self) -> np.ndarray:
+        return self._map.elev
+
+    @property
+    def known(self) -> np.ndarray:
+        return self._map.known
+
+    def integrate(
+        self, points: np.ndarray, sensor_xy: tuple[float, float], sensor_z: float
+    ) -> None:
+        """Fold scan `points` (N,3) into the rolling map (centered on sensor_xy), then re-derive
+        (elev, known) from the accumulated cloud via inpaint + confidence."""
+        if len(points) == 0:
+            return
+        pts = np.ascontiguousarray(points, np.float32)
+        pts_wp = wp.array(pts, dtype=wp.vec3, device=self._device)
+        valid_wp = wp.ones(len(pts), dtype=wp.int32, device=self._device)  # hits are pre-filtered
+        self._map_wp = self._acc.step(
+            self._map_wp, None, pts_wp, valid_wp, (float(sensor_xy[0]), float(sensor_xy[1]))
+        )
+        self._map.update(self._map_wp.numpy(), sensor_xy, sensor_z)
