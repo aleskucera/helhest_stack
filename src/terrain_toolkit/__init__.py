@@ -1,5 +1,6 @@
 from .dynamic import DynamicFilterConfig
 from .dynamic import DynamicPointFilter
+from .dynamic import frontier_from_organized
 from .gridmap import GridMap
 from .heightmap import diffuse_inpaint
 from .heightmap import FlatGroundFootprint
@@ -65,6 +66,7 @@ __all__ = [
     "TraversabilityConfig",
     "TraversabilityCosts",
     "diffuse_inpaint",
+    "frontier_from_organized",
     "gaussian_smooth",
     "multigrid_inpaint",
     "voxel_downsample",
