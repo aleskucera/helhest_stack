@@ -156,8 +156,15 @@ def voxel_accumulate_kernel(
     nz: wp.int32,
     sums: wp.array(dtype=wp.vec3),
     counts: wp.array(dtype=wp.int32),
+    occupied: wp.array(dtype=wp.int32),
+    occ_counter: wp.array(dtype=wp.int32),
 ):
-    """Assign each point to its voxel bucket and atomically accumulate sum/count."""
+    """Assign each point to its voxel bucket and accumulate sum/count.
+
+    Records each bucket the moment its count goes 0->1 (exactly one thread wins
+    that transition), so the compact pass can visit only occupied buckets instead
+    of scanning the whole grid.
+    """
     i = wp.tid()
     p = points[i]
     fx = (p[0] - origin[0]) * inv_voxel
@@ -173,23 +180,24 @@ def voxel_accumulate_kernel(
     if iz < 0 or iz >= nz:
         return
     bucket = ix + iy * nx + iz * nx * ny
+    if wp.atomic_add(counts, bucket, 1) == 0:
+        occupied[wp.atomic_add(occ_counter, 0, 1)] = bucket
     wp.atomic_add(sums, bucket, p)
-    wp.atomic_add(counts, bucket, 1)
 
 
 @wp.kernel
 def voxel_compact_kernel(
+    occupied: wp.array(dtype=wp.int32),
     sums: wp.array(dtype=wp.vec3),
     counts: wp.array(dtype=wp.int32),
-    out_counter: wp.array(dtype=wp.int32),
     out_points: wp.array(dtype=wp.vec3),
 ):
-    """Write centroid (sum/count) of each non-empty voxel to a compact output array."""
-    i = wp.tid()
-    c = counts[i]
-    if c > 0:
-        slot = wp.atomic_add(out_counter, 0, 1)
-        out_points[slot] = sums[i] / float(c)
+    """Emit one centroid per occupied bucket (indexed off `occupied`) and reset
+    that bucket to empty, leaving `sums`/`counts` zeroed for the next call."""
+    idx = occupied[wp.tid()]
+    out_points[wp.tid()] = sums[idx] / float(counts[idx])
+    sums[idx] = wp.vec3(0.0, 0.0, 0.0)
+    counts[idx] = 0
 
 
 @wp.kernel

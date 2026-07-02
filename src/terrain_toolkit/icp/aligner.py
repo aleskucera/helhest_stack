@@ -95,31 +95,36 @@ def _voxel_bin(
     min_corner: wp.vec3,
     inv_voxel: float,
     dims: np.ndarray,
-    n_vx: int,
     sums: wp.array,
     counts: wp.array,
-    counter: wp.array,
+    occupied: wp.array,
+    occ_counter: wp.array,
     out: wp.array,
 ) -> int:
     """Bin `points_wp` to one centroid per occupied voxel in caller-owned buffers.
 
-    `sums`/`counts` (len ≥ n_vx) and `counter` must be pre-zeroed; `out` (len ≥ n)
-    receives the centroids. Returns the number written.
+    `sums`/`counts` (len ≥ grid cells) must start zeroed and are left zeroed —
+    the compact pass resets each cell it reads, so it (and the clear) cost
+    O(occupied), not O(grid). `occupied`/`out` (len ≥ n) are scratch. Returns the
+    number of centroids written to `out`.
     """
+    occ_counter.zero_()
     wp.launch(
         voxel_accumulate_kernel,
         dim=n,
         inputs=[points_wp, min_corner, inv_voxel, int(dims[0]), int(dims[1]), int(dims[2])],
-        outputs=[sums, counts],
-    )
-    wp.launch(
-        voxel_compact_kernel,
-        dim=n_vx,
-        inputs=[sums, counts],
-        outputs=[counter, out],
+        outputs=[sums, counts, occupied, occ_counter],
     )
     wp.synchronize()
-    return int(counter.numpy()[0])
+    n_out = int(occ_counter.numpy()[0])
+    if n_out:
+        wp.launch(
+            voxel_compact_kernel,
+            dim=n_out,
+            inputs=[occupied],
+            outputs=[sums, counts, out],
+        )
+    return n_out
 
 
 def voxel_downsample(
@@ -142,11 +147,21 @@ def voxel_downsample(
         pts_wp = wp.array(pts, dtype=wp.vec3)
         sums = wp.zeros(n_vx, dtype=wp.vec3)
         counts = wp.zeros(n_vx, dtype=wp.int32)
-        counter = wp.zeros(1, dtype=wp.int32)
+        occupied = wp.empty(len(pts), dtype=wp.int32)
+        occ_counter = wp.zeros(1, dtype=wp.int32)
         out = wp.empty(len(pts), dtype=wp.vec3)
         min_corner = wp.vec3(float(mins[0]), float(mins[1]), float(mins[2]))
         n_out = _voxel_bin(
-            pts_wp, len(pts), min_corner, 1.0 / voxel_size, dims, n_vx, sums, counts, counter, out
+            pts_wp,
+            len(pts),
+            min_corner,
+            1.0 / voxel_size,
+            dims,
+            sums,
+            counts,
+            occupied,
+            occ_counter,
+            out,
         )
         result = out.numpy()[:n_out]
 
@@ -225,12 +240,14 @@ class IcpAligner:
         self.verbose = verbose
         self._grid: wp.HashGrid | None = None
 
-        # Voxel-downsample scratch buffers, grown on demand.
+        # Voxel-downsample scratch buffers, grown on demand. sums/counts are kept
+        # zeroed between calls by the compact pass, so they are never re-zeroed.
         self._vx_cells: int = 0
         self._vx_out_capacity: int = 0
         self._vx_sums: wp.array | None = None
         self._vx_counts: wp.array | None = None
         self._vx_counter: wp.array | None = None
+        self._vx_occupied: wp.array | None = None
         self._vx_out: wp.array | None = None
 
     def _ensure_grid(self, radius: float, points: np.ndarray) -> wp.HashGrid:
@@ -255,21 +272,18 @@ class IcpAligner:
         dims, n_vx = _voxel_grid_dims(mins, maxs, voxel_size)
 
         with wp.ScopedDevice(self.device):
-            # Grow the shared scratch buffers on demand, else just re-zero them.
+            # Grow the shared scratch buffers on demand. sums/counts are left
+            # zeroed by the previous call's compact pass, so no re-zeroing here.
             if self._vx_cells < n_vx:
                 self._vx_sums = wp.zeros(n_vx, dtype=wp.vec3)
                 self._vx_counts = wp.zeros(n_vx, dtype=wp.int32)
                 self._vx_cells = n_vx
-            else:
-                self._vx_sums.zero_()
-                self._vx_counts.zero_()
             if self._vx_out_capacity < len(pts):
                 self._vx_out = wp.empty(len(pts), dtype=wp.vec3)
+                self._vx_occupied = wp.empty(len(pts), dtype=wp.int32)
                 self._vx_out_capacity = len(pts)
             if self._vx_counter is None:
                 self._vx_counter = wp.zeros(1, dtype=wp.int32)
-            else:
-                self._vx_counter.zero_()
 
             pts_wp = wp.array(pts, dtype=wp.vec3)
             min_corner = wp.vec3(float(mins[0]), float(mins[1]), float(mins[2]))
@@ -279,9 +293,9 @@ class IcpAligner:
                 min_corner,
                 1.0 / voxel_size,
                 dims,
-                n_vx,
                 self._vx_sums,
                 self._vx_counts,
+                self._vx_occupied,
                 self._vx_counter,
                 self._vx_out,
             )
