@@ -62,7 +62,7 @@ def voxel_downsample(
             f"voxel grid has {n_vx} cells (>{_MAX_VOXEL_GRID_CELLS}); use a larger voxel_size"
         )
 
-    device = device if device is not None else wp.get_device()
+    device = wp.get_device(device)
     with wp.ScopedDevice(device):
         pts_wp = wp.array(pts, dtype=wp.vec3)
         sums_wp = wp.zeros(n_vx, dtype=wp.vec3)
@@ -165,7 +165,7 @@ class IcpAligner:
         verbose: bool = False,
     ):
         self.config = config or IcpConfig()
-        self.device = device if device is not None else wp.get_device()
+        self.device = wp.get_device(device)
         self.verbose = verbose
         self._grid: wp.HashGrid | None = None
 

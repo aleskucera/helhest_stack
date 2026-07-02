@@ -81,7 +81,7 @@ class GeometricTraversabilityAnalyzer:
         self.width = width
         self.shape = (height, width)
         self.config = config or TraversabilityConfig()
-        self.device = device if device is not None else wp.get_device()
+        self.device = wp.get_device(device)
         self.verbose = verbose
 
         cfg = self.config

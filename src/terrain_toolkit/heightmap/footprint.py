@@ -73,7 +73,7 @@ class FlatGroundFootprint:
         self.resolution = float(resolution)
         self.config = config
         self.fill_only = 1 if config.mode == "fill" else 0
-        self.device = device if device is not None else wp.get_device()
+        self.device = wp.get_device(device)
 
     @property
     def is_empty(self) -> bool:

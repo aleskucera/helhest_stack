@@ -86,7 +86,7 @@ class ObstacleInflator:
         self.width = width
         self.shape = (height, width)
         self.config = config or FilterConfig()
-        self.device = device if device is not None else wp.get_device()
+        self.device = wp.get_device(device)
 
         sigma_cells = self.config.inflation_sigma_m / resolution
         self.radius_cells = int(math.ceil(3.0 * sigma_cells))
@@ -132,7 +132,7 @@ class TemporalGate:
         device: wp.context.Device | None = None,
     ):
         self.config = config or FilterConfig()
-        self.device = device if device is not None else wp.get_device()
+        self.device = wp.get_device(device)
 
         self._last_obstacle_count = 0
         self._consecutive_rejections = 0
@@ -192,7 +192,7 @@ class SupportRatioMask:
         self.width = width
         self.shape = (height, width)
         self.config = config or FilterConfig()
-        self.device = device if device is not None else wp.get_device()
+        self.device = wp.get_device(device)
 
         self.support_radius_cells = meters_to_cells(
             self.config.support_radius_m,
@@ -258,7 +258,7 @@ class OcclusionMask:
         self.width = width
         self.shape = (height, width)
         self.config = config or OcclusionConfig()
-        self.device = device if device is not None else wp.get_device()
+        self.device = wp.get_device(device)
 
         with wp.ScopedDevice(self.device):
             self._filtered = wp.zeros(self.shape, dtype=wp.float32)

@@ -182,7 +182,7 @@ class PrimitiveLidar:
     ):
         if directions.ndim != 2 or directions.shape[1] != 3:
             raise ValueError(f"directions must be (B, 3); got {directions.shape}")
-        self.device = device if device is not None else wp.get_device()
+        self.device = wp.get_device(device)
         self.ground = ground
         # Range noise 1σ(r) = noise_std + range_noise_quad·r², capped at range_noise_max.
         self.noise_std = float(noise_std)

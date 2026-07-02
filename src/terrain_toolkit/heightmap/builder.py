@@ -62,7 +62,7 @@ class HeightMapBuilder:
         self.width = int(math.ceil((xmax - xmin) / resolution))
         self.height = int(math.ceil((ymax - ymin) / resolution))
         self.shape = (self.height, self.width)
-        self.device = device if device is not None else wp.get_device()
+        self.device = wp.get_device(device)
 
         with wp.ScopedDevice(self.device):
             self._max = wp.empty(self.shape, dtype=wp.float32)

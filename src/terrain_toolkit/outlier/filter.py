@@ -74,7 +74,7 @@ class StatisticalOutlierFilter:
         device: wp.context.Device | None = None,
     ):
         self.config = config or OutlierFilterConfig()
-        self.device = device if device is not None else wp.get_device()
+        self.device = wp.get_device(device)
         self._grid: wp.HashGrid | None = None
 
         # If the caller knows the point-cloud extent ahead of time, precreate
@@ -233,7 +233,7 @@ class RadiusOutlierFilter:
         device: wp.context.Device | None = None,
     ):
         self.config = config or RadiusOutlierFilterConfig()
-        self.device = device if device is not None else wp.get_device()
+        self.device = wp.get_device(device)
         self._grid: wp.HashGrid | None = None
 
         if bounds is not None:

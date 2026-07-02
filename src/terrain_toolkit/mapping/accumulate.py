@@ -88,7 +88,7 @@ class DeviceMapAccumulator:
         z_bounds: tuple[float, float] = (-2.0, 6.0),
         device: wp.context.Device | None = None,
     ):
-        self.device = device if device is not None else wp.get_device()
+        self.device = wp.get_device(device)
         self.voxel = float(voxel_size)
         self.radius = float(radius)
         self.z0, self.z1 = float(z_bounds[0]), float(z_bounds[1])
