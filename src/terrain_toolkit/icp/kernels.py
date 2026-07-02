@@ -4,6 +4,10 @@ import warp as wp
 
 wp.init()
 
+# Fixed-size types for the device-side 6x6 Gauss-Newton solve.
+mat66 = wp.types.matrix(shape=(6, 6), dtype=wp.float32)
+vec6 = wp.types.vector(length=6, dtype=wp.float32)
+
 
 @wp.func
 def _accumulate_row(
@@ -203,12 +207,20 @@ def voxel_compact_kernel(
 @wp.kernel
 def transform_points_kernel(
     src: wp.array(dtype=wp.vec3),
-    R: wp.mat33,
-    t: wp.vec3,
+    pose: wp.array(dtype=wp.mat44),  # device-resident current pose (target_T_source)
+    n_src: wp.array(dtype=wp.int32),
     out: wp.array(dtype=wp.vec3),
 ):
     i = wp.tid()
-    out[i] = R @ src[i] + t
+    if i >= n_src[0]:
+        return
+    m = pose[0]
+    p = src[i]
+    out[i] = wp.vec3(
+        m[0, 0] * p[0] + m[0, 1] * p[1] + m[0, 2] * p[2] + m[0, 3],
+        m[1, 0] * p[0] + m[1, 1] * p[1] + m[1, 2] * p[2] + m[1, 3],
+        m[2, 0] * p[0] + m[2, 1] * p[1] + m[2, 2] * p[2] + m[2, 3],
+    )
 
 
 @wp.kernel
@@ -218,6 +230,7 @@ def accumulate_system_kernel(
     target_normals: wp.array(dtype=wp.vec3),
     target_valid: wp.array(dtype=wp.int32),
     transformed_src: wp.array(dtype=wp.vec3),
+    n_src: wp.array(dtype=wp.int32),
     max_dist: wp.float32,
     huber_delta: wp.float32,
     JtJ: wp.array(dtype=wp.float32, ndim=2),
@@ -227,6 +240,8 @@ def accumulate_system_kernel(
 ):
     """For each source point: find nearest target, build point-to-plane Jacobian row."""
     i = wp.tid()
+    if i >= n_src[0]:
+        return
     p = transformed_src[i]
 
     best = max_dist * max_dist
@@ -265,3 +280,123 @@ def accumulate_system_kernel(
     _accumulate_row(JtJ, Jtr, j0, j1, j2, j3, j4, j5, r, w)
     wp.atomic_add(cost, 0, w * r * r)
     wp.atomic_add(num_inliers, 0, 1)
+
+
+@wp.kernel
+def solve6x6_kernel(
+    JtJ: wp.array(dtype=wp.float32, ndim=2),  # upper triangle populated
+    Jtr: wp.array(dtype=wp.float32),
+    damping: wp.float32,
+    delta: wp.array(dtype=wp.float32),
+):
+    """delta = -(H + damping·I)^-1 · Jtr, H symmetrized from JtJ, via float32 Cholesky (dim=1)."""
+    h = mat66()
+    for i in range(6):
+        for j in range(6):
+            if i <= j:
+                h[i, j] = JtJ[i, j]
+            else:
+                h[i, j] = JtJ[j, i]
+    for d in range(6):
+        h[d, d] = h[d, d] + damping
+
+    # Cholesky H = L Lᵀ.
+    ll = mat66()
+    for j in range(6):
+        s = h[j, j]
+        for k in range(j):
+            s = s - ll[j, k] * ll[j, k]
+        ljj = wp.sqrt(wp.max(s, 1.0e-12))  # damping keeps H SPD; clamp guards fp noise
+        ll[j, j] = ljj
+        for i in range(j + 1, 6):
+            s2 = h[i, j]
+            for k in range(j):
+                s2 = s2 - ll[i, k] * ll[j, k]
+            ll[i, j] = s2 / ljj
+
+    # Forward solve L y = -Jtr, then back solve Lᵀ x = y.
+    y = vec6()
+    for i in range(6):
+        s = -Jtr[i]
+        for k in range(i):
+            s = s - ll[i, k] * y[k]
+        y[i] = s / ll[i, i]
+    x = vec6()
+    for ii in range(6):
+        i = 5 - ii
+        s = y[i]
+        for k in range(i + 1, 6):
+            s = s - ll[k, i] * x[k]
+        x[i] = s / ll[i, i]
+
+    for i in range(6):
+        delta[i] = x[i]
+
+
+@wp.func
+def _skew(w: wp.vec3) -> wp.mat33:
+    return wp.mat33(0.0, -w[2], w[1], w[2], 0.0, -w[0], -w[1], w[0], 0.0)
+
+
+@wp.kernel
+def se3_update_kernel(
+    delta: wp.array(dtype=wp.float32),
+    pose: wp.array(dtype=wp.mat44),  # pose <- exp(delta) @ pose (in place)
+    dr: wp.array(dtype=wp.float32),
+    dt: wp.array(dtype=wp.float32),
+):
+    """Left-multiply the pose by the SE(3) exponential of the GN step (dim=1)."""
+    omega = wp.vec3(delta[0], delta[1], delta[2])
+    v = wp.vec3(delta[3], delta[4], delta[5])
+    theta = wp.length(omega)
+    ident = wp.identity(n=3, dtype=wp.float32)
+    w_mat = _skew(omega)
+    if theta < 1.0e-8:
+        rot = ident + w_mat
+        v_mat = ident + 0.5 * w_mat
+    else:
+        w2 = w_mat @ w_mat
+        a = wp.sin(theta) / theta
+        b = (1.0 - wp.cos(theta)) / (theta * theta)
+        c = (theta - wp.sin(theta)) / (theta * theta * theta)
+        rot = ident + a * w_mat + b * w2
+        v_mat = ident + b * w_mat + c * w2
+    tvec = v_mat @ v
+    step = wp.mat44(
+        rot[0, 0], rot[0, 1], rot[0, 2], tvec[0],
+        rot[1, 0], rot[1, 1], rot[1, 2], tvec[1],
+        rot[2, 0], rot[2, 1], rot[2, 2], tvec[2],
+        0.0, 0.0, 0.0, 1.0,
+    )
+    pose[0] = step @ pose[0]
+    dr[0] = theta
+    dt[0] = wp.length(v)
+
+
+@wp.kernel
+def keep_going_kernel(
+    dr: wp.array(dtype=wp.float32),
+    dt: wp.array(dtype=wp.float32),
+    inliers: wp.array(dtype=wp.int32),
+    iter_count: wp.array(dtype=wp.int32),
+    cap: wp.int32,
+    conv_rot: wp.float32,
+    conv_trans: wp.float32,
+    keep_running: wp.array(dtype=wp.int32),
+    converged: wp.array(dtype=wp.int32),
+):
+    """Device loop condition (dim=1): stop on convergence, no inliers, or the cap."""
+    it = iter_count[0] + 1
+    iter_count[0] = it
+    stop = int(0)
+    if dr[0] < conv_rot and dt[0] < conv_trans:
+        converged[0] = 1
+        stop = 1
+    if inliers[0] == 0:
+        stop = 1
+    if it >= cap:
+        stop = 1
+    if stop == 1:
+        keep_running[0] = 0
+    else:
+        keep_running[0] = 1

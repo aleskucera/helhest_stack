@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import math
 from dataclasses import dataclass
 from dataclasses import field
 
@@ -10,6 +9,9 @@ import warp as wp
 
 from .kernels import accumulate_system_kernel
 from .kernels import estimate_normals_kernel
+from .kernels import keep_going_kernel
+from .kernels import se3_update_kernel
+from .kernels import solve6x6_kernel
 from .kernels import transform_points_kernel
 from .kernels import voxel_accumulate_kernel
 from .kernels import voxel_compact_kernel
@@ -28,6 +30,11 @@ class IcpConfig:
     convergence_rotation_rad: float = 1.0e-4
     convergence_translation_m: float = 1.0e-4
     damping: float = 1.0e-6
+
+    # Upper bound on source/target points after downsampling; the aligner
+    # preallocates its device buffers to this size and subsamples anything larger
+    # (fixed buffers are what make the GN loop CUDA-graph-capturable).
+    max_points: int = 120_000
 
     # Voxel downsampling applied to source (and target if `voxel_target`) before ICP.
     # Set to None or 0 to disable. Using the centroid per voxel gives a more
@@ -179,37 +186,6 @@ class IcpResult:
     timings_ms: dict[str, float] = field(default_factory=dict)
 
 
-def _skew(v: np.ndarray) -> np.ndarray:
-    return np.array([[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]], dtype=np.float64)
-
-
-def _exp_se3(xi: np.ndarray) -> np.ndarray:
-    """Lie-algebra exp: xi = [omega; v] (6,) → SE(3) 4x4."""
-    omega = xi[:3]
-    v = xi[3:]
-    theta = float(np.linalg.norm(omega))
-    W = _skew(omega)
-    if theta < 1.0e-8:
-        R = np.eye(3) + W
-        V = np.eye(3) + 0.5 * W
-    else:
-        W2 = W @ W
-        R = (
-            np.eye(3)
-            + (math.sin(theta) / theta) * W
-            + ((1.0 - math.cos(theta)) / (theta * theta)) * W2
-        )
-        V = (
-            np.eye(3)
-            + ((1.0 - math.cos(theta)) / (theta * theta)) * W
-            + ((theta - math.sin(theta)) / (theta**3)) * W2
-        )
-    T = np.eye(4)
-    T[:3, :3] = R
-    T[:3, 3] = V @ v
-    return T
-
-
 def _hashgrid_dims(points: np.ndarray, radius: float) -> tuple[int, int, int]:
     """Pick reasonable hash grid dimensions for the target cloud."""
     mins = points.min(axis=0)
@@ -240,6 +216,7 @@ class IcpAligner:
         self.device = wp.get_device(device)
         self.verbose = verbose
         self._grid: wp.HashGrid | None = None
+        self._capped_warned = False
 
         # Voxel-downsample scratch buffers, grown on demand. sums/counts are kept
         # zeroed between calls by the compact pass, so they are never re-zeroed.
@@ -250,6 +227,28 @@ class IcpAligner:
         self._vx_counter: wp.array | None = None
         self._vx_occupied: wp.array | None = None
         self._vx_out: wp.array | None = None
+
+        # Device-resident GN-loop state: fixed-size buffers (max_points) plus the
+        # per-iteration scalars, so the loop touches only these and is graph-ready.
+        mp = self.config.max_points
+        with wp.ScopedDevice(self.device):
+            self._src = wp.zeros(mp, dtype=wp.vec3)
+            self._tgt = wp.zeros(mp, dtype=wp.vec3)
+            self._transformed = wp.zeros(mp, dtype=wp.vec3)
+            self._normals = wp.zeros(mp, dtype=wp.vec3)
+            self._valid = wp.zeros(mp, dtype=wp.int32)
+            self._n_src = wp.zeros(1, dtype=wp.int32)
+            self._JtJ = wp.zeros((6, 6), dtype=wp.float32)
+            self._Jtr = wp.zeros(6, dtype=wp.float32)
+            self._cost = wp.zeros(1, dtype=wp.float32)
+            self._inliers = wp.zeros(1, dtype=wp.int32)
+            self._pose = wp.zeros(1, dtype=wp.mat44)
+            self._delta = wp.zeros(6, dtype=wp.float32)
+            self._dr = wp.zeros(1, dtype=wp.float32)
+            self._dt = wp.zeros(1, dtype=wp.float32)
+            self._iter = wp.zeros(1, dtype=wp.int32)
+            self._keep_running = wp.zeros(1, dtype=wp.int32)
+            self._converged = wp.zeros(1, dtype=wp.int32)
 
     def _ensure_grid(self, radius: float, points: np.ndarray) -> wp.HashGrid:
         dims = _hashgrid_dims(points, radius)
@@ -304,6 +303,93 @@ class IcpAligner:
 
         return out.astype(points.dtype, copy=False)
 
+    def _cap(self, points: np.ndarray) -> np.ndarray:
+        """Subsample to at most `max_points` (the fixed buffers require a bound)."""
+        n = len(points)
+        if n <= self.config.max_points:
+            return points
+        if not self._capped_warned:
+            print(f"[icp] cloud of {n} pts exceeds max_points; subsampling to {self.config.max_points}")
+            self._capped_warned = True
+        idx = np.linspace(0, n - 1, self.config.max_points).astype(np.int64)
+        return points[idx]
+
+    def _seed_pose(self, init_pose: np.ndarray | None) -> None:
+        """Load the initial pose and reset the loop state into the device buffers."""
+        pose = np.eye(4, dtype=np.float32) if init_pose is None else np.asarray(init_pose, np.float32)
+        self._pose.assign(pose.reshape(1, 4, 4))
+        self._iter.zero_()
+        self._converged.zero_()
+        self._keep_running.fill_(1)
+
+    def _gn_body(self, grid: wp.HashGrid) -> None:
+        """One Gauss-Newton iteration, entirely on device (this is the graph body).
+
+        Launches over the fixed `max_points` extent; the transform/accumulate
+        kernels early-return past the live count `_n_src`.
+        """
+        cfg = self.config
+        mp = cfg.max_points
+        self._JtJ.zero_()
+        self._Jtr.zero_()
+        self._cost.zero_()
+        self._inliers.zero_()
+        wp.launch(
+            transform_points_kernel,
+            dim=mp,
+            inputs=[self._src, self._pose, self._n_src],
+            outputs=[self._transformed],
+        )
+        wp.launch(
+            accumulate_system_kernel,
+            dim=mp,
+            inputs=[
+                grid.id,
+                self._tgt,
+                self._normals,
+                self._valid,
+                self._transformed,
+                self._n_src,
+                float(cfg.max_correspondence_dist_m),
+                float(cfg.huber_delta),
+            ],
+            outputs=[self._JtJ, self._Jtr, self._cost, self._inliers],
+        )
+        wp.launch(
+            solve6x6_kernel,
+            dim=1,
+            inputs=[self._JtJ, self._Jtr, float(cfg.damping)],
+            outputs=[self._delta],
+        )
+        wp.launch(
+            se3_update_kernel,
+            dim=1,
+            inputs=[self._delta],
+            outputs=[self._pose, self._dr, self._dt],
+        )
+        wp.launch(
+            keep_going_kernel,
+            dim=1,
+            inputs=[
+                self._dr,
+                self._dt,
+                self._inliers,
+                self._iter,
+                int(cfg.max_iters),
+                float(cfg.convergence_rotation_rad),
+                float(cfg.convergence_translation_m),
+            ],
+            outputs=[self._keep_running, self._converged],
+        )
+
+    def _run_gn_eager(self, grid: wp.HashGrid) -> None:
+        """Device-resident GN loop, host-driven (Phase 2 captures this as a graph)."""
+        for _ in range(self.config.max_iters):
+            self._gn_body(grid)
+            wp.synchronize()
+            if int(self._keep_running.numpy()[0]) == 0:
+                break
+
     def align(
         self,
         source: np.ndarray,
@@ -328,118 +414,52 @@ class IcpAligner:
                     if cfg.voxel_target:
                         target = self._voxel_downsample(target, cfg.voxel_size_m)
 
+            source = self._cap(source)
+            target = self._cap(target)
+            n_src = len(source)
+            n_tgt = len(target)
+
+            # Fill the first n entries of the preallocated buffers; the rest is
+            # never read (kernels guard on the live counts / the grid extent).
             with prof.stage("upload"):
                 src_wp = wp.array(np.ascontiguousarray(source, dtype=np.float32), dtype=wp.vec3)
                 tgt_wp = wp.array(np.ascontiguousarray(target, dtype=np.float32), dtype=wp.vec3)
+                wp.copy(self._src, src_wp, 0, 0, n_src)
+                wp.copy(self._tgt, tgt_wp, 0, 0, n_tgt)
+                self._n_src.fill_(n_src)
 
             with prof.stage("grid_build"):
                 grid = self._ensure_grid(grid_radius, target)
-                grid.build(points=tgt_wp, radius=float(grid_radius))
+                grid.build(points=self._tgt[:n_tgt], radius=float(grid_radius))
 
             with prof.stage("normals"):
-                normals_wp = wp.empty(len(target), dtype=wp.vec3)
-                valid_wp = wp.empty(len(target), dtype=wp.int32)
                 wp.launch(
                     estimate_normals_kernel,
-                    dim=len(target),
+                    dim=n_tgt,
                     inputs=[
                         grid.id,
-                        tgt_wp,
+                        self._tgt,
                         float(cfg.normal_radius_m),
                         int(cfg.normal_min_neighbors),
                         int(cfg.normal_power_iters),
                     ],
-                    outputs=[normals_wp, valid_wp],
+                    outputs=[self._normals, self._valid],
                 )
 
-            transformed_wp = wp.empty(len(source), dtype=wp.vec3)
-            JtJ_wp = wp.zeros((6, 6), dtype=wp.float32)
-            Jtr_wp = wp.zeros(6, dtype=wp.float32)
-            cost_wp = wp.zeros(1, dtype=wp.float32)
-            inliers_wp = wp.zeros(1, dtype=wp.int32)
-
-            T = (
-                np.eye(4, dtype=np.float64)
-                if init_pose is None
-                else np.asarray(init_pose, dtype=np.float64).copy()
-            )
-
-            converged = False
-            final_cost = float("inf")
-            final_inliers = 0
-            iters_run = 0
-
-            for it in range(cfg.max_iters):
-                iters_run = it + 1
-                R = T[:3, :3].astype(np.float32)
-                t = T[:3, 3].astype(np.float32)
-
-                with prof.stage("iterations"):
-                    JtJ_wp.zero_()
-                    Jtr_wp.zero_()
-                    cost_wp.zero_()
-                    inliers_wp.zero_()
-                    wp.launch(
-                        transform_points_kernel,
-                        dim=len(source),
-                        inputs=[src_wp, wp.mat33(R.flatten().tolist()), wp.vec3(*t.tolist())],
-                        outputs=[transformed_wp],
-                    )
-                    wp.launch(
-                        accumulate_system_kernel,
-                        dim=len(source),
-                        inputs=[
-                            grid.id,
-                            tgt_wp,
-                            normals_wp,
-                            valid_wp,
-                            transformed_wp,
-                            float(cfg.max_correspondence_dist_m),
-                            float(cfg.huber_delta),
-                        ],
-                        outputs=[JtJ_wp, Jtr_wp, cost_wp, inliers_wp],
-                    )
-                wp.synchronize()  # pull the normal equations back to solve on the host
-
-                H_upper = JtJ_wp.numpy().astype(np.float64)
-                H = np.triu(H_upper) + np.triu(H_upper, 1).T
-                g = Jtr_wp.numpy().astype(np.float64)
-                n_in = int(inliers_wp.numpy()[0])
-                c = float(cost_wp.numpy()[0])
-
-                if n_in == 0:
-                    if self.verbose:
-                        print(f"[icp] iter {it}: no inliers, aborting")
-                    break
-
-                H += cfg.damping * np.eye(6)
-                try:
-                    delta = -np.linalg.solve(H, g)
-                except np.linalg.LinAlgError:
-                    if self.verbose:
-                        print(f"[icp] iter {it}: singular system, aborting")
-                    break
-
-                T = _exp_se3(delta) @ T
-                final_cost = c
-                final_inliers = n_in
-
-                dr = float(np.linalg.norm(delta[:3]))
-                dt = float(np.linalg.norm(delta[3:]))
-                if self.verbose:
-                    mean_cost = c / max(n_in, 1)
-                    print(
-                        f"[icp] iter {it:2d}  inliers={n_in}  cost/pt={mean_cost:.5f}  "
-                        f"|dω|={dr:.5f}  |dv|={dt:.5f}"
-                    )
-                if dr < cfg.convergence_rotation_rad and dt < cfg.convergence_translation_m:
-                    converged = True
-                    break
+            self._seed_pose(init_pose)
+            with prof.stage("iterations"):
+                self._run_gn_eager(grid)
 
             prof.read()
+            wp.synchronize()
+            pose = self._pose.numpy().reshape(4, 4).astype(np.float64)
+            iters_run = int(self._iter.numpy()[0])
+            final_inliers = int(self._inliers.numpy()[0])
+            final_cost = float(self._cost.numpy()[0])
+            converged = bool(self._converged.numpy()[0])
 
         return IcpResult(
-            pose=T,
+            pose=pose,
             iterations=iters_run,
             final_cost=final_cost,
             num_inliers=final_inliers,
