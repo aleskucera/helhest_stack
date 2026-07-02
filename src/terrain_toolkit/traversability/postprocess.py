@@ -7,22 +7,21 @@ import numpy as np
 import warp as wp
 
 from .._warp_utils import as_gpu
-from ..grid_utils import meters_to_cells
 from .kernels import count_obstacles_kernel
 from .kernels import inflate_obstacles_kernel
-from .kernels import support_ratio_mask_kernel
 
 
 @dataclass
 class FilterConfig:
     """Configuration for the traversability post-processing stages.
 
-    Single bag shared by `ObstacleInflator`, `TemporalGate`, and
-    `SupportRatioMask` — each stage reads only the fields it needs.
+    Single bag for the filter chain: `ObstacleInflator` and `TemporalGate` read
+    it directly, and the pipeline forwards the support fields to a
+    `confidence.SupportConfig` for the support-ratio mask.
     """
 
-    # Support ratio: cells whose neighborhood has fewer than this fraction of
-    # measured cells are rejected (set to NaN).
+    # Support ratio (forwarded to confidence.SupportConfig): cells whose
+    # neighborhood has fewer than this fraction of measured cells are set to NaN.
     support_radius_m: float = 0.5
     support_ratio: float = 0.5
 
@@ -145,67 +144,3 @@ class TemporalGate:
         self._consecutive_rejections = 0
         self._last_obstacle_count = current
         return True
-
-
-class SupportRatioMask:
-    """NaN-out cost cells whose raw-elevation neighborhood lacks measurements.
-
-    Preallocates a single owned output buffer — the returned `wp.array` is
-    overwritten on the next `apply()`/`rejected_frame()` call.
-    """
-
-    def __init__(
-        self,
-        resolution: float,
-        height: int,
-        width: int,
-        config: FilterConfig | None = None,
-        *,
-        device: wp.context.Device | None = None,
-    ):
-        self.resolution = resolution
-        self.height = height
-        self.width = width
-        self.shape = (height, width)
-        self.config = config or FilterConfig()
-        self.device = wp.get_device(device)
-
-        self.support_radius_cells = meters_to_cells(
-            self.config.support_radius_m,
-            resolution,
-        )
-
-        with wp.ScopedDevice(self.device):
-            self._filtered = wp.zeros(self.shape, dtype=wp.float32)
-
-    def apply(
-        self,
-        raw_elevation: np.ndarray | wp.array,
-        cost_map: np.ndarray | wp.array,
-    ) -> wp.array:
-        """`raw_elevation` is the pre-inpaint heightmap (NaN in unmeasured cells)."""
-        if raw_elevation.shape != self.shape or cost_map.shape != self.shape:
-            raise ValueError("raw_elevation and cost_map must match mask shape")
-
-        elev_wp = as_gpu(raw_elevation, self.device)
-        cost_wp = as_gpu(cost_map, self.device)
-        wp.launch(
-            support_ratio_mask_kernel,
-            dim=self.shape,
-            inputs=[
-                elev_wp,
-                cost_wp,
-                self.height,
-                self.width,
-                self.support_radius_cells,
-                float(self.config.support_ratio),
-            ],
-            outputs=[self._filtered],
-            device=self.device,
-        )
-        return self._filtered
-
-    def rejected_frame(self) -> wp.array:
-        """Return an all-NaN buffer (the same owned buffer as `apply`)."""
-        self._filtered.fill_(float("nan"))
-        return self._filtered

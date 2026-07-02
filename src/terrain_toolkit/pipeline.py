@@ -6,14 +6,16 @@ from typing import Literal
 import numpy as np
 import warp as wp
 
+from .confidence import OcclusionConfig
+from .confidence import OcclusionMask
+from .confidence import SupportConfig
+from .confidence import SupportRatioMask
 from .gridmap import GridMap
 from .heightmap import FlatGroundFootprint
 from .heightmap import FootprintConfig
 from .heightmap import gaussian_smooth
 from .heightmap import HeightMapBuilder
 from .heightmap import multigrid_inpaint
-from .occlusion import OcclusionConfig
-from .occlusion import OcclusionMask
 from .outlier import OutlierFilterConfig
 from .outlier import RadiusOutlierFilter
 from .outlier import RadiusOutlierFilterConfig
@@ -21,7 +23,6 @@ from .outlier import StatisticalOutlierFilter
 from .traversability import FilterConfig
 from .traversability import GeometricTraversabilityAnalyzer
 from .traversability import ObstacleInflator
-from .traversability import SupportRatioMask
 from .traversability import TemporalGate
 from .traversability import TraversabilityConfig
 
@@ -260,7 +261,10 @@ class TerrainPipeline:
                 resolution=resolution,
                 height=self.height,
                 width=self.width,
-                config=filter,
+                config=SupportConfig(
+                    support_radius_m=filter.support_radius_m,
+                    support_ratio=filter.support_ratio,
+                ),
                 device=self.device,
             )
 

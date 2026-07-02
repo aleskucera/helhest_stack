@@ -1,10 +1,10 @@
 """Line-of-sight occlusion masking on the 2.5D heightmap.
 
-A sensor-visibility stage, distinct from traversability geometry: inpainting
-fills unmeasured cells with plausible elevations, but cells hidden behind an
-obstacle were never observed. `OcclusionMask` NaN-outs the cost of exactly those
-cells — unmeasured *and* in the sensor's line-of-sight shadow — so a planner
-cannot route through inpainted free space behind walls.
+Inpainting fills unmeasured cells with plausible elevations, but a cell hidden
+behind an obstacle was never observed. `OcclusionMask` NaN-outs the cost of
+exactly those cells — unmeasured *and* in the sensor's line-of-sight shadow — so
+a planner cannot route through inpainted free space behind walls. See also
+`SupportRatioMask` — the other half of "which cells not to trust".
 """
 
 from __future__ import annotations

@@ -1,3 +1,7 @@
+from .confidence import OcclusionConfig
+from .confidence import OcclusionMask
+from .confidence import SupportConfig
+from .confidence import SupportRatioMask
 from .dynamic import DynamicFilterConfig
 from .dynamic import DynamicPointFilter
 from .dynamic import frontier_from_organized
@@ -14,8 +18,6 @@ from .icp import IcpConfig
 from .icp import IcpResult
 from .icp import voxel_downsample
 from .mapping import DeviceMapAccumulator
-from .occlusion import OcclusionConfig
-from .occlusion import OcclusionMask
 from .outlier import OutlierFilterConfig
 from .outlier import RadiusOutlierFilter
 from .outlier import RadiusOutlierFilterConfig
@@ -29,7 +31,6 @@ from .sim import PrimitiveLidar
 from .traversability import FilterConfig
 from .traversability import GeometricTraversabilityAnalyzer
 from .traversability import ObstacleInflator
-from .traversability import SupportRatioMask
 from .traversability import TemporalGate
 from .traversability import TraversabilityConfig
 from .traversability import TraversabilityCosts
@@ -58,6 +59,7 @@ __all__ = [
     "RadiusOutlierFilter",
     "RadiusOutlierFilterConfig",
     "StatisticalOutlierFilter",
+    "SupportConfig",
     "SupportRatioMask",
     "TemporalGate",
     "TerrainMap",

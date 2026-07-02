@@ -6,6 +6,38 @@ wp.init()
 
 
 @wp.kernel
+def support_ratio_mask_kernel(
+    elevation_map: wp.array(dtype=wp.float32, ndim=2),
+    cost_map: wp.array(dtype=wp.float32, ndim=2),
+    map_height: wp.int32,
+    map_width: wp.int32,
+    support_radius: wp.int32,
+    support_ratio: wp.float32,
+    filtered_cost: wp.array(dtype=wp.float32, ndim=2),
+):
+    """Keep cost where the local neighborhood has enough measured cells; else NaN."""
+    r, c = wp.tid()
+    measured = int(0)
+    total = int(0)
+    for dr in range(-support_radius, support_radius + 1):
+        for dc in range(-support_radius, support_radius + 1):
+            nr = r + dr
+            nc = c + dc
+            if nr >= 0 and nr < map_height and nc >= 0 and nc < map_width:
+                val = elevation_map[nr, nc]
+                total += 1
+                if not wp.isnan(val):
+                    measured += 1
+    ratio = float(0.0)
+    if total > 0:
+        ratio = float(measured) / float(total)
+    if ratio >= support_ratio:
+        filtered_cost[r, c] = cost_map[r, c]
+    else:
+        filtered_cost[r, c] = wp.float32(wp.nan)
+
+
+@wp.kernel
 def occlusion_mask_kernel(
     elevation_map: wp.array(dtype=wp.float32, ndim=2),
     raw_elevation: wp.array(dtype=wp.float32, ndim=2),
