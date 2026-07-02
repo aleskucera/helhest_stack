@@ -15,9 +15,9 @@ def selftest_transpose_guard():
     # ny != nx so a transpose also changes shape; two points whose (row, col) are SWAPS of each other
     # with DISTINCT heights -> if the code swapped r<->c, A and B would trade cells (and heights).
     x0, y0, cell, ny, nx = 0.0, 0.0, 0.1, 20, 30
-    pts = np.array(
-        [[1.2, 0.3, 1.5], [0.3, 1.2, 0.4]]  # x=1.2 -> col 12, y=0.3 -> row 3
-    )  # x=0.3 -> col 3,  y=1.2 -> row 12
+    pts = np.array(  # points at cell CENTERS ((c+0.5)*cell): x=1.25 -> col 12, y=0.35 -> row 3
+        [[1.25, 0.35, 1.5], [0.35, 1.25, 0.4]]  # A: row 3, col 12
+    )  # B: x=0.35 -> col 3,  y=1.25 -> row 12
     H, known = rasterize(pts, x0, y0, cell, ny, nx)
     okA = bool(known[3, 12]) and abs(H[3, 12] - 1.5) < 1e-5  # A at row 3, col 12
     okB = bool(known[12, 3]) and abs(H[12, 3] - 0.4) < 1e-5  # B at row 12, col 3
@@ -40,7 +40,29 @@ def selftest_roundtrip():
     return err < 1e-5 and known.all()
 
 
+def selftest_engine_agreement():
+    # The rasterizer must place a point at cell (r, c)'s ENGINE center into array cell (r, c) -- i.e.
+    # agree with Heightmap / GridParams (min-corner: center at x0 + (c+0.5)*cell). This is the check
+    # the self-inverse round-trip could NOT make -- it was self-consistent on the WRONG (cell-origin)
+    # convention, so it stayed green while a real point cloud landed half a cell off.
+    from kinematic_helhest.heightmap import Heightmap
+
+    x0, y0, cell, ny, nx = -1.0, 2.0, 0.5, 8, 10
+    r, c = 2, 3
+    hm = Heightmap(np.zeros((ny, nx), np.float32), (x0, y0), cell)
+    cx, cy = x0 + (c + 0.5) * cell, y0 + (r + 0.5) * cell  # engine center of the target cell
+    ix, iy, tx, ty = hm._grid_coords(cx, cy)  # Heightmap agrees this world point IS cell (r, c)...
+    on_center = ix == c and iy == r and abs(tx) < 1e-6 and abs(ty) < 1e-6
+    H, known = rasterize(np.array([[cx, cy, 1.0]]), x0, y0, cell, ny, nx)
+    hit = np.argwhere(H > 0.5).tolist()
+    ok = on_center and hit == [[r, c]]
+    print(f"  engine center ({cx:.2f},{cy:.2f}) -> rasterize cell {hit} (want [[{r}, {c}]])")
+    print(f"engine-agreement guard  {'OK' if ok else 'FAIL'}")
+    return ok
+
+
 if __name__ == "__main__":
     a = selftest_transpose_guard()
     b = selftest_roundtrip()
-    print("ALL OK" if a and b else "FAILED")
+    c = selftest_engine_agreement()
+    print("ALL OK" if a and b and c else "FAILED")
