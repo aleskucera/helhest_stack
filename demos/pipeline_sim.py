@@ -220,8 +220,9 @@ def _viz(res: dict, out: str) -> None:
     print(f"saved {out}")
 
 
-def box_world(cell: float = 0.06):
+def box_world(cell: float = 0.06, lane_half: float = 1.8):
     """Pillars lining a straight lane -> both ICP features AND planner obstacles.
+    `lane_half` = pillar-row |y| (smaller -> tighter lane -> less drift tolerance).
 
     Returns (scene Heightmap for WarpDriver reality, box_lo, box_hi for the OSDome,
     start (x,y,yaw), goal (x,y)). The SAME pillars drive reality (rasterized to a
@@ -238,8 +239,8 @@ def box_world(cell: float = 0.06):
 
     half, top = 0.3, 2.0
     los, his = [], []
-    for xc in np.arange(1.0, 15.5, 1.5):
-        for yc in (-1.8, 1.8):
+    for xc in np.arange(1.0, 15.5, 1.0):
+        for yc in (-lane_half, lane_half):
             H[(np.abs(XX - xc) <= half) & (np.abs(YY - yc) <= half)] = top
             los.append((xc - half, yc - half, 0.0))
             his.append((xc + half, yc + half, top))
@@ -247,8 +248,47 @@ def box_world(cell: float = 0.06):
     return scene, np.asarray(los, np.float32), np.asarray(his, np.float32), (0.0, 0.0, 0.0), np.array([14.0, 0.0])
 
 
+def narrow_lane_box_world(cell: float = 0.06):
+    """Tight straight lane: threadable at nominal, but lateral localization drift clips
+    a wall as the sensors degrade -> isolates the localization-tolerance boundary."""
+    return box_world(cell, lane_half=1.35)
+
+
+def slalom_box_world(cell: float = 0.06):
+    """A slalom: outer walls (features + boundary) + alternating center gates the robot
+    must weave around. Tight enough that localization drift eventually clips a gate."""
+    from helhest.heightmap import Heightmap
+
+    xlim, ylim = (-2.0, 17.0), (-4.0, 4.0)
+    nx = int(round((xlim[1] - xlim[0]) / cell))
+    ny = int(round((ylim[1] - ylim[0]) / cell))
+    xs = xlim[0] + (np.arange(nx) + 0.5) * cell
+    ys = ylim[0] + (np.arange(ny) + 0.5) * cell
+    XX, YY = np.meshgrid(xs, ys)
+    H = np.zeros((ny, nx), np.float64)
+    los, his, top = [], [], 2.0
+
+    def add(cx, cy, hx, hy):
+        H[(np.abs(XX - cx) <= hx) & (np.abs(YY - cy) <= hy)] = top
+        los.append((cx - hx, cy - hy, 0.0))
+        his.append((cx + hx, cy + hy, top))
+
+    for xc in np.arange(1.0, 15.5, 1.5):  # outer walls
+        for yc in (-2.4, 2.4):
+            add(xc, yc, 0.3, 0.3)
+    for i, xc in enumerate(np.arange(3.0, 14.0, 2.5)):  # alternating center gates
+        add(xc, 1.1 if i % 2 == 0 else -1.1, 0.45, 0.55)
+
+    scene = Heightmap(H, (xlim[0], ylim[0]), cell)
+    return scene, np.asarray(los, np.float32), np.asarray(his, np.float32), (0.0, 0.0, 0.0), np.array([15.0, 0.0])
+
+
+_WORLDS = {"lane": box_world, "narrow": narrow_lane_box_world, "slalom": slalom_box_world}
+
+
 def run_closed_loop(
     device: str = "cuda",
+    world: str = "lane",
     max_frames: int = 400,
     dt: float = 0.1,
     columns: int = 512,
@@ -283,7 +323,7 @@ def run_closed_loop(
 
     rng = np.random.default_rng(seed)
     gyro_bias = np.deg2rad(gyro_bias_dps)
-    scene, box_lo, box_hi, start, goal = box_world()
+    scene, box_lo, box_hi, start, goal = _WORLDS[world]()
     cell = scene.cell
     mu = W.matching_friction(scene)
     drv = WarpDriver(scene, mu, init_pose=tuple(start), device=device)  # REALITY
@@ -405,20 +445,74 @@ def _viz_closed(res: dict, out: str) -> None:
     print(f"saved {out}")
 
 
+def run_stress(device: str = "cuda", seeds: int = 2, max_frames: int = 350) -> dict:
+    """Sweep sensor degradation (lidar dropout + odom noise) on the lane and measure
+    where the pipeline breaks: localization error, contacts, reach-rate."""
+    dropouts = [0.03, 0.2, 0.4, 0.6, 0.8]
+    rows = []
+    for d in dropouts:
+        me, mx, ct, rc = [], [], [], []
+        for s in range(seeds):
+            r = run_closed_loop(
+                device=device, world="lane", max_frames=max_frames, dropout=d,
+                trans_noise=0.08 * (1.0 + 3.0 * d), heading="gyro", seed=s,
+            )
+            me.append(r["err"].mean())
+            mx.append(r["err"].max())
+            ct.append(r["contacts"])
+            rc.append(1.0 if r["reached"] else 0.0)
+            print(f"  dropout={d:.2f} seed={s}: reached={r['reached']} contacts={r['contacts']} "
+                  f"mean-err={r['err'].mean():.2f} max-err={r['err'].max():.2f}")
+        rows.append((d, np.mean(me), np.mean(mx), np.mean(ct), np.mean(rc)))
+    return dict(dropouts=dropouts, rows=np.asarray(rows))
+
+
+def _viz_stress(res: dict, out: str) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    r = res["rows"]  # d, mean_err, max_err, contacts, reach_rate
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5))
+    ax1.plot(r[:, 0], r[:, 1], "-o", color="#1f77b4", label="mean loc-err")
+    ax1.plot(r[:, 0], r[:, 2], "--o", color="#1f77b4", alpha=0.6, label="max loc-err")
+    ax1.set_xlabel("lidar dropout (fraction of returns lost)")
+    ax1.set_ylabel("localization error (m)")
+    ax1.legend()
+    ax1.set_title("Localization error vs. sensor degradation")
+    ax2.plot(r[:, 0], r[:, 4], "-o", color="#2ca02c", label="reach-rate")
+    ax2.plot(r[:, 0], r[:, 3], "-o", color="#d62728", label="mean contacts")
+    ax2.set_xlabel("lidar dropout (fraction of returns lost)")
+    ax2.legend()
+    ax2.set_title("Reach-rate + contacts vs. sensor degradation")
+    fig.tight_layout()
+    fig.savefig(out, dpi=120)
+    print(f"saved {out}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--steps", type=int, default=120)
     ap.add_argument("--columns", type=int, default=512, help="OSDome azimuth columns")
     ap.add_argument("--max-frames", type=int, default=400, help="closed-loop step budget (Stage 2)")
+    ap.add_argument("--world", choices=list(_WORLDS), default="lane", help="closed-loop world")
+    ap.add_argument("--dropout", type=float, default=0.03, help="lidar return dropout (stress knob)")
+    ap.add_argument("--trans-noise", type=float, default=0.08, help="odom translation noise (stress knob)")
     ap.add_argument("--heading", choices=["gyro", "wheel"], default="gyro", help="closed-loop odom heading source")
     ap.add_argument("--yaw-bias", type=float, default=0.12, help="wheel-diff skid under-rotation")
     ap.add_argument("--gyro-bias-dps", type=float, default=0.3, help="gyro constant bias (deg/s)")
     ap.add_argument("--localization-only", action="store_true", help="Stage 1: scripted path, IMU compare")
+    ap.add_argument("--stress", action="store_true", help="sweep sensor degradation -> find the failure boundary")
     ap.add_argument("--shot", default=None)
     args = ap.parse_args()
     wp.init()
-    if args.localization_only:
+    if args.stress:
+        res = run_stress(device=args.device)
+        if args.shot:
+            _viz_stress(res, args.shot)
+    elif args.localization_only:
         res = run(
             device=args.device, steps=args.steps, columns=args.columns,
             yaw_bias=args.yaw_bias, gyro_bias_dps=args.gyro_bias_dps,
@@ -432,7 +526,8 @@ def main() -> None:
             _viz(res, args.shot)
     else:
         res = run_closed_loop(
-            device=args.device, max_frames=args.max_frames, columns=args.columns,
+            device=args.device, world=args.world, max_frames=args.max_frames, columns=args.columns,
+            dropout=args.dropout, trans_noise=args.trans_noise,
             heading=args.heading, yaw_bias=args.yaw_bias, gyro_bias_dps=args.gyro_bias_dps,
         )
         print(
