@@ -45,7 +45,7 @@ class Dashboard:
     def __init__(self, R, halfb, dt, stride):
         self.R, self.halfb, self.dt, self.stride = R, halfb, dt, stride
         self.frames: list[Image.Image] = []
-        self.fig, self.axes = plt.subplots(1, 3, figsize=(16, 5.2))
+        self.fig, self.axes = plt.subplots(2, 2, figsize=(15, 10))
 
     def __call__(self, s):
         if s["f"] % self.stride:
@@ -54,8 +54,8 @@ class Dashboard:
         xmin, ymin = s["xmin"], s["ymin"]
         ex, ey, eyaw = s["est"]
         gx, gy = s["goal"]
-        ax0, ax1, ax2 = self.axes
-        for a in self.axes:
+        ax0, ax1, ax2, ax3 = self.axes.ravel()
+        for a in self.axes.ravel():
             a.clear()
 
         # --- Panel 0: global accumulated map ---
@@ -79,8 +79,8 @@ class Dashboard:
         ax1.imshow(unknown, origin="lower", extent=ext, cmap="Greys", alpha=0.35, vmin=0, vmax=1)
         rx, ry = ex - xmin, ey - ymin
         U = s["planner"].nominal()
-        path = _rollout_nominal(U, rx, ry, eyaw, self.R, self.halfb, self.dt)
-        ax1.plot(path[:, 0], path[:, 1], "-", color="#ffd400", lw=2.5, label="MPPI nominal")
+        path0 = _rollout_nominal(U, rx, ry, eyaw, self.R, self.halfb, self.dt)
+        ax1.plot(path0[:, 0], path0[:, 1], "-", color="#ffd400", lw=2.5, label="MPPI nominal")
         ax1.plot(rx, ry, "o", color="k", ms=7)
         ax1.plot(np.clip(gx - xmin, 0, ww * cell), np.clip(gy - ymin, 0, wh * cell), "*", color="red", ms=16, mec="k")
         ax1.set_aspect("equal")
@@ -107,6 +107,31 @@ class Dashboard:
         ax2.plot(np.clip(gx - xmin, 0, rext[1]), np.clip(gy - ymin, 0, rext[3]), "*", color="lime", ms=16, mec="k")
         ax2.set_aspect("equal")
         ax2.set_title("Cost-to-go V (colour) + best-heading flow")
+
+        # --- Panel 3: MPPI rollout cloud (candidates coloured by CVaR cost) ---
+        pl = s["planner"]
+        ctrl = pl.sim.controlled.numpy()  # [T+1, B, 3] window-local (x, y, yaw)
+        Jc = pl.J_cand.numpy()  # [n_cand] CVaR cost per candidate
+        n_scen, n_cand = pl.n_slip, len(Jc)
+        finite = Jc[np.isfinite(Jc)]
+        lo, hi = (np.percentile(finite, [2, 92]) if len(finite) else (0.0, 1.0))
+        norm = plt.Normalize(lo, max(hi, lo + 1e-6))
+        cmap = plt.cm.viridis_r  # low cost = bright
+        ax3.imshow(np.where(s["elev"] > 0.5, 1.0, np.nan), origin="lower", extent=ext,
+                   cmap="Greys", alpha=0.5, vmin=0, vmax=1)  # walls for context
+        order = np.argsort(-np.nan_to_num(Jc, nan=lo))  # draw high-cost first, low-cost on top
+        show = order[:: max(1, n_cand // 220)]
+        for b in show:
+            path = ctrl[:, b * n_scen, :2]  # scenario 0 (no-slip) of candidate b
+            col = cmap(norm(Jc[b])) if np.isfinite(Jc[b]) else (0.6, 0.6, 0.6, 0.15)
+            ax3.plot(path[:, 0], path[:, 1], "-", color=col, lw=0.7, alpha=0.55)
+        ax3.plot(path0[:, 0], path0[:, 1], "-", color="#ff2d95", lw=2.6, label="nominal")
+        ax3.plot(rx, ry, "o", color="k", ms=7)
+        ax3.set_xlim(0, ww * cell)
+        ax3.set_ylim(0, wh * cell)
+        ax3.set_aspect("equal")
+        ax3.legend(loc="upper left", fontsize=8)
+        ax3.set_title(f"MPPI cloud: {len(show)}/{n_cand} candidates (bright=low cost)")
 
         self.fig.suptitle(
             f"frame {s['f']}   loc-err {s['err']:.2f} m   contacts {s['contacts']}", fontsize=13
