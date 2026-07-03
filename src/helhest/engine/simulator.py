@@ -94,7 +94,7 @@ class BaseSimulator:
         """Allocate the per-rollout state/output/input buffers (shapes shared by both subclasses).
         `requires_grad` covers the state-carrying + diagnostic buffers; controls/start pose follow
         `control_grad` (the differentiable path skips control gradients).
-        `omega_actual` and `init_omega_actual` are never differentiated (tau_motor is a non-diff
+        `current_wheel_omega` and `init_current_wheel_omega` are never differentiated (tau_motor is a non-diff
         struct scalar; promote to wp.array if d(loss)/d(tau) is ever needed)."""
         B, T = self.batch_size, self.n_steps
         rg = requires_grad
@@ -105,10 +105,10 @@ class BaseSimulator:
             self.turning = wp.zeros((T, B), dtype=wp.vec2f, requires_grad=rg)
             self.clearance = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             self.residual = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
-            self.omega_actual = wp.zeros((T + 1, B), dtype=wp.vec3f)
-            self.wheel_omega = wp.zeros((T, B), dtype=wp.vec3f, requires_grad=control_grad)
+            self.current_wheel_omega = wp.zeros((T + 1, B), dtype=wp.vec3f)
+            self.target_wheel_omega = wp.zeros((T, B), dtype=wp.vec3f, requires_grad=control_grad)
             self.start_pose = wp.zeros(B, dtype=wp.vec3f, requires_grad=control_grad)
-            self.init_omega_actual = wp.zeros(B, dtype=wp.vec3f)  # like start_pose
+            self.init_current_wheel_omega = wp.zeros(B, dtype=wp.vec3f)  # like start_pose
 
     def _dilate(
         self,
@@ -178,8 +178,8 @@ class ForwardSimulator(BaseSimulator):
     def rollout_launch(self) -> None:
         """Launch the whole rollout (init + T steps) in ONE fused kernel; NO host I/O.
 
-        `self.wheel_omega` must already hold the controls, `self.start_pose` the init pose,
-        and `self.init_omega_actual` the initial lagged wheel speed (e.g. encoder reading;
+        `self.target_wheel_omega` must already hold the controls, `self.start_pose` the init pose,
+        and `self.init_current_wheel_omega` the initial lagged wheel speed (e.g. encoder reading;
         zeros if starting from rest). Results stay on device -- the graph-capturable core."""
         wp.launch(
             rollout_kernel,
@@ -193,13 +193,13 @@ class ForwardSimulator(BaseSimulator):
                 self.robot,
                 self.solver,
                 self.start_pose,
-                self.init_omega_actual,
-                self.wheel_omega,
+                self.init_current_wheel_omega,
+                self.target_wheel_omega,
             ],
             outputs=[
                 self.controlled,
                 self.derived,
-                self.omega_actual,
+                self.current_wheel_omega,
                 self.loads,
                 self.turning,
                 self.clearance,
@@ -210,12 +210,12 @@ class ForwardSimulator(BaseSimulator):
 
     def rollout(
         self,
-        wheel_omega: np.ndarray,
+        target_wheel_omega: np.ndarray,
         init_pose: tuple[float, float, float],
-        init_omega: np.ndarray | None = None,
+        init_wheel_omega: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """wheel_omega [T, B, 3], init_pose (x,y,yaw) shared by all rollouts.
-        `init_omega` is the initial actual wheel speed (shape [3] or [B, 3]); defaults to
+        """target_wheel_omega [T, B, 3], init_pose (x,y,yaw) shared by all rollouts.
+        `init_wheel_omega` is the initial actual wheel speed (shape [3] or [B, 3]); defaults to
         zeros (wheels at rest). Returns controlled [T+1,B,3] (x,y,yaw),
         derived [T+1,B,3] (z,pitch,roll), clear/resid [T,B]."""
         # Start pose:
@@ -225,15 +225,15 @@ class ForwardSimulator(BaseSimulator):
             )
         )
         # Wheel omega:
-        self.wheel_omega.assign(np.ascontiguousarray(wheel_omega, np.float32))
-        if init_omega is None:
-            self.init_omega_actual.zero_()
+        self.target_wheel_omega.assign(np.ascontiguousarray(target_wheel_omega, np.float32))
+        if init_wheel_omega is None:
+            self.init_current_wheel_omega.zero_()
         else:
-            init_omega_np = np.asarray(init_omega, np.float32)
-            if init_omega_np.ndim == 1:
-                init_omega_np = np.tile(init_omega_np, (self.batch_size, 1))
-            self.init_omega_actual.assign(np.ascontiguousarray(init_omega_np))
-        
+            init_wheel_omega_np = np.asarray(init_wheel_omega, np.float32)
+            if init_wheel_omega_np.ndim == 1:
+                init_wheel_omega_np = np.tile(init_wheel_omega_np, (self.batch_size, 1))
+            self.init_current_wheel_omega.assign(np.ascontiguousarray(init_wheel_omega_np))
+
         # Launch rollout:
         self.rollout_launch()
         return (
@@ -254,7 +254,7 @@ class DifferentiableSimulator(BaseSimulator):
         sim = DifferentiableSimulator(robot, solver, grid, B, T, device)
         sim.set_terrain(elev_stack)              # elev_stack is [B, ny, nx]
         sim.set_friction(mu_stack)               # mu_stack is a [B, ny, nx] wp.array; or set_uniform_friction(value)
-        sim.wheel_omega.assign(...); sim.start_pose.assign(...)
+        sim.target_wheel_omega.assign(...); sim.start_pose.assign(...)
         sim.rollout_taped(my_loss_fn); sim.backward()   # loss_fn defaults to demo_loss
         g = sim.friction.grad.numpy()            # d(loss)/d(friction), shape [B, ny, nx]
 
@@ -264,7 +264,7 @@ class DifferentiableSimulator(BaseSimulator):
     dataset of independent episodes); for one shared terrain, broadcast it across the B slices.
 
     Gradients flow to the raw terrain (`elevation`/`friction`) and the state buffers
-    (`controlled`/`derived`); controls (`wheel_omega`) and `start_pose` are NOT grad-tracked -- we
+    (`controlled`/`derived`); controls (`target_wheel_omega`) and `start_pose` are NOT grad-tracked -- we
     don't differentiate w.r.t. control, and a non-grad leaf simply skips its gradient without
     breaking the terrain chain. The dilation is split: a shared-memory tiled arg-max CONTACT runs
     off-tape (fast, non-diff) and the GATHER runs on-tape (envelope = elevation[contact] + cap), so
@@ -369,8 +369,8 @@ class DifferentiableSimulator(BaseSimulator):
 
     def rollout_taped(self, loss_fn: Callable | None = demo_loss) -> wp.array | None:
         """Record init + T per-step launches (+ optional `loss_fn(self)`) on a fresh tape; return the
-        loss array (or None). `self.wheel_omega`/`self.start_pose` must already hold controls/pose;
-        set `self.init_omega_actual` before calling if the robot is already moving (default: zeros).
+        loss array (or None). `self.target_wheel_omega`/`self.start_pose` must already hold controls/pose;
+        set `self.init_current_wheel_omega` before calling if the robot is already moving (default: zeros).
 
         Two backward paths follow:
           - scalar loss: pass a `loss_fn` (default `demo_loss`); it runs INSIDE the tape so its
@@ -384,7 +384,9 @@ class DifferentiableSimulator(BaseSimulator):
         `d(loss)/d(raw elevation)` connects through envelope = elevation[contact] -- its scatter
         adjoint is the analytical gradient. `elevation`/`friction` must already be set."""
         self._contact()  # off-tape arg-max -> best_k, fresh for the current elevation
-        wp.copy(self.omega_actual[0], self.init_omega_actual) # seed omega_actual[0] off-tape: boundary condition, not differentiated.
+        wp.copy(
+            self.current_wheel_omega[0], self.init_current_wheel_omega
+        )  # seed current_wheel_omega[0] off-tape: boundary condition, not differentiated.
         self.tape = wp.Tape()
         with self.tape:
             self._gather()  # on-tape: envelope = elev[contact] + cap; scatter adjoint -> d/d elevation
@@ -406,13 +408,13 @@ class DifferentiableSimulator(BaseSimulator):
                         self.grid,
                         self.robot,
                         self.solver,
-                        self.wheel_omega[t],
-                        self.omega_actual[t],
+                        self.target_wheel_omega[t],
+                        self.current_wheel_omega[t],
                         self.controlled[t],
                         self.derived[t],
                     ],
                     outputs=[
-                        self.omega_actual[t + 1],
+                        self.current_wheel_omega[t + 1],
                         self.controlled[t + 1],
                         self.derived[t + 1],
                         self.loads[t],

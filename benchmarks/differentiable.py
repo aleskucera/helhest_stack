@@ -16,7 +16,7 @@ import warp as wp
 from helhest import dynamics
 from helhest import friction
 from helhest import heightmap as hmmod
-from helhest.control.reference import _to_wheel_omega
+from helhest.control.reference import _to_target_wheel_omega
 from helhest.engine import DifferentiableSimulator
 from helhest.engine import GridParams
 
@@ -55,8 +55,10 @@ def _build(scene, mu, B, T, device):
             device=device,
         )
     )
-    sim.wheel_omega.assign(
-        np.ascontiguousarray(_to_wheel_omega(np.full((B, T, 2), 2.0, np.float32)), np.float32)
+    sim.target_wheel_omega.assign(
+        np.ascontiguousarray(
+            _to_target_wheel_omega(np.full((B, T, 2), 2.0, np.float32)), np.float32
+        )
     )
     sim.start_pose.assign(np.tile(np.asarray((0.0, 0.0, 0.0), np.float32), (B, 1)))
     return sim

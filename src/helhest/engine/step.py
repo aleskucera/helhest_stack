@@ -86,15 +86,17 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
 
 
 @wp.func
-def motor_lag_step(omega_actual: wp.vec3, omega_cmd: wp.vec3, dt: float, tau: float) -> wp.vec3:
-    """First-order actuator lag: advance omega_actual one timestep toward omega_cmd.
+def motor_lag_step(
+    current_wheel_omega: wp.vec3, target_wheel_omega: wp.vec3, dt: float, tau: float
+) -> wp.vec3:
+    """First-order actuator lag: advance current_wheel_omega one timestep toward target_wheel_omega.
 
     alpha = min(dt / tau, 1.0) so the update never overshoots. When tau == 0
-    (the default) alpha clamps to 1.0 and omega_actual = omega_cmd immediately,
+    (the default) alpha clamps to 1.0 and current_wheel_omega = target_wheel_omega immediately,
     reproducing the original instantaneous-tracking behavior.
     """
     alpha = wp.min(dt / wp.max(tau, 1e-6), 1.0)
-    return omega_actual + alpha * (omega_cmd - omega_actual)
+    return current_wheel_omega + alpha * (target_wheel_omega - current_wheel_omega)
 
 
 @wp.func
@@ -552,11 +554,11 @@ def step_kernel(
     grid: Grid,
     robot: Robot,
     solver: Solver,
-    omega_cmd: wp.array(dtype=wp.vec3),  # [B] commanded (wL, wR, w_rear) this step
-    omega_actual_in: wp.array(dtype=wp.vec3),  # [B] lagged omega entering this step
+    target_wheel_omega: wp.array(dtype=wp.vec3),  # [B] commanded (wL, wR, w_rear) this step
+    current_wheel_omega_in: wp.array(dtype=wp.vec3),  # [B] lagged omega entering this step
     controlled: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) current state
     derived: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) current state
-    omega_actual_out: wp.array(dtype=wp.vec3),  # [B] lagged omega after this step -> written
+    current_wheel_omega_out: wp.array(dtype=wp.vec3),  # [B] lagged omega after this step -> written
     controlled_next: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) settled NEW state -> written
     derived_next: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) NEW state -> written
     loads_out: wp.array(dtype=wp.vec3),  # [B] N_i of the NEW state
@@ -566,8 +568,10 @@ def step_kernel(
 ):
     tid = wp.tid()
     tc = derived[tid]
-    omega = motor_lag_step(omega_actual_in[tid], omega_cmd[tid], solver.dt, solver.tau_motor)
-    omega_actual_out[tid] = omega
+    omega = motor_lag_step(
+        current_wheel_omega_in[tid], target_wheel_omega[tid], solver.dt, solver.tau_motor
+    )
+    current_wheel_omega_out[tid] = omega
     pose_next = step_predict(
         envelope,
         friction,
@@ -605,11 +609,11 @@ def step_kernel_bt(
     grid: Grid,
     robot: Robot,
     solver: Solver,
-    omega_cmd: wp.array(dtype=wp.vec3),  # [B] commanded (wL, wR, w_rear) this step
-    omega_actual_in: wp.array(dtype=wp.vec3),  # [B] lagged omega entering this step
+    target_wheel_omega: wp.array(dtype=wp.vec3),  # [B] commanded (wL, wR, w_rear) this step
+    current_wheel_omega_in: wp.array(dtype=wp.vec3),  # [B] lagged omega entering this step
     controlled: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) current state
     derived: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) current state
-    omega_actual_out: wp.array(dtype=wp.vec3),  # [B] lagged omega after this step -> written
+    current_wheel_omega_out: wp.array(dtype=wp.vec3),  # [B] lagged omega after this step -> written
     controlled_next: wp.array(dtype=wp.vec3),  # [B] -> written
     derived_next: wp.array(dtype=wp.vec3),
     loads_out: wp.array(dtype=wp.vec3),
@@ -620,8 +624,10 @@ def step_kernel_bt(
     """Batched-terrain step: rollout tid steps on its own slices; settle uses the full 3D array."""
     tid = wp.tid()
     tc = derived[tid]
-    omega = motor_lag_step(omega_actual_in[tid], omega_cmd[tid], solver.dt, solver.tau_motor)
-    omega_actual_out[tid] = omega
+    omega = motor_lag_step(
+        current_wheel_omega_in[tid], target_wheel_omega[tid], solver.dt, solver.tau_motor
+    )
+    current_wheel_omega_out[tid] = omega
     pose_next = step_predict(
         envelope[tid],
         friction[tid],
@@ -661,18 +667,20 @@ def rollout_kernel(
     robot: Robot,
     solver: Solver,
     start_pose: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw)
-    init_omega_actual: wp.array(dtype=wp.vec3),  # [B] initial lagged omega (e.g. encoder reading)
-    wheel_omega: wp.array2d(dtype=wp.vec3),  # [T, B] commanded (wL, wR, w_rear)
+    init_current_wheel_omega: wp.array(
+        dtype=wp.vec3
+    ),  # [B] initial lagged omega (e.g. encoder reading)
+    target_wheel_omega: wp.array2d(dtype=wp.vec3),  # [T, B] commanded (wL, wR, w_rear)
     controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] (x, y, yaw)
     derived: wp.array2d(dtype=wp.vec3),  # [T+1, B] (z, pitch, roll)
-    omega_actual_out: wp.array2d(dtype=wp.vec3),  # [T+1, B] realized omega after lag
+    current_wheel_omega_out: wp.array2d(dtype=wp.vec3),  # [T+1, B] realized omega after lag
     loads_out: wp.array2d(dtype=wp.vec3),  # [T, B]
     turn_out: wp.array2d(dtype=wp.vec2),  # [T, B]
     clear_out: wp.array2d(dtype=float),  # [T, B]
     resid_out: wp.array2d(dtype=float),  # [T, B]
 ):
     """FORWARD-ONLY whole-rollout fusion: one thread per rollout walks all n_steps steps,
-    carrying the state (pc, tc, oa) in registers instead of round-tripping it through
+    carrying the state (pc, tc, current) in registers instead of round-tripping it through
     global memory between per-step launches (~1.2x faster than init_state_kernel +
     n_steps*step_kernel). This is the hot planning path; the differentiable/calibration
     path keeps the per-step step_kernel (the register carry is NOT auto-diffable --
@@ -686,10 +694,10 @@ def rollout_kernel(
     pc = start_pose[b]
     z0 = sample_field(envelope, grid, pc[0], pc[1]) + robot.wheel_radius
     tc = settle(envelope, grid, robot, solver, pc, wp.vec3(z0, 0.0, 0.0))
-    oa = init_omega_actual[b]  # initial lagged omega carried in registers
+    current = init_current_wheel_omega[b]  # initial lagged omega carried in registers
     controlled[0, b] = pc
     derived[0, b] = tc
-    omega_actual_out[0, b] = oa
+    current_wheel_omega_out[0, b] = current
 
     for t in range(n_steps):
         x = pc[0]
@@ -713,11 +721,11 @@ def rollout_kernel(
         x_icr = grip_x / total_grip  # grip-weighted ICR offset
         alpha = 1.0 + solver.k_turn * total_grip / (robot.gravity * robot.mass)  # turn resistance
 
-        # Apply lag first (update-then-use): tau_motor=0 gives oa = omega_cmd[t] exactly.
-        oa = motor_lag_step(oa, wheel_omega[t, b], solver.dt, solver.tau_motor)
-        omega_actual_out[t + 1, b] = oa
-        vx = robot.wheel_radius * (oa[0] + oa[1]) / 2.0
-        wz = robot.wheel_radius * (oa[1] - oa[0]) / (2.0 * robot.half_track * alpha)
+        # Apply lag first (update-then-use): tau_motor=0 gives current = target_wheel_omega[t] exactly.
+        current = motor_lag_step(current, target_wheel_omega[t, b], solver.dt, solver.tau_motor)
+        current_wheel_omega_out[t + 1, b] = current
+        vx = robot.wheel_radius * (current[0] + current[1]) / 2.0
+        wz = robot.wheel_radius * (current[1] - current[0]) / (2.0 * robot.half_track * alpha)
         vy = -x_icr * wz
         vw = R * wp.vec3(vx, vy, 0.0)
         xn = x + vw[0] * solver.dt

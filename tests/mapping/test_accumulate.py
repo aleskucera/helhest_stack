@@ -121,7 +121,9 @@ def test_accumulator_multiframe() -> None:
         survivors = np.vstack([prev_map[carve.astype(bool)], pts[valid.astype(bool)]])
         inr = (survivors[:, 0] - center[0]) ** 2 + (survivors[:, 1] - center[1]) ** 2 <= RADIUS**2
         ref_cells = _voxel_cells(survivors[inr], center)
-        assert _voxel_cells(new.numpy(), center) == ref_cells, "multiframe voxels diverge from numpy"
+        assert (
+            _voxel_cells(new.numpy(), center) == ref_cells
+        ), "multiframe voxels diverge from numpy"
 
         prev_map = new.numpy()
         map_wp = new

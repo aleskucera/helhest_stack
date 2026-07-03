@@ -19,6 +19,7 @@ With no ``--robot`` the script builds a box+cylinder proxy from the exported geo
 constants, so it runs standalone. Frame convention matches the sim: X-forward, Y-left,
 Z-up, meters/radians; wheels spin about body Y by default (``--wheel-axis``).
 """
+
 from __future__ import annotations
 
 import argparse

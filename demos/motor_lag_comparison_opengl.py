@@ -41,26 +41,23 @@ from helhest.viz.render import build_terrain
 # ── scenario ──────────────────────────────────────────────────────────────────
 DT = 0.1  # [s]
 PHASES = [
-    (30, [2.5,  2.5, 2.5]),   # straight forward
+    (30, [2.5, 2.5, 2.5]),  # straight forward
     (30, [2.5, -1.0, 0.75]),  # asymmetric turn left
-    (30, [2.5,  2.5, 2.5]),   # straight forward again
+    (30, [2.5, 2.5, 2.5]),  # straight forward again
 ]
 PHASE_NAMES = ["Phase 1: straight", "Phase 2: turn", "Phase 3: straight"]
-TAUS   = [0.0, 0.5]
+TAUS = [0.0, 0.5]
 LABELS = ["tau = 0.0 s  (instantaneous)", "tau = 0.5 s  (lagged)"]
 # trail / robot body colours (steelblue, crimson)
 COLORS_RGB = [(0.27, 0.51, 0.71), (0.86, 0.08, 0.24)]
 XLIM = (-2.0, 14.0)
-YLIM = (-8.0,  8.0)
+YLIM = (-8.0, 8.0)
 
 PW, PH = 1100, 820  # window pixel size
 
 
 def _build_setpoints() -> np.ndarray:
-    return np.vstack([
-        np.tile(np.asarray(cmd, np.float64), (n, 1))
-        for n, cmd in PHASES
-    ])
+    return np.vstack([np.tile(np.asarray(cmd, np.float64), (n, 1)) for n, cmd in PHASES])
 
 
 def _run_warp(
@@ -91,13 +88,13 @@ def _run_warp(
 def _pose_to_st(pose3: np.ndarray, der3: np.ndarray) -> SimpleNamespace:
     x, y, yaw = float(pose3[0]), float(pose3[1]), float(pose3[2])
     z, pitch, roll = float(der3[0]), float(der3[1]), float(der3[2])
-    cy, sy = np.cos(yaw),   np.sin(yaw)
+    cy, sy = np.cos(yaw), np.sin(yaw)
     cp, sp = np.cos(pitch), np.sin(pitch)
-    cr, sr = np.cos(roll),  np.sin(roll)
-    Rz = np.array([[ cy, -sy, 0], [ sy,  cy, 0], [0, 0, 1]], np.float32)
-    Ry = np.array([[ cp,  0, sp], [  0,  1, 0], [-sp, 0, cp]], np.float32)
-    Rx = np.array([[1,  0,   0], [0, cr, -sr], [0, sr,  cr]], np.float32)
-    R  = (Rz @ Ry @ Rx).astype(np.float32)
+    cr, sr = np.cos(roll), np.sin(roll)
+    Rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]], np.float32)
+    Ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]], np.float32)
+    Rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]], np.float32)
+    R = (Rz @ Ry @ Rx).astype(np.float32)
     return SimpleNamespace(x=x, y=y, yaw=yaw, valid=True, place={"z": z, "R": R})
 
 
@@ -107,7 +104,7 @@ def _view(cam: list[float], st: SimpleNamespace, w: int, h: int) -> None:
 
     az, el, dist = cam
     tgt = np.array([st.x, st.y, st.place["z"]])
-    d   = np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
+    d = np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
     eye = tgt + dist * d
     gl.glViewport(0, 0, w, h)
     gl.glMatrixMode(gl.GL_PROJECTION)
@@ -171,7 +168,7 @@ def _cbs(cam: list[float], ms: dict) -> tuple:
     def on_cursor(w_, x, y):
         if ms["down"]:
             cam[0] -= (x - ms["x"]) * 0.01
-            cam[1]  = float(np.clip(cam[1] + (y - ms["y"]) * 0.01, 0.05, 1.5))
+            cam[1] = float(np.clip(cam[1] + (y - ms["y"]) * 0.01, 0.05, 1.5))
             ms["x"], ms["y"] = x, y
 
     def on_scroll(w_, dx, dy):
@@ -206,8 +203,8 @@ def run(device: str = "cuda:0", speed: float = 1.0) -> None:
     setpoints = _build_setpoints()
     T = len(setpoints)
     scene = hm_mod.flat(xlim=XLIM, ylim=YLIM)
-    mu    = friction_mod.uniform(0.8, xlim=XLIM, ylim=YLIM)
-    grid  = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
+    mu = friction_mod.uniform(0.8, xlim=XLIM, ylim=YLIM)
+    grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
 
     print("Pre-computing Warp trajectories …")
     trajectories: dict[float, tuple[np.ndarray, np.ndarray]] = {}
@@ -221,7 +218,7 @@ def run(device: str = "cuda:0", speed: float = 1.0) -> None:
     phase_x = [float(ctrl0[idx, 0]) for idx in phase_step_ends[1:-1]]
 
     # ── meshes ───────────────────────────────────────────────────────────────
-    terrain  = build_terrain(scene)
+    terrain = build_terrain(scene)
     base_robot = build_robot()
     robots = [_make_robot_colored(base_robot, c) for c in COLORS_RGB]
 
@@ -237,7 +234,7 @@ def run(device: str = "cuda:0", speed: float = 1.0) -> None:
     _init_gl()
 
     cam = [-2.1, 0.85, 12.0]
-    ms  = {"down": False, "x": 0.0, "y": 0.0}
+    ms = {"down": False, "x": 0.0, "y": 0.0}
     bcb, ccb, scb = _cbs(cam, ms)
     glfw.set_mouse_button_callback(win, bcb)
     glfw.set_cursor_pos_callback(win, ccb)
@@ -245,11 +242,11 @@ def run(device: str = "cuda:0", speed: float = 1.0) -> None:
 
     # ── animation state ──────────────────────────────────────────────────────
     # stage 0: tau=0 animating  |  stage 1: tau=0.5 animating over frozen tau=0 trail
-    stage        = 0
-    t            = 0
-    trails       = [[], []]          # trails[0] = tau=0,  trails[1] = tau=0.5
-    frame_dt     = DT / max(speed, 1e-3)
-    t_next       = time.monotonic()
+    stage = 0
+    t = 0
+    trails = [[], []]  # trails[0] = tau=0,  trails[1] = tau=0.5
+    frame_dt = DT / max(speed, 1e-3)
+    t_next = time.monotonic()
 
     while not glfw.window_should_close(win):
         glfw.poll_events()
@@ -260,7 +257,7 @@ def run(device: str = "cuda:0", speed: float = 1.0) -> None:
 
         now = time.monotonic()
         if now >= t_next:
-            t     += 1
+            t += 1
             t_next = now + frame_dt
             if t > T:
                 # transition or loop
@@ -273,10 +270,10 @@ def run(device: str = "cuda:0", speed: float = 1.0) -> None:
                     trails[0].clear()
                     trails[1].clear()
 
-        tau   = TAUS[stage]
+        tau = TAUS[stage]
         ctrl, der = trajectories[tau]
         t_idx = min(t, T)
-        st    = _pose_to_st(ctrl[t_idx], der[t_idx])
+        st = _pose_to_st(ctrl[t_idx], der[t_idx])
         trails[stage].append((st.x, st.y, st.place["z"] + 0.03))
 
         phase_label = _current_phase(t_idx)

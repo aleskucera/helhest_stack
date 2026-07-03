@@ -37,7 +37,7 @@ class State:
     valid: bool  # not high-centered (chassis clears)
     alpha: float = float("nan")  # turning params USED to reach this state
     x_icr: float = float("nan")  # (nan for an initial settled-only state)
-    omega_actual: np.ndarray | None = None  # lagged wheel speed that was used for this step
+    current_wheel_omega: np.ndarray | None = None  # lagged wheel speed that was used for this step
 
     @property
     def pose7(self):
@@ -54,13 +54,15 @@ class State:
         return float(self.loads @ self.place["normals"][:, 2])
 
 
-def _settle(x, y, yaw, surf, hm, init=None, alpha=float("nan"), x_icr=float("nan"), omega_actual=None):
+def _settle(
+    x, y, yaw, surf, hm, init=None, alpha=float("nan"), x_icr=float("nan"), current_wheel_omega=None
+):
     """Project a planar pose onto the terrain -> valid State."""
     place = placement.settle(x, y, yaw, surf, init=init)
     N = placement.normal_loads(place, x, y)
     cc, _ = placement.chassis_clearance(place["R"], x, y, place["z"], hm)
     cmin = float(cc.min())
-    return State(x, y, yaw, place, N, cmin, cmin >= 0.0, alpha, x_icr, omega_actual)
+    return State(x, y, yaw, place, N, cmin, cmin >= 0.0, alpha, x_icr, current_wheel_omega)
 
 
 def make_state(x, y, yaw, surf, hm):
@@ -81,10 +83,12 @@ def turning_of(state, mu_field, k, alpha=1.0, x_icr=0.0):
     return turning.turning_params(mu_i, state.loads, k)
 
 
-def _motor_lag_step(omega_actual: np.ndarray, omega_cmd: np.ndarray, dt: float, tau: float) -> np.ndarray:
+def _motor_lag_step(
+    current_wheel_omega: np.ndarray, target_wheel_omega: np.ndarray, dt: float, tau: float
+) -> np.ndarray:
     """First-order actuator lag: mirrors the device motor_lag_step @wp.func exactly."""
     alpha = min(dt / max(tau, 1e-6), 1.0)
-    return omega_actual + alpha * (omega_cmd - omega_actual)
+    return current_wheel_omega + alpha * (target_wheel_omega - current_wheel_omega)
 
 
 def step(
@@ -100,28 +104,37 @@ def step(
     R=WHEEL_RADIUS,
     b=HALF_TRACK,
     tau_motor: float = 0.0,
-    omega_actual: np.ndarray | None = None,
+    current_wheel_omega: np.ndarray | None = None,
 ):
     """Advance one timestep: valid State + wheel speeds [L,R,rear] -> valid State."""
     omega = np.asarray(omega, dtype=np.float64)
-    if omega_actual is None:
-        omega_actual = np.zeros(3, dtype=np.float64)
+    if current_wheel_omega is None:
+        current_wheel_omega = np.zeros(3, dtype=np.float64)
 
     alpha_t, xicr_t = turning_of(state, mu_field, k, alpha, x_icr)
 
-    # Apply lag first (update-then-use): tau_motor=0 gives omega_eff = omega_cmd exactly,
+    # Apply lag first (update-then-use): tau_motor=0 gives current_wheel_omega_eff = target_wheel_omega exactly,
     # preserving backward compatibility with the original instantaneous-tracking model.
-    omega_eff = _motor_lag_step(omega_actual, omega, dt, tau_motor)
+    current_wheel_omega_eff = _motor_lag_step(current_wheel_omega, omega, dt, tau_motor)
 
     # Predict: project the body velocity through the CURRENT orientation, step.
-    vx, vy, wz = twist.wheel_twist(omega_eff, alpha_t, xicr_t, R, b)
+    vx, vy, wz = twist.wheel_twist(current_wheel_omega_eff, alpha_t, xicr_t, R, b)
     v_world = state.place["R"] @ np.array([vx, vy, 0.0])
     x = state.x + v_world[0] * dt
     y = state.y + v_world[1] * dt
     yaw = state.yaw + wz * dt
 
     # Project: settle the new pose -> next valid State (warm-started).
-    # omega_eff is the filter state for the next step (carry-through for the lag chain).
+    # current_wheel_omega_eff is the filter state for the next step (carry-through for the lag chain).
     init = (state.place["z"], state.place["pitch"], state.place["roll"])
-    return _settle(x, y, yaw, surf, hm, init=init, alpha=alpha_t, x_icr=xicr_t,
-                   omega_actual=omega_eff)
+    return _settle(
+        x,
+        y,
+        yaw,
+        surf,
+        hm,
+        init=init,
+        alpha=alpha_t,
+        x_icr=xicr_t,
+        current_wheel_omega=current_wheel_omega_eff,
+    )

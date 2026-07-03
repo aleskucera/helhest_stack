@@ -51,6 +51,7 @@ def voxel_downsample(points: np.ndarray, voxel_size: float, *, device) -> np.nda
     ds, n = vg.downsample(pw, len(points))
     return ds.numpy()[:n].astype(points.dtype, copy=False)
 
+
 SENSOR = np.array([0.0, 0.0, 0.5])  # stationary sensor origin
 WALL_X = 10.0  # back wall distance (m)
 PERSON_X = 5.0  # person's distance from the sensor (m)

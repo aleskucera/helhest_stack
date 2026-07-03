@@ -1,12 +1,12 @@
 """GPU-resident MPPI inner loop (sample -> rollout -> cost -> reweight) + CUDA graph.
 
-The numpy MPPI loop is host-bound: per refine ~15 ms of numpy (cost, noise, wheel_omega)
+The numpy MPPI loop is host-bound: per refine ~15 ms of numpy (cost, noise, target_wheel_omega)
 vs ~2.7 ms of GPU work. These Warp kernels move the whole refine onto the device so
 nothing but the executed pose ever comes back, and the refine is captured as a CUDA
 graph and replayed. `reference._cost` stays the numpy oracle for the parity test.
 
 Kernels (all suffixed _kernel):
-  _sample_wheel_omega  spline-knot noise -> Ub -> writes the rollout's wheel_omega buffer (rear -> 0)
+  _sample_target_wheel_omega  spline-knot noise -> Ub -> writes the rollout's target_wheel_omega buffer (rear -> 0)
   _cost          per-rollout scalar cost J[B] (cost-to-go goal V^2 + graded-infeasible + effort/smooth)
   _minmax/_bisect_*/_count_below/_elite_u   CEM reweight (top-k elite mean) of U, on device
   _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
@@ -154,7 +154,7 @@ def _knot_bracket(t: int, horizon: int, n_knots: int):
 
 
 @wp.kernel
-def _sample_wheel_omega_kernel(
+def _sample_target_wheel_omega_kernel(
     U: wp.array2d(dtype=float),
     sigma: float,
     sigma_knot: float,
@@ -165,16 +165,16 @@ def _sample_wheel_omega_kernel(
     n_scen: int,  # slip scenarios per candidate (= n_slip; 1 = non-robust)
     slip: wp.array2d(dtype=float),  # [n_scen, 2] wheel-speed retention; scenario 0 = (1, 1)
     seed: wp.array(dtype=int),
-    wheel_omega: wp.array2d(dtype=wp.vec3),
+    target_wheel_omega: wp.array2d(dtype=wp.vec3),
 ):
     # rollout r = candidate b * n_scen + scenario k: all scenarios of a candidate share the SAME
     # sampled control (noise keyed on b), then scenario k scales the wheels by its slip. So the cost
     # sees how each candidate holds up across the disturbance. n_scen=1 -> b=r, slip=(1,1) (today).
     t, r = wp.tid()
-    n_cand = wheel_omega.shape[1] // n_scen
+    n_cand = target_wheel_omega.shape[1] // n_scen
     b = r // n_scen
     k = r % n_scen
-    horizon = wheel_omega.shape[0]
+    horizon = target_wheel_omega.shape[0]
     knot_lo, knot_hi, frac = _knot_bracket(t, horizon, n_knots)
     wheel_l = U[t, 0]
     wheel_r = U[t, 1]
@@ -210,7 +210,7 @@ def _sample_wheel_omega_kernel(
         wheel_l += sigma * wp.randn(jitter)
         wheel_r += sigma * wp.randn(jitter)
     # apply scenario k's wheel slip, then clamp to the forward-arc box (wmin >= 0 -> no reverse)
-    wheel_omega[t, r] = wp.vec3(
+    target_wheel_omega[t, r] = wp.vec3(
         wp.clamp(wheel_l * slip[k, 0], wmin, wmax), wp.clamp(wheel_r * slip[k, 1], wmin, wmax), 0.0
     )
 
@@ -221,7 +221,7 @@ def _cost_kernel(
     derived: wp.array2d(dtype=wp.vec3),
     clearance: wp.array2d(dtype=float),
     residual: wp.array2d(dtype=float),
-    wheel_omega: wp.array2d(dtype=wp.vec3),  # Ub in components [0], [1]
+    target_wheel_omega: wp.array2d(dtype=wp.vec3),  # Ub in components [0], [1]
     goal: wp.array(dtype=float),  # [2] world goal (device -> graph-safe, changes per replan)
     grid: Grid,  # geometry for sampling lattice_field at the rollout pose
     lattice_field: wp.array3d(
@@ -267,7 +267,7 @@ def _cost_kernel(
     prev_l = float(0.0)
     prev_r = float(0.0)
     for t in range(horizon):
-        wheels = wheel_omega[t, r]  # (wL, wR)
+        wheels = target_wheel_omega[t, r]  # (wL, wR)
         sp2 = wheels[0] * wheels[0] + wheels[1] * wheels[1]
         effort_sum += sp2
         if t > 0:
@@ -393,7 +393,7 @@ def _elite_u_kernel(
     J_cand: wp.array(dtype=float),
     tau: wp.array(dtype=float),
     count: wp.array(dtype=float),
-    wheel_omega: wp.array2d(dtype=wp.vec3),
+    target_wheel_omega: wp.array2d(dtype=wp.vec3),
     n_scen: int,
     wmin: float,
     wmax: float,
@@ -404,7 +404,9 @@ def _elite_u_kernel(
     elite_sum = float(0.0)
     for b in range(n_cand):
         if J_cand[b] <= tau[0]:  # elite candidate
-            elite_sum += wheel_omega[t, b * n_scen][wheel]  # scenario 0 = the un-slipped control
+            elite_sum += target_wheel_omega[t, b * n_scen][
+                wheel
+            ]  # scenario 0 = the un-slipped control
     U[t, wheel] = wp.clamp(elite_sum / count[0], wmin, wmax)  # unweighted elite mean (forward arcs)
 
 
@@ -531,7 +533,7 @@ class MppiGpu:
         self._prof.mark(0)
         wp.launch(_bump_seed_kernel, 1, inputs=[self.seed], device=self.device)
         wp.launch(
-            _sample_wheel_omega_kernel,
+            _sample_target_wheel_omega_kernel,
             (self.horizon, self.n_rollouts),
             inputs=[
                 self.U,
@@ -545,7 +547,7 @@ class MppiGpu:
                 self.slip,
                 self.seed,
             ],
-            outputs=[self.sim.wheel_omega],
+            outputs=[self.sim.target_wheel_omega],
             device=self.device,
         )
         self._prof.mark(1)  # sample done
@@ -559,7 +561,7 @@ class MppiGpu:
                 self.sim.derived,
                 self.sim.clearance,
                 self.sim.residual,
-                self.sim.wheel_omega,
+                self.sim.target_wheel_omega,
                 self.goal,
                 self.lattice_grid,
                 self.lattice_field,
@@ -644,7 +646,7 @@ class MppiGpu:
                 self.J_cand,
                 self.tau,
                 self.count,
-                self.sim.wheel_omega,
+                self.sim.target_wheel_omega,
                 self.n_slip,
                 self.sampling.wmin,
                 self.sampling.wmax,

@@ -18,7 +18,7 @@ import numpy as np
 import warp as wp
 from helhest import friction
 from helhest import heightmap as hmmod
-from helhest.control.reference import _to_wheel_omega
+from helhest.control.reference import _to_target_wheel_omega
 from helhest.engine import ForwardSimulator
 from helhest.engine import Grid
 from helhest.engine import GridParams
@@ -127,7 +127,7 @@ def check_end_to_end(device, B=16, T=25):
     mu = friction.uniform(0.8)  # default extent matches box_scene
     params = SolverParams(dt=0.05, k_turn=2.0, newton_iters=12)
     start = (-1.0, 0.0, 0.0)
-    wheel_omega = _to_wheel_omega(np.full((B, T, 2), 2.0, np.float32))
+    target_wheel_omega = _to_target_wheel_omega(np.full((B, T, 2), 2.0, np.float32))
 
     host = ForwardSimulator(
         RobotParams(),
@@ -141,14 +141,14 @@ def check_end_to_end(device, B=16, T=25):
         wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
     )
     host.set_friction(mu)
-    ph, _, ch, rh = host.rollout(wheel_omega, start)
+    ph, _, ch, rh = host.rollout(target_wheel_omega, start)
 
     H_wp = wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
     grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
     dev = ForwardSimulator(RobotParams(), params, grid, B, T, device)
     dev.set_terrain(H_wp)
     dev.set_uniform_friction(0.8)
-    pd, _, cd, rd = dev.rollout(wheel_omega, start)
+    pd, _, cd, rd = dev.rollout(target_wheel_omega, start)
 
     dp = float(np.abs(ph - pd).max())
     dc = float(np.abs(ch - cd).max())

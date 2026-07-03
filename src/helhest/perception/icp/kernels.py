@@ -309,10 +309,22 @@ def se3_update_kernel(
         v_mat = ident + b * w_mat + c * w2
     tvec = v_mat @ v
     step = wp.mat44(
-        rot[0, 0], rot[0, 1], rot[0, 2], tvec[0],
-        rot[1, 0], rot[1, 1], rot[1, 2], tvec[1],
-        rot[2, 0], rot[2, 1], rot[2, 2], tvec[2],
-        0.0, 0.0, 0.0, 1.0,
+        rot[0, 0],
+        rot[0, 1],
+        rot[0, 2],
+        tvec[0],
+        rot[1, 0],
+        rot[1, 1],
+        rot[1, 2],
+        tvec[1],
+        rot[2, 0],
+        rot[2, 1],
+        rot[2, 2],
+        tvec[2],
+        0.0,
+        0.0,
+        0.0,
+        1.0,
     )
     pose[0] = step @ pose[0]
     dr[0] = theta

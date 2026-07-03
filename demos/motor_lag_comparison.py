@@ -31,43 +31,40 @@ from helhest.engine import GridParams
 # --- scenario parameters ---
 DT = 0.1  # [s] control timestep
 PHASES = [
-    # (n_steps, omega_cmd [L, R, rear])
-    (30, [2.5,  2.5, 2.5]),   # straight forward  -- shows acceleration ramp-up
+    # (n_steps, target_wheel_omega [L, R, rear])
+    (30, [2.5, 2.5, 2.5]),  # straight forward  -- shows acceleration ramp-up
     (30, [2.5, -1.0, 0.75]),  # asymmetric turn left -- shows turn-response delay
-    (30, [2.5,  2.5, 2.5]),   # straight forward again -- lag from turn exit compounds
+    (30, [2.5, 2.5, 2.5]),  # straight forward again -- lag from turn exit compounds
 ]
 
-TAUS   = [0.0, 0.5]
+TAUS = [0.0, 0.5]
 COLORS = ["steelblue", "crimson"]
 LABELS = ["tau = 0 s  (instantaneous)", "tau = 0.5 s  (lagged)"]
 
 # terrain large enough that the robot never leaves the grid
 XLIM = (-2.0, 14.0)
-YLIM = (-8.0,  8.0)
+YLIM = (-8.0, 8.0)
 
 
 def _build_setpoints() -> np.ndarray:
     """Concatenate phase blocks into a [T, 3] setpoints array."""
-    blocks = [
-        np.tile(np.asarray(cmd, np.float64), (n, 1))
-        for n, cmd in PHASES
-    ]
+    blocks = [np.tile(np.asarray(cmd, np.float64), (n, 1)) for n, cmd in PHASES]
     return np.vstack(blocks)
 
 
-def _omega_actual_log(setpoints: np.ndarray, tau: float) -> np.ndarray:
-    """Compute the omega_actual trajectory analytically (left wheel only).
+def _current_wheel_omega_log(setpoints: np.ndarray, tau: float) -> np.ndarray:
+    """Compute the current_wheel_omega trajectory analytically (left wheel only).
 
     Mirrors the device motor_lag_step @wp.func: alpha = min(dt/max(tau, 1e-6), 1).
     Returns shape [T] — effective left-wheel speed used at each step.
     """
     alpha = min(DT / max(tau, 1e-6), 1.0)
     T = len(setpoints)
-    oa = 0.0
+    current = 0.0
     log = np.empty(T)
     for t in range(T):
-        oa = oa + alpha * (setpoints[t, 0] - oa)
-        log[t] = oa
+        current = current + alpha * (setpoints[t, 0] - current)
+        log[t] = current
     return log
 
 
@@ -83,13 +80,15 @@ def run_warp(
     T = len(setpoints)
     solver = dynamics.planning_solver(dt=DT)
     solver.tau_motor = tau
-    sim = ForwardSimulator(dynamics.robot_params(), solver, grid, batch_size=1, n_steps=T, device=device)
+    sim = ForwardSimulator(
+        dynamics.robot_params(), solver, grid, batch_size=1, n_steps=T, device=device
+    )
     sim.set_terrain(
         wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
     )
     sim.set_friction(mu)
-    wheel_omega = np.ascontiguousarray(setpoints[:, None, :], np.float32)  # [T, 1, 3]
-    controlled, *_ = sim.rollout(wheel_omega, (0.0, 0.0, 0.0), np.zeros(3))
+    target_wheel_omega = np.ascontiguousarray(setpoints[:, None, :], np.float32)  # [T, 1, 3]
+    controlled, *_ = sim.rollout(target_wheel_omega, (0.0, 0.0, 0.0), np.zeros(3))
     return controlled[:, 0, :]  # [T+1, 3]
 
 
@@ -101,8 +100,8 @@ def run(out: str | None = None, device: str = "cpu") -> None:
     time = np.arange(T) * DT  # [s]
 
     scene = hm_mod.flat(xlim=XLIM, ylim=YLIM)
-    mu    = friction_mod.uniform(0.8, xlim=XLIM, ylim=YLIM)
-    grid  = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
+    mu = friction_mod.uniform(0.8, xlim=XLIM, ylim=YLIM)
+    grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
 
     # phase boundary times for shading
     phase_times = np.cumsum([0] + [n * DT for n, _ in PHASES])  # [0, 3, 6, 9]
@@ -130,11 +129,19 @@ def run(out: str | None = None, device: str = "cpu") -> None:
     for i, (t0, t1) in enumerate(zip(phase_times[:-1], phase_times[1:])):
         ax.axvspan(t0, t1, alpha=0.07, color="gray", zorder=0)
 
-    ax.step(time, setpoints[:, 0], color="gray", linewidth=1.5, linestyle="--",
-            where="post", label="omega_cmd", zorder=5)
+    ax.step(
+        time,
+        setpoints[:, 0],
+        color="gray",
+        linewidth=1.5,
+        linestyle="--",
+        where="post",
+        label="target_wheel_omega",
+        zorder=5,
+    )
     for tau, color, label in zip(TAUS, COLORS, LABELS):
-        oa = _omega_actual_log(setpoints, tau)
-        ax.plot(time, oa, color=color, linewidth=2.0, label=label)
+        current = _current_wheel_omega_log(setpoints, tau)
+        ax.plot(time, current, color=color, linewidth=2.0, label=label)
     ax.legend(fontsize=9)
     ax.set_xlim(0, time[-1])
 
@@ -152,9 +159,12 @@ def run(out: str | None = None, device: str = "cpu") -> None:
         # arrow at the end showing final heading
         dx = xs[-1] - xs[-2]
         dy = ys[-1] - ys[-2]
-        ax.annotate("", xy=(xs[-1], ys[-1]),
-                    xytext=(xs[-1] - dx * 3, ys[-1] - dy * 3),
-                    arrowprops=dict(arrowstyle="->", color=color, lw=1.5))
+        ax.annotate(
+            "",
+            xy=(xs[-1], ys[-1]),
+            xytext=(xs[-1] - dx * 3, ys[-1] - dy * 3),
+            arrowprops=dict(arrowstyle="->", color=color, lw=1.5),
+        )
 
     # phase-change markers on the tau=0 reference path
     ref = results[0.0]

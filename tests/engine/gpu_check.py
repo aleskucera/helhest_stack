@@ -21,7 +21,7 @@ import warp as wp
 from helhest import dynamics
 from helhest import friction
 from helhest import heightmap as hmmod
-from helhest.control.reference import _to_wheel_omega
+from helhest.control.reference import _to_target_wheel_omega
 from helhest.engine import DifferentiableSimulator
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
@@ -72,9 +72,9 @@ def check_forward_parity():
     """CUDA step rollout vs CPU step rollout on the same node grid."""
     scene, mu = hmmod.box_scene(), friction.uniform(0.8)
     B, T, start = 64, 40, (-1.0, 0.0, 0.0)
-    wheel_omega = _to_wheel_omega(np.full((B, T, 2), 2.0, np.float32))
-    pc, tc, _, _ = _sim(scene, mu, B, T, "cpu").rollout(wheel_omega, start)
-    pg, tg, _, _ = _sim(scene, mu, B, T, "cuda").rollout(wheel_omega, start)
+    target_wheel_omega = _to_target_wheel_omega(np.full((B, T, 2), 2.0, np.float32))
+    pc, tc, _, _ = _sim(scene, mu, B, T, "cpu").rollout(target_wheel_omega, start)
+    pg, tg, _, _ = _sim(scene, mu, B, T, "cuda").rollout(target_wheel_omega, start)
     dp = float(np.abs(pc - pg).max())
     dt = float(np.abs(tc - tg).max())
     print(f"  forward CUDA-vs-CPU  dplanar={dp:.2e}  dtilt={dt:.2e}")
@@ -114,13 +114,13 @@ def time_rollout(B=2048, T=70, reps=30):
     scene = hmmod.demo_terrain()
     mu = friction.uniform(0.8, xlim=(-3.0, 10.0), ylim=(-4.0, 4.0), cell=0.06)
     sim = _sim(scene, mu, B, T, "cuda")
-    wheel_omega = _to_wheel_omega(np.full((B, T, 2), 2.0, np.float32))
+    target_wheel_omega = _to_target_wheel_omega(np.full((B, T, 2), 2.0, np.float32))
     start = (0.0, 0.0, 0.0)
-    sim.rollout(wheel_omega, start)  # warm up: triggers CUDA codegen + first launch
+    sim.rollout(target_wheel_omega, start)  # warm up: triggers CUDA codegen + first launch
     wp.synchronize_device("cuda")
     t0 = time.perf_counter()
     for _ in range(reps):
-        sim.rollout(wheel_omega, start)
+        sim.rollout(target_wheel_omega, start)
     wp.synchronize_device("cuda")
     dt = (time.perf_counter() - t0) / reps
     print(
@@ -136,7 +136,7 @@ def check_vjp():
     ny, nx = scene.H.shape
     B, T = 3, 14
     grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
-    omega = _to_wheel_omega(np.tile(np.array([1.5, 2.5], np.float32), (B, T, 1)))
+    omega = _to_target_wheel_omega(np.tile(np.array([1.5, 2.5], np.float32), (B, T, 1)))
     rng = np.random.default_rng(0)
     cc = rng.standard_normal((T + 1, B, 3)).astype(np.float32)
     cd = rng.standard_normal((T + 1, B, 3)).astype(np.float32)
@@ -153,7 +153,7 @@ def check_vjp():
             )
         )
         sim.set_uniform_friction(0.8)
-        sim.wheel_omega.assign(np.ascontiguousarray(omega, np.float32))
+        sim.target_wheel_omega.assign(np.ascontiguousarray(omega, np.float32))
         sim.start_pose.assign(np.tile(np.asarray((-1.0, 0.0, 0.0), np.float32), (B, 1)))
         return sim
 
@@ -206,7 +206,7 @@ def check_bt_grad_fd():
     ny, nx = scene.H.shape
     B, T = 2, 18
     grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
-    omega = _to_wheel_omega(
+    omega = _to_target_wheel_omega(
         np.tile(np.array([0.5, 3.5], np.float32), (B, T, 1))
     )  # a SHARP turn: the harder it turns, the more x_icr (and its position grad) drives final-x
     elev0 = np.broadcast_to(scene.H, (B, ny, nx)).astype(np.float32)
@@ -220,7 +220,7 @@ def check_bt_grad_fd():
         )
         s.set_terrain(wp.array(np.ascontiguousarray(elev), dtype=wp.float32, device="cuda"))
         s.set_friction(wp.array(np.ascontiguousarray(fric), dtype=wp.float32, device="cuda"))
-        s.wheel_omega.assign(np.ascontiguousarray(omega, np.float32))
+        s.target_wheel_omega.assign(np.ascontiguousarray(omega, np.float32))
         s.start_pose.assign(np.tile(np.asarray((-1.0, 0.0, 0.0), np.float32), (B, 1)))
         L = float(s.rollout_taped(loss_fn).numpy()[0])
         if grad_of is None:

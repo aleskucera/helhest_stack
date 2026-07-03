@@ -66,7 +66,7 @@ def rollout_device(
     pose0 = wp.array(np.asarray([init_pose], np.float32), dtype=wp.vec3, device=device)
     controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
     derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
-    omega_actual = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
+    current_wheel_omega = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
     loads = wp.zeros((T, 1), dtype=wp.vec3, device=device)
     turn = wp.zeros((T, 1), dtype=wp.vec2, device=device)
     clear = wp.zeros((T, 1), dtype=float, device=device)
@@ -83,8 +83,27 @@ def rollout_device(
         wp.launch(
             step_kernel,
             1,
-            inputs=[te, tr, tm, g, robot, sp, omega[t], omega_actual[t], controlled[t], derived[t]],
-            outputs=[omega_actual[t + 1], controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]],
+            inputs=[
+                te,
+                tr,
+                tm,
+                g,
+                robot,
+                sp,
+                omega[t],
+                current_wheel_omega[t],
+                controlled[t],
+                derived[t],
+            ],
+            outputs=[
+                current_wheel_omega[t + 1],
+                controlled[t + 1],
+                derived[t + 1],
+                loads[t],
+                turn[t],
+                clear[t],
+                resid[t],
+            ],
             device=device,
         )
     clear_np, resid_np = clear.numpy()[:, 0], resid.numpy()[:, 0]
@@ -286,17 +305,17 @@ def selftest_rollout_kernel():
     pose0 = wp.array(
         np.tile([-1.0, 0.0, 0.0], (B, 1)).astype(np.float32), dtype=wp.vec3, device="cpu"
     )
-    init_oa = wp.zeros(B, dtype=wp.vec3, device="cpu") 
+    init_oa = wp.zeros(B, dtype=wp.vec3, device="cpu")
 
     def buffers():
         return [
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
-            wp.zeros((T, B), dtype=wp.vec3, device="cpu"),       
-            wp.zeros((T, B), dtype=wp.vec2, device="cpu"),       
-            wp.zeros((T, B), dtype=float, device="cpu"),         
-            wp.zeros((T, B), dtype=float, device="cpu"),         
+            wp.zeros((T, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
+            wp.zeros((T, B), dtype=float, device="cpu"),
+            wp.zeros((T, B), dtype=float, device="cpu"),
         ]
 
     fused = buffers()
@@ -319,7 +338,18 @@ def selftest_rollout_kernel():
         wp.launch(
             step_kernel,
             B,
-            inputs=[te, tr, tm, g, robot, sp, omega[t], perstep[2][t], perstep[0][t], perstep[1][t]],
+            inputs=[
+                te,
+                tr,
+                tm,
+                g,
+                robot,
+                sp,
+                omega[t],
+                perstep[2][t],
+                perstep[0][t],
+                perstep[1][t],
+            ],
             outputs=[
                 perstep[2][t + 1],
                 perstep[0][t + 1],
@@ -339,7 +369,8 @@ def selftest_rollout_kernel():
 
 def selftest_motor_lag():
     """Device and numpy oracle must agree on a step-command rollout with tau_motor > 0,
-    and omega_actual must converge toward omega_cmd with the expected time constant."""
+    and current_wheel_omega must converge toward target_wheel_omega with the expected time constant.
+    """
     wp.init()
     tau = 0.2  # [s] motor lag
     dt = 0.05  # [s] timestep
@@ -364,26 +395,50 @@ def selftest_motor_lag():
 
     controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
     derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
-    omega_actual = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
+    current_wheel_omega = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
     loads = wp.zeros((T, 1), dtype=wp.vec3, device="cpu")
     turn = wp.zeros((T, 1), dtype=wp.vec2, device="cpu")
     clear = wp.zeros((T, 1), dtype=float, device="cpu")
     resid = wp.zeros((T, 1), dtype=float, device="cpu")
 
-    wp.launch(init_state_kernel, 1, inputs=[te, g, robot, sp, pose0],
-              outputs=[controlled, derived], device="cpu")
+    wp.launch(
+        init_state_kernel,
+        1,
+        inputs=[te, g, robot, sp, pose0],
+        outputs=[controlled, derived],
+        device="cpu",
+    )
     for t in range(T):
         wp.launch(
-            step_kernel, 1,
-            inputs=[te, tr, tm, g, robot, sp, omega[t], omega_actual[t], controlled[t], derived[t]],
-            outputs=[omega_actual[t + 1], controlled[t + 1], derived[t + 1],
-                     loads[t], turn[t], clear[t], resid[t]],
+            step_kernel,
+            1,
+            inputs=[
+                te,
+                tr,
+                tm,
+                g,
+                robot,
+                sp,
+                omega[t],
+                current_wheel_omega[t],
+                controlled[t],
+                derived[t],
+            ],
+            outputs=[
+                current_wheel_omega[t + 1],
+                controlled[t + 1],
+                derived[t + 1],
+                loads[t],
+                turn[t],
+                clear[t],
+                resid[t],
+            ],
             device="cpu",
         )
 
-    oa_dev = omega_actual.numpy()[:, 0, 0]  # left-wheel channel [T+1]
-    # omega_actual[0] = init (zeros); omega_actual[t+1] = effective speed used at step t.
-    # After a step command, the effective speed should converge: oa[t+1] ≈ 2*(1 - exp(-t*dt/tau)).
+    oa_dev = current_wheel_omega.numpy()[:, 0, 0]  # left-wheel channel [T+1]
+    # current_wheel_omega[0] = init (zeros); current_wheel_omega[t+1] = effective speed used at step t.
+    # After a step command, the effective speed should converge: current[t+1] ≈ 2*(1 - exp(-t*dt/tau)).
     alpha = min(dt / max(tau, 1e-6), 1.0)
     oa_expected = np.array([2.0 * (1.0 - (1.0 - alpha) ** t) for t in range(1, T + 1)], np.float64)
 
@@ -391,13 +446,19 @@ def selftest_motor_lag():
 
     # Compare device rollout with numpy oracle.
     ref = rollout_np.rollout_terrain(
-        setpoints, dt, scene, init_pose=(0.0, 0.0, 0.0), mu_field=mu, k=2.0,
-        tau_motor=tau, init_omega=np.zeros(3),
+        setpoints,
+        dt,
+        scene,
+        init_pose=(0.0, 0.0, 0.0),
+        mu_field=mu,
+        k=2.0,
+        tau_motor=tau,
+        init_wheel_omega=np.zeros(3),
     )
     d_xy = np.abs(controlled.numpy()[1:, 0, :2] - ref["pose2"][:, :2]).max()
 
     print(
-        f"motor_lag  d_omega_actual={d_oa:.2e}  d_xy_vs_oracle={d_xy:.2e}  "
+        f"motor_lag  d_current_wheel_omega={d_oa:.2e}  d_xy_vs_oracle={d_xy:.2e}  "
         f"{'OK' if d_oa < 1e-5 and d_xy < 1e-3 else 'REVIEW'}"
     )
 

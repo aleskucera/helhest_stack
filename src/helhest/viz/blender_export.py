@@ -12,9 +12,10 @@ plus the terrain heightmap and the fixed robot geometry constants. It has no dep
 back on this package, so ``blender_import.py`` runs under Blender's bundled Python.
 
 Frame 0 is the settled start pose (no motion yet); frame k+1 is the pose after applying
-``wheel_omega[k]``. Wheel spin is the running integral ``cumsum(wheel_omega) * dt`` [rad],
+``target_wheel_omega[k]``. Wheel spin is the running integral ``cumsum(target_wheel_omega) * dt`` [rad],
 ordered (left, right, rear) to match the engine's wheel order.
 """
+
 from __future__ import annotations
 
 import sys
@@ -69,10 +70,10 @@ def _mat_to_quat(R: np.ndarray) -> np.ndarray:
 
 
 def collect_rollout(
-    drv: WarpDriver, wheel_omega_seq: np.ndarray, dt: float
+    drv: WarpDriver, target_wheel_omega_seq: np.ndarray, dt: float
 ) -> dict[str, np.ndarray]:
     """Drive `drv` through wheel-speed sequence [T, 3] and record per-frame state [T+1, ...]."""
-    seq = np.asarray(wheel_omega_seq, np.float64).reshape(-1, 3)
+    seq = np.asarray(target_wheel_omega_seq, np.float64).reshape(-1, 3)
     n = len(seq) + 1  # +1 for the settled start frame
     pos = np.zeros((n, 3))
     euler = np.zeros((n, 3))  # (yaw, pitch, roll) [rad]

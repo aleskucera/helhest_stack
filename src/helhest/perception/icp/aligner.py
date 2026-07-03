@@ -120,9 +120,7 @@ class IcpAligner:
         cfg = self.config
         self._voxel: VoxelGrid | None = None
         if cfg.voxel_size_m is not None and cfg.voxel_size_m > 0.0:
-            self._voxel = VoxelGrid(
-                cfg.voxel_size_m, max_points=cfg.max_points, device=self.device
-            )
+            self._voxel = VoxelGrid(cfg.voxel_size_m, max_points=cfg.max_points, device=self.device)
 
         # Device-resident GN-loop state: fixed-size buffers (max_points) plus the
         # per-iteration scalars, so the loop touches only these and is graph-ready.
@@ -174,7 +172,9 @@ class IcpAligner:
 
     def _seed_pose(self, init_pose: np.ndarray | None) -> None:
         """Load the initial pose and reset the loop state into the device buffers."""
-        pose = np.eye(4, dtype=np.float32) if init_pose is None else np.asarray(init_pose, np.float32)
+        pose = (
+            np.eye(4, dtype=np.float32) if init_pose is None else np.asarray(init_pose, np.float32)
+        )
         self._pose.assign(pose.reshape(1, 4, 4))
         self._iter.zero_()
         self._converged.zero_()

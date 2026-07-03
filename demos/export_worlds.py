@@ -9,6 +9,7 @@ the Blender pipeline (``viz/blender_import.py``). CUDA required (the planner run
 
 Then render one, e.g.:  ./scripts/render_dasenka.sh /tmp/worlds/pocket.npz 1
 """
+
 from __future__ import annotations
 
 import argparse

@@ -14,7 +14,7 @@ from helhest import friction
 from helhest import heightmap as hmmod
 from helhest.control import mppi as mg
 from helhest.control.reference import _cost as cost_np
-from helhest.control.reference import _to_wheel_omega
+from helhest.control.reference import _to_target_wheel_omega
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 from helhest.engine import RobotParams
@@ -60,8 +60,8 @@ def selftest_cost_parity(device="cuda", B=2048, T=70):
 
     # arbitrary fan
     Ub = np.clip(rng.normal(1.5, _WMAX, (B, T, 2)), -_WMAX, _WMAX).astype(np.float32)
-    # same rollout feeds both: assign wheel_omega (= Ub) + start, launch, read back for the oracle.
-    cc, dd, cl, rs = sim.rollout(_to_wheel_omega(Ub), start)
+    # same rollout feeds both: assign target_wheel_omega (= Ub) + start, launch, read back for the oracle.
+    cc, dd, cl, rs = sim.rollout(_to_target_wheel_omega(Ub), start)
     J_np, _ = cost_np(cc, dd, cl, rs, Ub, _LAT_CONST, _CM, _RT, _W)
 
     goal_d = wp.array(goal.astype(np.float32), dtype=float, device=device)
@@ -86,7 +86,7 @@ def selftest_cost_parity(device="cuda", B=2048, T=70):
             sim.derived,
             sim.clearance,
             sim.residual,
-            sim.wheel_omega,
+            sim.target_wheel_omega,
             goal_d,
             sim.grid,
             lat_field,
@@ -121,7 +121,7 @@ def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
 
     # GPU: bisection top-k threshold -> elite mean
     Jd = wp.array(J, dtype=float, device=device)
-    wheel_omega = wp.array(_to_wheel_omega(Ub), dtype=wp.vec3, device=device)
+    target_wheel_omega = wp.array(_to_target_wheel_omega(Ub), dtype=wp.vec3, device=device)
     jmin = wp.zeros(1, dtype=float, device=device)
     jmax = wp.zeros(1, dtype=float, device=device)
     lo = wp.zeros(1, dtype=float, device=device)
@@ -141,7 +141,7 @@ def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
     wp.launch(
         mg._elite_u_kernel,
         (T, 2),
-        inputs=[Jd, tau, count, wheel_omega, 1, -_WMAX, _WMAX, B, Ud],
+        inputs=[Jd, tau, count, target_wheel_omega, 1, -_WMAX, _WMAX, B, Ud],
         device=device,
     )  # n_scen=1
     U_gpu = Ud.numpy()
