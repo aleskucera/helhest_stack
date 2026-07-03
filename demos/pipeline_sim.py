@@ -307,8 +307,12 @@ def run_closed_loop(
     T: int = 70,
     dock_radius: float = 1.2,
     seed: int = 0,
+    profile: bool = False,
 ) -> dict:
-    """Stage 2: full pipeline closed on the ESTIMATED pose (odom heading from `heading`)."""
+    """Stage 2: full pipeline closed on the ESTIMATED pose (odom heading from `heading`).
+    `profile=True` times each stage with CUDA events (helhest.profiling.StageProfiler)."""
+    import time as _time
+
     from helhest import dynamics
     from helhest import worlds as W
     from helhest.control.mppi import CostParams
@@ -320,6 +324,7 @@ def run_closed_loop(
     from helhest.engine import GridParams
     from helhest.perception import HeightMapBuilder
     from helhest.planning.costtogo import CostToGo
+    from helhest.profiling import StageProfiler
 
     rng = np.random.default_rng(seed)
     gyro_bias = np.deg2rad(gyro_bias_dps)
@@ -350,6 +355,10 @@ def run_closed_loop(
     planner.cw.lattice_cap = ctg._vcap
     sgrid = GridParams(rcnx, rcny, rccell, 0.0, 0.0).build()
 
+    STAGES = ("scan", "icp", "map", "heightmap", "costtogo", "mppi", "drive")
+    prof = StageProfiler(device, STAGES, enabled=profile)
+    warmup, frame_ms = 15, []
+
     map_wp: wp.array | None = None
     T_odom = se2_to_mat(*start)
     true_tr, est_tr, err = [], [], []
@@ -370,7 +379,10 @@ def run_closed_loop(
             )
         prev = (st.x, st.y, st.yaw)
 
+        t0 = _time.perf_counter()
+        prof.mark(0)
         scan_base = _scan_base(lidar, st.x, st.y, st.yaw, box_lo, box_hi, f + 1, device)
+        prof.mark(1)
         if not localizer.initialized:
             localizer.bootstrap(T_odom, T_true)
             T_wb = T_true
@@ -380,10 +392,12 @@ def run_closed_loop(
         ex, ey, eyaw = mat_to_se2(T_wb)
         est_tr.append((ex, ey))
         err.append(float(np.hypot(ex - st.x, ey - st.y)))
+        prof.mark(2)
 
         world_corrected = transform_points(scan_base, len(scan_base), T_wb)
         valid = wp.full(len(scan_base), 1, dtype=wp.int32, device=device)
         map_wp = acc.step(map_wp, None, world_corrected, valid, (ex, ey))
+        prof.mark(3)
 
         half = win_m / 2.0
         xmin, ymin = ex - half, ey - half
@@ -391,12 +405,14 @@ def run_closed_loop(
         layers = builder.build(map_wp)
         known = layers.count.numpy() > 0
         elev = np.where(known, layers.max.numpy(), 0.0).astype(np.float32)[:wh, :ww]
+        prof.mark(4)
 
         state_l = np.array([ex - xmin, ey - ymin, eyaw], np.float32)
         goal_l = (goal[0] - xmin, goal[1] - ymin)
         plan_sim.set_terrain(wp.array(np.ascontiguousarray(elev), dtype=wp.float32, device=device))
         Hc = elev[: rcny * kr, : rcnx * kr].reshape(rcny, kr, rcnx, kr).max(axis=(1, 3)) if kr > 1 else elev
         V = ctg.compute(wp.array(np.ascontiguousarray(Hc), dtype=wp.float32, device=device), goal_l)
+        prof.mark(5)
         planner.set_lattice(V, sgrid)
 
         if dock_radius > 0.0 and float(np.hypot(ex - goal[0], ey - goal[1])) < dock_radius:
@@ -405,7 +421,15 @@ def run_closed_loop(
             planner.replan(state_l, goal_l, 3)
             u = planner.nominal()
             cmd = np.array([u[0, 0], u[0, 1], 0.5 * (u[0, 0] + u[0, 1])], np.float32)
+        prof.mark(6)
         drv.step(cmd)
+        prof.mark(7)
+        if profile and f == warmup:
+            prof.reset()
+        if profile and f >= warmup:
+            prof.accumulate()
+            wp.synchronize_device(prof.device)
+            frame_ms.append((_time.perf_counter() - t0) * 1000.0)
         if drv.clear < 0.05:
             contacts += 1
 
@@ -413,6 +437,8 @@ def run_closed_loop(
         true=np.asarray(true_tr), est=np.asarray(est_tr), err=np.asarray(err),
         box_lo=box_lo, box_hi=box_hi, goal=goal, reached=reached, frames=f + 1,
         contacts=contacts, heading=heading,
+        prof=prof.stats() if profile else None,
+        frame_ms=float(np.mean(frame_ms)) if frame_ms else None,
     )
 
 
@@ -505,10 +531,28 @@ def main() -> None:
     ap.add_argument("--gyro-bias-dps", type=float, default=0.3, help="gyro constant bias (deg/s)")
     ap.add_argument("--localization-only", action="store_true", help="Stage 1: scripted path, IMU compare")
     ap.add_argument("--stress", action="store_true", help="sweep sensor degradation -> find the failure boundary")
+    ap.add_argument("--profile", action="store_true", help="time each pipeline stage with CUDA events")
     ap.add_argument("--shot", default=None)
     args = ap.parse_args()
     wp.init()
-    if args.stress:
+    if args.profile:
+        res = run_closed_loop(
+            device=args.device, world=args.world, max_frames=args.max_frames,
+            columns=args.columns, heading=args.heading, profile=True,
+        )
+        p = res["prof"]
+        total = sum(v["mean_ms"] for v in p.values())
+        print(f"\nPer-stage GPU time (CUDA events), mean over {next(iter(p.values()))['n']} frames "
+              f"[world={args.world}, {args.columns} cols]:\n")
+        print(f"  {'stage':<11} {'mean ms':>9} {'std ms':>8} {'% GPU':>7}")
+        for name, v in p.items():
+            print(f"  {name:<11} {v['mean_ms']:>9.3f} {v['std_ms']:>8.3f} {100*v['mean_ms']/total:>6.1f}%")
+        print(f"  {'-'*38}")
+        print(f"  {'GPU total':<11} {total:>9.3f}")
+        print(f"  {'frame wall':<11} {res['frame_ms']:>9.3f}  (host overhead {res['frame_ms']-total:+.3f} ms)")
+        print(f"\n  => max control rate ~ {1000.0/res['frame_ms']:.0f} Hz   "
+              f"(reached={res['reached']}, contacts={res['contacts']})")
+    elif args.stress:
         res = run_stress(device=args.device)
         if args.shot:
             _viz_stress(res, args.shot)
