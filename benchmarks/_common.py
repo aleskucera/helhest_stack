@@ -5,10 +5,10 @@ import time
 
 import numpy as np
 import warp as wp
-from kinematic_helhest import dynamics
-from kinematic_helhest import worlds as W
-from kinematic_helhest.engine import GridParams
-from kinematic_helhest.planning.costtogo import CostToGo
+from helhest import dynamics
+from helhest import worlds as W
+from helhest.engine import GridParams
+from helhest.planning.costtogo import CostToGo
 
 
 def build_scene(world):

@@ -3,7 +3,7 @@
 This is the main code path (the numpy `reference/` package is the verification
 oracle only). Public API:
 
-    from kinematic_helhest.engine import (
+    from helhest.engine import (
         RobotParams, SolverParams, ForwardSimulator, init_state_kernel, step_kernel,
     )
 

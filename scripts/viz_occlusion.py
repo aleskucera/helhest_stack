@@ -19,7 +19,7 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from terrain_toolkit import TerrainPipeline, TraversabilityConfig, OcclusionConfig
+from helhest.terrain import TerrainPipeline, TraversabilityConfig, OcclusionConfig
 
 
 def main() -> None:

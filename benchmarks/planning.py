@@ -13,7 +13,7 @@ Run from the repo root:  python -m benchmarks.planning [--world slalom]
 import argparse
 
 import warp as wp
-from kinematic_helhest import worlds as W
+from helhest import worlds as W
 
 from ._common import build_routing
 from ._common import build_scene

@@ -18,17 +18,17 @@ from __future__ import annotations
 
 import numpy as np
 import warp as wp
-from terrain_toolkit import DeviceMapAccumulator
-from terrain_toolkit import IcpAligner
-from terrain_toolkit import IcpConfig
-from terrain_toolkit import Localizer
-from terrain_toolkit import LocalizerConfig
-from terrain_toolkit import transform_points
-from terrain_toolkit.localization.pose_math import invert_pose
-from terrain_toolkit.localization.pose_math import pose_correction_magnitude
-from terrain_toolkit.localization.pose_math import transform_points_xyz
-from terrain_toolkit.sim import GroundSpec
-from terrain_toolkit.sim import PrimitiveLidar
+from helhest.terrain import DeviceMapAccumulator
+from helhest.terrain import IcpAligner
+from helhest.terrain import IcpConfig
+from helhest.terrain import Localizer
+from helhest.terrain import LocalizerConfig
+from helhest.terrain import transform_points
+from helhest.terrain.localization.pose_math import invert_pose
+from helhest.terrain.localization.pose_math import pose_correction_magnitude
+from helhest.terrain.localization.pose_math import transform_points_xyz
+from helhest.terrain.sim import GroundSpec
+from helhest.terrain.sim import PrimitiveLidar
 
 # Pipeline constants matching the node defaults.
 ACC_VOXEL_M = 0.10

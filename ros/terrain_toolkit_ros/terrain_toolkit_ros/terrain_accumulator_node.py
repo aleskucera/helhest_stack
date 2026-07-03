@@ -3,7 +3,7 @@
 
 Fuses a LiDAR PointCloud2 stream with robot odometry (nav_msgs/Odometry) into a
 persistent, device-resident rolling voxel map (DeviceMapAccumulator), then runs
-the terrain_toolkit pipeline over a robot-centric window of it. Each scan is
+the helhest.terrain pipeline over a robot-centric window of it. Each scan is
 registered scan-to-submap with point-to-plane ICP, using the odometry
 frame-to-frame delta as the initial guess; the refined trajectory corrects odom
 drift. The published terrain_map therefore covers more than a single scan (it
@@ -40,21 +40,21 @@ from rcl_interfaces.msg import ParameterDescriptor
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2
-from terrain_toolkit import BoxCrop
-from terrain_toolkit import DeviceMapAccumulator
-from terrain_toolkit import DynamicFilterConfig
-from terrain_toolkit import DynamicPointFilter
-from terrain_toolkit import IcpAligner
-from terrain_toolkit import IcpConfig
-from terrain_toolkit import Localizer
-from terrain_toolkit import LocalizerConfig
-from terrain_toolkit import RegistrationOutcome
-from terrain_toolkit import TerrainMap
-from terrain_toolkit import transform_points
-from terrain_toolkit.localization.pose_math import deskew_scan
-from terrain_toolkit.localization.pose_math import invert_pose
-from terrain_toolkit.localization.pose_math import matrix_to_quaternion
-from terrain_toolkit.localization.pose_math import transform_points_xyz
+from helhest.terrain import BoxCrop
+from helhest.terrain import DeviceMapAccumulator
+from helhest.terrain import DynamicFilterConfig
+from helhest.terrain import DynamicPointFilter
+from helhest.terrain import IcpAligner
+from helhest.terrain import IcpConfig
+from helhest.terrain import Localizer
+from helhest.terrain import LocalizerConfig
+from helhest.terrain import RegistrationOutcome
+from helhest.terrain import TerrainMap
+from helhest.terrain import transform_points
+from helhest.terrain.localization.pose_math import deskew_scan
+from helhest.terrain.localization.pose_math import invert_pose
+from helhest.terrain.localization.pose_math import matrix_to_quaternion
+from helhest.terrain.localization.pose_math import transform_points_xyz
 from tf2_ros import TransformBroadcaster
 from tf2_ros import TransformException
 

@@ -11,7 +11,7 @@ for the stress harness. They target different weaknesses:
   ridge    a diagonal barrier with one notch -> direction-dependent crossing
   bumpy    rough terrain, some bumps tall enough to high-center -> tilt / settle feasibility
 
-Render them:  python -m kinematic_helhest.worlds [--out /tmp/worlds.png]
+Render them:  python -m helhest.worlds [--out /tmp/worlds.png]
 """
 
 import argparse

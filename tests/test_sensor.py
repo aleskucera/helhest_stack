@@ -10,10 +10,10 @@ import math
 import os
 import tempfile
 
-from terrain_toolkit import DynamicFilterConfig
-from terrain_toolkit import LidarSensorConfig
-from terrain_toolkit.sim import osdome_sensor_config
-from terrain_toolkit.sim import sensor_config_from_ouster_metadata
+from helhest.terrain import DynamicFilterConfig
+from helhest.terrain import LidarSensorConfig
+from helhest.terrain.sim import osdome_sensor_config
+from helhest.terrain.sim import sensor_config_from_ouster_metadata
 
 
 def _raises(fn) -> bool:

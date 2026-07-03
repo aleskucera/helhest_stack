@@ -13,12 +13,12 @@ import time
 
 import numpy as np
 import warp as wp
-from kinematic_helhest import dynamics
-from kinematic_helhest import friction
-from kinematic_helhest import heightmap as hmmod
-from kinematic_helhest.control.reference import _to_wheel_omega
-from kinematic_helhest.engine import DifferentiableSimulator
-from kinematic_helhest.engine import GridParams
+from helhest import dynamics
+from helhest import friction
+from helhest import heightmap as hmmod
+from helhest.control.reference import _to_wheel_omega
+from helhest.engine import DifferentiableSimulator
+from helhest.engine import GridParams
 
 
 def _time(fn, reps, device):

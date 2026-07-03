@@ -3,8 +3,8 @@ import argparse
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from terrain_toolkit import TerrainPipeline
-from terrain_toolkit import TraversabilityConfig
+from helhest.terrain import TerrainPipeline
+from helhest.terrain import TraversabilityConfig
 
 BOUNDS = (-5.0, 5.0, -5.0, 5.0)
 RESOLUTION = 0.1

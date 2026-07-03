@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import numpy as np
 import warp as wp
-from terrain_toolkit.localization.pose_math import deskew_scan
-from terrain_toolkit.localization.pose_math import invert_pose
-from terrain_toolkit.localization.pose_math import transform_points_xyz
-from terrain_toolkit.sim import GroundSpec
-from terrain_toolkit.sim import PrimitiveLidar
+from helhest.terrain.localization.pose_math import deskew_scan
+from helhest.terrain.localization.pose_math import invert_pose
+from helhest.terrain.localization.pose_math import transform_points_xyz
+from helhest.terrain.sim import GroundSpec
+from helhest.terrain.sim import PrimitiveLidar
 
 SWEEP_PERIOD_S = 0.1  # OSDome at 10 Hz — the worst-case sweep window
 SENSOR_HEIGHT_M = 0.5

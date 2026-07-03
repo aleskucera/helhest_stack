@@ -22,11 +22,11 @@ import argparse
 import numpy as np
 import warp as wp
 
-from kinematic_helhest import dynamics
-from kinematic_helhest import friction as friction_mod
-from kinematic_helhest import heightmap as hm_mod
-from kinematic_helhest.engine import ForwardSimulator
-from kinematic_helhest.engine import GridParams
+from helhest import dynamics
+from helhest import friction as friction_mod
+from helhest import heightmap as hm_mod
+from helhest.engine import ForwardSimulator
+from helhest.engine import GridParams
 
 # --- scenario parameters ---
 DT = 0.1  # [s] control timestep

@@ -12,19 +12,19 @@ import time
 
 import numpy as np
 import warp as wp
-from terrain_toolkit.heightmap import gaussian_smooth
-from terrain_toolkit.heightmap import HeightMapBuilder
-from terrain_toolkit.heightmap import multigrid_inpaint
-from terrain_toolkit.outlier import OutlierFilterConfig
-from terrain_toolkit.outlier import RadiusOutlierFilter
-from terrain_toolkit.outlier import RadiusOutlierFilterConfig
-from terrain_toolkit.outlier import StatisticalOutlierFilter
-from terrain_toolkit.traversability import FilterConfig
-from terrain_toolkit.traversability import GeometricTraversabilityAnalyzer
-from terrain_toolkit.traversability import ObstacleInflator
-from terrain_toolkit.traversability import SupportRatioMask
-from terrain_toolkit.traversability import TemporalGate
-from terrain_toolkit.traversability import TraversabilityConfig
+from helhest.terrain.heightmap import gaussian_smooth
+from helhest.terrain.heightmap import HeightMapBuilder
+from helhest.terrain.heightmap import multigrid_inpaint
+from helhest.terrain.outlier import OutlierFilterConfig
+from helhest.terrain.outlier import RadiusOutlierFilter
+from helhest.terrain.outlier import RadiusOutlierFilterConfig
+from helhest.terrain.outlier import StatisticalOutlierFilter
+from helhest.terrain.traversability import FilterConfig
+from helhest.terrain.traversability import GeometricTraversabilityAnalyzer
+from helhest.terrain.traversability import ObstacleInflator
+from helhest.terrain.traversability import SupportRatioMask
+from helhest.terrain.traversability import TemporalGate
+from helhest.terrain.traversability import TraversabilityConfig
 
 
 def parse_args() -> argparse.Namespace:

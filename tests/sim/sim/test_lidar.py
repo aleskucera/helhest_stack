@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import numpy as np
 import warp as wp
-from terrain_toolkit.sim import GroundSpec
-from terrain_toolkit.sim import PrimitiveLidar
+from helhest.terrain.sim import GroundSpec
+from helhest.terrain.sim import PrimitiveLidar
 
 ORIGIN = np.array([0.3, -0.4, 0.5])
 YAW = 0.6  # exercise the in-kernel beam rotation

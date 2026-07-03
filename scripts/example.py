@@ -1,9 +1,9 @@
 """Minimal example: configure and run the full terrain pipeline on synthetic data."""
 
 import numpy as np
-from terrain_toolkit import FilterConfig
-from terrain_toolkit import TerrainPipeline
-from terrain_toolkit import TraversabilityConfig
+from helhest.terrain import FilterConfig
+from helhest.terrain import TerrainPipeline
+from helhest.terrain import TraversabilityConfig
 
 # ---------------------------------------------------------------------------
 # Configuration — every parameter explicit

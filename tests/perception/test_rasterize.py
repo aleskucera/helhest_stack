@@ -7,8 +7,8 @@ silently mis-place every obstacle, so these tests are the tripwire.
 
 import numpy as np
 
-from kinematic_helhest.perception.rasterize import heightmap_to_points
-from kinematic_helhest.perception.rasterize import rasterize
+from helhest.perception.rasterize import heightmap_to_points
+from helhest.perception.rasterize import rasterize
 
 
 def selftest_transpose_guard():
@@ -45,7 +45,7 @@ def selftest_engine_agreement():
     # agree with Heightmap / GridParams (min-corner: center at x0 + (c+0.5)*cell). This is the check
     # the self-inverse round-trip could NOT make -- it was self-consistent on the WRONG (cell-origin)
     # convention, so it stayed green while a real point cloud landed half a cell off.
-    from kinematic_helhest.heightmap import Heightmap
+    from helhest.heightmap import Heightmap
 
     x0, y0, cell, ny, nx = -1.0, 2.0, 0.5, 8, 10
     r, c = 2, 3

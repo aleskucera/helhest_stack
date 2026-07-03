@@ -6,26 +6,26 @@ Run:  python -m tests.engine.step
 import numpy as np
 import warp as wp
 
-from kinematic_helhest import friction
-from kinematic_helhest import heightmap as hmmod
-from kinematic_helhest.engine import clearances
-from kinematic_helhest.engine import Grid
-from kinematic_helhest.engine import GridParams
-from kinematic_helhest.engine import init_state_kernel
-from kinematic_helhest.engine import Robot
-from kinematic_helhest.engine import RobotParams
-from kinematic_helhest.engine import sample_field
-from kinematic_helhest.engine import sample_normal
-from kinematic_helhest.engine import settle
-from kinematic_helhest.engine import Solver
-from kinematic_helhest.engine import SolverParams
-from kinematic_helhest.engine import step_kernel
-from kinematic_helhest.engine.rotations import euler_zyx
-from kinematic_helhest.engine.step import chassis_clearance
-from kinematic_helhest.engine.step import normal_loads
-from kinematic_helhest.engine.step import rollout_kernel
-from kinematic_helhest.reference import placement
-from kinematic_helhest.reference import rollout as rollout_np
+from helhest import friction
+from helhest import heightmap as hmmod
+from helhest.engine import clearances
+from helhest.engine import Grid
+from helhest.engine import GridParams
+from helhest.engine import init_state_kernel
+from helhest.engine import Robot
+from helhest.engine import RobotParams
+from helhest.engine import sample_field
+from helhest.engine import sample_normal
+from helhest.engine import settle
+from helhest.engine import Solver
+from helhest.engine import SolverParams
+from helhest.engine import step_kernel
+from helhest.engine.rotations import euler_zyx
+from helhest.engine.step import chassis_clearance
+from helhest.engine.step import normal_loads
+from helhest.engine.step import rollout_kernel
+from helhest.reference import placement
+from helhest.reference import rollout as rollout_np
 
 
 def _upload(hm, device, requires_grad=False):

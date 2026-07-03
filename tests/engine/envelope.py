@@ -6,9 +6,9 @@ Run:  python -m tests.engine.envelope
 import numpy as np
 import warp as wp
 
-from kinematic_helhest import heightmap as hmmod
-from kinematic_helhest.engine.envelope import _contact_kernel
-from kinematic_helhest.engine.envelope import _gather_kernel
+from helhest import heightmap as hmmod
+from helhest.engine.envelope import _contact_kernel
+from helhest.engine.envelope import _gather_kernel
 
 
 def wheel_envelope(elevation, cell_size, wheel_radius, device="cpu"):

@@ -21,11 +21,11 @@ def run(world="pocket", n_theta=24, stride=1, lat_coarsen=6, device="cuda", out=
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from kinematic_helhest import dynamics
-    from kinematic_helhest import worlds as W
-    from kinematic_helhest.engine import GridParams
-    from kinematic_helhest.planning.costtogo import CostToGo
-    from kinematic_helhest.planning.lattice_solver import trace_optimal
+    from helhest import dynamics
+    from helhest import worlds as W
+    from helhest.engine import GridParams
+    from helhest.planning.costtogo import CostToGo
+    from helhest.planning.lattice_solver import trace_optimal
 
     wp.init()
     builder, start, goal = W.WORLDS[world]
@@ -137,7 +137,7 @@ def run(world="pocket", n_theta=24, stride=1, lat_coarsen=6, device="cuda", out=
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    import kinematic_helhest.worlds as W
+    import helhest.worlds as W
 
     ap.add_argument("--world", default="pocket", choices=list(W.WORLDS))
     ap.add_argument("--n-theta", type=int, default=24)

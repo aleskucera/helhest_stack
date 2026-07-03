@@ -1,4 +1,4 @@
-"""Shared plumbing between the terrain_toolkit ROS nodes.
+"""Shared plumbing between the helhest.terrain ROS nodes.
 
 Both the single-frame `terrain_toolkit_node` and the accumulating
 `terrain_accumulator_node` wrap the same `TerrainPipeline`, so the parameter
@@ -17,14 +17,14 @@ from sensor_msgs.msg import PointCloud2
 from sensor_msgs.msg import PointField
 from sensor_msgs_py import point_cloud2 as pc2
 from std_msgs.msg import Header
-from terrain_toolkit import FilterConfig
-from terrain_toolkit import FootprintConfig
-from terrain_toolkit import OcclusionConfig
-from terrain_toolkit import OutlierFilterConfig
-from terrain_toolkit import RadiusOutlierFilterConfig
-from terrain_toolkit import TerrainMap
-from terrain_toolkit import TerrainPipeline
-from terrain_toolkit import TraversabilityConfig
+from helhest.terrain import FilterConfig
+from helhest.terrain import FootprintConfig
+from helhest.terrain import OcclusionConfig
+from helhest.terrain import OutlierFilterConfig
+from helhest.terrain import RadiusOutlierFilterConfig
+from helhest.terrain import TerrainMap
+from helhest.terrain import TerrainPipeline
+from helhest.terrain import TraversabilityConfig
 
 
 def quaternion_to_matrix(x: float, y: float, z: float, w: float) -> np.ndarray:

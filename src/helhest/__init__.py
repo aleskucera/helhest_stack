@@ -8,7 +8,7 @@ Layout:
   viz/         glfw/OpenGL viewers + shared rendering toolkit.
   model, data, heightmap, friction   Shared geometry / scenes / fields.
 
-The root package stays import-light on purpose: importing `kinematic_helhest`
+The root package stays import-light on purpose: importing `helhest`
 does NOT pull in Warp, so the numpy reference is usable on its own. Reach into a
-subpackage for what you need, e.g. `from kinematic_helhest.engine import step_kernel`.
+subpackage for what you need, e.g. `from helhest.engine import step_kernel`.
 """

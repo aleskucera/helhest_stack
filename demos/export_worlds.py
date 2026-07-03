@@ -17,10 +17,10 @@ import os
 import numpy as np
 import warp as wp
 from eval import evaluate  # sibling demo (demos/ is on sys.path when run as a script)
-from kinematic_helhest import worlds as W
-from kinematic_helhest.model import euler_zyx
-from kinematic_helhest.viz.blender_export import _mat_to_quat
-from kinematic_helhest.viz.blender_export import write_npz
+from helhest import worlds as W
+from helhest.model import euler_zyx
+from helhest.viz.blender_export import _mat_to_quat
+from helhest.viz.blender_export import write_npz
 
 
 def build_frames(poses: list, cmds: list, dt: float) -> dict[str, np.ndarray]:

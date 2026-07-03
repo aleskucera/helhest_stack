@@ -1,8 +1,8 @@
 """GridMap: the shared heightmap representation between the perception producer
-(terrain_toolkit) and a planning consumer (e.g. motion_toolkit).
+(helhest.terrain) and a planning consumer (e.g. motion_toolkit).
 
 Deliberately minimal -- just the elevation grid + its world placement + an optional
-validity mask. The richer multi-layer `TerrainMap`/`TerrainMapGPU` stay terrain_toolkit's
+validity mask. The richer multi-layer `TerrainMap`/`TerrainMapGPU` stay helhest.terrain's
 own output; `GridMap` is the thin contract that crosses the package boundary, so the frame
 convention is asserted in exactly one place (see test_gridmap.py for the round-trip guard).
 """

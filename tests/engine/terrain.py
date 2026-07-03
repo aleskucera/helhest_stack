@@ -6,11 +6,11 @@ Run:  python -m tests.engine.terrain
 import numpy as np
 import warp as wp
 
-from kinematic_helhest import heightmap as hmmod
-from kinematic_helhest.engine import Grid
-from kinematic_helhest.engine import GridParams
-from kinematic_helhest.engine import sample_field
-from kinematic_helhest.engine import sample_normal
+from helhest import heightmap as hmmod
+from helhest.engine import Grid
+from helhest.engine import GridParams
+from helhest.engine import sample_field
+from helhest.engine import sample_normal
 
 
 @wp.kernel

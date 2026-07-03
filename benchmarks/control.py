@@ -16,13 +16,13 @@ import argparse
 
 import numpy as np
 import warp as wp
-from kinematic_helhest import dynamics
-from kinematic_helhest import worlds as W
-from kinematic_helhest.control.mppi import CostParams
-from kinematic_helhest.control.mppi import MppiGpu
-from kinematic_helhest.control.mppi import RobustConfig
-from kinematic_helhest.engine import ForwardSimulator
-from kinematic_helhest.engine import GridParams
+from helhest import dynamics
+from helhest import worlds as W
+from helhest.control.mppi import CostParams
+from helhest.control.mppi import MppiGpu
+from helhest.control.mppi import RobustConfig
+from helhest.engine import ForwardSimulator
+from helhest.engine import GridParams
 
 from ._common import build_routing
 from ._common import build_scene

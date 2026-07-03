@@ -2,9 +2,9 @@
 
 Two-step pipeline (this file is step 1):
 
-    python -m kinematic_helhest.viz.blender_export [out.npz]
+    python -m helhest.viz.blender_export [out.npz]
     blender [scene.blend] --background --python \
-        src/kinematic_helhest/viz/blender_import.py -- --data out.npz [--robot robot.blend ...]
+        src/helhest/viz/blender_import.py -- --data out.npz [--robot robot.blend ...]
 
 The ``.npz`` holds, per frame, the body pose (world position + orientation as BOTH a
 quaternion and Euler ZYX), the integrated per-wheel spin angle, and a validity flag,

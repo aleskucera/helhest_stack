@@ -1,4 +1,4 @@
-"""Seam test: terrain_toolkit GridMap -> engine GridParams maps cleanly and preserves the
+"""Seam test: helhest.terrain GridMap -> engine GridParams maps cleanly and preserves the
 frame convention (dims order, min-corner origin, cell size).
 
 Run: python tests/perception/test_gridmap_seam.py
@@ -7,8 +7,8 @@ Run: python tests/perception/test_gridmap_seam.py
 from __future__ import annotations
 
 import numpy as np
-from kinematic_helhest.perception.gridmap import grid_params_from
-from terrain_toolkit import GridMap
+from helhest.perception.gridmap import grid_params_from
+from helhest.terrain import GridMap
 
 
 def main() -> None:

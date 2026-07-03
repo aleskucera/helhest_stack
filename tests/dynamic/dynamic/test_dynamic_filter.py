@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import numpy as np
 import warp as wp
-from terrain_toolkit import DynamicFilterConfig
-from terrain_toolkit import DynamicPointFilter
+from helhest.terrain import DynamicFilterConfig
+from helhest.terrain import DynamicPointFilter
 
 
 def _slab(x: float, half: float, n: int) -> np.ndarray:

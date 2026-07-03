@@ -16,20 +16,20 @@ from collections import deque
 
 import numpy as np
 import warp as wp
-from kinematic_helhest import dynamics
-from kinematic_helhest import worlds as W
-from kinematic_helhest.control.mppi import CostParams
-from kinematic_helhest.control.mppi import MppiGpu
-from kinematic_helhest.control.mppi import RobustConfig
-from kinematic_helhest.control.terminal import dock_control
-from kinematic_helhest.driver import WarpDriver
-from kinematic_helhest.engine import ForwardSimulator
-from kinematic_helhest.engine import GridParams
-from kinematic_helhest.perception.lidar import crop_window
-from kinematic_helhest.perception.lidar import drift_scan
-from kinematic_helhest.perception.lidar import lidar_scan
-from kinematic_helhest.perception.lidar import MultiScanMap
-from kinematic_helhest.planning.costtogo import CostToGo
+from helhest import dynamics
+from helhest import worlds as W
+from helhest.control.mppi import CostParams
+from helhest.control.mppi import MppiGpu
+from helhest.control.mppi import RobustConfig
+from helhest.control.terminal import dock_control
+from helhest.driver import WarpDriver
+from helhest.engine import ForwardSimulator
+from helhest.engine import GridParams
+from helhest.perception.lidar import crop_window
+from helhest.perception.lidar import drift_scan
+from helhest.perception.lidar import lidar_scan
+from helhest.perception.lidar import MultiScanMap
+from helhest.planning.costtogo import CostToGo
 
 
 def navigate(

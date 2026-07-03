@@ -15,14 +15,14 @@ bilinear-stencil scatter into Henv.grad. No Newton, no max on the tape.
 import numpy as np
 import warp as wp
 
-from kinematic_helhest.engine import clearances
-from kinematic_helhest.engine import Grid
-from kinematic_helhest.engine import Robot
-from kinematic_helhest.engine import sample_field
-from kinematic_helhest.engine import settle
-from kinematic_helhest.engine import Solver
-from kinematic_helhest.engine.envelope import _contact_kernel
-from kinematic_helhest.engine.envelope import _gather_kernel
+from helhest.engine import clearances
+from helhest.engine import Grid
+from helhest.engine import Robot
+from helhest.engine import sample_field
+from helhest.engine import settle
+from helhest.engine import Solver
+from helhest.engine.envelope import _contact_kernel
+from helhest.engine.envelope import _gather_kernel
 
 
 def wheel_envelope(elevation, cell_size, wheel_radius, device="cpu"):
@@ -123,7 +123,7 @@ def _residual(
 
 def dsettle_dHenv(env_hm, poses, adj_u, params, jac_eps=1e-4, device="cpu"):
     """Implicit grad d(sum_p adj_u_p . u*_p)/dHenv. Returns (grad_Henv, u_star)."""
-    from kinematic_helhest.engine import GridParams, RobotParams
+    from helhest.engine import GridParams, RobotParams
 
     elev = wp.array(
         np.ascontiguousarray(env_hm.H, np.float32),
@@ -160,9 +160,9 @@ def dsettle_dHenv(env_hm, poses, adj_u, params, jac_eps=1e-4, device="cpu"):
 def _selftest():
     """Implicit d/dHenv vs finite differences (numpy settle oracle), on the
     nonzero (contact) cells only."""
-    from kinematic_helhest import heightmap as hmmod
-    from kinematic_helhest.reference import placement
-    from kinematic_helhest.engine import SolverParams
+    from helhest import heightmap as hmmod
+    from helhest.reference import placement
+    from helhest.engine import SolverParams
 
     wp.init()
     params = SolverParams(newton_iters=12)
@@ -198,8 +198,8 @@ def _selftest():
 
 
 def _fd_loss(env, poses, adj_u, i, j, delta):
-    from kinematic_helhest import heightmap as hmmod
-    from kinematic_helhest.reference import placement
+    from helhest import heightmap as hmmod
+    from helhest.reference import placement
 
     Hp = env.H.copy()
     Hp[i, j] += delta
@@ -226,7 +226,7 @@ def _row_loss(
 
 
 def _gmeta(hm):
-    from kinematic_helhest.engine import Grid
+    from helhest.engine import Grid
 
     g = Grid()
     g.origin_x, g.origin_y, g.cell_size = float(hm.x0), float(hm.y0), float(hm.cell)
@@ -237,7 +237,7 @@ def _gmeta(hm):
 def _fwd(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, grad=False):
     """Forward init + T steps + loss on the FINAL state (B=1). If grad, taped
     backward -> (loss, gHenv, gHmu). T inferred from omega_np."""
-    from kinematic_helhest.engine import init_state_kernel, step_kernel
+    from helhest.engine import init_state_kernel, step_kernel
 
     dev = "cpu"
     T = omega_np.shape[0]
@@ -286,9 +286,9 @@ def _fwd(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, grad=Fals
 
 def _selftest_step_grad():
     """One full step on the tape: d(loss)/dHenv and d(loss)/dHmu vs finite diff."""
-    from kinematic_helhest import friction
-    from kinematic_helhest import heightmap as hmmod
-    from kinematic_helhest.engine import RobotParams, SolverParams
+    from helhest import friction
+    from helhest import heightmap as hmmod
+    from helhest.engine import RobotParams, SolverParams
 
     wp.init()
     scene = hmmod.flat()
@@ -344,7 +344,7 @@ def _fd_grid(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, g_an,
 def _fwd_h(rawH, muH, g, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, grad=False):
     """Like _fwd but the leaf is the RAW heightmap: Henv = wheel_envelope(rawH) is
     computed on the tape, so backward yields d(loss)/d(raw h)."""
-    from kinematic_helhest.engine import init_state_kernel, step_kernel
+    from helhest.engine import init_state_kernel, step_kernel
 
     dev = "cpu"
     T = omega_np.shape[0]
@@ -393,9 +393,9 @@ def _fwd_h(rawH, muH, g, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, grad=
 
 def _selftest_dh():
     """End-to-end d(loss)/d(raw h) through the envelope dilation + rollout vs FD."""
-    from kinematic_helhest import friction
-    from kinematic_helhest import heightmap as hmmod
-    from kinematic_helhest.engine import RobotParams, SolverParams
+    from helhest import friction
+    from helhest import heightmap as hmmod
+    from helhest.engine import RobotParams, SolverParams
 
     wp.init()
     T, R = 8, 0.35
@@ -445,7 +445,7 @@ def _fd_cells(rawH, muH, g_an, which, eps, fwd):
 def _fwd_batch(envH, rawH, muH, g, robot, sp, omega_np, poses, wpv, wtv, grad=False):
     """Batched (B>1) forward init + T steps + summed loss over all rollouts.
     omega_np: [T, B, 3]; poses: [B, 3]. Grads accumulate into shared Henv/Hmu."""
-    from kinematic_helhest.engine import init_state_kernel, step_kernel
+    from helhest.engine import init_state_kernel, step_kernel
 
     dev = "cpu"
     T, B = omega_np.shape[0], omega_np.shape[1]
@@ -494,9 +494,9 @@ def _fwd_batch(envH, rawH, muH, g, robot, sp, omega_np, poses, wpv, wtv, grad=Fa
 
 def _selftest_batch():
     """Batched B rollouts == sum of B solo rollouts (forward loss + grads)."""
-    from kinematic_helhest import friction
-    from kinematic_helhest import heightmap as hmmod
-    from kinematic_helhest.engine import RobotParams, SolverParams
+    from helhest import friction
+    from helhest import heightmap as hmmod
+    from helhest.engine import RobotParams, SolverParams
 
     wp.init()
     T, B = 5, 4
@@ -550,9 +550,9 @@ def _selftest_batch():
 
 def _selftest_bptt():
     """BPTT over a T-step rollout: d(loss on final state)/dHenv,dHmu vs finite diff."""
-    from kinematic_helhest import friction
-    from kinematic_helhest import heightmap as hmmod
-    from kinematic_helhest.engine import RobotParams, SolverParams
+    from helhest import friction
+    from helhest import heightmap as hmmod
+    from helhest.engine import RobotParams, SolverParams
 
     wp.init()
     T = 8

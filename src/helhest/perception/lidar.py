@@ -7,7 +7,7 @@ regions (behind walls, beyond range) the planner must reason about. Ground truth
 heightmap; output is (observed_elevation, known_mask) over the same grid. Accumulate scans across a
 drive (MultiScanMap) to get the multi-scan map.
 
-  python -m kinematic_helhest.perception.lidar --world pocket
+  python -m helhest.perception.lidar --world pocket
 """
 
 from __future__ import annotations
@@ -223,7 +223,7 @@ def run(
 
 def main():
     import argparse
-    import kinematic_helhest.worlds as W
+    import helhest.worlds as W
 
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--world", default="pocket", choices=list(W.WORLDS))

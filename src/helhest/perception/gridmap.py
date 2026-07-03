@@ -1,9 +1,9 @@
-"""Consumer side of the perception->planning seam: adapt a terrain_toolkit `GridMap`
+"""Consumer side of the perception->planning seam: adapt a helhest.terrain `GridMap`
 (the shared heightmap contract) onto the engine's `GridParams`.
 
 The import of `GridMap` is type-only -- the shim duck-types the instance at runtime, so
-motion_toolkit keeps terrain_toolkit an OPTIONAL dependency (you only ever hold a GridMap
-when terrain_toolkit produced one). The elevation/valid arrays pass through untouched
+motion_toolkit keeps helhest.terrain an OPTIONAL dependency (you only ever hold a GridMap
+when helhest.terrain produced one). The elevation/valid arrays pass through untouched
 (`gm.elevation` is fed straight to `ForwardSimulator.set_terrain`, zero-copy if it is a wp.array).
 """
 
@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from ..engine import GridParams
 
 if TYPE_CHECKING:
-    from terrain_toolkit import GridMap
+    from helhest.terrain import GridMap
 
 
 def grid_params_from(gm: GridMap) -> GridParams:

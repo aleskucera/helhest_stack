@@ -28,15 +28,15 @@ from types import SimpleNamespace
 import numpy as np
 import warp as wp
 
-from kinematic_helhest import dynamics
-from kinematic_helhest import friction as friction_mod
-from kinematic_helhest import heightmap as hm_mod
-from kinematic_helhest.engine import ForwardSimulator
-from kinematic_helhest.engine import GridParams
-from kinematic_helhest.viz.render import _draw
-from kinematic_helhest.viz.render import _init_gl
-from kinematic_helhest.viz.render import build_robot
-from kinematic_helhest.viz.render import build_terrain
+from helhest import dynamics
+from helhest import friction as friction_mod
+from helhest import heightmap as hm_mod
+from helhest.engine import ForwardSimulator
+from helhest.engine import GridParams
+from helhest.viz.render import _draw
+from helhest.viz.render import _init_gl
+from helhest.viz.render import build_robot
+from helhest.viz.render import build_terrain
 
 # ── scenario ──────────────────────────────────────────────────────────────────
 DT = 0.1  # [s]

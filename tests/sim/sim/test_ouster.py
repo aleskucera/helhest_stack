@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import numpy as np
 import warp as wp
-from terrain_toolkit.sim import GroundSpec
-from terrain_toolkit.sim import make_osdome_lidar
-from terrain_toolkit.sim import nominal_osdome_polar
-from terrain_toolkit.sim import osdome_beam_directions
-from terrain_toolkit.sim import ouster_beam_directions
-from terrain_toolkit.sim.ouster import OSDOME_MAX_RANGE_M
-from terrain_toolkit.sim.ouster import OSDOME_MIN_RANGE_M
+from helhest.terrain.sim import GroundSpec
+from helhest.terrain.sim import make_osdome_lidar
+from helhest.terrain.sim import nominal_osdome_polar
+from helhest.terrain.sim import osdome_beam_directions
+from helhest.terrain.sim import ouster_beam_directions
+from helhest.terrain.sim.ouster import OSDOME_MAX_RANGE_M
+from helhest.terrain.sim.ouster import OSDOME_MIN_RANGE_M
 
 
 def test_all_unit() -> None:

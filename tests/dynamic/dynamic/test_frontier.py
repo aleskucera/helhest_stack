@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import numpy as np
 import warp as wp
-from terrain_toolkit import DynamicFilterConfig
-from terrain_toolkit import DynamicPointFilter
-from terrain_toolkit import frontier_from_organized
+from helhest.terrain import DynamicFilterConfig
+from helhest.terrain import DynamicPointFilter
+from helhest.terrain import frontier_from_organized
 
 MAX_RANGE = 45.0
 

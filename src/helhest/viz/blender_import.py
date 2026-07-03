@@ -4,7 +4,7 @@ Run inside Blender (GUI or headless). This script imports only ``bpy``/``numpy``
 shipped with Blender), so it has no dependency on the rest of the package.
 
     # interactive: open the result and tweak camera/materials yourself
-    blender --python src/kinematic_helhest/viz/blender_import.py -- --data rollout.npz
+    blender --python src/helhest/viz/blender_import.py -- --data rollout.npz
 
     # with your own rigged model (.blend with separate wheel objects)
     blender --python .../blender_import.py -- --data rollout.npz \

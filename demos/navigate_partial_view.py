@@ -12,8 +12,8 @@ Both windows step in lockstep (same robot/sim); only the cameras are independent
 global map (window 1) smears while the local rollouts (window 2) stay on true geometry. In each window:
 mouse-drag orbits, scroll zooms, ESC/Q quits.
 
-Perception is terrain_toolkit's real OSDome 3D lidar; the local planning map (window 2) is dense
-via terrain_toolkit inpaint + confidence masks (occlusion & support).
+Perception is helhest.terrain's real OSDome 3D lidar; the local planning map (window 2) is dense
+via helhest.terrain inpaint + confidence masks (occlusion & support).
 
   python demos/navigate_partial_view.py --world pocket
   python demos/navigate_partial_view.py --world pocket --drift 0.04
@@ -25,24 +25,24 @@ import argparse
 
 import numpy as np
 import warp as wp
-from kinematic_helhest import dynamics
-from kinematic_helhest import worlds as W
-from kinematic_helhest.control.mppi import CostParams
-from kinematic_helhest.control.mppi import MppiGpu
-from kinematic_helhest.control.mppi import RobustConfig
-from kinematic_helhest.control.terminal import dock_control
-from kinematic_helhest.driver import WarpDriver
-from kinematic_helhest.engine import ForwardSimulator
-from kinematic_helhest.engine import GridParams
-from kinematic_helhest.heightmap import Heightmap
-from kinematic_helhest.perception.lidar import crop_window
-from kinematic_helhest.planning.costtogo import CostToGo
-from kinematic_helhest.planning.lattice_solver import trace_optimal
-from kinematic_helhest.viz.render import _commands
-from kinematic_helhest.viz.render import _draw
-from kinematic_helhest.viz.render import _init_gl
-from kinematic_helhest.viz.render import build_robot
-from kinematic_helhest.viz.render import build_terrain
+from helhest import dynamics
+from helhest import worlds as W
+from helhest.control.mppi import CostParams
+from helhest.control.mppi import MppiGpu
+from helhest.control.mppi import RobustConfig
+from helhest.control.terminal import dock_control
+from helhest.driver import WarpDriver
+from helhest.engine import ForwardSimulator
+from helhest.engine import GridParams
+from helhest.heightmap import Heightmap
+from helhest.perception.lidar import crop_window
+from helhest.planning.costtogo import CostToGo
+from helhest.planning.lattice_solver import trace_optimal
+from helhest.viz.render import _commands
+from helhest.viz.render import _draw
+from helhest.viz.render import _init_gl
+from helhest.viz.render import build_robot
+from helhest.viz.render import build_terrain
 
 PW, PH = 900, 780  # each window's size
 
@@ -222,11 +222,11 @@ def run(
     builder, start, goal = W.WORLDS[world]
     scene = builder()
     mu = W.matching_friction(scene)
-    # perception front-end: terrain_toolkit's real OSDome 3D ray-cast, rasterized for the global
+    # perception front-end: helhest.terrain's real OSDome 3D ray-cast, rasterized for the global
     # routing map, and inpaint + confidence masks (occlusion & support) for the local planning map.
-    from kinematic_helhest.perception.terrain_lidar import TerrainAccumMap
-    from kinematic_helhest.perception.terrain_lidar import TerrainInpaintMap
-    from kinematic_helhest.perception.terrain_lidar import TerrainLidar
+    from helhest.perception.terrain_lidar import TerrainAccumMap
+    from helhest.perception.terrain_lidar import TerrainInpaintMap
+    from helhest.perception.terrain_lidar import TerrainLidar
 
     tlidar = TerrainLidar(scene, device=device)
     inpaint_map = TerrainInpaintMap(
@@ -260,7 +260,7 @@ def run(
     sgrid = GridParams(
         rcnx, rcny, rccell, (ww // 2 - rww // 2) * cell, (wh // 2 - rwh // 2) * cell
     ).build()
-    # GLOBAL routing map: terrain_toolkit rolling accumulator (25 m radius) -> inpaint + occlusion
+    # GLOBAL routing map: helhest.terrain rolling accumulator (25 m radius) -> inpaint + occlusion
     mm = TerrainAccumMap(scene, radius_m=25.0, device=device)
     local = inpaint_map  # LOCAL map the MPPI plans on (rebuilt per frame from the current scan)
     rng = np.random.default_rng(0)

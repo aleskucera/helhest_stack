@@ -13,15 +13,15 @@ import argparse
 
 import numpy as np
 import warp as wp
-from kinematic_helhest import dynamics
-from kinematic_helhest import worlds as W
-from kinematic_helhest.control.mppi import CostParams
-from kinematic_helhest.control.mppi import MppiGpu
-from kinematic_helhest.control.mppi import RobustConfig
-from kinematic_helhest.control.terminal import dock_control
-from kinematic_helhest.driver import WarpDriver
-from kinematic_helhest.engine import ForwardSimulator
-from kinematic_helhest.engine import GridParams
+from helhest import dynamics
+from helhest import worlds as W
+from helhest.control.mppi import CostParams
+from helhest.control.mppi import MppiGpu
+from helhest.control.mppi import RobustConfig
+from helhest.control.terminal import dock_control
+from helhest.driver import WarpDriver
+from helhest.engine import ForwardSimulator
+from helhest.engine import GridParams
 
 
 def evaluate(
@@ -62,7 +62,7 @@ def evaluate(
     )
     Hc = np.ascontiguousarray(Hc, np.float32)
     cgrid = GridParams(cnx, cny, ccell, scene.x0, scene.y0)
-    from kinematic_helhest.planning.costtogo import CostToGo
+    from helhest.planning.costtogo import CostToGo
 
     clat = CostToGo(
         cgrid, dynamics.robot_params(), dynamics.planning_solver(), n_theta=n_theta, device=device

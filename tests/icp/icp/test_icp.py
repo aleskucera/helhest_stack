@@ -5,8 +5,8 @@ import argparse
 
 import numpy as np
 import warp as wp
-from terrain_toolkit import IcpAligner
-from terrain_toolkit import IcpConfig
+from helhest.terrain import IcpAligner
+from helhest.terrain import IcpConfig
 
 
 def make_scene_cloud(n: int, seed: int) -> np.ndarray:

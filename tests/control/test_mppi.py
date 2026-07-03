@@ -10,15 +10,15 @@ Run:  python -m tests.control.test_mppi
 
 import numpy as np
 import warp as wp
-from kinematic_helhest import friction
-from kinematic_helhest import heightmap as hmmod
-from kinematic_helhest.control import mppi as mg
-from kinematic_helhest.control.reference import _cost as cost_np
-from kinematic_helhest.control.reference import _to_wheel_omega
-from kinematic_helhest.engine import ForwardSimulator
-from kinematic_helhest.engine import GridParams
-from kinematic_helhest.engine import RobotParams
-from kinematic_helhest.engine import SolverParams
+from helhest import friction
+from helhest import heightmap as hmmod
+from helhest.control import mppi as mg
+from helhest.control.reference import _cost as cost_np
+from helhest.control.reference import _to_wheel_omega
+from helhest.engine import ForwardSimulator
+from helhest.engine import GridParams
+from helhest.engine import RobotParams
+from helhest.engine import SolverParams
 
 _W = dict(
     goal_terminal=3.0,

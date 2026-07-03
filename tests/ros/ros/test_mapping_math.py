@@ -8,12 +8,12 @@ Run: python tests/ros/test_mapping_math.py
 from __future__ import annotations
 
 import numpy as np
-from terrain_toolkit.localization.pose_math import crop_box
-from terrain_toolkit.localization.pose_math import invert_pose
-from terrain_toolkit.localization.pose_math import matrix_to_quaternion
-from terrain_toolkit.localization.pose_math import odom_delta
-from terrain_toolkit.localization.pose_math import pose_correction_magnitude
-from terrain_toolkit.localization.pose_math import transform_points_xyz
+from helhest.terrain.localization.pose_math import crop_box
+from helhest.terrain.localization.pose_math import invert_pose
+from helhest.terrain.localization.pose_math import matrix_to_quaternion
+from helhest.terrain.localization.pose_math import odom_delta
+from helhest.terrain.localization.pose_math import pose_correction_magnitude
+from helhest.terrain.localization.pose_math import transform_points_xyz
 
 
 def _rpy_to_R(roll: float, pitch: float, yaw: float) -> np.ndarray:
