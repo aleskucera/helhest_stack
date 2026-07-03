@@ -93,7 +93,9 @@ class BaseSimulator:
     def _alloc_rollout_buffers(self, requires_grad: bool, control_grad: bool) -> None:
         """Allocate the per-rollout state/output/input buffers (shapes shared by both subclasses).
         `requires_grad` covers the state-carrying + diagnostic buffers; controls/start pose follow
-        `control_grad` (the differentiable path skips control gradients)."""
+        `control_grad` (the differentiable path skips control gradients).
+        `omega_actual` and `init_omega_actual` are never differentiated (tau_motor is a non-diff
+        struct scalar; promote to wp.array if d(loss)/d(tau) is ever needed)."""
         B, T = self.batch_size, self.n_steps
         rg = requires_grad
         with wp.ScopedDevice(self.device):
@@ -103,8 +105,10 @@ class BaseSimulator:
             self.turning = wp.zeros((T, B), dtype=wp.vec2f, requires_grad=rg)
             self.clearance = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             self.residual = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
+            self.omega_actual = wp.zeros((T + 1, B), dtype=wp.vec3f)
             self.wheel_omega = wp.zeros((T, B), dtype=wp.vec3f, requires_grad=control_grad)
             self.start_pose = wp.zeros(B, dtype=wp.vec3f, requires_grad=control_grad)
+            self.init_omega_actual = wp.zeros(B, dtype=wp.vec3f)  # like start_pose
 
     def _dilate(
         self,
@@ -174,9 +178,9 @@ class ForwardSimulator(BaseSimulator):
     def rollout_launch(self) -> None:
         """Launch the whole rollout (init + T steps) in ONE fused kernel; NO host I/O.
 
-        `self.wheel_omega` must already hold the controls and `self.start_pose` the init pose
-        (e.g. filled on-device by the GPU MPPI sampler). Results stay on device in
-        controlled/derived/loads/turning/clearance/residual -- the graph-capturable core."""
+        `self.wheel_omega` must already hold the controls, `self.start_pose` the init pose,
+        and `self.init_omega_actual` the initial lagged wheel speed (e.g. encoder reading;
+        zeros if starting from rest). Results stay on device -- the graph-capturable core."""
         wp.launch(
             rollout_kernel,
             self.batch_size,
@@ -189,11 +193,13 @@ class ForwardSimulator(BaseSimulator):
                 self.robot,
                 self.solver,
                 self.start_pose,
+                self.init_omega_actual,
                 self.wheel_omega,
             ],
             outputs=[
                 self.controlled,
                 self.derived,
+                self.omega_actual,
                 self.loads,
                 self.turning,
                 self.clearance,
@@ -203,16 +209,32 @@ class ForwardSimulator(BaseSimulator):
         )
 
     def rollout(
-        self, wheel_omega: np.ndarray, init_pose: tuple[float, float, float]
+        self,
+        wheel_omega: np.ndarray,
+        init_pose: tuple[float, float, float],
+        init_omega: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """wheel_omega [T, B, 3], init_pose (x,y,yaw) shared by all rollouts. Returns
-        controlled [T+1,B,3] (x,y,yaw), derived [T+1,B,3] (z,pitch,roll), clear/resid [T,B]."""
-        self.wheel_omega.assign(np.ascontiguousarray(wheel_omega, np.float32))
+        """wheel_omega [T, B, 3], init_pose (x,y,yaw) shared by all rollouts.
+        `init_omega` is the initial actual wheel speed (shape [3] or [B, 3]); defaults to
+        zeros (wheels at rest). Returns controlled [T+1,B,3] (x,y,yaw),
+        derived [T+1,B,3] (z,pitch,roll), clear/resid [T,B]."""
+        # Start pose:
         self.start_pose.assign(
             np.ascontiguousarray(
                 np.tile(np.asarray(init_pose, np.float32), (self.batch_size, 1)), np.float32
             )
         )
+        # Wheel omega:
+        self.wheel_omega.assign(np.ascontiguousarray(wheel_omega, np.float32))
+        if init_omega is None:
+            self.init_omega_actual.zero_()
+        else:
+            init_omega_np = np.asarray(init_omega, np.float32)
+            if init_omega_np.ndim == 1:
+                init_omega_np = np.tile(init_omega_np, (self.batch_size, 1))
+            self.init_omega_actual.assign(np.ascontiguousarray(init_omega_np))
+        
+        # Launch rollout:
         self.rollout_launch()
         return (
             self.controlled.numpy(),
@@ -347,7 +369,8 @@ class DifferentiableSimulator(BaseSimulator):
 
     def rollout_taped(self, loss_fn: Callable | None = demo_loss) -> wp.array | None:
         """Record init + T per-step launches (+ optional `loss_fn(self)`) on a fresh tape; return the
-        loss array (or None). `self.wheel_omega`/`self.start_pose` must already hold controls/pose.
+        loss array (or None). `self.wheel_omega`/`self.start_pose` must already hold controls/pose;
+        set `self.init_omega_actual` before calling if the robot is already moving (default: zeros).
 
         Two backward paths follow:
           - scalar loss: pass a `loss_fn` (default `demo_loss`); it runs INSIDE the tape so its
@@ -361,6 +384,7 @@ class DifferentiableSimulator(BaseSimulator):
         `d(loss)/d(raw elevation)` connects through envelope = elevation[contact] -- its scatter
         adjoint is the analytical gradient. `elevation`/`friction` must already be set."""
         self._contact()  # off-tape arg-max -> best_k, fresh for the current elevation
+        wp.copy(self.omega_actual[0], self.init_omega_actual) # seed omega_actual[0] off-tape: boundary condition, not differentiated.
         self.tape = wp.Tape()
         with self.tape:
             self._gather()  # on-tape: envelope = elev[contact] + cap; scatter adjoint -> d/d elevation
@@ -383,10 +407,12 @@ class DifferentiableSimulator(BaseSimulator):
                         self.robot,
                         self.solver,
                         self.wheel_omega[t],
+                        self.omega_actual[t],
                         self.controlled[t],
                         self.derived[t],
                     ],
                     outputs=[
+                        self.omega_actual[t + 1],
                         self.controlled[t + 1],
                         self.derived[t + 1],
                         self.loads[t],
