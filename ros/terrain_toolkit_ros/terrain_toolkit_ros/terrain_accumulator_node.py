@@ -2,12 +2,16 @@
 """Accumulating terrain mapper for ROS 2 Kilted.
 
 Fuses a LiDAR PointCloud2 stream with robot odometry (nav_msgs/Odometry) into a
-persistent point cloud, then runs the terrain_toolkit pipeline over a
-robot-centric window of it. Each scan is registered scan-to-submap with
-point-to-plane ICP, using the odometry frame-to-frame delta as the initial
-guess; the refined trajectory corrects odom drift. The published terrain_map
-therefore covers more than a single scan (it retains terrain already passed or
-hidden behind obstacles).
+persistent, device-resident rolling voxel map (DeviceMapAccumulator), then runs
+the terrain_toolkit pipeline over a robot-centric window of it. Each scan is
+registered scan-to-submap with point-to-plane ICP, using the odometry
+frame-to-frame delta as the initial guess; the refined trajectory corrects odom
+drift. The published terrain_map therefore covers more than a single scan (it
+retains terrain already passed or hidden behind obstacles).
+
+The map, ICP submap, scan transform, and heightmap window all stay on the GPU:
+the scan is uploaded once at the sensor boundary and nothing bulk crosses back
+until the final published grid. Only 4x4 poses and point counts touch the host.
 
 Frames: sensor (lidar) → base (base_frame, via static TF) → odom (Odometry
 frame) → world ≡ map_frame (accumulation frame). The world frame is bootstrapped
@@ -36,22 +40,24 @@ from rcl_interfaces.msg import ParameterDescriptor
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2
+from terrain_toolkit import BoxCrop
+from terrain_toolkit import DeviceMapAccumulator
 from terrain_toolkit import DynamicFilterConfig
 from terrain_toolkit import DynamicPointFilter
 from terrain_toolkit import IcpAligner
 from terrain_toolkit import IcpConfig
+from terrain_toolkit import Localizer
+from terrain_toolkit import LocalizerConfig
+from terrain_toolkit import RegistrationOutcome
 from terrain_toolkit import TerrainMap
-from terrain_toolkit import VoxelGrid
+from terrain_toolkit import transform_points
+from terrain_toolkit.localization.pose_math import deskew_scan
+from terrain_toolkit.localization.pose_math import invert_pose
+from terrain_toolkit.localization.pose_math import matrix_to_quaternion
+from terrain_toolkit.localization.pose_math import transform_points_xyz
 from tf2_ros import TransformBroadcaster
 from tf2_ros import TransformException
 
-from ._mapping_math import crop_box
-from ._mapping_math import deskew_scan
-from ._mapping_math import invert_pose
-from ._mapping_math import matrix_to_quaternion
-from ._mapping_math import odom_delta
-from ._mapping_math import pose_correction_magnitude
-from ._mapping_math import transform_points_xyz
 from ._pipeline_common import build_pipeline
 from ._pipeline_common import declare_pipeline_parameters
 from ._pipeline_common import grid_to_cloud
@@ -85,12 +91,25 @@ _DYNAMIC_BUILD_PARAMS = frozenset(
     }
 )
 
+# Accumulator construction-time params: a change rebuilds the DeviceMapAccumulator
+# (its hash buffers are scratch; the persistent map_wp survives the rebuild).
+_ACC_BUILD_PARAMS = frozenset(
+    {
+        "accumulation_voxel_m",
+        "map_max_radius_m",
+        "map_z_min_m",
+        "map_z_max_m",
+    }
+)
+
 # Node-level params that are cached on attributes and read each callback.
 _NODE_PARAM_KEYS: tuple[str, ...] = (
     "base_frame",
     "map_frame",
     "accumulation_voxel_m",
     "map_max_radius_m",
+    "map_z_min_m",
+    "map_z_max_m",
     "icp_enable",
     "icp_submap_radius_m",
     "icp_min_inliers",
@@ -121,16 +140,19 @@ class TerrainAccumulatorNode(Node):
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         self.tf_broadcaster = TransformBroadcaster(self)
 
-        # Persistent map state (all in the world / map_frame). Bootstrapped on
+        # Persistent map state, kept on-device (world / map_frame). Bootstrapped on
         # the first scan; see _process.
-        self.global_cloud: np.ndarray | None = None
-        self._map_voxel: VoxelGrid | None = None  # lazy; sizes to the map on first use
-        self.odom_T_base_prev: np.ndarray | None = None
-        self.world_T_base_prev: np.ndarray | None = None
+        self.map_wp: wp.array | None = None  # device map (vec3), owned across frames
+        self._window_crop: BoxCrop | None = None  # lazy; device crop for the publish window
+        self.localizer: Localizer | None = None  # owns the trajectory (prev corrected + odom pose)
         self._deskew_warned = False  # warn once if deskew is on but the cloud lacks times
+        # warn once if dynamic filtering is enabled (not yet wired on the device path)
+        self._dynamic_warned = False
 
         self._build_pipeline(p)
         self._build_aligner(p)
+        self._build_localizer(p)
+        self._build_accumulator(p)
         self._build_dynamic_filter(p)
 
         sync_queue: int = self.get_parameter("sync_queue").value
@@ -206,6 +228,14 @@ class TerrainAccumulatorNode(Node):
             "map_max_radius_m",
             50.0,
             fp("Drop accumulated points beyond this distance from the robot (m)", 1.0, 500.0),
+        )
+        # World-z crop bounds for the on-device map (sparse hash → a wide range is
+        # free; set generously so terrain is never clipped over a normal run).
+        self.declare_parameter(
+            "map_z_min_m", -50.0, fp("Drop accumulated points below this world z (m)", -1000.0, 0.0)
+        )
+        self.declare_parameter(
+            "map_z_max_m", 50.0, fp("Drop accumulated points above this world z (m)", 0.0, 1000.0)
         )
 
         # ICP (scan-to-submap)
@@ -307,6 +337,8 @@ class TerrainAccumulatorNode(Node):
         self.map_frame: str = p["map_frame"]
         self.accumulation_voxel_m: float = p["accumulation_voxel_m"]
         self.map_max_radius_m: float = p["map_max_radius_m"]
+        self.map_z_min_m: float = p["map_z_min_m"]
+        self.map_z_max_m: float = p["map_z_max_m"]
         self.icp_enable: bool = p["icp_enable"]
         self.icp_submap_radius_m: float = p["icp_submap_radius_m"]
         self.icp_min_inliers: int = p["icp_min_inliers"]
@@ -338,6 +370,35 @@ class TerrainAccumulatorNode(Node):
         )
         # Share the pipeline's resolved Warp device so both run on the same GPU/CPU.
         self.aligner = IcpAligner(cfg, device=self.pipe.device)
+        # Repoint an existing localizer at the rebuilt aligner without touching its
+        # pose state (a device/ICP-param change must not reset the trajectory).
+        if self.localizer is not None:
+            self.localizer.aligner = self.aligner
+
+    def _build_localizer(self, p: dict) -> None:
+        self.localizer = Localizer(self.aligner, self._localizer_config())
+
+    def _localizer_config(self) -> LocalizerConfig:
+        # Built from the cached node params; the gate is read live (updated on reconfigure).
+        return LocalizerConfig(
+            enable=self.icp_enable,
+            submap_radius_m=self.icp_submap_radius_m,
+            min_submap_points=self.icp_min_submap_points,
+            min_inliers=self.icp_min_inliers,
+            max_correction_trans_m=self.icp_max_corr_trans_m,
+            max_correction_rot_rad=self.icp_max_corr_rot_rad,
+        )
+
+    def _build_accumulator(self, p: dict) -> None:
+        # Device-native rolling map: carve + add + radius-crop + voxel-thin per step,
+        # kept on the pipeline's device. Its buffers are scratch — rebuilding does not
+        # drop self.map_wp (that persists and is re-thinned on the next step()).
+        self.acc = DeviceMapAccumulator(
+            p["accumulation_voxel_m"],
+            p["map_max_radius_m"],
+            z_bounds=(p["map_z_min_m"], p["map_z_max_m"]),
+            device=self.pipe.device,
+        )
 
     def _build_dynamic_filter(self, p: dict) -> None:
         cfg = DynamicFilterConfig(
@@ -365,19 +426,30 @@ class TerrainAccumulatorNode(Node):
         try:
             if PIPELINE_PARAMS & new_values.keys():
                 self._build_pipeline(merged)
-                # The pipeline owns the resolved device; rebuild the aligner and
-                # dynamic filter so they follow a device change.
+                # The pipeline owns the resolved device; rebuild everything that lives
+                # on it so they follow a device change.
                 self._build_aligner(merged)
+                self._build_accumulator(merged)
                 self._build_dynamic_filter(merged)
+                # Device-resident state on the old device is now stale — drop it and
+                # re-bootstrap the map on the next scan.
+                self.map_wp = None
+                self._window_crop = None
+                self.localizer._crop = None
             else:
                 if _ICP_BUILD_PARAMS & new_values.keys():
                     self._build_aligner(merged)
+                if _ACC_BUILD_PARAMS & new_values.keys():
+                    self._build_accumulator(merged)
                 if _DYNAMIC_BUILD_PARAMS & new_values.keys():
                     self._build_dynamic_filter(merged)
         except Exception as exc:
             return SetParametersResult(successful=False, reason=str(exc))
 
         self._cache_node_params(merged)
+        # Push the (possibly changed) gate/enable params into the live localizer,
+        # preserving its pose state.
+        self.localizer.config = self._localizer_config()
         return SetParametersResult(successful=True)
 
     # ------------------------------------------------------------------
@@ -401,43 +473,53 @@ class TerrainAccumulatorNode(Node):
 
         # First scan: bootstrap world ≡ odom, seed the map, publish, return.
         # (No odom delta yet, so this one sweep is left un-deskewed — negligible.)
-        if self.odom_T_base_prev is None:
+        if not self.localizer.initialized:
             world_T_base = odom_T_base_curr
-            world_pts = transform_points_xyz(world_T_base, scan_base)
-            self.global_cloud = self._downsample_map(world_pts)
+            self.localizer.bootstrap(odom_T_base_curr, world_T_base)
+            scan_base_wp = wp.array(scan_base, dtype=wp.vec3, device=self.pipe.device)
+            self._accumulate(scan_base_wp, world_T_base)
             self._publish(world_T_base, cloud_msg.header.stamp)
             self._broadcast_map_tf(world_T_base, odom_msg)
-            self.odom_T_base_prev = odom_T_base_curr
-            self.world_T_base_prev = world_T_base
             return
 
         # Predict the new pose from the odom delta on top of the corrected pose.
-        delta = odom_delta(self.odom_T_base_prev, odom_T_base_curr)
-        world_T_base_pred = self.world_T_base_prev @ delta
+        world_T_base_pred, sweep_delta = self.localizer.predict(odom_T_base_curr)
 
         # Motion-compensate the sweep to its end instant before registering /
         # accumulating: the odom delta doubles as the constant-velocity sweep motion.
+        # (Host-side, at the sensor boundary — see the deskew/TF follow-up.)
         if self.deskew_enable:
-            scan_base = self._deskew(scan_base, point_times, delta)
+            scan_base = self._deskew(scan_base, point_times, sweep_delta)
 
-        world_T_base = self._register(scan_base, world_T_base_pred)
+        # Single upload at the sensor boundary; everything downstream stays on device.
+        scan_base_wp = wp.array(scan_base, dtype=wp.vec3, device=self.pipe.device)
 
-        world_pts = transform_points_xyz(world_T_base, scan_base)
+        outcome = self.localizer.update(
+            scan_base_wp, world_T_base_pred, self.map_wp, odom_T_base_curr
+        )
+        self._log_registration(outcome)
+        world_T_base = outcome.pose
 
-        # Drop moving objects (people) and carve their stale ghosts by map-frame
-        # visibility, before they pollute the accumulated map.
-        if self.dynamic_enable and self.global_cloud is not None:
-            world_pts = self._filter_dynamic(world_pts, world_T_base, base_T_sensor)
+        if self.dynamic_enable and not self._dynamic_warned:
+            self.get_logger().warn(
+                "dynamic_enable is set but the on-device map path does not yet apply "
+                "the dynamic filter — accumulating without it (device carve follow-up)."
+            )
+            self._dynamic_warned = True
 
-        # Accumulate, bound to a radius around the robot, and downsample.
-        merged = np.vstack((self.global_cloud, world_pts))
-        merged = crop_box(merged, world_T_base[:3, 3], self.map_max_radius_m)
-        self.global_cloud = self._downsample_map(merged)
-
+        self._accumulate(scan_base_wp, world_T_base)
         self._publish(world_T_base, cloud_msg.header.stamp)
         self._broadcast_map_tf(world_T_base, odom_msg)
-        self.odom_T_base_prev = odom_T_base_curr
-        self.world_T_base_prev = world_T_base
+
+    def _accumulate(self, scan_base_wp: wp.array, world_T_base: np.ndarray) -> None:
+        """Place the scan by the corrected pose and fold it into the device map."""
+        n = len(scan_base_wp)
+        world_pts = transform_points(scan_base_wp, n, world_T_base)
+        valid = wp.full(n, 1, dtype=wp.int32, device=self.pipe.device)
+        # carve_mask=None: no dynamic carving on the device path yet (see _process).
+        self.map_wp = self.acc.step(
+            self.map_wp, None, world_pts, valid, (world_T_base[0, 3], world_T_base[1, 3])
+        )
 
     # ------------------------------------------------------------------
     # Scan deskew (motion compensation over the sweep)
@@ -467,108 +549,52 @@ class TerrainAccumulatorNode(Node):
         alphas = (point_times - point_times.min()) / span
         return deskew_scan(scan_base, alphas, delta).astype(np.float32)
 
-    def _downsample_map(self, points: np.ndarray) -> np.ndarray:
-        """Voxel-downsample the accumulated map via the device-native VoxelGrid.
-
-        The map still lives on the host here, so this uploads/reads back at the
-        boundary. Keeping the map on device (DeviceMapAccumulator) would remove
-        the round trip entirely — see the accumulator device-path follow-up.
-        """
-        if len(points) == 0:
-            return points
-        if self._map_voxel is None or self._map_voxel.max_points < len(points):
-            self._map_voxel = VoxelGrid(
-                self.accumulation_voxel_m,
-                max_points=max(len(points), 400_000),
-                device=self.pipe.device,
-            )
-        pw = wp.array(np.ascontiguousarray(points, np.float32), dtype=wp.vec3, device=self.pipe.device)
-        centroids, n = self._map_voxel.downsample(pw, len(points))
-        return centroids.numpy()[:n].astype(points.dtype, copy=False)
-
     # ------------------------------------------------------------------
     # ICP registration (scan-to-submap, with divergence gate)
     # ------------------------------------------------------------------
 
-    def _register(self, scan_base: np.ndarray, world_T_base_pred: np.ndarray) -> np.ndarray:
-        if not self.icp_enable:
-            return world_T_base_pred
-
-        submap = crop_box(self.global_cloud, world_T_base_pred[:3, 3], self.icp_submap_radius_m)
-        if submap.shape[0] < self.icp_min_submap_points:
+    def _log_registration(self, outcome: RegistrationOutcome) -> None:
+        """Surface the localizer's fallback reasons at the node's log level."""
+        if outcome.status == "sparse":
             self.get_logger().debug(
-                f"submap too sparse ({submap.shape[0]} pts) — using odom prediction."
+                f"submap too sparse ({outcome.submap_points} pts) — using odom prediction."
             )
-            return world_T_base_pred
-
-        dev = self.aligner.device
-        result = self.aligner.align(
-            wp.array(scan_base, dtype=wp.vec3, device=dev),
-            wp.array(submap, dtype=wp.vec3, device=dev),
-            init_pose=world_T_base_pred,
-        )
-
-        rot, trans = pose_correction_magnitude(world_T_base_pred, result.pose)
-        if (
-            result.converged
-            and result.num_inliers >= self.icp_min_inliers
-            and trans <= self.icp_max_corr_trans_m
-            and rot <= self.icp_max_corr_rot_rad
-        ):
-            return result.pose
-
-        self.get_logger().warn(
-            f"ICP rejected (converged={result.converged} inliers={result.num_inliers} "
-            f"Δrot={np.rad2deg(rot):.1f}° Δtrans={trans:.2f}m) — using odom prediction."
-        )
-        return world_T_base_pred
-
-    # ------------------------------------------------------------------
-    # Dynamic obstacle removal (map-frame visibility)
-    # ------------------------------------------------------------------
-
-    def _filter_dynamic(
-        self,
-        world_pts: np.ndarray,
-        world_T_base: np.ndarray,
-        base_T_sensor: np.ndarray,
-    ) -> np.ndarray:
-        """Drop dynamic scan points and carve stale map ghosts, return kept scan.
-
-        The visibility test bins directions in the sensor frame, so it needs the
-        sensor origin and orientation in the map frame: world_T_sensor =
-        world_T_base @ base_T_sensor.
-        """
-        world_T_sensor = world_T_base @ base_T_sensor
-        sensor_origin = world_T_sensor[:3, 3]
-        sensor_R_world = world_T_sensor[:3, :3].T  # world→sensor, to align bins to beams
-
-        scan_keep, map_keep = self.dynamic_filter.filter(
-            self.global_cloud,
-            world_pts,
-            sensor_origin,
-            sensor_rotation=sensor_R_world,
-        )
-        self.global_cloud = self.global_cloud[map_keep]
-        return world_pts[scan_keep]
+        elif outcome.status == "rejected":
+            self.get_logger().warn(
+                f"ICP rejected (converged={outcome.converged} inliers={outcome.num_inliers} "
+                f"Δrot={np.rad2deg(outcome.correction_rot_rad):.1f}° "
+                f"Δtrans={outcome.correction_trans_m:.2f}m) — using odom prediction."
+            )
 
     # ------------------------------------------------------------------
     # Publish + TF
     # ------------------------------------------------------------------
 
     def _publish(self, world_T_base: np.ndarray, stamp) -> None:
+        if self.map_wp is None or len(self.map_wp) == 0:
+            return
         robot_t = world_T_base[:3, 3]
-        window = crop_box(self.global_cloud, robot_t, (self.x_range, self.y_range))
-        if window.shape[0] == 0:
+
+        # Crop the publish window out of the device map and shift it by the FULL robot
+        # translation so the grid is built robot-relative (keeping the pipeline's z_max
+        # threshold robot-relative, matching the single-frame node). z_max is applied
+        # here on device since process() skips its numpy z-cut for device input. The
+        # world height is restored on publish via z_offset / the grid origin.
+        n_map = len(self.map_wp)
+        if self._window_crop is None or self._window_crop.max_points < n_map:
+            self._window_crop = BoxCrop(max(n_map, 400_000), device=self.pipe.device)
+        window_local, n = self._window_crop.crop(
+            self.map_wp,
+            n_map,
+            (robot_t[0], robot_t[1]),
+            (self.x_range, self.y_range),
+            recenter=robot_t,
+            z_max=self.pipe.z_max,
+        )
+        if n == 0:
             return
 
-        # Shift the window by the FULL robot translation so the grid is built in a
-        # robot-relative frame: this keeps the pipeline's z_max threshold
-        # robot-relative (matching the single-frame node). The world height is
-        # restored on publish via z_offset / the grid origin.
-        window_local = window - robot_t
-
-        terrain_map: TerrainMap = self.pipe.process(window_local)
+        terrain_map: TerrainMap = self.pipe.process(window_local[:n])
         cloud = grid_to_cloud(
             terrain_map=terrain_map,
             x_min=float(robot_t[0]) - self.x_range,

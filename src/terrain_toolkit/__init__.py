@@ -1,3 +1,5 @@
+from .cloud_ops import BoxCrop
+from .cloud_ops import transform_points
 from .confidence import OcclusionConfig
 from .confidence import OcclusionMask
 from .confidence import SupportConfig
@@ -16,6 +18,9 @@ from .heightmap import multigrid_inpaint
 from .icp import IcpAligner
 from .icp import IcpConfig
 from .icp import IcpResult
+from .localization import Localizer
+from .localization import LocalizerConfig
+from .localization import RegistrationOutcome
 from .mapping import DeviceMapAccumulator
 from .outlier import OutlierFilterConfig
 from .outlier import RadiusOutlierFilter
@@ -36,6 +41,7 @@ from .traversability import TraversabilityCosts
 from .voxel import VoxelGrid
 
 __all__ = [
+    "BoxCrop",
     "DeviceMapAccumulator",
     "DynamicFilterConfig",
     "DynamicPointFilter",
@@ -51,6 +57,8 @@ __all__ = [
     "IcpConfig",
     "IcpResult",
     "LidarSensorConfig",
+    "Localizer",
+    "LocalizerConfig",
     "ObstacleInflator",
     "OcclusionConfig",
     "OcclusionMask",
@@ -58,6 +66,7 @@ __all__ = [
     "PrimitiveLidar",
     "RadiusOutlierFilter",
     "RadiusOutlierFilterConfig",
+    "RegistrationOutcome",
     "StatisticalOutlierFilter",
     "SupportConfig",
     "SupportRatioMask",
@@ -68,6 +77,7 @@ __all__ = [
     "TraversabilityConfig",
     "TraversabilityCosts",
     "VoxelGrid",
+    "transform_points",
     "diffuse_inpaint",
     "frontier_from_organized",
     "gaussian_smooth",

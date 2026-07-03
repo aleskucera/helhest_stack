@@ -281,19 +281,23 @@ class TerrainPipeline:
 
     def process(
         self,
-        points: np.ndarray,
+        points: np.ndarray | wp.array,
         *,
         footprint_plane: tuple[float, float, float] | None = None,
         return_device: bool = False,
     ) -> TerrainMap | TerrainMapGPU:
         """Run the pipeline on a point cloud.
 
-        Default: download the selected layers to a numpy-backed `TerrainMap`.
-        `return_device=True`: skip the host copy and return a `TerrainMapGPU` of
-        live device `wp.array` handles (valid only until the next `process()` —
-        `wp.clone()` to retain) for a zero-copy handoff to another Warp library.
+        `points` may be a host (N, 3) numpy array or a device `wp.array(vec3)` for a
+        zero-copy handoff from another Warp stage. Default: download the selected
+        layers to a numpy-backed `TerrainMap`. `return_device=True`: skip the host
+        copy and return a `TerrainMapGPU` of live device `wp.array` handles (valid
+        only until the next `process()` — `wp.clone()` to retain).
+
+        The `z_max` cutoff is applied here only for numpy input; a device cloud is
+        taken as-is, so crop z on the caller side (e.g. `BoxCrop(z_max=...)`).
         """
-        if self.z_max is not None:
+        if self.z_max is not None and not isinstance(points, wp.array):
             points = points[points[:, 2] <= self.z_max]
 
         # Scope every allocation and kernel launch in this frame to the chosen
@@ -307,15 +311,15 @@ class TerrainPipeline:
 
     def _compute(
         self,
-        points: np.ndarray,
+        points: np.ndarray | wp.array,
         footprint_plane: tuple[float, float, float] | None = None,
     ) -> dict[str, object]:
         """Run all GPU stages and return the device buffers (no download)."""
-        # Single upload to the active device — every stage below consumes wp.array.
-        pts_wp = wp.array(
-            np.ascontiguousarray(points, dtype=np.float32),
-            dtype=wp.vec3,
-        )
+        # Device input is consumed directly (zero-copy); numpy uploads once here.
+        if isinstance(points, wp.array):
+            pts_wp = points
+        else:
+            pts_wp = wp.array(np.ascontiguousarray(points, dtype=np.float32), dtype=wp.vec3)
         if self.outlier_filter is not None:
             pts_wp = self.outlier_filter.apply(pts_wp)
 

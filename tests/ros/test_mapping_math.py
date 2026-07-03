@@ -1,29 +1,19 @@
-"""Unit tests for the accumulator's pose / cloud math (`_mapping_math`).
+"""Unit tests for the localization pose / cloud math (`localization.pose_math`).
 
-Pure numpy — no rclpy, no Warp — so this runs without a ROS install. The module
-under test lives in the (non-pip-installed) ROS package, so we add it to the path.
+Pure numpy — no rclpy — so this runs without a ROS install.
 
 Run: python tests/ros/test_mapping_math.py
 """
 
 from __future__ import annotations
 
-import os
-import sys
-
 import numpy as np
-
-_ROS_PKG = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "ros", "terrain_toolkit_ros")
-)
-sys.path.insert(0, _ROS_PKG)
-
-from terrain_toolkit_ros._mapping_math import crop_box  # noqa: E402
-from terrain_toolkit_ros._mapping_math import invert_pose  # noqa: E402
-from terrain_toolkit_ros._mapping_math import matrix_to_quaternion  # noqa: E402
-from terrain_toolkit_ros._mapping_math import odom_delta  # noqa: E402
-from terrain_toolkit_ros._mapping_math import pose_correction_magnitude  # noqa: E402
-from terrain_toolkit_ros._mapping_math import transform_points_xyz  # noqa: E402
+from terrain_toolkit.localization.pose_math import crop_box
+from terrain_toolkit.localization.pose_math import invert_pose
+from terrain_toolkit.localization.pose_math import matrix_to_quaternion
+from terrain_toolkit.localization.pose_math import odom_delta
+from terrain_toolkit.localization.pose_math import pose_correction_magnitude
+from terrain_toolkit.localization.pose_math import transform_points_xyz
 
 
 def _rpy_to_R(roll: float, pitch: float, yaw: float) -> np.ndarray:

@@ -69,6 +69,15 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - **Names carry the meaning.** Prefer a descriptive name that needs no comment to decode (`resolution`, `smooth_sigma`, `support_ratio`) over a short name plus an explanation. Keep terse names only for grid/loop indices and math (`i, j` = row/col, `p`, `dx, dy`).
 - **Comments explain WHY, not what.** Match the existing density: short notes on rationale, units, and grid/frame conventions — never a restatement of the code. Keep units and frame conventions explicit (e.g. `# row=y, col=x; sigma in CELLS not meters`). A trailing comment that would push its line past 100 goes on its own line *above* the code (otherwise black wraps the code around it).
 
+## 6. Device-Native by Default (this project)
+
+This is a Warp/CUDA codebase. Data-parallel work runs on-device; **host↔device copies are the dominant performance cost, and a per-frame upload→compute→readback round trip is the worst thing you can write here.** Default to device-resident `wp.array`, NOT numpy. Do not treat numpy as the baseline and device as an optimization — it is the reverse.
+
+- **Bulk data → device.** Point clouds, grids, per-point / per-cell fields, and *any new data-parallel stage* are `wp.array` + `@wp.kernel`. Never implement a compute stage in numpy, and never introduce a host↔device round trip for bulk data.
+- **numpy only at unavoidable boundaries:** parsing an incoming ROS / message payload, and small host-side *control* values — 4×4 poses, scalars, gate thresholds, counts. A pose stays numpy (16 floats driving host control flow); a cloud never does.
+- **If a stage seems to need numpy, STOP and say so before writing it.** Surface the round-trip cost and propose the device-native path — do not silently fall back to host arrays. The user has not, and does not, approve numpy for bulk data by default.
+- Mirror `icp/`, `voxel.py`, and `mapping/` (esp. `DeviceMapAccumulator`): device-resident data + kernels are the norm here, not the exception.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

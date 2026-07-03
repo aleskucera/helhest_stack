@@ -16,48 +16,19 @@ Run: python scripts/stress_icp_odom.py
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
 import numpy as np
 import warp as wp
-
+from terrain_toolkit import DeviceMapAccumulator
 from terrain_toolkit import IcpAligner
 from terrain_toolkit import IcpConfig
-from terrain_toolkit import VoxelGrid
+from terrain_toolkit import Localizer
+from terrain_toolkit import LocalizerConfig
+from terrain_toolkit import transform_points
+from terrain_toolkit.localization.pose_math import invert_pose
+from terrain_toolkit.localization.pose_math import pose_correction_magnitude
+from terrain_toolkit.localization.pose_math import transform_points_xyz
 from terrain_toolkit.sim import GroundSpec
 from terrain_toolkit.sim import PrimitiveLidar
-
-# Sim-side numpy boundary around the device-native VoxelGrid (this harness keeps
-# its accumulated map on the host; the library itself is Warp-only).
-_VG: dict[tuple, VoxelGrid] = {}
-
-
-def voxel_downsample(points: np.ndarray, voxel_size: float, *, device) -> np.ndarray:
-    if len(points) == 0:
-        return points
-    key = (round(voxel_size, 4), str(device))
-    vg = _VG.get(key)
-    if vg is None or vg.max_points < len(points):
-        vg = VoxelGrid(voxel_size, max_points=max(len(points), 300_000), device=device)
-        _VG[key] = vg
-    pw = wp.array(np.ascontiguousarray(points, np.float32), dtype=wp.vec3, device=device)
-    ds, n = vg.downsample(pw, len(points))
-    return ds.numpy()[:n].astype(points.dtype, copy=False)
-
-# Import the node's real pose algebra directly from the ROS package (pure numpy,
-# no rclpy) so the harness exercises the same math the node ships.
-_MM_PATH = Path(__file__).resolve().parents[1] / (
-    "ros/terrain_toolkit_ros/terrain_toolkit_ros/_mapping_math.py"
-)
-_spec = importlib.util.spec_from_file_location("_mapping_math", _MM_PATH)
-_mm = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mm)
-crop_box = _mm.crop_box
-invert_pose = _mm.invert_pose
-odom_delta = _mm.odom_delta
-pose_correction_magnitude = _mm.pose_correction_magnitude
-transform_points_xyz = _mm.transform_points_xyz
 
 # Pipeline constants matching the node defaults.
 ACC_VOXEL_M = 0.10
@@ -114,7 +85,9 @@ def _noisy_delta(
 # ----------------------------------------------------------------------------
 
 
-def _ring_directions(channels: int, az_count: int, el_min_deg: float, el_max_deg: float) -> np.ndarray:
+def _ring_directions(
+    channels: int, az_count: int, el_min_deg: float, el_max_deg: float
+) -> np.ndarray:
     """Spinning-LiDAR beam directions (local frame): channels x azimuth, full 360°."""
     els = np.deg2rad(np.linspace(el_min_deg, el_max_deg, channels))
     azs = np.linspace(-np.pi, np.pi, az_count, endpoint=False)
@@ -159,35 +132,8 @@ def _ground_truth_trajectory(n_frames: int) -> list[np.ndarray]:
 
 
 # ----------------------------------------------------------------------------
-# The node loop (headless reimplementation of _process / _register)
+# The node loop (headless driver over the shared Localizer)
 # ----------------------------------------------------------------------------
-
-
-def _register(
-    aligner: IcpAligner,
-    scan_base: np.ndarray,
-    global_cloud: np.ndarray,
-    world_T_base_pred: np.ndarray,
-) -> tuple[np.ndarray, str]:
-    """Scan-to-submap ICP with the node's divergence gate. Returns (pose, status)."""
-    submap = crop_box(global_cloud, world_T_base_pred[:3, 3], ICP_SUBMAP_RADIUS_M)
-    if submap.shape[0] < GATE_MIN_SUBMAP:
-        return world_T_base_pred, "sparse"
-    dev = aligner.device
-    result = aligner.align(
-        wp.array(scan_base, dtype=wp.vec3, device=dev),
-        wp.array(submap, dtype=wp.vec3, device=dev),
-        init_pose=world_T_base_pred,
-    )
-    rot, trans = pose_correction_magnitude(world_T_base_pred, result.pose)
-    if (
-        result.converged
-        and result.num_inliers >= GATE_MIN_INLIERS
-        and trans <= GATE_MAX_TRANS_M
-        and rot <= GATE_MAX_ROT_RAD
-    ):
-        return result.pose, "ok"
-    return world_T_base_pred, "reject"
 
 
 def run_pipeline(
@@ -199,63 +145,63 @@ def run_pipeline(
 ) -> dict[str, object]:
     """Drive the accumulating-mapper loop; return per-frame errors + gate stats.
 
-    `aligner=None` runs pure odom dead-reckoning (ICP disabled).
+    `aligner=None` runs pure odom dead-reckoning (ICP disabled). Uses the same
+    Localizer the ROS node ships, so the harness exercises the shipped gate.
     """
-    global_cloud: np.ndarray | None = None
-    odom_prev: np.ndarray | None = None
-    world_prev: np.ndarray | None = None
+    localizer = Localizer(
+        aligner,
+        LocalizerConfig(
+            enable=aligner is not None,
+            submap_radius_m=ICP_SUBMAP_RADIUS_M,
+            min_submap_points=GATE_MIN_SUBMAP,
+            min_inliers=GATE_MIN_INLIERS,
+            max_correction_trans_m=GATE_MAX_TRANS_M,
+            max_correction_rot_rad=GATE_MAX_ROT_RAD,
+        ),
+    )
+    # Device-native map: the accumulator carves+adds+crops+voxel-thins on device and
+    # keeps the map as a wp.array — no host round trip. z_bounds wide so the world-z
+    # box never clips the scene (sparse hash → unused z range costs nothing).
+    acc = DeviceMapAccumulator(
+        ACC_VOXEL_M, MAP_MAX_RADIUS_M, z_bounds=(-100.0, 100.0), device=device
+    )
+    map_wp: wp.array | None = None
     pos_err: list[float] = []
     rot_err: list[float] = []
     n_reject = 0
     n_sparse = 0
-    diverged_at: int | None = None
 
     for k in range(len(scans_base)):
-        scan_base = scans_base[k]
-        if odom_prev is None:
+        n = len(scans_base[k])
+        scan_base_wp = wp.array(scans_base[k], dtype=wp.vec3, device=device)  # single upload
+        if not localizer.initialized:
             world_T_base = odom[k]  # bootstrap world ≡ odom (= gt[0])
-            global_cloud = voxel_downsample(
-                transform_points_xyz(world_T_base, scan_base), ACC_VOXEL_M, device=device
-            )
+            localizer.bootstrap(odom[k], world_T_base)
         else:
-            delta = odom_delta(odom_prev, odom[k])
-            world_T_base_pred = world_prev @ delta
-            if aligner is None:
-                world_T_base = world_T_base_pred
-            else:
-                world_T_base, status = _register(
-                    aligner, scan_base, global_cloud, world_T_base_pred
-                )
-                n_reject += status == "reject"
-                n_sparse += status == "sparse"
-            world_pts = transform_points_xyz(world_T_base, scan_base)
-            merged = np.vstack((global_cloud, world_pts))
-            merged = crop_box(merged, world_T_base[:3, 3], MAP_MAX_RADIUS_M)
-            # A cloud smeared far enough overflows the voxel grid — that is the map
-            # having diverged, not a bug. Record it and stop rather than crash.
-            try:
-                global_cloud = voxel_downsample(merged, ACC_VOXEL_M, device=device)
-            except ValueError:
-                diverged_at = k
-                pos_err.append(float("inf"))
-                break
+            world_T_base_pred, _ = localizer.predict(odom[k])
+            outcome = localizer.update(scan_base_wp, world_T_base_pred, map_wp, odom[k])
+            world_T_base = outcome.pose
+            n_reject += outcome.status == "rejected"
+            n_sparse += outcome.status == "sparse"
+
+        world_pts = transform_points(scan_base_wp, n, world_T_base)
+        valid = wp.full(n, 1, dtype=wp.int32, device=device)
+        map_wp = acc.step(map_wp, None, world_pts, valid, (world_T_base[0, 3], world_T_base[1, 3]))
 
         rot, trans = pose_correction_magnitude(gt[k], world_T_base)
         pos_err.append(trans)
         rot_err.append(np.rad2deg(rot))
-        odom_prev = odom[k]
-        world_prev = world_T_base
 
-    pos = np.array([e for e in pos_err if np.isfinite(e)])
+    pos = np.array(pos_err)
     rot = np.array(rot_err)
     return {
-        "ate_pos": float("inf") if diverged_at is not None else float(np.sqrt(np.mean(pos**2))),
-        "final_pos": float("inf") if diverged_at is not None else float(pos[-1]),
+        "ate_pos": float(np.sqrt(np.mean(pos**2))),
+        "final_pos": float(pos[-1]),
         "ate_rot": float(np.sqrt(np.mean(rot**2))),
         "final_rot": float(rot[-1]),
         "n_reject": n_reject,
         "n_sparse": n_sparse,
-        "diverged_at": diverged_at,
+        "diverged_at": None,
     }
 
 
@@ -339,6 +285,7 @@ def main() -> None:
     print(header)
     print(sub)
     print("─" * len(header))
+
     def _fmt(x: float) -> str:
         return "diverged" if not np.isfinite(x) else f"{x:.3f}"
 

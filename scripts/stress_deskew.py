@@ -4,7 +4,7 @@ A spinning sensor (the OSDome) measures each azimuth at a different instant, so 
 moving robot smears one sweep across its own motion. This drives a single sweep
 while the robot translates + yaws, builds the physically-skewed cloud (cast each
 azimuth wedge from the sensor pose at that wedge's time), then checks that
-`_mapping_math.deskew_scan` puts the geometry back where an instantaneous scan
+`pose_math.deskew_scan` puts the geometry back where an instantaneous scan
 would. Metric: how far each pillar's centroid lands from the clean-scan centroid.
 
 Run: python scripts/stress_deskew.py
@@ -12,24 +12,13 @@ Run: python scripts/stress_deskew.py
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
 import numpy as np
 import warp as wp
-
+from terrain_toolkit.localization.pose_math import deskew_scan
+from terrain_toolkit.localization.pose_math import invert_pose
+from terrain_toolkit.localization.pose_math import transform_points_xyz
 from terrain_toolkit.sim import GroundSpec
 from terrain_toolkit.sim import PrimitiveLidar
-
-_MM_PATH = Path(__file__).resolve().parents[1] / (
-    "ros/terrain_toolkit_ros/terrain_toolkit_ros/_mapping_math.py"
-)
-_spec = importlib.util.spec_from_file_location("_mapping_math", _MM_PATH)
-_mm = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mm)
-deskew_scan = _mm.deskew_scan
-invert_pose = _mm.invert_pose
-transform_points_xyz = _mm.transform_points_xyz
 
 SWEEP_PERIOD_S = 0.1  # OSDome at 10 Hz — the worst-case sweep window
 SENSOR_HEIGHT_M = 0.5
@@ -52,7 +41,9 @@ def _yaw_of(T: np.ndarray) -> float:
 
 def _sweep_pose(v: float, omega: float, alpha: float) -> np.ndarray:
     """Ground-truth base pose at sweep fraction `alpha` (0 = start, 1 = end)."""
-    return _planar_pose(alpha * v * SWEEP_PERIOD_S, 0.0, alpha * omega * SWEEP_PERIOD_S, SENSOR_HEIGHT_M)
+    return _planar_pose(
+        alpha * v * SWEEP_PERIOD_S, 0.0, alpha * omega * SWEEP_PERIOD_S, SENSOR_HEIGHT_M
+    )
 
 
 def _ring_directions() -> np.ndarray:
@@ -113,7 +104,9 @@ def build_swept_scan(
     return np.vstack(pts_base), np.concatenate(alphas)
 
 
-def _pillar_centroids(cloud_base: np.ndarray, ref_pose: np.ndarray, centers: np.ndarray) -> np.ndarray:
+def _pillar_centroids(
+    cloud_base: np.ndarray, ref_pose: np.ndarray, centers: np.ndarray
+) -> np.ndarray:
     """Per-pillar xy centroid (in world) of a base-frame cloud; NaN if a pillar is unseen."""
     world = transform_points_xyz(ref_pose, cloud_base)
     body = world[(world[:, 2] > 0.3) & (world[:, 2] < 2.8)]  # pillar body, drop ground
