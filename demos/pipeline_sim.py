@@ -487,20 +487,26 @@ def run_closed_loop(
         half = win_m / 2.0
         xmin, ymin = ex - half, ey - half
         bounds = (xmin, ex + half, ymin, ey + half)
-        # LOCAL single-scan map (THIS scan) -> support mask -> inpaint SMALL gaps only -> MPPI.
-        # Trust the inpaint only WITHIN local_max_gap_m of a real return; large unseen areas stay
-        # flat (optimistic) so diffusion can't invent phantom obstacles.
+        # LOCAL single-scan map (THIS scan) -> support mask -> inpaint SMALL gaps only.
+        # Trust the inpaint only WITHIN local_max_gap_m of a real return; large unseen areas are
+        # filled from MEMORY below (not phantom-diffused).
         ll = HeightMapBuilder(cell, bounds, device=device).build(world_corrected)
         conf = (ll.count.numpy() >= local_support)[:wh, :ww]
         hm = np.where(conf, ll.max.numpy()[:wh, :ww], np.nan).astype(np.float32)
         filled = np.nan_to_num(np.asarray(multigrid_inpaint(hm)), nan=0.0).astype(np.float32)
         known_local = _dilate_bool(conf, int(round(local_max_gap_m / cell)))
-        elev_local = np.where(known_local, filled, 0.0).astype(np.float32)
         # GLOBAL rolling map over the ROUTING window (route_m, all accumulated points) -> cost-to-go
         rhalf = route_m / 2.0
         rxmin, rymin = ex - rhalf, ey - rhalf
         rgl = HeightMapBuilder(cell, (rxmin, ex + rhalf, rymin, ey + rhalf), device=device).build(map_wp)
         relev = np.where(rgl.count.numpy() > 0, rgl.max.numpy(), 0.0).astype(np.float32)[:rwh, :rww]
+        # MPPI terrain: fresh scan where the robot CURRENTLY sees (known_local wins -> no drift ghost
+        # can override what's visible); the ACCUMULATED map fills only the blind cells, so MPPI still
+        # feels obstacles it saw earlier that are now out of the single-scan FOV. The plan window is the
+        # central [wh, ww] of the routing window (both robot-centered at `cell`), so crop `relev`.
+        oy, ox = (rwh - wh) // 2, (rww - ww) // 2
+        mem = relev[oy : oy + wh, ox : ox + ww]
+        elev_local = np.where(known_local, filled, mem).astype(np.float32)
         prof.mark(4)
 
         state_l = np.array([ex - xmin, ey - ymin, eyaw], np.float32)

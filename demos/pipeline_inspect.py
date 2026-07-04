@@ -35,17 +35,17 @@ _NORM = plt.Normalize(ZMIN, ZMAX)
 _GROUND = HCMAP(_NORM(0.0))  # colour of flat ground — used as the "continuous world" backdrop
 
 
-def _rollout_nominal(U, x, y, yaw, R, halfb, dt):
-    """Planar twist rollout of the MPPI nominal wheel-speed sequence U[T,2] -> xy path."""
-    path = [(x, y)]
-    for uL, uR in U:
-        vx = R * (uL + uR) / 2.0
-        wz = R * (uR - uL) / (2.0 * halfb)
-        x += vx * math.cos(yaw) * dt
-        y += vx * math.sin(yaw) * dt
-        yaw += wz * dt
-        path.append((x, y))
-    return np.asarray(path)
+def _settled_nominal(pl, xmin, ymin, rx, ry, yaw):
+    """The committed nominal U rolled through the SETTLING simulator (same physics as reality) ->
+    world-frame xy path. Unlike a kinematic/unicycle rollout, a settled robot stalls at walls, so this
+    shows where the robot ACTUALLY goes -- it never climbs terrain the real robot couldn't."""
+    U = pl.nominal()  # [T, 2] committed wheel speeds (wL, wR)
+    tw = np.empty((U.shape[0], pl.sim.batch_size, 3), np.float32)  # rollout wants [T, B, 3]
+    tw[:, :, 0] = U[:, 0:1]
+    tw[:, :, 1] = U[:, 1:2]
+    tw[:, :, 2] = 0.5 * (U[:, 0:1] + U[:, 1:2])  # rear wheel = mean (matches the driver command)
+    controlled = pl.sim.rollout(tw, (rx, ry, yaw))[0]  # [T+1, B, 3] window-local; all B identical here
+    return controlled[:, 0, :2] + np.array([xmin, ymin])
 
 
 def _robot(ax, x, y, yaw, scale):
@@ -56,8 +56,8 @@ def _robot(ax, x, y, yaw, scale):
 
 
 class Dashboard:
-    def __init__(self, R, halfb, dt, stride, view_m):
-        self.R, self.halfb, self.dt, self.stride, self.V = R, halfb, dt, stride, view_m
+    def __init__(self, stride, view_m):
+        self.stride, self.V = stride, view_m
         self.frames: list[Image.Image] = []
         self.fig, axes = plt.subplots(2, 3, figsize=(18, 11))
         # top: perception (truth / raw scan / local map) ; bottom: planning (global map / cost-to-go / MPPI)
@@ -174,8 +174,10 @@ class Dashboard:
             p = ctrl[:, b * n_scen, :2] + np.array([xmin, ymin])  # window-local -> world
             col = plt.cm.viridis_r(norm(Jc[b])) if np.isfinite(Jc[b]) else (0.6, 0.6, 0.6, 0.15)
             am.plot(p[:, 0], p[:, 1], "-", color=col, lw=0.7, alpha=0.55)
-        path0 = _rollout_nominal(pl.nominal(), rx, ry, eyaw, self.R, self.halfb, self.dt) + np.array([xmin, ymin])
-        am.plot(path0[:, 0], path0[:, 1], "-", color="#ff2d95", lw=2.6, label="nominal")
+        # nominal drawn through the SETTLING sim (not a unicycle) -> where the robot actually goes; the
+        # host `ctrl` copy above is already taken, so this rollout may clobber pl.sim.controlled safely.
+        path0 = _settled_nominal(pl, xmin, ymin, rx, ry, eyaw)
+        am.plot(path0[:, 0], path0[:, 1], "-", color="#ff2d95", lw=2.6, label="nominal (settled)")
         _robot(am, ex, ey, eyaw, 0.8)
         am.set_xlim(wext[0], wext[1])
         am.set_ylim(wext[2], wext[3])
@@ -197,8 +199,6 @@ class Dashboard:
 
 
 def main():
-    from helhest import dynamics
-
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--world", choices=list(pipeline_sim._WORLDS), default="lane")
@@ -211,8 +211,7 @@ def main():
     args = ap.parse_args()
     wp.init()
 
-    rp = dynamics.robot_params()
-    dash = Dashboard(rp.wheel_radius, rp.half_track, dynamics.planning_solver().dt, args.stride, args.view_m)
+    dash = Dashboard(args.stride, args.view_m)
     res = pipeline_sim.run_closed_loop(
         device=args.device, world=args.world, max_frames=args.max_frames, frame_hook=dash, dynamic=args.dynamic,
     )
