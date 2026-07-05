@@ -3,7 +3,8 @@
 The numpy MPPI loop is host-bound: per refine ~15 ms of numpy (cost, noise, target_wheel_omega)
 vs ~2.7 ms of GPU work. These Warp kernels move the whole refine onto the device so
 nothing but the executed pose ever comes back, and the refine is captured as a CUDA
-graph and replayed. `reference._cost` stays the numpy oracle for the parity test.
+graph and replayed. The cost kernel is validated by CONTRACT (analytic checks in
+tests/control/test_mppi.py), not against a numpy twin.
 
 Kernels (all suffixed _kernel):
   _sample_target_wheel_omega  spline-knot noise -> Ub -> writes the rollout's target_wheel_omega buffer (rear -> 0)

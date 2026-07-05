@@ -1,9 +1,19 @@
-"""GPU MPPI inner loop (mppi) vs the numpy oracle (reference._cost + numpy reweight).
+"""GPU MPPI cost kernel + CEM reweight -- validated by CONTRACT, not by a numpy twin.
 
-The GPU RNG differs from numpy's, so trajectories can't be compared bit-for-bit.
-Instead this checks the two host-replaceable pieces on *identical* inputs:
-  * cost     : GPU `_cost` kernel J[B] vs numpy `_cost` on the same rollout + Ub
-  * reweight : GPU jmin/softmax/weighted-U vs numpy softmax on the same J + Ub
+Differential-testing the cost against a hand-written numpy copy only proves the two AGREE, never
+that either is CORRECT (a bug transcribed into both passes), and it taxes the hottest code with a
+sync burden. So instead:
+  * cost assembly : ANALYTIC -- fabricate a rollout with known poses/tilts/violations/controls and
+                    check J against the cost computed BY HAND from the real Robot envelope. (The old
+                    twin's constants had silently drifted from RobotParams and the test still passed
+                    because demo_terrain never tilts into the gap -- exactly the false confidence
+                    this replaces.)
+  * sample_lattice: ANALYTIC -- a field whose value IS its column/heading index, so the trilinear
+                    sample must return the fractional (column, heading) coordinate _locate defines.
+  * fallback      : ANALYTIC -- a SATURATED field (V >= cap) must switch the goal term to the
+                    straight-line pull cap^2 + explore_fallback*||pose-goal||^2.
+  * reweight      : the GPU bisection top-k elite mean vs an EXACT numpy top-k (a different
+                    algorithm for the same spec -- a real oracle, not a transcription).
 
 Run:  python -m tests.control.test_mppi
 """
@@ -13,25 +23,16 @@ import warp as wp
 from helhest import friction
 from helhest import heightmap as hmmod
 from helhest.control import mppi as mg
-from helhest.control.reference import _cost as cost_np
 from helhest.control.reference import _to_target_wheel_omega
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 from helhest.engine import RobotParams
 from helhest.engine import SolverParams
+from helhest.engine.terrain import Grid
 
-_W = dict(
-    goal_terminal=3.0,
-    goal_running=0.3,
-    infeasible=1e5,
-    effort=2e-3,
-    smoothness=2e-3,
-    max_roll=np.radians(30.0),
-    max_pitch_up=np.radians(45.0),
-    max_pitch_down=np.radians(30.0),
-)
-_CM, _RT, _WMAX = 0.05, 1e-2, 4.0
-_LAT_CONST = 5.0  # constant cost-to-go field for parity: V^2 is a known constant on both sides
+_W = dict(goal_terminal=3.0, goal_running=0.3, infeasible=1e5, effort=2e-3, smoothness=2e-3)
+_WMAX = 4.0
+_LAT_CONST = 5.0  # a non-saturated constant field -> V^2 is a known constant
 
 
 def _build_sim(device, B, T):
@@ -52,74 +53,166 @@ def _build_sim(device, B, T):
     return sim
 
 
-def selftest_cost_parity(device="cuda", B=2048, T=70):
-    """Identical Ub -> GPU `_cost` J vs numpy `_cost` J. RNG-independent."""
-    sim = _build_sim(device, B, T)
-    rng = np.random.default_rng(0)
-    start, goal = (0.0, 0.0, 0.0), np.array([3.0, 1.0])
-
-    # arbitrary fan
-    Ub = np.clip(rng.normal(1.5, _WMAX, (B, T, 2)), -_WMAX, _WMAX).astype(np.float32)
-    # same rollout feeds both: assign target_wheel_omega (= Ub) + start, launch, read back for the oracle.
-    cc, dd, cl, rs = sim.rollout(_to_target_wheel_omega(Ub), start)
-    J_np, _ = cost_np(cc, dd, cl, rs, Ub, _LAT_CONST, _CM, _RT, _W)
-
-    goal_d = wp.array(goal.astype(np.float32), dtype=float, device=device)
-    Jg = wp.zeros(B, dtype=float, device=device)
+def _cw(explore_fallback=0.0, lattice_cap=1e9, out_of_bounds=0.0):
     cw = mg.CostWeights()
     cw.goal_terminal, cw.goal_running = _W["goal_terminal"], _W["goal_running"]
-    cw.explore_fallback = 0.0  # fallback off in parity (not exercised here; verified e2e)
-    cw.lattice_cap = 1e9
-    cw.out_of_bounds = 0.0  # no out-of-bounds penalty in parity
+    cw.explore_fallback, cw.lattice_cap, cw.out_of_bounds = explore_fallback, lattice_cap, out_of_bounds
     cw.effort, cw.smoothness, cw.infeasible = _W["effort"], _W["smoothness"], _W["infeasible"]
-    # envelope + clear_margin/resid_tol come from sim.robot (RobotParams() defaults match _W/_CM/_RT
-    # exactly, so the GPU kernel and the numpy oracle still agree).
-    # CONSTANT field -> sample_lattice returns _LAT_CONST everywhere, so V^2 is a known constant
-    lat_field = wp.full(
-        (sim.grid.cells_y, sim.grid.cells_x, 16), _LAT_CONST, dtype=float, device=device
-    )
+    return cw
+
+
+def _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, field_val, goal, cw, T, B):
+    """Fabricate a rollout (poses/tilts/violations/controls we CHOSE) and run the GPU cost kernel on
+    it -> J[B]. Nothing is settled, so every input is known and J is hand-computable."""
+    controlled = wp.array(np.ascontiguousarray(poses, np.float32), dtype=wp.vec3, device=device)
+    derived = wp.array(np.ascontiguousarray(tilts, np.float32), dtype=wp.vec3, device=device)
+    clearance = wp.array(np.ascontiguousarray(clear, np.float32), dtype=float, device=device)
+    residual = wp.array(np.ascontiguousarray(resid, np.float32), dtype=float, device=device)
+    twom = wp.array(np.ascontiguousarray(ctrl, np.float32), dtype=wp.vec3, device=device)
+    cy, cx = sim.grid.cells_y, sim.grid.cells_x
+    field = wp.full((cy, cx, 16), float(field_val), dtype=float, device=device)
+    goal_d = wp.array(np.asarray(goal, np.float32), dtype=float, device=device)
+    Jg = wp.zeros(B, dtype=float, device=device)
     wp.launch(
         mg._cost_kernel,
         B,
-        inputs=[
-            sim.controlled,
-            sim.derived,
-            sim.clearance,
-            sim.residual,
-            sim.target_wheel_omega,
-            goal_d,
-            sim.grid,
-            lat_field,
-            16,
-            cw,
-            sim.robot,
-            T,
-        ],
+        inputs=[controlled, derived, clearance, residual, twom, goal_d, sim.grid, field, 16, cw, sim.robot, T],
         outputs=[Jg],
         device=device,
     )
-    J_gpu = Jg.numpy()
+    return Jg.numpy()
 
-    rel = np.abs(J_gpu - J_np) / (np.abs(J_np) + 1e-6)
-    print(
-        f"  cost   B={B} T={T}: J~{J_np.mean():.0f}  max|rel|={rel.max():.2e}  "
-        f"max|abs|={np.abs(J_gpu - J_np).max():.2e}"
+
+def selftest_cost_assembly(device="cuda"):
+    """Every cost term at once, checked against the value computed BY HAND from the real Robot
+    envelope: goal V^2 (terminal+running), effort, and the graded clearance/residual/roll/climb
+    penalty with its (horizon-t)/horizon early weighting."""
+    B, T = 1, 4
+    sim = _build_sim(device, B, T)
+    rp = RobotParams()  # host copy of the SAME envelope sim.robot was built from
+    d_clear, d_resid, d_roll, d_climb = 0.02, 0.01, 0.02, 0.03  # chosen amounts PAST each limit
+
+    poses = np.zeros((T + 1, B, 3), np.float32)  # anywhere (field is constant); yaw irrelevant
+    poses[..., 0], poses[..., 1] = 2.0, 2.0
+    tilts = np.zeros((T + 1, B, 3), np.float32)  # (z, pitch, roll)
+    tilts[..., 1] = -(rp.max_pitch_up + d_climb)  # climbing = nose-UP = NEGATIVE pitch
+    tilts[..., 2] = rp.max_roll + d_roll
+    clear = np.full((T, B), rp.clear_margin - d_clear, np.float32)  # below margin -> clear_viol
+    resid = np.full((T, B), rp.resid_tol + d_resid, np.float32)  # above tol -> resid_viol
+    ctrl = np.full((T, B, 3), 1.0, np.float32)  # constant -> effort = T*2, smoothness = 0
+
+    J = _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, _LAT_CONST, [3.0, 1.0], _cw(), T, B)
+
+    per_viol = d_clear + d_resid + d_roll + d_climb  # descend stays 0 (pitch is negative)
+    sum_early = sum((T - t) / T for t in range(T))  # earlier violations weigh more
+    exp = (
+        (_W["goal_terminal"] + _W["goal_running"]) * _LAT_CONST**2  # goal: V^2, run mean == terminal
+        + _W["effort"] * (T * 2.0)  # effort = sum wL^2+wR^2 = T*(1+1)
+        + per_viol * sum_early * _W["infeasible"]
     )
-    print(f"cost parity  {'OK' if rel.max() < 1e-2 else 'REVIEW'}")
+    rel = abs(J[0] - exp) / abs(exp)
+    print(f"  cost assembly: J={J[0]:.3f} expected={exp:.3f} rel={rel:.2e}")
+    print(f"cost assembly  {'OK' if rel < 1e-4 else 'REVIEW'}")
+
+
+def selftest_fallback(device="cuda"):
+    """A SATURATED lattice (V >= cap) must drop V^2 and use the straight-line pull
+    cap^2 + explore_fallback*||pose-goal||^2 -- the branch the constant-field test never reaches."""
+    B, T = 1, 4
+    sim = _build_sim(device, B, T)
+    rp = RobotParams()
+    cap, fb, V = 100.0, 1.0, 200.0  # V=200 >= 0.9*cap=90 -> saturated
+    px, py, gx, gy = 2.0, 2.0, 5.0, 6.0
+
+    poses = np.zeros((T + 1, B, 3), np.float32)
+    poses[..., 0], poses[..., 1] = px, py
+    tilts = np.zeros((T + 1, B, 3), np.float32)
+    clear = np.full((T, B), rp.clear_margin + 1.0, np.float32)  # no violations anywhere
+    resid = np.zeros((T, B), np.float32)
+    ctrl = np.zeros((T, B, 3), np.float32)  # no effort/smoothness
+
+    J = _launch_cost(
+        device, sim, poses, tilts, clear, resid, ctrl, V, [gx, gy],
+        _cw(explore_fallback=fb, lattice_cap=cap), T, B,
+    )
+    goal_cost = cap**2 + fb * ((px - gx) ** 2 + (py - gy) ** 2)
+    exp = (_W["goal_terminal"] + _W["goal_running"]) * goal_cost
+    rel = abs(J[0] - exp) / abs(exp)
+    print(f"  fallback: J={J[0]:.3f} expected={exp:.3f} rel={rel:.2e}")
+    print(f"fallback  {'OK' if rel < 1e-4 else 'REVIEW'}")
+
+
+@wp.kernel
+def _probe_sample(
+    field: wp.array3d(dtype=float),
+    grid: Grid,
+    n_theta: int,
+    xs: wp.array(dtype=float),
+    ys: wp.array(dtype=float),
+    yaws: wp.array(dtype=float),
+    out: wp.array(dtype=float),
+):
+    i = wp.tid()
+    out[i] = mg.sample_lattice(field, grid, n_theta, xs[i], ys[i], yaws[i])
+
+
+def selftest_sample_lattice(device="cuda"):
+    """Trilinear sample correctness. With a 1 m grid at origin 0, _locate maps world x to the
+    fractional column (x - 0)/1 - 0.5. A field whose value IS its column index must sample back to
+    that fraction (clamped in-bounds); a field whose value IS its heading index checks the theta
+    interp + 2*pi wrap."""
+    nx = ny = 10
+    nt = 4
+    grid = GridParams(nx, ny, 1.0, 0.0, 0.0).build()
+
+    def _probe(field_np, xs, ys, yaws):
+        field = wp.array(np.ascontiguousarray(field_np, np.float32), dtype=float, device=device)
+        out = wp.zeros(len(xs), dtype=float, device=device)
+        wp.launch(
+            _probe_sample,
+            len(xs),
+            inputs=[
+                field, grid, nt,
+                wp.array(np.asarray(xs, np.float32), dtype=float, device=device),
+                wp.array(np.asarray(ys, np.float32), dtype=float, device=device),
+                wp.array(np.asarray(yaws, np.float32), dtype=float, device=device),
+            ],
+            outputs=[out],
+            device=device,
+        )
+        return out.numpy()
+
+    # field[r, c, t] = c -> sample returns the fractional column = clamp(x - 0.5, col in [0, nx-1])
+    col = np.broadcast_to(np.arange(nx)[None, :, None], (ny, nx, nt))
+    xs = [3.3, 0.5, -2.0, 100.0]  # in-cell, cell edge, off-grid low (clamp 0), off-grid high (clamp)
+    exp_x = [2.8, 0.0, 0.0, 9.0]
+    got_x = _probe(col, xs, [5.0] * 4, [0.0] * 4)
+
+    # field[r, c, t] = t -> sample returns the interpolated heading index (wrapping at 2*pi)
+    hd = np.broadcast_to(np.arange(nt)[None, None, :], (ny, nx, nt))
+    two_pi = 2.0 * np.pi
+    yaws = [0.0, two_pi / 8.0, two_pi * 7.0 / 8.0]  # bin 0; half of 0->1; half of 3->0 (wrap)
+    exp_t = [0.0, 0.5, 1.5]
+    got_t = _probe(hd, [5.0] * 3, [5.0] * 3, yaws)
+
+    ex = float(np.abs(got_x - exp_x).max())
+    et = float(np.abs(got_t - exp_t).max())
+    print(f"  sample_lattice x: got={np.round(got_x, 4).tolist()} exp={exp_x} max|err|={ex:.2e}")
+    print(f"  sample_lattice theta(+wrap): got={np.round(got_t, 4).tolist()} exp={exp_t} max|err|={et:.2e}")
+    print(f"sample_lattice  {'OK' if max(ex, et) < 1e-4 else 'REVIEW'}")
 
 
 def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
-    """Identical J + Ub -> GPU CEM (bisection top-k elite mean) U vs numpy exact-top-k mean."""
+    """GPU CEM (bisection top-k threshold -> elite mean) vs an EXACT numpy top-k mean. Different
+    algorithm, same spec -- a genuine oracle, not a transcription."""
     rng = np.random.default_rng(1)
     Ub = np.clip(rng.normal(1.5, _WMAX, (B, T, 2)), -_WMAX, _WMAX).astype(np.float32)
     J = rng.uniform(0.0, 5.0e4, B).astype(np.float32)
     target_k = int(elite_frac * B)
 
-    # numpy reference: exact top-k elite mean
     tau_np = np.partition(J, target_k)[target_k]
     U_np = np.clip(Ub[J <= tau_np].mean(0), -_WMAX, _WMAX).astype(np.float32)
 
-    # GPU: bisection top-k threshold -> elite mean
     Jd = wp.array(J, dtype=float, device=device)
     target_wheel_omega = wp.array(_to_target_wheel_omega(Ub), dtype=wp.vec3, device=device)
     jmin = wp.zeros(1, dtype=float, device=device)
@@ -156,5 +249,7 @@ if __name__ == "__main__":
     wp.init()
     dev = "cuda" if wp.get_cuda_device_count() > 0 else "cpu"
     print(f"device: {dev}")
-    selftest_cost_parity(dev)
+    selftest_cost_assembly(dev)
+    selftest_fallback(dev)
+    selftest_sample_lattice(dev)
     selftest_reweight_parity(dev)
