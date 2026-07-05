@@ -692,6 +692,9 @@ def main() -> None:
     ap.add_argument("--heading", choices=["gyro", "wheel"], default="gyro", help="closed-loop odom heading source")
     ap.add_argument("--yaw-bias", type=float, default=0.12, help="wheel-diff skid under-rotation")
     ap.add_argument("--gyro-bias-dps", type=float, default=0.3, help="gyro constant bias (deg/s)")
+    ap.add_argument("--robust-margin-m", type=float, default=0.0, help="cost-to-go safety tube: lateral (m)")
+    ap.add_argument("--robust-margin-deg", type=float, default=0.0, help="cost-to-go safety tube: heading (deg)")
+    ap.add_argument("--exec-slip", type=float, default=0.0, help="reality wheel slip: driver keeps uniform[x,1] per wheel")
     ap.add_argument("--localization-only", action="store_true", help="Stage 1: scripted path, IMU compare")
     ap.add_argument("--stress", action="store_true", help="sweep sensor degradation -> find the failure boundary")
     ap.add_argument("--profile", action="store_true", help="time each pipeline stage with CUDA events")
@@ -736,6 +739,8 @@ def main() -> None:
             device=args.device, world=args.world, max_frames=args.max_frames, columns=args.columns,
             dropout=args.dropout, trans_noise=args.trans_noise,
             heading=args.heading, yaw_bias=args.yaw_bias, gyro_bias_dps=args.gyro_bias_dps,
+            robust_margin_m=args.robust_margin_m, robust_margin_deg=args.robust_margin_deg,
+            exec_slip=args.exec_slip,
         )
         print(
             f"CLOSED LOOP ({res['heading']} odom)  reached={res['reached']} frames={res['frames']} "
