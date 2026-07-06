@@ -18,7 +18,6 @@ import numpy as np
 import warp as wp
 from helhest import friction
 from helhest import heightmap as hmmod
-from helhest.control.reference import _to_target_wheel_omega
 from helhest.engine import ForwardSimulator
 from helhest.engine import Grid
 from helhest.engine import GridParams
@@ -27,6 +26,7 @@ from helhest.engine import sample_field
 from helhest.engine import SolverParams
 from helhest.engine.envelope import _contact_kernel
 from helhest.engine.envelope import _gather_kernel
+from tests._util import _to_target_wheel_omega
 
 
 def wheel_envelope(elevation, cell_size, wheel_radius, device="cpu"):

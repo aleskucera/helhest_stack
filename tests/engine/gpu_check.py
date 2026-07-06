@@ -21,13 +21,13 @@ import warp as wp
 from helhest import dynamics
 from helhest import friction
 from helhest import heightmap as hmmod
-from helhest.control.reference import _to_target_wheel_omega
 from helhest.engine import DifferentiableSimulator
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 from helhest.engine import RobotParams
 from helhest.engine import SolverParams
 from helhest.engine.simulator import demo_loss
+from tests._util import _to_target_wheel_omega
 
 from tests.engine.gradients import dsettle_dHenv
 
