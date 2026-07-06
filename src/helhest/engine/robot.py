@@ -4,7 +4,6 @@
 of read-only constants passed into the kernels). The numpy geometry/mass also live
 in the top-level `model.py` for the reference/viz paths; these are the device twin.
 """
-
 from dataclasses import dataclass
 
 import numpy as np
@@ -68,10 +67,10 @@ class RobotParams:  # host-side robot knobs — what you nudge
     # tightest forward arc the planner assumes (skid-steer maneuverability)
     min_turn_radius: float = 0.5
     # [rad] lateral tip-over limit (symmetric; narrow track -> strict)
-    max_roll: float = np.radians(30.0)
-    max_pitch_up: float = np.radians(45.0)  # [rad] climbing limit (nose UP, pitch < 0)
+    max_roll: float = np.radians(15.0)
+    max_pitch_up: float = np.radians(25.0)  # [rad] climbing limit (nose UP, pitch < 0)
     # [rad] descending limit (nose DOWN, pitch > 0; front-heavy)
-    max_pitch_down: float = np.radians(30.0)
+    max_pitch_down: float = np.radians(15.0)
     # min belly-terrain gap [m]; below it the pose is infeasible (high-centers)
     clear_margin: float = 0.05
     # settle residual above which the pose is infeasible (can't find a resting pose)
