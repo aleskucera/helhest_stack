@@ -9,6 +9,7 @@ import warp as wp
 from ..sensor import LidarSensorConfig
 from .kernels import _DEPTH_SENTINEL
 from .kernels import classify_kernel
+from .kernels import classify_recency_kernel
 from .kernels import render_depth_kernel
 
 
@@ -230,6 +231,52 @@ class DynamicPointFilter:
         with wp.ScopedDevice(self.device):
             self._render(scan_points, len(scan_points), origin, rot, self._scan_depth)
             return self._classify(map_points, n_map, origin, rot, self._scan_depth)
+
+    def carve_recency(
+        self,
+        map_points: wp.array,
+        scan_points: wp.array,
+        sensor_origin: np.ndarray,
+        ages: wp.array,
+        frame: int,
+        max_unseen: int,
+        *,
+        sensor_rotation: np.ndarray | None = None,
+    ) -> wp.array:
+        """Carve + visibility-gated recency, device-native → the `map_keep` mask (0 = drop).
+
+        Like `carve()`, but also drops points that ARE observable this frame (a beam reached
+        their range) yet have not been reconfirmed for more than `max_unseen` frames — the
+        stale dynamic residue the instantaneous carve leaves behind. Points the frontier never
+        reached (blind rear, occluded) are kept, so history survives where the sensor can't
+        currently look. `ages` (int32, len == map) is each point's last-seen frame, maintained
+        by `DeviceMapAccumulator`. One frontier render, one classify — same cost as `carve()`.
+        """
+        n_map = len(map_points)
+        if n_map == 0:
+            return wp.zeros(0, dtype=wp.int32)
+        origin, rot = _pose_to_warp(sensor_origin, sensor_rotation)
+        with wp.ScopedDevice(self.device):
+            self._render(scan_points, len(scan_points), origin, rot, self._scan_depth)
+            keep = wp.empty(n_map, dtype=wp.int32)
+            wp.launch(
+                classify_recency_kernel,
+                dim=n_map,
+                inputs=[
+                    map_points,
+                    origin,
+                    rot,
+                    *self._grid,
+                    float(self.config.margin_m),
+                    float(self.config.margin_rel),
+                    self._scan_depth,
+                    ages,
+                    int(frame),
+                    int(max_unseen),
+                ],
+                outputs=[keep],
+            )
+            return keep
 
     def filter(
         self,

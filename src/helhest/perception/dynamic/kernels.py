@@ -120,3 +120,56 @@ def classify_kernel(
     margin = margin_m + r * margin_rel
     if od > r + margin:
         keep[i] = 0
+
+
+@wp.kernel
+def classify_recency_kernel(
+    points: wp.array(dtype=wp.vec3),
+    origin: wp.vec3,
+    rot: wp.mat33,
+    az_bins: int,
+    el_bins: int,
+    az_min: wp.float32,
+    az_span: wp.float32,
+    el_min: wp.float32,
+    el_max: wp.float32,
+    min_range: wp.float32,
+    margin_m: wp.float32,
+    margin_rel: wp.float32,
+    other_depth: wp.array(dtype=wp.float32),
+    ages: wp.array(dtype=wp.int32),
+    frame: wp.int32,
+    max_unseen: wp.int32,
+    keep: wp.array(dtype=wp.int32),
+):
+    """Carve + visibility-gated recency in one pass → the map keep mask (0 = drop).
+
+    A point is dropped when the frontier saw PAST it (dynamic, seen-through), OR when it is
+    OBSERVABLE this frame (a beam reached at least its range) yet has gone unconfirmed for
+    more than `max_unseen` frames (stale dynamic residue the instantaneous carve missed).
+
+    Points the frontier did NOT reach are kept: an unobserved bearing (`od` == sentinel,
+    e.g. a side-mounted sensor's blind rear) and an occluded point (`od` < range − margin,
+    a nearer surface stopped the beam) are both things we cannot currently disprove, so
+    accumulated history survives there until it leaves the map or odometry breaks.
+    """
+    i = wp.tid()
+    keep[i] = 1
+    d = rot @ (points[i] - origin)
+    r = wp.length(d)
+    if r < min_range:
+        return
+    idx = _bin_index(d, az_bins, el_bins, az_min, az_span, el_min, el_max)
+    if idx < 0:
+        return
+    od = other_depth[idx]
+    if od >= _DEPTH_SENTINEL:  # no beam along this bearing → not observable → keep
+        return
+    margin = margin_m + r * margin_rel
+    if od > r + margin:  # frontier saw past → seen-through → carve now
+        keep[i] = 0
+        return
+    if od >= r - margin:  # beam reached the point (observable); stale → forget
+        if (frame - ages[i]) > max_unseen:
+            keep[i] = 0
+    # else od < r − margin: occluded (beam stopped short) → not observable → keep

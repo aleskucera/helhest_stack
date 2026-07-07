@@ -154,39 +154,26 @@ def _accumulate_stamped_kernel(
 
 
 @wp.kernel
-def _compact_evict_kernel(
+def _compact_stamped_kernel(
     slots: wp.array(dtype=wp.int32),
     keys: wp.array(dtype=wp.int64),
     sums: wp.array(dtype=wp.vec3),
     counts: wp.array(dtype=wp.int32),
     last_seen: wp.array(dtype=wp.int32),
-    cx: wp.float32,
-    cy: wp.float32,
-    view_r2: wp.float32,  # (view range)^2; a cell within it is "should have been seen"
-    frame: wp.int32,
-    max_unseen: wp.int32,
     age_sentinel: wp.int32,
-    out_counter: wp.array(dtype=wp.int32),
     out_points: wp.array(dtype=wp.vec3),
     out_ages: wp.array(dtype=wp.int32),
 ):
-    """Emit each occupied cell's centroid + last_seen, EXCEPT cells that are in view yet
-    stale (frame - last_seen > max_unseen) — those are dynamic residue and get dropped.
-    Cells out of view are always kept (occluded / off-camera, not contradicted). Resets
-    the slot for the next step whether kept or evicted."""
+    """Emit each occupied cell's centroid + its last_seen frame, and reset the slot for the
+    next step. No eviction here — dropping stale/dynamic cells is done upstream via the carve
+    mask (see DynamicPointFilter.carve_recency); this only carries the recency stamp forward."""
     s = slots[wp.tid()]
-    c = sums[s] / float(counts[s])
-    ls = last_seen[s]
+    out_points[wp.tid()] = sums[s] / float(counts[s])
+    out_ages[wp.tid()] = last_seen[s]
     keys[s] = _EMPTY
     sums[s] = wp.vec3(0.0, 0.0, 0.0)
     counts[s] = 0
     last_seen[s] = age_sentinel
-    in_view = ((c[0] - cx) * (c[0] - cx) + (c[1] - cy) * (c[1] - cy)) < view_r2
-    if in_view and (frame - ls) > max_unseen:
-        return
-    idx = wp.atomic_add(out_counter, 0, 1)
-    out_points[idx] = c
-    out_ages[idx] = ls
 
 
 class DeviceMapAccumulator:
@@ -228,10 +215,9 @@ class DeviceMapAccumulator:
             self._counts = wp.zeros(capacity, dtype=wp.int32)
             self._slots = wp.empty(self.max_points, dtype=wp.int32)
             self._slot_counter = wp.zeros(1, dtype=wp.int32)
-            # Recency pruning (opt-in via step(max_unseen=...)): per-cell last-seen frame
-            # and a compaction counter for the eviction pass. Untouched on the legacy path.
+            # Recency tracking (opt-in via step(frame=...)): per-cell last-seen frame.
+            # Untouched on the legacy path.
             self._last_seen = wp.full(capacity, _AGE_SENTINEL, dtype=wp.int32)
-            self._out_counter = wp.zeros(1, dtype=wp.int32)
 
     def _accumulate(self, points: wp.array, mask: wp.array, cx: float, cy: float) -> None:
         """Bin `points` (kept where `mask != 0`) into the shared hash table."""
@@ -298,8 +284,6 @@ class DeviceMapAccumulator:
         *,
         map_ages: wp.array | None = None,
         frame: int | None = None,
-        max_unseen: int | None = None,
-        view_range: float | None = None,
     ) -> wp.array | tuple[wp.array, wp.array]:
         """Return the new map: (carved map ∪ valid new points), cropped + voxel-thinned.
 
@@ -308,17 +292,17 @@ class DeviceMapAccumulator:
         new scan's per-beam points with `valid_wp` (int32) selecting real returns.
         `map` + `points` together must not exceed `max_points`.
 
-        Recency pruning (opt-in): pass `max_unseen` (+ `frame`, `view_range`) to also
-        evict cells that are within `view_range` of `center` yet have not been observed
-        for more than `max_unseen` frames — dynamic residue the geometric carve missed.
-        Cells out of view are preserved. In this mode the return is `(new_map, new_ages)`;
-        thread `new_ages` back in as `map_ages` next step (None → treat map as fresh).
-        The legacy path (no `max_unseen`) returns just `new_map` and is byte-identical.
+        Recency tracking (opt-in): pass `frame` to maintain a per-cell last-seen stamp and
+        return `(new_map, new_ages)`; thread `new_ages` back in as `map_ages` next step
+        (None → treat the map as seen this frame). Eviction of stale/dynamic cells is NOT
+        done here — encode it in `carve_mask` (see `DynamicPointFilter.carve_recency`), which
+        decides what to forget from actual sensor visibility. The legacy path (no `frame`)
+        returns just `new_map` and is byte-identical.
         """
         cx, cy = float(center[0]), float(center[1])
         n_map = 0 if map_wp is None else len(map_wp)
         n_pts = len(points_wp)
-        recency = max_unseen is not None
+        recency = frame is not None
         with wp.ScopedDevice(self.device):
             if n_map + n_pts == 0:
                 empty = wp.zeros(0, dtype=wp.vec3)
@@ -345,7 +329,8 @@ class DeviceMapAccumulator:
                     )
                 return new_map
 
-            # Recency path: stamp cells, then compact + evict stale in-view cells.
+            # Recency path: stamp cells (last_seen), then compact carrying the stamp forward.
+            # `carve_mask` already dropped the stale/dynamic map points upstream.
             fr = int(frame)
             if n_map:
                 keep = carve_mask if carve_mask is not None else wp.full(n_map, 1, dtype=wp.int32)
@@ -355,35 +340,21 @@ class DeviceMapAccumulator:
                 sstamp = wp.full(n_pts, fr, dtype=wp.int32)
                 self._accumulate_stamped(points_wp, valid_wp, sstamp, cx, cy)
             wp.synchronize()
-            n_used = int(self._slot_counter.numpy()[0])
-            view_r2 = float(view_range) ** 2 if view_range is not None else 1.0e18
-            full_pts = wp.empty(n_used, dtype=wp.vec3)
-            full_ages = wp.empty(n_used, dtype=wp.int32)
-            self._out_counter.zero_()
-            if n_used:
+            n_out = int(self._slot_counter.numpy()[0])
+            new_map = wp.empty(n_out, dtype=wp.vec3)
+            new_ages = wp.empty(n_out, dtype=wp.int32)
+            if n_out:
                 wp.launch(
-                    _compact_evict_kernel,
-                    dim=n_used,
+                    _compact_stamped_kernel,
+                    dim=n_out,
                     inputs=[
                         self._slots,
                         self._keys,
                         self._sums,
                         self._counts,
                         self._last_seen,
-                        cx,
-                        cy,
-                        view_r2,
-                        fr,
-                        int(max_unseen),
                         _AGE_SENTINEL,
                     ],
-                    outputs=[self._out_counter, full_pts, full_ages],
+                    outputs=[new_map, new_ages],
                 )
-            wp.synchronize()
-            n_out = int(self._out_counter.numpy()[0])
-            new_map = wp.empty(n_out, dtype=wp.vec3)
-            new_ages = wp.empty(n_out, dtype=wp.int32)
-            if n_out:
-                wp.copy(new_map, full_pts, 0, 0, n_out)
-                wp.copy(new_ages, full_ages, 0, 0, n_out)
             return new_map, new_ages
