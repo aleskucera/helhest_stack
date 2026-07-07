@@ -21,20 +21,28 @@ world frame is bootstrapped to odom at the first scan.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import rclpy
 import tf2_ros
 import warp as wp
+from geometry_msgs.msg import Point
+from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import TransformStamped
 from message_filters import ApproximateTimeSynchronizer
 from message_filters import Subscriber
 from nav_msgs.msg import Odometry
+from nav_msgs.msg import Path
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py.point_cloud2 import read_points_numpy
+from std_msgs.msg import ColorRGBA
+from visualization_msgs.msg import Marker
+from visualization_msgs.msg import MarkerArray
 from helhest.perception import DeviceMapAccumulator
 from helhest.perception import DynamicFilterConfig
 from helhest.perception import DynamicPointFilter
@@ -49,6 +57,12 @@ from helhest.perception import StatisticalOutlierFilter
 from helhest.perception import TerrainMap
 from helhest.perception import transform_points
 from helhest.perception.dynamic.frontier import frontier_from_organized
+from helhest import dynamics
+from helhest.control.mppi import CostParams
+from helhest.control.mppi import MppiGpu
+from helhest.engine import ForwardSimulator
+from helhest.engine import GridParams
+from helhest.planning.costtogo import CostToGo
 from helhest.localization import Localizer
 from helhest.localization import LocalizerConfig
 from helhest.localization import RegistrationOutcome
@@ -96,6 +110,41 @@ _DYN_BUILD = frozenset(
 _OUTLIER_BUILD = frozenset(
     {"outlier_search_radius_m", "outlier_min_neighbors", "outlier_std_mult", "device"}
 )
+# Planner is sized to the windows + rollout shape; a change to any rebuilds it (and its
+# CUDA graphs), so keep it off the per-frame path.
+_PLAN_BUILD = frozenset(
+    {
+        "win_m",
+        "route_m",
+        "resolution",
+        "plan_batch",
+        "plan_horizon",
+        "plan_n_theta",
+        "plan_lat_coarsen",
+        "plan_friction",
+        "plan_robust_margin_m",
+        "plan_robust_margin_deg",
+        "plan_nominal_reset",
+        "device",
+    }
+)
+
+
+@dataclass(frozen=True)
+class _MapFrame:
+    """One frame's built maps + window geometry, shared by publishing and planning."""
+
+    elev_local: np.ndarray  # (wh, ww) filled, NaN-free — planner terrain
+    elev_local_view: np.ndarray  # (wh, ww) NaN in unknown cells — for RViz
+    relev_view: np.ndarray  # (rwh, rww) NaN in unknown cells — for RViz
+    relev_mem: np.ndarray  # (rwh, rww) blind cells = 0 — cost-to-go routing terrain
+    cell: float
+    ex: float
+    ey: float
+    lxmin: float
+    lymin: float
+    rxmin: float
+    rymin: float
 
 
 def _dilate_bool(mask: np.ndarray, k: int) -> np.ndarray:
@@ -128,6 +177,13 @@ class ElevationNode(Node):
         self.map_ages: wp.array | None = None  # per-map-point last-seen frame (recency pruning)
         self._frame: int = 0  # monotonic frame counter for recency stamps
         self._beam_dirs: np.ndarray | None = None  # per-beam unit dirs, built once for the frontier
+        self.goal_xy: tuple[float, float] | None = None  # planning goal in map frame
+        self.planner: MppiGpu | None = None
+        self.plan_sim: ForwardSimulator | None = None
+        self.ctg: CostToGo | None = None
+        self.sgrid = None  # routing lattice grid (built)
+        self._plan_kr: int = 1
+        self._plan_dims: tuple[int, int, int, int, int, int] | None = None
         self.localizer: Localizer | None = None
         self._latest_imu: Imu | None = None
         self._deskew_warned = False
@@ -139,8 +195,11 @@ class ElevationNode(Node):
         self._build_accumulator()
         self._build_dynamic_filter()
         self._build_outlier_filter()
+        if self.plan_enable:
+            self._build_planner()
 
         self.create_subscription(Imu, self.imu_topic, self._imu_callback, 20)
+        self.create_subscription(PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10)
         # LiDAR is best-effort (SensorDataQoS); a reliable sub gets nothing from it.
         self.cloud_sub = Subscriber(
             self, PointCloud2, self.lidar_topic, qos_profile=qos_profile_sensor_data
@@ -155,6 +214,9 @@ class ElevationNode(Node):
 
         self.pub_local = self.create_publisher(PointCloud2, "elevation_local", 10)
         self.pub_global = self.create_publisher(PointCloud2, "elevation_global", 10)
+        self.pub_path = self.create_publisher(Path, "planned_path", 10)
+        self.pub_path_marker = self.create_publisher(Marker, "planned_path_marker", 10)
+        self.pub_fan = self.create_publisher(MarkerArray, "mppi_fan", 10)
         self.add_on_set_parameters_callback(self._on_parameters_changed)
 
         self.get_logger().info(
@@ -241,16 +303,13 @@ class ElevationNode(Node):
         # carved (see dynamic/frontier.py). Falls back to returns on a non-organized sensor.
         d("dynamic_frontier_enable", True)
         d("dynamic_frontier_max_range_m", 100.0)  # range a no-return beam is treated as free to
-        # Recency pruning: forget accumulated cells that stay in view but go unconfirmed for
-        # this many frames — clears the moving-object trail the geometric carve leaves behind.
-        # In-view = within recency_view_range_m of the robot (360 deg sensor). Out-of-view
-        # (occluded / off-camera) cells are preserved. At 10 Hz, 10 frames ~= 1 s.
-        # Keep view_range tight: far static is sampled too sparsely to be re-hit every frame,
-        # so a large range wrongly evicts it (measured: 8 m loses 6% static, 30 m loses 17%,
-        # for the SAME dynamic cleanup — obstacles are near).
+        # Recency pruning: forget a cell that is OBSERVABLE this frame (a beam reached its
+        # range) yet has gone unconfirmed for this many frames — the moving-object trail the
+        # instantaneous carve leaves behind. Visibility-gated: cells the sensor cannot see
+        # now (blind rear, occluded) are kept, so mapped history survives behind the robot
+        # until it leaves the map radius or odometry breaks. At 10 Hz, 10 frames ~= 1 s.
         d("dynamic_recency_enable", True)
         d("dynamic_max_unseen_frames", 10)
-        d("dynamic_recency_view_range_m", 8.0)
         # ICP
         d("icp_enable", True)
         d("icp_submap_radius_m", 15.0)
@@ -272,6 +331,24 @@ class ElevationNode(Node):
         d("gravity_use_accel", False)  # force accel gravity even if orientation is present
         # Viz
         d("publish_map_tf", True)
+        # MPPI planning (visualization only — no motor commands). Consumes the maps this node
+        # already builds: elevation_local as the rollout terrain, elevation_global for the
+        # cost-to-go routing field. Goal comes from RViz "2D Nav Goal" on goal_topic. Publishes
+        # the intended path (nav_msgs/Path) + the MPPI sample fan (MarkerArray).
+        d("plan_enable", True)
+        d("goal_topic", "/goal_pose")
+        d("plan_batch", 4096)  # MPPI rollouts B
+        d("plan_horizon", 70)  # rollout steps T (planning_solver dt = 0.1 s)
+        d("plan_n_theta", 24)  # cost-to-go heading bins
+        d("plan_lat_coarsen", 4)  # routing/cost-to-go grid coarsening vs the map cell
+        d("plan_n_refine", 3)  # MPPI refine iterations per frame
+        d("plan_friction", 0.8)  # uniform rollout friction
+        d("plan_robust_margin_m", 0.0)  # cost-to-go safety tube: lateral (m)
+        d("plan_robust_margin_deg", 0.0)  # cost-to-go safety tube: heading (deg)
+        d("plan_nominal_reset", 1.5)  # nominal wheel speed the planner seeds from
+        d("plan_publish_fan", True)
+        d("plan_fan_stride", 64)  # draw every Nth rollout in the fan
+        d("plan_path_width", 0.08)  # intended-path line marker width (m)
 
     def _cache_params(self) -> None:
         g = lambda k: self.get_parameter(k).value  # noqa: E731
@@ -316,11 +393,23 @@ class ElevationNode(Node):
         self.dynamic_frontier_max_range_m: float = g("dynamic_frontier_max_range_m")
         self.dynamic_recency_enable: bool = g("dynamic_recency_enable")
         self.dynamic_max_unseen_frames: int = g("dynamic_max_unseen_frames")
-        self.dynamic_recency_view_range_m: float = g("dynamic_recency_view_range_m")
         self.gravity_enable: bool = g("gravity_enable")
         self.gravity_use_accel: bool = g("gravity_use_accel")
         self.reset_map_on_reject: bool = g("reset_map_on_reject")
         self.publish_map_tf: bool = g("publish_map_tf")
+        self.plan_enable: bool = g("plan_enable")
+        self.plan_batch: int = g("plan_batch")
+        self.plan_horizon: int = g("plan_horizon")
+        self.plan_n_theta: int = g("plan_n_theta")
+        self.plan_lat_coarsen: int = g("plan_lat_coarsen")
+        self.plan_n_refine: int = g("plan_n_refine")
+        self.plan_friction: float = g("plan_friction")
+        self.plan_robust_margin_m: float = g("plan_robust_margin_m")
+        self.plan_robust_margin_deg: float = g("plan_robust_margin_deg")
+        self.plan_nominal_reset: float = g("plan_nominal_reset")
+        self.plan_publish_fan: bool = g("plan_publish_fan")
+        self.plan_fan_stride: int = g("plan_fan_stride")
+        self.plan_path_width: float = g("plan_path_width")
 
     @staticmethod
     def _resolve_device(name: str) -> wp.context.Device:
@@ -390,6 +479,56 @@ class ElevationNode(Node):
         )
         self.outlier_filter = StatisticalOutlierFilter(cfg, device=self.device)
 
+    def _build_planner(self) -> None:
+        """Build the MPPI rollout simulator, planner, and cost-to-go, sized to the current
+        windows/resolution. Expensive (rollout buffers + CUDA graphs) — only on structural
+        param change, never per frame."""
+        cell = self.resolution
+        ww = wh = int(round(self.win_m / cell))
+        rww = rwh = int(round(self.route_m / cell))
+        kr = max(1, int(self.plan_lat_coarsen))
+        rcny, rcnx, rccell = rwh // kr, rww // kr, cell * kr
+        win_grid = GridParams(ww, wh, cell, 0.0, 0.0)
+        self.plan_sim = ForwardSimulator(
+            dynamics.robot_params(),
+            dynamics.planning_solver(),
+            win_grid,
+            int(self.plan_batch),
+            int(self.plan_horizon),
+            self.device,
+        )
+        self.plan_sim.set_uniform_friction(self.plan_friction)
+        self.planner = MppiGpu(self.plan_sim, CostParams(), n_theta=int(self.plan_n_theta))
+        self.planner.reset_nominal(self.plan_nominal_reset)
+        self.ctg = CostToGo(
+            GridParams(rcnx, rcny, rccell, 0.0, 0.0),
+            dynamics.robot_params(),
+            dynamics.planning_solver(),
+            n_theta=int(self.plan_n_theta),
+            robust_margin_m=self.plan_robust_margin_m,
+            robust_margin_deg=self.plan_robust_margin_deg,
+            device=self.device,
+        )
+        self.planner.cw.lattice_cap = self.ctg._vcap
+        # Routing field expressed in the PLANNING window's frame: both windows are robot-centered,
+        # so their origins differ by a constant cell offset.
+        self.sgrid = GridParams(
+            rcnx, rcny, rccell, (ww // 2 - rww // 2) * cell, (wh // 2 - rwh // 2) * cell
+        ).build()
+        self._plan_kr = kr
+        self._plan_dims = (ww, wh, rww, rwh, rcnx, rcny)
+
+    def _goal_callback(self, msg: PoseStamped) -> None:
+        """RViz 2D Nav Goal. Assumes the pose is already in map_frame (RViz publishes in its
+        fixed frame — set it to the map frame); warns otherwise and uses it as-is."""
+        if msg.header.frame_id and msg.header.frame_id != self.map_frame:
+            self.get_logger().warn(
+                f"goal frame '{msg.header.frame_id}' != map_frame '{self.map_frame}'; "
+                "set the RViz Fixed Frame to the map frame."
+            )
+        self.goal_xy = (msg.pose.position.x, msg.pose.position.y)
+        self.get_logger().info(f"goal set: ({self.goal_xy[0]:.2f}, {self.goal_xy[1]:.2f})")
+
     def _on_parameters_changed(self, params) -> SetParametersResult:
         names = {p.name for p in params}
         try:
@@ -403,6 +542,8 @@ class ElevationNode(Node):
                 self._build_dynamic_filter()
             if names & _OUTLIER_BUILD:
                 self._build_outlier_filter()
+            if self.plan_enable and (names & _PLAN_BUILD or self.planner is None):
+                self._build_planner()  # (re)build on structural change or first enable
             if "device" in names:  # device moved -> device-resident state is stale
                 self.map_wp = None
                 self.map_ages = None
@@ -475,19 +616,34 @@ class ElevationNode(Node):
             carve_scan = self._frontier_world(cloud_msg, world_T_sensor) if self.dynamic_frontier_enable else None
             if carve_scan is None:
                 carve_scan = world_scan
-            carve = self.dynamic_filter.carve(self.map_wp, carve_scan, sensor_origin)
+            if self.dynamic_recency_enable and self.map_ages is not None:
+                # Carve + visibility-gated recency: also forget cells that are OBSERVABLE now
+                # but went unconfirmed for max_unseen frames. Cells the sensor can't currently
+                # see (blind rear, occluded) are kept, so history survives behind the robot.
+                carve = self.dynamic_filter.carve_recency(
+                    self.map_wp,
+                    carve_scan,
+                    sensor_origin,
+                    self.map_ages,
+                    self._frame,
+                    self.dynamic_max_unseen_frames,
+                )
+            else:
+                carve = self.dynamic_filter.carve(self.map_wp, carve_scan, sensor_origin)
         center = (world_T_base[0, 3], world_T_base[1, 3])
         if self.dynamic_recency_enable:
             self.map_wp, self.map_ages = self.acc.step(
                 self.map_wp, carve, world_scan, valid, center,
                 map_ages=self.map_ages, frame=self._frame,
-                max_unseen=self.dynamic_max_unseen_frames,
-                view_range=self.dynamic_recency_view_range_m,
             )
         else:
             self.map_wp = self.acc.step(self.map_wp, carve, world_scan, valid, center)
             self.map_ages = None
-        self._publish_maps(world_T_base, world_scan, cloud_msg.header.stamp)
+        mf = self._build_maps(world_T_base, world_scan)
+        if mf is not None:
+            self._publish_maps(mf, cloud_msg.header.stamp)
+            if self.plan_enable and self.goal_xy is not None and self.planner is not None:
+                self._plan(mf, world_T_base, cloud_msg.header.stamp)
         self._broadcast_map_tf(world_T_base, odom_msg)
 
     # ------------------------------------------------------------------
@@ -548,9 +704,10 @@ class ElevationNode(Node):
         fp.apply(primary, plane)
         conf[fp.i0 : fp.i1, fp.j0 : fp.j1] = True
 
-    def _publish_maps(self, world_T_base: np.ndarray, world_scan: wp.array, stamp) -> None:
+    def _build_maps(self, world_T_base: np.ndarray, world_scan: wp.array) -> _MapFrame | None:
+        """Build the local (single-scan/MPPI) and global (routing) elevation maps for this frame."""
         if self.map_wp is None or len(self.map_wp) == 0:
-            return
+            return None
         cell = self.resolution
         ex, ey = float(world_T_base[0, 3]), float(world_T_base[1, 3])
 
@@ -593,12 +750,26 @@ class ElevationNode(Node):
         mem = relev_mem[oy : oy + lwh, ox : ox + lww]
         mem_known = rmeasured[oy : oy + lwh, ox : ox + lww]
         elev_local = np.where(known, filled, mem).astype(np.float32)
-        # Only publish cells with real info (fresh scan or remembered); the rest are unknown.
+        # Cells with real info (fresh scan or remembered); the rest are unknown -> NaN for RViz.
         show = known | mem_known
         elev_local_view = np.where(show, elev_local, np.nan).astype(np.float32)
+        return _MapFrame(
+            elev_local=elev_local,
+            elev_local_view=elev_local_view,
+            relev_view=relev_view,
+            relev_mem=relev_mem,
+            cell=cell,
+            ex=ex,
+            ey=ey,
+            lxmin=lxmin,
+            lymin=lymin,
+            rxmin=rxmin,
+            rymin=rymin,
+        )
 
-        self._publish_grid(self.pub_local, elev_local_view, lxmin, lymin, cell, stamp)
-        self._publish_grid(self.pub_global, relev_view, rxmin, rymin, cell, stamp)
+    def _publish_maps(self, mf: _MapFrame, stamp) -> None:
+        self._publish_grid(self.pub_local, mf.elev_local_view, mf.lxmin, mf.lymin, mf.cell, stamp)
+        self._publish_grid(self.pub_global, mf.relev_view, mf.rxmin, mf.rymin, mf.cell, stamp)
 
     def _publish_grid(self, pub, elev: np.ndarray, xmin: float, ymin: float, cell: float, stamp):
         ny, nx = elev.shape
@@ -615,6 +786,91 @@ class ElevationNode(Node):
         )
         if cloud is not None:
             pub.publish(cloud)
+
+    # ------------------------------------------------------------------
+    # MPPI planning (visualization only)
+    # ------------------------------------------------------------------
+
+    def _plan(self, mf: _MapFrame, world_T_base: np.ndarray, stamp) -> None:
+        """Run MPPI toward the goal on this frame's maps; publish the intended path + fan.
+
+        Terrain = the single-scan elevation_local; the routing cost-to-go is solved on the
+        accumulated elevation_global. Visualization only — no motor commands are emitted.
+        """
+        gx, gy = self.goal_xy
+        ez = float(world_T_base[2, 3])
+        eyaw = float(np.arctan2(world_T_base[1, 0], world_T_base[0, 0]))
+        _, _, _, _, rcnx, rcny = self._plan_dims
+        kr = self._plan_kr
+        state_l = np.array([mf.ex - mf.lxmin, mf.ey - mf.lymin, eyaw], np.float32)
+        goal_l = (gx - mf.lxmin, gy - mf.lymin)
+        goal_r = (gx - mf.rxmin, gy - mf.rymin)
+        with wp.ScopedDevice(self.device):
+            self.plan_sim.set_terrain(
+                wp.array(np.ascontiguousarray(mf.elev_local), dtype=wp.float32, device=self.device)
+            )
+            relev = mf.relev_mem  # (rwh, rww), blind cells = 0
+            if kr > 1:
+                Hc = relev[: rcny * kr, : rcnx * kr].reshape(rcny, kr, rcnx, kr).max(axis=(1, 3))
+            else:
+                Hc = relev
+            V = self.ctg.compute(
+                wp.array(np.ascontiguousarray(Hc), dtype=wp.float32, device=self.device), goal_r
+            )
+            self.planner.set_lattice(V, self.sgrid)
+            self.planner.replan(state_l, goal_l, int(self.plan_n_refine))
+        # candidate 0 is the committed nominal rollout; window-local -> map coords.
+        ctrl = self.planner.sim.controlled.numpy()  # [T+1, B, 3] = (x, y, yaw)
+        origin = np.array([mf.lxmin, mf.lymin], np.float32)
+        self._publish_path(ctrl[:, 0, :2] + origin, ez, stamp)
+        if self.plan_publish_fan:
+            self._publish_fan(ctrl, origin, ez, stamp)
+
+    def _publish_path(self, xy: np.ndarray, z: float, stamp) -> None:
+        path = Path()
+        path.header.stamp = stamp
+        path.header.frame_id = self.map_frame
+        for x, y in xy:
+            ps = PoseStamped()
+            ps.header = path.header
+            ps.pose.position.x = float(x)
+            ps.pose.position.y = float(y)
+            ps.pose.position.z = z
+            ps.pose.orientation.w = 1.0
+            path.poses.append(ps)
+        self.pub_path.publish(path)
+        # Same path as a thick LINE_STRIP marker (nav_msgs/Path renders as 1px GL lines).
+        m = Marker()
+        m.header = path.header
+        m.ns = "planned_path"
+        m.id = 0
+        m.type = Marker.LINE_STRIP
+        m.action = Marker.ADD
+        m.scale.x = float(self.plan_path_width)
+        m.color = ColorRGBA(r=0.1, g=1.0, b=0.2, a=1.0)
+        m.pose.orientation.w = 1.0
+        m.points = [Point(x=float(x), y=float(y), z=z) for x, y in xy]
+        self.pub_path_marker.publish(m)
+
+    def _publish_fan(self, ctrl: np.ndarray, origin: np.ndarray, z: float, stamp) -> None:
+        """A subsample of the MPPI rollouts as one faint LINE_LIST marker (the "fan")."""
+        stride = max(1, int(self.plan_fan_stride))
+        m = Marker()
+        m.header.stamp = stamp
+        m.header.frame_id = self.map_frame
+        m.ns = "mppi_fan"
+        m.id = 0
+        m.type = Marker.LINE_LIST
+        m.action = Marker.ADD
+        m.scale.x = 0.02  # line width (m)
+        m.color = ColorRGBA(r=0.2, g=0.7, b=1.0, a=0.35)
+        m.pose.orientation.w = 1.0
+        for b in range(0, ctrl.shape[1], stride):
+            xy = ctrl[:, b, :2] + origin
+            for k in range(len(xy) - 1):
+                m.points.append(Point(x=float(xy[k, 0]), y=float(xy[k, 1]), z=z))
+                m.points.append(Point(x=float(xy[k + 1, 0]), y=float(xy[k + 1, 1]), z=z))
+        self.pub_fan.publish(MarkerArray(markers=[m]))
 
     # ------------------------------------------------------------------
     # IMU gravity vector -> up-in-base
