@@ -25,8 +25,9 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "terrain_toolkit_node = terrain_toolkit_ros.terrain_toolkit_node:main",
+            "single_scan_terrain_node = terrain_toolkit_ros.single_scan_terrain_node:main",
             "terrain_accumulator_node = terrain_toolkit_ros.terrain_accumulator_node:main",
+            "elevation_node = terrain_toolkit_ros.elevation_node:main",
         ],
     },
 )

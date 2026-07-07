@@ -229,8 +229,8 @@ def generate_launch_description() -> LaunchDescription:
 
     node = Node(
         package="terrain_toolkit_ros",
-        executable="terrain_toolkit_node",
-        name="helhest.perception",
+        executable="single_scan_terrain_node",
+        name="single_scan_terrain",
         output="screen",
         parameters=[
             {

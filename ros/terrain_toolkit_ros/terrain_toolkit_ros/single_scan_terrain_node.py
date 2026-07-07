@@ -30,11 +30,11 @@ from ._pipeline_common import quaternion_to_matrix
 from ._pipeline_common import read_pipeline_parameters
 
 
-class TerrainToolkitNode(Node):
+class SingleScanTerrainNode(Node):
     """Bridge a LiDAR PointCloud2 topic to the helhest.perception pipeline."""
 
     def __init__(self) -> None:
-        super().__init__("helhest.perception")
+        super().__init__("single_scan_terrain")
 
         self._declare_parameters()
         p = self._read_parameters()
@@ -205,7 +205,7 @@ class TerrainToolkitNode(Node):
                 ],
             ),
         ]
-        lines = ["TerrainToolkitNode configuration:"]
+        lines = ["SingleScanTerrainNode configuration:"]
         for title, keys in groups:
             lines.append(f"  [{title}]")
             width = max(len(k) for k in keys)
@@ -392,7 +392,7 @@ class TerrainToolkitNode(Node):
 
 def main(args=None) -> None:
     rclpy.init(args=args)
-    node = TerrainToolkitNode()
+    node = SingleScanTerrainNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

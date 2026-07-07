@@ -34,7 +34,7 @@ source install/setup.bash
 ## Run
 
 ```bash
-ros2 launch terrain_toolkit_ros terrain_toolkit_node.launch.py \
+ros2 launch terrain_toolkit_ros single_scan_terrain_node.launch.py \
     lidar_topic:=/points \
     robot_frame_ga:=base_link \
     resolution:=0.15 \
@@ -46,7 +46,7 @@ All pipeline parameters can be changed at runtime with `ros2 param set` /
 
 ## Accumulating mapper (`terrain_accumulator_node`)
 
-`terrain_toolkit_node` maps a single scan. `terrain_accumulator_node` fuses the
+`single_scan_terrain_node` maps a single scan. `terrain_accumulator_node` fuses the
 LiDAR stream with robot odometry (`nav_msgs/Odometry`) into a persistent point
 cloud and runs the same pipeline over a **robot-centric window** of it, so the
 published `terrain_map` covers more than one scan (terrain already passed or
@@ -135,4 +135,4 @@ Bring-up checklist:
 | Footprint | `footprint_half_x` / `footprint_half_y` | `0.5` / `0.5` | Footprint half-extents (m) |
 | Footprint | `footprint_mode` | `overwrite` | `overwrite` real cells or `fill` gaps only |
 
-See `launch/terrain_toolkit_node.launch.py` for the full list.
+See `launch/single_scan_terrain_node.launch.py` for the full list.

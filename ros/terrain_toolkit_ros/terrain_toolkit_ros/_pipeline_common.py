@@ -1,6 +1,6 @@
 """Shared plumbing between the helhest.perception ROS nodes.
 
-Both the single-frame `terrain_toolkit_node` and the accumulating
+Both the single-frame `single_scan_terrain_node` and the accumulating
 `terrain_accumulator_node` wrap the same `TerrainPipeline`, so the parameter
 contract (declare/read/build) and the PointCloud2 <-> numpy converters live here
 in one place — adding a pipeline parameter touches exactly one file.
