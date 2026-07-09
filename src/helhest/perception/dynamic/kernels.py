@@ -46,6 +46,36 @@ def _bin_index(
     return row * az_bins + col
 
 
+@wp.func
+def _has_observed_neighbor(
+    depth: wp.array(dtype=wp.float32),
+    idx: int,
+    az_bins: int,
+    el_bins: int,
+) -> int:
+    """1 if any bin in a small window around `idx` was observed (a beam reached it).
+
+    Used to tell a BETWEEN-BEAM gap (an unobserved bearing whose neighbours ARE scanned — a
+    stale fragment the sensor can never re-hit) from a genuinely UNSCANNED region (outside the
+    vertical FOV, all neighbours empty too). The el window (+-2 rows) spans the beam pitch;
+    azimuth wraps the full circle."""
+    row = idx / az_bins
+    col = idx - row * az_bins
+    found = int(0)
+    for dr in range(-2, 3):
+        r2 = row + dr
+        if r2 >= 0 and r2 < el_bins:
+            for dc in range(-1, 2):
+                c2 = col + dc
+                if c2 < 0:
+                    c2 = c2 + az_bins
+                if c2 >= az_bins:
+                    c2 = c2 - az_bins
+                if depth[r2 * az_bins + c2] < _DEPTH_SENTINEL:
+                    found = 1
+    return found
+
+
 @wp.kernel
 def render_depth_kernel(
     points: wp.array(dtype=wp.vec3),
@@ -120,3 +150,146 @@ def classify_kernel(
     margin = margin_m + r * margin_rel
     if od > r + margin:
         keep[i] = 0
+
+
+@wp.kernel
+def classify_recency_kernel(
+    points: wp.array(dtype=wp.vec3),
+    origin: wp.vec3,
+    rot: wp.mat33,
+    az_bins: int,
+    el_bins: int,
+    az_min: wp.float32,
+    az_span: wp.float32,
+    el_min: wp.float32,
+    el_max: wp.float32,
+    min_range: wp.float32,
+    margin_m: wp.float32,
+    margin_rel: wp.float32,
+    other_depth: wp.array(dtype=wp.float32),
+    ages: wp.array(dtype=wp.int32),
+    frame: wp.int32,
+    max_unseen: wp.int32,
+    keep: wp.array(dtype=wp.int32),
+):
+    """Carve + visibility-gated recency in one pass → the map keep mask (0 = drop).
+
+    A point is dropped when the frontier saw PAST it (dynamic, seen-through), OR when it is
+    OBSERVABLE this frame (a beam reached at least its range) yet has gone unconfirmed for
+    more than `max_unseen` frames (stale dynamic residue the instantaneous carve missed).
+
+    Points the frontier did NOT reach are kept: an unobserved bearing (`od` == sentinel,
+    e.g. a side-mounted sensor's blind rear) and an occluded point (`od` < range − margin,
+    a nearer surface stopped the beam) are both things we cannot currently disprove, so
+    accumulated history survives there until it leaves the map or odometry breaks.
+    """
+    i = wp.tid()
+    keep[i] = 1
+    d = rot @ (points[i] - origin)
+    r = wp.length(d)
+    if r < min_range:
+        return
+    idx = _bin_index(d, az_bins, el_bins, az_min, az_span, el_min, el_max)
+    if idx < 0:
+        return
+    od = other_depth[idx]
+    if od >= _DEPTH_SENTINEL:  # no beam along this bearing → not observable → keep
+        return
+    margin = margin_m + r * margin_rel
+    if od > r + margin:  # frontier saw past → seen-through → carve now
+        keep[i] = 0
+        return
+    if od >= r - margin:  # beam reached the point (observable); stale → forget
+        if (frame - ages[i]) > max_unseen:
+            keep[i] = 0
+    # else od < r − margin: occluded (beam stopped short) → not observable → keep
+
+
+@wp.kernel
+def classify_streak_kernel(
+    points: wp.array(dtype=wp.vec3),
+    origin: wp.vec3,
+    rot: wp.mat33,
+    az_bins: int,
+    el_bins: int,
+    az_min: wp.float32,
+    az_span: wp.float32,
+    el_min: wp.float32,
+    el_max: wp.float32,
+    min_range: wp.float32,
+    margin_m: wp.float32,
+    margin_rel: wp.float32,
+    other_depth: wp.array(dtype=wp.float32),
+    streak_in: wp.array(dtype=wp.int32),
+    persist: wp.int32,
+    gap_persist: wp.int32,
+    gap_max_range: wp.float32,
+    gap_fwd_az: wp.float32,
+    gap_fwd_half: wp.float32,
+    keep: wp.array(dtype=wp.int32),
+    streak_out: wp.array(dtype=wp.int32),
+):
+    """Consecutive-free carve → keep mask + updated seen-through streak (one per map point).
+
+    A point is dropped only after the scan has seen PAST it for `persist` CONSECUTIVE frames,
+    not on a single frame's evidence. Per frame: seen-through (`od > r + margin`) grows the
+    streak; a beam that returns at ~the point's range confirms it and resets the streak to 0;
+    a bearing the scan did not observe (sentinel) or an occluded point (`od < r − margin`)
+    leaves the streak unchanged (no evidence either way). This tolerates the ambiguous single
+    no-return — grazing/dark/dropped beam — that the instantaneous carve wrongly deleted.
+
+    The BETWEEN-BEAM gap age-out (`gap_persist`) is additionally gated to NEAR + IN-FRONT space:
+    `gap_max_range` (>0) skips points farther than that, and `gap_fwd_half` (>0) skips points whose
+    world azimuth is more than that many radians off the robot heading `gap_fwd_az`. Without these
+    gates the coarse-elevation gap test erodes distant structure (a real point in an empty el-bin
+    reads as a gap) and the wheel-occlusion shadows off to the sides.
+    """
+    i = wp.tid()
+    keep[i] = 1
+    s = streak_in[i]
+    d = rot @ (points[i] - origin)
+    r = wp.length(d)
+    if r < min_range:
+        streak_out[i] = s
+        return
+    idx = _bin_index(d, az_bins, el_bins, az_min, az_span, el_min, el_max)
+    if idx < 0:
+        streak_out[i] = s
+        return
+    od = other_depth[idx]
+    if od >= _DEPTH_SENTINEL:  # no beam reached this exact bearing
+        # A BETWEEN-BEAM gap (neighbouring bearings ARE scanned) is a stale fragment the sensor
+        # can never re-hit — age it out. A point in a fully unscanned region (outside the vertical
+        # FOV, all neighbours empty) is held: we genuinely can't judge it.
+        if gap_persist > 0 and _has_observed_neighbor(other_depth, idx, az_bins, el_bins) == 1:
+            # Gate the gap age-out to near + in-front space (0/<=0 disables a gate).
+            near = gap_max_range <= 0.0 or r <= gap_max_range
+            in_front = int(1)
+            if gap_fwd_half > 0.0:
+                az = wp.atan2(d[1], d[0])
+                daz = az - gap_fwd_az
+                while daz > wp.pi:
+                    daz = daz - 2.0 * wp.pi
+                while daz < -wp.pi:
+                    daz = daz + 2.0 * wp.pi
+                if wp.abs(daz) > gap_fwd_half:
+                    in_front = 0
+            if near and in_front == 1:
+                s = s + 1
+                streak_out[i] = s
+                if s >= gap_persist:
+                    keep[i] = 0
+                return
+        streak_out[i] = s
+        return
+    margin = margin_m + r * margin_rel
+    if od > r + margin:  # seen through → one free vote
+        s = s + 1
+        streak_out[i] = s
+        if s >= persist:
+            keep[i] = 0
+        return
+    if od >= r - margin:  # a beam returned at ~this range → confirmed occupied → reset
+        streak_out[i] = 0
+        return
+    streak_out[i] = s  # od < r − margin: occluded → cannot judge → hold

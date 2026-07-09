@@ -336,7 +336,7 @@ def generate_launch_description() -> LaunchDescription:
     lc = LaunchConfiguration
 
     node = Node(
-        package="terrain_toolkit_ros",
+        package="helhest_stack_ros",
         executable="terrain_accumulator_node",
         name="terrain_accumulator",
         output="screen",

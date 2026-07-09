@@ -78,6 +78,10 @@ This is a Warp/CUDA codebase. Data-parallel work runs on-device; **host↔device
 - **If a stage seems to need numpy, STOP and say so before writing it.** Surface the round-trip cost and propose the device-native path — do not silently fall back to host arrays. The user has not, and does not, approve numpy for bulk data by default.
 - Mirror `icp/`, `voxel.py`, and `mapping/` (esp. `DeviceMapAccumulator`) under `helhest/perception/`: device-resident data + kernels are the norm here, not the exception.
 
+## 7. Deployment gotchas (ROS) — read `ros/README.md`
+
+Before debugging "the node drops LiDAR frames / the map is sparse / ICP rejects a lot," check the transport. **6 MB Ouster clouds are silently dropped by Fast DDS** when the socket buffer can't hold one (default `rmem_max` 4 MB < one cloud) — it looks like a compute/ICP/rate problem but is not (a bare subscriber drops them too). Fix: point every participant at `ros/fastdds_shm.xml` via `FASTRTPS_DEFAULT_PROFILES_FILE` (same-host), or raise `net.core.rmem_max` above the cloud size (multi-host). Full symptom→cause→fix→verify, plus the other non-obvious defaults (gyro rotation prior, world-snapped accumulator grid, recency off), are in `ros/README.md`.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

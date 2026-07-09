@@ -1,4 +1,4 @@
-"""Launch file for the terrain_toolkit_ros node."""
+"""Launch file for the helhest_stack_ros node."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -228,9 +228,9 @@ def generate_launch_description() -> LaunchDescription:
     lc = LaunchConfiguration
 
     node = Node(
-        package="terrain_toolkit_ros",
-        executable="terrain_toolkit_node",
-        name="helhest.perception",
+        package="helhest_stack_ros",
+        executable="single_scan_terrain_node",
+        name="single_scan_terrain",
         output="screen",
         parameters=[
             {

@@ -9,6 +9,8 @@ import warp as wp
 from ..sensor import LidarSensorConfig
 from .kernels import _DEPTH_SENTINEL
 from .kernels import classify_kernel
+from .kernels import classify_recency_kernel
+from .kernels import classify_streak_kernel
 from .kernels import render_depth_kernel
 
 
@@ -230,6 +232,112 @@ class DynamicPointFilter:
         with wp.ScopedDevice(self.device):
             self._render(scan_points, len(scan_points), origin, rot, self._scan_depth)
             return self._classify(map_points, n_map, origin, rot, self._scan_depth)
+
+    def carve_recency(
+        self,
+        map_points: wp.array,
+        scan_points: wp.array,
+        sensor_origin: np.ndarray,
+        ages: wp.array,
+        frame: int,
+        max_unseen: int,
+        *,
+        sensor_rotation: np.ndarray | None = None,
+    ) -> wp.array:
+        """Carve + visibility-gated recency, device-native → the `map_keep` mask (0 = drop).
+
+        Like `carve()`, but also drops points that ARE observable this frame (a beam reached
+        their range) yet have not been reconfirmed for more than `max_unseen` frames — the
+        stale dynamic residue the instantaneous carve leaves behind. Points the frontier never
+        reached (blind rear, occluded) are kept, so history survives where the sensor can't
+        currently look. `ages` (int32, len == map) is each point's last-seen frame, maintained
+        by `DeviceMapAccumulator`. One frontier render, one classify — same cost as `carve()`.
+        """
+        n_map = len(map_points)
+        if n_map == 0:
+            return wp.zeros(0, dtype=wp.int32)
+        origin, rot = _pose_to_warp(sensor_origin, sensor_rotation)
+        with wp.ScopedDevice(self.device):
+            self._render(scan_points, len(scan_points), origin, rot, self._scan_depth)
+            keep = wp.empty(n_map, dtype=wp.int32)
+            wp.launch(
+                classify_recency_kernel,
+                dim=n_map,
+                inputs=[
+                    map_points,
+                    origin,
+                    rot,
+                    *self._grid,
+                    float(self.config.margin_m),
+                    float(self.config.margin_rel),
+                    self._scan_depth,
+                    ages,
+                    int(frame),
+                    int(max_unseen),
+                ],
+                outputs=[keep],
+            )
+            return keep
+
+    def carve_streak(
+        self,
+        map_points: wp.array,
+        scan_points: wp.array,
+        sensor_origin: np.ndarray,
+        streak_in: wp.array,
+        persist: int,
+        gap_persist: int = 0,
+        gap_max_range: float = 0.0,
+        gap_fwd_az: float = 0.0,
+        gap_fwd_half: float = 0.0,
+        *,
+        sensor_rotation: np.ndarray | None = None,
+    ) -> tuple[wp.array, wp.array]:
+        """Consecutive-free carve, device-native → `(map_keep, streak_out)`.
+
+        Like `carve()`, but a point is dropped only after the scan has seen PAST it for `persist`
+        CONSECUTIVE frames — not on one frame's ambiguous evidence (a lone no-return from a
+        grazing/dark/dropped beam). `streak_in` (int32, len == map) is each point's current
+        seen-through streak (maintained by `DeviceMapAccumulator`; all-zero on the first frame);
+        `streak_out` is the updated streak to thread back through the accumulator. `persist <= 1`
+        reduces to the instantaneous `carve()`.
+
+        `gap_persist` > 0 also ages out BETWEEN-BEAM points: a bearing with no beam whose neighbours
+        ARE scanned (a stale fragment the discrete beams can never re-hit) is dropped after that many
+        frames. Points in a fully unscanned region (outside the vertical FOV) are still held. That
+        age-out is gated to NEAR + IN-FRONT space: `gap_max_range` (>0) skips farther points, and
+        `gap_fwd_half` (>0, radians) skips points whose world azimuth is off the robot heading
+        `gap_fwd_az` by more than that — keeps it from eroding distant structure and wheel shadows.
+        """
+        n_map = len(map_points)
+        if n_map == 0:
+            return wp.zeros(0, dtype=wp.int32), wp.zeros(0, dtype=wp.int32)
+        origin, rot = _pose_to_warp(sensor_origin, sensor_rotation)
+        with wp.ScopedDevice(self.device):
+            self._render(scan_points, len(scan_points), origin, rot, self._scan_depth)
+            keep = wp.empty(n_map, dtype=wp.int32)
+            streak_out = wp.empty(n_map, dtype=wp.int32)
+            wp.launch(
+                classify_streak_kernel,
+                dim=n_map,
+                inputs=[
+                    map_points,
+                    origin,
+                    rot,
+                    *self._grid,
+                    float(self.config.margin_m),
+                    float(self.config.margin_rel),
+                    self._scan_depth,
+                    streak_in,
+                    int(persist),
+                    int(gap_persist),
+                    float(gap_max_range),
+                    float(gap_fwd_az),
+                    float(gap_fwd_half),
+                ],
+                outputs=[keep, streak_out],
+            )
+            return keep, streak_out
 
     def filter(
         self,

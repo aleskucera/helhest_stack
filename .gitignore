@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+bags/
 .venv/
 venv/
 *.egg-info/
@@ -27,3 +28,4 @@ data/
 
 # MkDocs build output
 site/
+.tools/
