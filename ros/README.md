@@ -93,11 +93,16 @@ matching `/odom_2d`.
 - **Accumulator voxel grid is world-snapped** so the map does not erode under translation
   (`DeviceMapAccumulator._min_corner`).
 - **Map maintenance:** consecutive-free visibility carve of dynamic obstacles ON — a point is
-  dropped only after the scan sees PAST it for `carve_persist_frames` (8) frames in a row, so a
+  dropped only after the scan sees PAST it for `carve_persist_frames` (25) frames IN A ROW, so a
   single ambiguous no-return can't delete static geometry, while a spot a moving person vacated
-  (no return for 8 straight frames) IS carved. Frontier no-return path ON (needed to carve a
-  trail on open ground, where the vacated spot has no solid background); persist=8 is what makes
-  it safe. Net: a moving person keeps their current pose but leaves no trail. Between-beam-gap
+  (seen through for 25 straight frames) IS carved. 25, not 8: driving PARALLEL to a wall makes the
+  beams graze along it and read as seen-through, but only intermittently (the 360° scan re-hits it
+  as the pose shifts), so a low threshold erodes corridor walls — at 8 both walls lost ~43% while
+  driving `slow_translate_long`, at 25 only ~24%, with the moving-person trail still carved (a
+  vacated spot on open ground is seen-through CONSECUTIVELY, never re-hit). Cost: a vacated spot
+  lingers ~2.5 s before clearing. Frontier no-return path ON (needed to carve a trail on open
+  ground, where the vacated spot has no solid background); persist is what makes it safe. Net: a
+  moving person keeps their current pose but leaves no trail. Between-beam-gap
   age-out ON (`carve_gap_frames`, 8) but GATED to near + in-front space: a map point on a bearing
   no beam ever re-hits, whose neighbours ARE scanned, is a stale fragment the discrete Ouster beams
   can't confirm or carve normally (reads as "unobserved → keep" forever) — dropped after 8 frames.

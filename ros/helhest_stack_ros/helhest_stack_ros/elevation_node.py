@@ -345,14 +345,16 @@ class ElevationNode(Node):
         # Dynamic-obstacle carving: remove accumulated points the current scan sees
         # through (moving things). Visibility ray-carve against the new scan.
         d("dynamic_enable", True)
-        # Consecutive-free carve: only drop a point seen-through for this many frames in a row,
+        # Consecutive-free carve: only drop a point seen-through for this many frames IN A ROW,
         # so one grazing/dark/dropped-beam no-return can't delete static geometry. <=1 = the old
         # instantaneous carve. Threaded per-cell through the accumulator (survives re-voxelizing).
-        # 8, not 3: high enough that a static wall that intermittently no-returns survives (it is
-        # re-confirmed within 8 frames as the robot moves), while a vacated floor spot behind a
-        # moving person (no return for 8 straight frames) IS carved — so the trail goes, the
-        # current pose stays. This is what makes the frontier path (below) safe to leave on.
-        d("carve_persist_frames", 8)
+        # 25, not 8: when the robot drives PARALLEL to a wall the beams graze along it and read as
+        # seen-through, but only INTERMITTENTLY (the 360° scan re-hits it as the pose changes), so a
+        # high consecutive threshold keeps it — at 8 both corridor walls eroded ~43% while driving,
+        # at 25 only ~24%. A moving obstacle's vacated spot is seen-through CONSECUTIVELY (open
+        # ground, never re-hit), so its trail still carves — measured unchanged 8->25. Cost: a
+        # vacated spot lingers ~2.5 s (25 frames @ 10 Hz) before clearing. Makes the frontier safe.
+        d("carve_persist_frames", 25)
         # Age out a BETWEEN-BEAM speck: a map point on a bearing no beam reached, but whose
         # NEIGHBOURS were scanned, is dropped after this many frames (0 disables). Gated to NEAR +
         # IN-FRONT space (the two params below): ungated, the coarse-elevation gap test erased 37%
