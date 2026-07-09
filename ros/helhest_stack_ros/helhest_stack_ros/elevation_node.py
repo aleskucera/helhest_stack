@@ -332,7 +332,9 @@ class ElevationNode(Node):
         d("map_z_max_m", 50.0)
         # Dynamic-obstacle carving: remove accumulated points the current scan sees
         # through (moving things). Visibility ray-carve against the new scan.
-        d("dynamic_enable", True)
+        # OFF by default: it is currently over-carving STATIC structure (under investigation).
+        # With it off the map is pure accumulation (reset-on-loss still guards tracking loss).
+        d("dynamic_enable", False)
         d("dynamic_az_bins", 1024)  # range-image resolution; match the sensor (Ouster 1024x128)
         d("dynamic_el_bins", 128)
         d("dynamic_el_min_deg", -90.0)  # full hemisphere (world-frame binning, robust to mount)
