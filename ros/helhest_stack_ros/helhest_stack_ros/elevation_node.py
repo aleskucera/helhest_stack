@@ -419,6 +419,10 @@ class ElevationNode(Node):
         # Motion prior: take rotation from the IMU orientation (slip-immune), keeping only
         # translation from wheel odom — wheel odom yaw is wrong under skid (in-place rotation).
         d("imu_rotation_prior", True)
+        # Reject single-sample gyro glitches before they reach the deskew / integrated rotation
+        # prior: this robot's /imu/data spikes to >1000 deg/s for one sample (real motion peaks
+        # ~300), and one such sample injects tens of degrees of phantom yaw. 0 disables.
+        d("max_gyro_rate_dps", 600.0)
         # Viz
         d("publish_map_tf", True)
         # Close odom->base_link ourselves. helhest_llc publishes the /odom_2d message but
@@ -497,6 +501,11 @@ class ElevationNode(Node):
         self.gravity_enable: bool = g("gravity_enable")
         self.gravity_use_accel: bool = g("gravity_use_accel")
         self.imu_rotation_prior: bool = g("imu_rotation_prior")
+        _max_gyro_dps: float = g("max_gyro_rate_dps")
+        # squared rad/s gate, or inf when disabled (0) — compared against |omega|^2 per sample
+        self._max_gyro_rate_sq: float = (
+            np.deg2rad(_max_gyro_dps) ** 2 if _max_gyro_dps > 0.0 else np.inf
+        )
         self.reset_map_on_reject: bool = g("reset_map_on_reject")
         self.reset_after_rejects: int = g("reset_after_rejects")
         self.debug_frames: bool = g("debug_frames")
@@ -673,8 +682,13 @@ class ElevationNode(Node):
         self._latest_imu = msg
         q = msg.orientation
         if q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w > 0.5:  # buffer valid fused orientations
-            t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             w = msg.angular_velocity
+            # Drop a single-sample gyro glitch: the deskew and the integrated rotation prior both
+            # read this buffer, and one 8000 deg/s spike sample injects ~80 deg of phantom yaw. The
+            # integrator then bridges the missing sample with its good neighbours.
+            if w.x * w.x + w.y * w.y + w.z * w.z > self._max_gyro_rate_sq:
+                return
+            t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             self._imu_buffer.append(
                 (t, np.array([q.x, q.y, q.z, q.w]), np.array([w.x, w.y, w.z]))
             )

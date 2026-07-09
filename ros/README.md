@@ -75,6 +75,14 @@ matching `/odom_2d`.
 
 - **Rotation prior = integrated gyro**, not the fused `/imu/data` orientation (its yaw is
   wrong-sign on this hardware — AHRS ENU/NED bug). See `elevation_node._gyro_orientation_base`.
+- **Gyro glitch guard (`max_gyro_rate_dps`, 600):** this robot's `/imu/data` angular_velocity
+  spikes to 1000–8000 deg/s for a SINGLE sample (real motion peaks ~300); `/ouster/imu` is the
+  same signal without the spikes. The deskew and the integrated rotation prior both read the gyro,
+  and one spike sample injects tens of degrees of phantom yaw — during a FAST turn this threw the
+  ICP prior 30–40° off, so ICP either rejected the frame or aliased, smearing the accumulated map
+  into a pinwheel. `_imu_callback` now drops any sample above the gate (the integrator bridges the
+  hole with its good neighbours). Symptom without it: `rotate_fast` gave ~9 ICP rejects and a
+  radially-smeared map; with it, 0 rejects and a coherent map.
 - **Accumulator voxel grid is world-snapped** so the map does not erode under translation
   (`DeviceMapAccumulator._min_corner`).
 - **Map maintenance:** consecutive-free visibility carve of dynamic obstacles ON — a point is
