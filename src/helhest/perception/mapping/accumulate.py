@@ -200,8 +200,10 @@ class DeviceMapAccumulator:
         self.voxel = float(voxel_size)
         self.radius = float(radius)
         self.z0, self.z1 = float(z_bounds[0]), float(z_bounds[1])
-        # Cell-grid extent (for the crop / cell index; storage is sparse below).
-        self.dx = int(2.0 * self.radius / self.voxel) + 1
+        # Cell-grid extent (for the crop / cell index; storage is sparse below). +2 (not +1):
+        # the grid origin is snapped DOWN to the voxel lattice (see _min_corner), which can push
+        # it up to one voxel below cx-radius, so one extra cell is needed to still reach cx+radius.
+        self.dx = int(2.0 * self.radius / self.voxel) + 2
         self.dy = self.dx
         self.dz = int((self.z1 - self.z0) / self.voxel) + 1
         self.max_points = int(max_points)
@@ -219,9 +221,21 @@ class DeviceMapAccumulator:
             # Untouched on the legacy path.
             self._last_seen = wp.full(capacity, _AGE_SENTINEL, dtype=wp.int32)
 
+    def _min_corner(self, cx: float, cy: float) -> wp.vec3:
+        """Grid origin SNAPPED to the global voxel lattice, so a world point falls in the same
+        cell regardless of the robot pose. Anchoring it to the raw pose (cx - radius) shifts the
+        grid's sub-voxel phase whenever the robot translates; the whole map is re-binned every
+        step, so a shifted phase re-partitions it and merges/drops points that cross the moved
+        cell boundaries — eroding regions the robot has driven away from (they stop being
+        refilled by new scans). Snapping makes the per-step re-voxelization idempotent under
+        translation. The crop still follows the robot via the radius test in the kernel."""
+        mx = ((cx - self.radius) // self.voxel) * self.voxel
+        my = ((cy - self.radius) // self.voxel) * self.voxel
+        return wp.vec3(mx, my, self.z0)
+
     def _accumulate(self, points: wp.array, mask: wp.array, cx: float, cy: float) -> None:
         """Bin `points` (kept where `mask != 0`) into the shared hash table."""
-        min_corner = wp.vec3(cx - self.radius, cy - self.radius, self.z0)
+        min_corner = self._min_corner(cx, cy)
         wp.launch(
             _accumulate_masked_kernel,
             dim=len(points),
@@ -246,7 +260,7 @@ class DeviceMapAccumulator:
     ) -> None:
         """Bin `points` (kept where `mask != 0`) into the hash, carrying per-point frame
         `stamps` into the per-cell `last_seen` (max)."""
-        min_corner = wp.vec3(cx - self.radius, cy - self.radius, self.z0)
+        min_corner = self._min_corner(cx, cy)
         wp.launch(
             _accumulate_stamped_kernel,
             dim=len(points),
