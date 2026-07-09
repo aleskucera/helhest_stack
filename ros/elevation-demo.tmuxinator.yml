@@ -23,16 +23,23 @@
   bag     = ENV['BAG']  || "#{repo}/bags/rotate"
   rate    = ENV['RATE'] || '0.25'
   # Optional param overrides:
-  #   NO_FORGET=1 -> pure accumulation (no dynamic carve/recency, never wipe on reject).
-  #   YAW=16      -> yaw multi-start ICP (batched); escapes bad rotational init on fast spins.
+  #   NO_FORGET=1  -> pure accumulation (no dynamic carve/recency, never wipe on reject).
+  #   NO_RECENCY=1 -> drop only the time-based age-out; KEEP visibility carve + reset-on-loss.
+  #                   For static-scene mapping, where recency wrongly erases real walls.
+  #   YAW=16       -> yaw multi-start ICP (batched); escapes bad rotational init on fast spins.
   extra   = ''
   extra  += ' -p dynamic_enable:=false -p dynamic_recency_enable:=false -p reset_map_on_reject:=false' if ENV['NO_FORGET']
+  extra  += ' -p dynamic_recency_enable:=false' if ENV['NO_RECENCY']
   extra  += " -p icp_yaw_restarts:=#{ENV['YAW']}" if ENV['YAW']
   args    = extra.empty? ? '' : "--ros-args#{extra}"
+  # Large-SHM Fast DDS profile so 6 MB Ouster clouds transfer via shared memory instead of
+  # dropping on UDP (default rmem_max=4 MB < one cloud). MUST be set on every participant
+  # (bag publisher, node, rviz) or clouds are lost. See ros/fastdds_shm.xml.
+  dds     = "export FASTRTPS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\" && export FASTDDS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\""
   # Plain ROS + localhost discovery (for bag / rviz / rqt panes).
-  ros     = 'source /opt/ros/jazzy/setup.bash && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST'
+  ros     = "source /opt/ros/jazzy/setup.bash && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"
   # Full dev env: dev-shell (venv + src + ROS) plus the ros package on PYTHONPATH.
-  dev     = "source \"#{repo}/ros/dev-shell.sh\" && export PYTHONPATH=\"#{repo}/ros/helhest_stack_ros:$PYTHONPATH\" && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST"
+  dev     = "source \"#{repo}/ros/dev-shell.sh\" && export PYTHONPATH=\"#{repo}/ros/helhest_stack_ros:$PYTHONPATH\" && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"
 %>
 
 name: elevation-demo
