@@ -83,6 +83,13 @@ matching `/odom_2d`.
   into a pinwheel. `_imu_callback` now drops any sample above the gate (the integrator bridges the
   hole with its good neighbours). Symptom without it: `rotate_fast` gave ~9 ICP rejects and a
   radially-smeared map; with it, 0 rejects and a coherent map.
+- **IMU source: keep `/imu/data`.** The gyro buffer is rotated into base via the static IMU-mount
+  TF (`_gyro_base_rotation`), and the IMU sub uses sensor (best-effort) QoS, so `/ouster/imu` is a
+  *selectable* fallback (`-p imu_topic:=/ouster/imu -p gravity_use_accel:=true` — its sensor QoS
+  and `os_imu` mount are handled). But it is NOT recommended: its gyro is spike-free, yet its fused
+  orientation is broken (gravity/up ~90° off), forcing accel-based gravity, which is polluted by
+  centripetal accel during fast turns. On `rotate_fast`, `/ouster/imu`+accel gave 2 rejects and 2×
+  larger ICP corrections (max 16° vs 8.6°) and a blobbier map than `/imu/data`+guard (0 rejects).
 - **Accumulator voxel grid is world-snapped** so the map does not erode under translation
   (`DeviceMapAccumulator._min_corner`).
 - **Map maintenance:** consecutive-free visibility carve of dynamic obstacles ON — a point is

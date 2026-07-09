@@ -218,6 +218,7 @@ class ElevationNode(Node):
         # Running gyro-integrated world_R_base + the stamp it is integrated to (rotation prior).
         self._gyro_R_base: np.ndarray | None = None
         self._gyro_t: float | None = None
+        self._base_R_gyro: np.ndarray | None = None  # cached static base<-imu rotation for the gyro
         self._consecutive_rejects = 0  # for reset-on-sustained-divergence
         self._prof: dict[str, float] = {}  # per-stage cumulative seconds (profile_stages)
         self._prof_n = 0
@@ -234,7 +235,10 @@ class ElevationNode(Node):
         if self.plan_enable:
             self._build_planner()
 
-        self.create_subscription(Imu, self.imu_topic, self._imu_callback, 20)
+        # Sensor QoS (best-effort): a best-effort sub receives from BOTH a reliable publisher
+        # (`/imu/data`) and a best-effort one (`/ouster/imu`); a reliable sub gets nothing from
+        # the latter.
+        self.create_subscription(Imu, self.imu_topic, self._imu_callback, qos_profile_sensor_data)
         self.create_subscription(PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10)
         # LiDAR is best-effort (SensorDataQoS); a reliable sub gets nothing from it.
         self.cloud_sub = Subscriber(
@@ -688,10 +692,12 @@ class ElevationNode(Node):
             # integrator then bridges the missing sample with its good neighbours.
             if w.x * w.x + w.y * w.y + w.z * w.z > self._max_gyro_rate_sq:
                 return
+            base_R_imu = self._gyro_base_rotation(msg.header.frame_id)
+            if base_R_imu is None:  # IMU->base TF not ready yet — skip until it is
+                return
+            w_base = base_R_imu @ np.array([w.x, w.y, w.z])
             t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-            self._imu_buffer.append(
-                (t, np.array([q.x, q.y, q.z, q.w]), np.array([w.x, w.y, w.z]))
-            )
+            self._imu_buffer.append((t, np.array([q.x, q.y, q.z, q.w]), w_base))
 
     def _synced_callback(self, cloud_msg: PointCloud2, odom_msg: Odometry) -> None:
         try:
@@ -1194,8 +1200,8 @@ class ElevationNode(Node):
         cloud stamp to this one, piecewise over the buffered samples), so it stays correct even
         when a frame is rejected — the delta still spans the true inter-cloud rotation.
 
-        The gyro is already in base_frame (imu == base); returns None when the prior is
-        disabled so predict() falls back to the pure odom delta.
+        The buffered gyro is already rotated into base_frame (see `_gyro_base_rotation`); returns
+        None when the prior is disabled so predict() falls back to the pure odom delta.
         """
         if not self.imu_rotation_prior:
             return None
@@ -1221,6 +1227,23 @@ class ElevationNode(Node):
         self._gyro_R_base = R
         self._gyro_t = t
         return R.copy()
+
+    def _gyro_base_rotation(self, frame_id: str) -> np.ndarray | None:
+        """Cached base_R_imu (rotation only) from the static IMU mount TF, or None if not ready yet.
+
+        The gyro angular_velocity arrives in the IMU frame — identity for `/imu/data` (imu == base)
+        but a real rotation for `/ouster/imu` (os_imu). Rotating it into base_frame keeps the yaw
+        axis correct for any IMU source. The mount is static, so we look it up once and cache it.
+        """
+        if self._base_R_gyro is not None:
+            return self._base_R_gyro
+        try:
+            tf = self.tf_buffer.lookup_transform(self.base_frame, frame_id, rclpy.time.Time())
+        except TransformException:
+            return None
+        r = tf.transform.rotation
+        self._base_R_gyro = quaternion_to_matrix(r.x, r.y, r.z, r.w)[:3, :3]
+        return self._base_R_gyro
 
     def _imu_omega_at(self, t: float) -> np.ndarray | None:
         """IMU angular_velocity (rad/s, base frame) linearly interpolated to time `t`, or None.
