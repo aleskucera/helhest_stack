@@ -6,12 +6,18 @@ tmuxinator header). This file records **deployment gotchas** that are easy to lo
 
 ## KNOWN ISSUE: large LiDAR clouds silently dropped by DDS
 
+**RMW note (read first):** this applies only when the RMW is **Fast DDS** (`rmw_fastrtps_cpp`)
+— e.g. bag replay on a dev box. The **live robot runs Zenoh** (`rmw_zenoh_cpp`), whose
+reliable-TCP transport has no such failure mode: measured same-host, a bare subscriber
+received **201/201** `/ouster/points` at 10 Hz, zero loss. So `fastdds_shm.xml` below is
+**inert under Zenoh** — don't chase it on the robot; check `RMW_IMPLEMENTATION` first.
+
 **Symptom:** the node processes only a fraction of `/ouster/points` (e.g. ~40%); the
 accumulated map is sparse/streaky and localization sees big per-frame rotations (ICP
 rejects). Slowing the bag rate does **not** help. A bare do-nothing subscriber also only
 receives a fraction — so it is **not** compute, ICP, or the node; it is the **transport**.
 
-**Cause:** an Ouster 1024×128 cloud is **~6 MB**. With Fast DDS (the default RMW) over
+**Cause:** an Ouster 1024×128 cloud is **~6 MB**. With Fast DDS (the RMW in that case) over
 best-effort UDP, each cloud is fragmented into thousands of packets; if the OS socket
 receive buffer can't hold a whole cloud, reassembly fails and the **entire message is
 dropped** — per message, regardless of playback rate. Defaults are far too small:
@@ -45,6 +51,26 @@ echo -e "net.core.rmem_max=134217728\nnet.core.rmem_default=8388608" \
 (325 clouds): before → 136/325 processed (58% dropped, ICP rejects); after SHM →
 318/325 (2%, 0 rejects). A do-nothing subscriber went 109/325 → 325/325.
 
+## KNOWN ISSUE: node runs but publishes nothing — cloud stamped in sensor time
+
+**Symptom:** the node starts (Warp init + the `ElevationNode:` banner) but never publishes
+`elevation_local`/`elevation_global`; RViz stays empty. `/odom_2d` and `/imu/data` are live.
+
+**Cause:** the cloud↔odom `ApproximateTimeSynchronizer` never matches a pair because the
+clocks differ. With the Ouster driver's `timestamp_mode` **unset (empty)** it falls back to
+`TIME_FROM_INTERNAL_OSC` — the sensor's internal oscillator (uptime), e.g. a header stamp of
+`7616 s` — while `/odom_2d` and `/imu/data` are in system time (`~1.78e9 s`). Off by ~1.78
+billion seconds, so no slop can bridge it and `_process()` never fires.
+
+**Fix:** launch the Ouster driver with `timestamp_mode:=TIME_FROM_ROS_TIME` so clouds carry
+the host ROS clock (same as odom/imu). It configures the sensor at startup, so `ros2 param
+set` won't take — **relaunch the driver**. Don't use `TIME_FROM_PTP_1588`: odom/imu here are
+plain system time, not PTP-disciplined, so PTP clouds still wouldn't match (the `ptp4l` on
+`eth_ouster` is not aligning the sensor to system UTC — the `7616 s` readback proves it).
+
+**Verify:** `ros2 topic echo --once --field header.stamp /ouster/points` should read ~`1.78e9`,
+matching `/odom_2d`.
+
 ## Other defaults worth knowing
 
 - **Rotation prior = integrated gyro**, not the fused `/imu/data` orientation (its yaw is
@@ -54,3 +80,8 @@ echo -e "net.core.rmem_max=134217728\nnet.core.rmem_default=8388608" \
 - **Map maintenance:** visibility ray-carve of dynamic obstacles ON, time-based recency
   age-out OFF (erased static structure), reset-on-tracking-loss ON. `NO_FORGET=1` disables
   all three; `RECENCY=1` re-enables the age-out.
+- **Node broadcasts `odom→base_link`** (`publish_odom_tf`, default on) at the full odom rate,
+  because `helhest_llc` publishes the `/odom_2d` message but no TF — without it `base_link`
+  is disconnected from `map` and RViz can't place/follow the robot. Set false only if the odom
+  source starts broadcasting it. RViz: world-up view = Fixed Frame `map` + view Target Frame
+  `base_link`; robot-up view = Fixed Frame `base_link` (needs the dense odom-rate TF above).
