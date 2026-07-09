@@ -98,13 +98,18 @@ matching `/odom_2d`.
   (no return for 8 straight frames) IS carved. Frontier no-return path ON (needed to carve a
   trail on open ground, where the vacated spot has no solid background); persist=8 is what makes
   it safe. Net: a moving person keeps their current pose but leaves no trail. Between-beam-gap
-  age-out ON (`carve_gap_frames`, 8): a map point on a bearing no beam ever re-hits, but whose
-  neighbours ARE scanned, is a stale fragment the discrete Ouster beams can't confirm or carve
-  the normal way (it reads as "unobserved → keep" forever) — it is dropped after 8 frames. This
-  clears the sparse elevated specks that used to sit in the robot's path; a point in a fully
-  unscanned region (no scanned neighbour, outside the vertical FOV) is still held. Also: recency
-  age-out OFF (erased static), reset-on-tracking-loss ON. `NO_FORGET=1` disables carve + recency
-  + reset; `RECENCY=1` re-enables the age-out.
+  age-out ON (`carve_gap_frames`, 8) but GATED to near + in-front space: a map point on a bearing
+  no beam ever re-hits, whose neighbours ARE scanned, is a stale fragment the discrete Ouster beams
+  can't confirm or carve normally (reads as "unobserved → keep" forever) — dropped after 8 frames.
+  This clears the sparse elevated specks that sit in the robot's path. The gate is essential:
+  ungated, the carve depth-image bins elevation coarser (128 bins / 180° = 1.4°/bin) than the beam
+  pitch (~0.35°), so a distant real point lands in an empty el-bin and reads as a gap — ungated it
+  erased 37% of the map (72% of structure past 8 m) and ate the wheel-occlusion shadows off to the
+  sides. `carve_gap_max_range_m` (2.5) limits it to near points and `carve_gap_fwd_deg` (45, half-
+  cone off the robot heading) to the front, cutting erosion to ~2% while still clearing the specks.
+  A point in a fully unscanned region (no scanned neighbour, outside the FOV) is always held. Also:
+  recency age-out OFF (erased static), reset-on-tracking-loss ON. `NO_FORGET=1` disables carve +
+  recency + reset; `RECENCY=1` re-enables the age-out.
 - **Node broadcasts `odom→base_link`** (`publish_odom_tf`, default on) at the full odom rate,
   because `helhest_llc` publishes the `/odom_2d` message but no TF — without it `base_link`
   is disconnected from `map` and RViz can't place/follow the robot. Set false only if the odom

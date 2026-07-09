@@ -223,6 +223,9 @@ def classify_streak_kernel(
     streak_in: wp.array(dtype=wp.int32),
     persist: wp.int32,
     gap_persist: wp.int32,
+    gap_max_range: wp.float32,
+    gap_fwd_az: wp.float32,
+    gap_fwd_half: wp.float32,
     keep: wp.array(dtype=wp.int32),
     streak_out: wp.array(dtype=wp.int32),
 ):
@@ -234,6 +237,12 @@ def classify_streak_kernel(
     a bearing the scan did not observe (sentinel) or an occluded point (`od < r − margin`)
     leaves the streak unchanged (no evidence either way). This tolerates the ambiguous single
     no-return — grazing/dark/dropped beam — that the instantaneous carve wrongly deleted.
+
+    The BETWEEN-BEAM gap age-out (`gap_persist`) is additionally gated to NEAR + IN-FRONT space:
+    `gap_max_range` (>0) skips points farther than that, and `gap_fwd_half` (>0) skips points whose
+    world azimuth is more than that many radians off the robot heading `gap_fwd_az`. Without these
+    gates the coarse-elevation gap test erodes distant structure (a real point in an empty el-bin
+    reads as a gap) and the wheel-occlusion shadows off to the sides.
     """
     i = wp.tid()
     keep[i] = 1
@@ -253,11 +262,24 @@ def classify_streak_kernel(
         # can never re-hit — age it out. A point in a fully unscanned region (outside the vertical
         # FOV, all neighbours empty) is held: we genuinely can't judge it.
         if gap_persist > 0 and _has_observed_neighbor(other_depth, idx, az_bins, el_bins) == 1:
-            s = s + 1
-            streak_out[i] = s
-            if s >= gap_persist:
-                keep[i] = 0
-            return
+            # Gate the gap age-out to near + in-front space (0/<=0 disables a gate).
+            near = gap_max_range <= 0.0 or r <= gap_max_range
+            in_front = int(1)
+            if gap_fwd_half > 0.0:
+                az = wp.atan2(d[1], d[0])
+                daz = az - gap_fwd_az
+                while daz > wp.pi:
+                    daz = daz - 2.0 * wp.pi
+                while daz < -wp.pi:
+                    daz = daz + 2.0 * wp.pi
+                if wp.abs(daz) > gap_fwd_half:
+                    in_front = 0
+            if near and in_front == 1:
+                s = s + 1
+                streak_out[i] = s
+                if s >= gap_persist:
+                    keep[i] = 0
+                return
         streak_out[i] = s
         return
     margin = margin_m + r * margin_rel

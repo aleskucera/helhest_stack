@@ -287,6 +287,9 @@ class DynamicPointFilter:
         streak_in: wp.array,
         persist: int,
         gap_persist: int = 0,
+        gap_max_range: float = 0.0,
+        gap_fwd_az: float = 0.0,
+        gap_fwd_half: float = 0.0,
         *,
         sensor_rotation: np.ndarray | None = None,
     ) -> tuple[wp.array, wp.array]:
@@ -301,7 +304,10 @@ class DynamicPointFilter:
 
         `gap_persist` > 0 also ages out BETWEEN-BEAM points: a bearing with no beam whose neighbours
         ARE scanned (a stale fragment the discrete beams can never re-hit) is dropped after that many
-        frames. Points in a fully unscanned region (outside the vertical FOV) are still held.
+        frames. Points in a fully unscanned region (outside the vertical FOV) are still held. That
+        age-out is gated to NEAR + IN-FRONT space: `gap_max_range` (>0) skips farther points, and
+        `gap_fwd_half` (>0, radians) skips points whose world azimuth is off the robot heading
+        `gap_fwd_az` by more than that — keeps it from eroding distant structure and wheel shadows.
         """
         n_map = len(map_points)
         if n_map == 0:
@@ -325,6 +331,9 @@ class DynamicPointFilter:
                     streak_in,
                     int(persist),
                     int(gap_persist),
+                    float(gap_max_range),
+                    float(gap_fwd_az),
+                    float(gap_fwd_half),
                 ],
                 outputs=[keep, streak_out],
             )
