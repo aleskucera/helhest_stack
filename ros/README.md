@@ -78,11 +78,13 @@ matching `/odom_2d`.
 - **Accumulator voxel grid is world-snapped** so the map does not erode under translation
   (`DeviceMapAccumulator._min_corner`).
 - **Map maintenance:** consecutive-free visibility carve of dynamic obstacles ON — a point is
-  dropped only after the scan sees PAST it for `carve_persist_frames` (3) frames in a row, so a
-  single ambiguous no-return can't delete static geometry; the frontier no-return path is OFF
-  by default (it over-carved static — real dynamics are caught by a real farther return). Also:
-  time-based recency age-out OFF (erased static), reset-on-tracking-loss ON. `NO_FORGET=1`
-  disables carve + recency + reset; `RECENCY=1` re-enables the age-out.
+  dropped only after the scan sees PAST it for `carve_persist_frames` (8) frames in a row, so a
+  single ambiguous no-return can't delete static geometry, while a spot a moving person vacated
+  (no return for 8 straight frames) IS carved. Frontier no-return path ON (needed to carve a
+  trail on open ground, where the vacated spot has no solid background); persist=8 is what makes
+  it safe. Net: a moving person keeps their current pose but leaves no trail. Also: recency
+  age-out OFF (erased static), reset-on-tracking-loss ON. `NO_FORGET=1` disables carve + recency
+  + reset; `RECENCY=1` re-enables the age-out.
 - **Node broadcasts `odom→base_link`** (`publish_odom_tf`, default on) at the full odom rate,
   because `helhest_llc` publishes the `/odom_2d` message but no TF — without it `base_link`
   is disconnected from `map` and RViz can't place/follow the robot. Set false only if the odom
