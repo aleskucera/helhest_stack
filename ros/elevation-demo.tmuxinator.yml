@@ -24,12 +24,12 @@
   rate    = ENV['RATE'] || '0.25'
   # Optional param overrides:
   #   NO_FORGET=1  -> pure accumulation (no dynamic carve/recency, never wipe on reject).
-  #   NO_RECENCY=1 -> drop only the time-based age-out; KEEP visibility carve + reset-on-loss.
-  #                   For static-scene mapping, where recency wrongly erases real walls.
+  #   RECENCY=1    -> re-enable the time-based age-out (default OFF; removes moving-obstacle
+  #                   trails but also erodes sparse static cells). Visibility carve stays on.
   #   YAW=16       -> yaw multi-start ICP (batched); escapes bad rotational init on fast spins.
   extra   = ''
   extra  += ' -p dynamic_enable:=false -p dynamic_recency_enable:=false -p reset_map_on_reject:=false' if ENV['NO_FORGET']
-  extra  += ' -p dynamic_recency_enable:=false' if ENV['NO_RECENCY']
+  extra  += ' -p dynamic_recency_enable:=true' if ENV['RECENCY']
   extra  += " -p icp_yaw_restarts:=#{ENV['YAW']}" if ENV['YAW']
   args    = extra.empty? ? '' : "--ros-args#{extra}"
   # Large-SHM Fast DDS profile so 6 MB Ouster clouds transfer via shared memory instead of

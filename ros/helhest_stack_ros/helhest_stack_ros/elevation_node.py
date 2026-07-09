@@ -350,7 +350,11 @@ class ElevationNode(Node):
         # instantaneous carve leaves behind. Visibility-gated: cells the sensor cannot see
         # now (blind rear, occluded) are kept, so mapped history survives behind the robot
         # until it leaves the map radius or odometry breaks. At 10 Hz, 10 frames ~= 1 s.
-        d("dynamic_recency_enable", True)
+        # OFF by default: this time-based age-out also erases legit STATIC structure seen at
+        # grazing/sparse angles. The visibility ray-carve (dynamic_enable) still removes moving
+        # obstacles the moment a beam passes through them; recency only cleaned up the residual
+        # trail. Enable it if you need that trail removed and can accept eroding static cells.
+        d("dynamic_recency_enable", False)
         d("dynamic_max_unseen_frames", 10)
         # ICP
         d("icp_enable", True)
