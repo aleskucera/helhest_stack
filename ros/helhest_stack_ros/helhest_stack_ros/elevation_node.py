@@ -25,6 +25,7 @@ world frame is bootstrapped to odom at the first scan.
 
 from __future__ import annotations
 
+import time
 from collections import deque
 from dataclasses import dataclass
 
@@ -214,6 +215,9 @@ class ElevationNode(Node):
         self._gyro_R_base: np.ndarray | None = None
         self._gyro_t: float | None = None
         self._consecutive_rejects = 0  # for reset-on-sustained-divergence
+        self._prof: dict[str, float] = {}  # per-stage cumulative seconds (profile_stages)
+        self._prof_n = 0
+        self._prof_t = 0.0
         self._deskew_warned = False
         self._imu_warned = False
 
@@ -378,6 +382,7 @@ class ElevationNode(Node):
         d("reset_map_on_reject", True)
         d("reset_after_rejects", 5)  # wipe only after this many CONSECUTIVE rejects (sustained loss)
         d("debug_frames", False)  # INFO-log each frame's registration metrics (debugging)
+        d("profile_stages", False)  # GPU-synced per-stage timing, logged every 30 frames (debugging)
         # Gravity prior (IMU anchors ICP roll/pitch)
         d("gravity_enable", True)
         d("gravity_weight", 2000.0)
@@ -460,6 +465,7 @@ class ElevationNode(Node):
         self.reset_map_on_reject: bool = g("reset_map_on_reject")
         self.reset_after_rejects: int = g("reset_after_rejects")
         self.debug_frames: bool = g("debug_frames")
+        self.profile_stages: bool = g("profile_stages")
         self.publish_map_tf: bool = g("publish_map_tf")
         self.publish_accumulated: bool = g("publish_accumulated")
         self.plan_enable: bool = g("plan_enable")
@@ -642,8 +648,20 @@ class ElevationNode(Node):
         except Exception as exc:
             self.get_logger().error(f"elevation error: {exc}")
 
+    def _ck(self, label: str) -> None:
+        """Profiling checkpoint: sync the GPU (Warp is async) and accrue time since the last _ck."""
+        if not self.profile_stages:
+            return
+        wp.synchronize()
+        now = time.perf_counter()
+        self._prof[label] = self._prof.get(label, 0.0) + (now - self._prof_t)
+        self._prof_t = now
+
     def _process(self, cloud_msg: PointCloud2, odom_msg: Odometry) -> None:
         self._frame += 1
+        if self.profile_stages:
+            wp.synchronize()
+            self._prof_t = time.perf_counter()
         odom_T_base = self._odom_to_matrix(odom_msg)
         scan = self._scan_in_base(cloud_msg)
         if scan is None or scan[0].shape[0] == 0:
@@ -658,6 +676,7 @@ class ElevationNode(Node):
             return
         gravity_up = self._gravity_up_base(cloud_msg.header.stamp)
         imu_R_base = self._gyro_orientation_base(cloud_msg.header.stamp)
+        self._ck("preproc+prior")
 
         if not self.localizer.initialized:
             world_T_base = odom_T_base
@@ -670,6 +689,7 @@ class ElevationNode(Node):
                 scan_base = self._deskew(scan_base, point_times, sweep_delta, cloud_msg.header.stamp)
             scan_wp = wp.array(scan_base, dtype=wp.vec3, device=self.device)
             scan_wp = self._denoise(scan_wp, base_T_sensor)
+            self._ck("deskew+denoise")
             outcome = self.localizer.update(
                 scan_wp,
                 world_T_base_pred,
@@ -678,6 +698,7 @@ class ElevationNode(Node):
                 imu_R_base_curr=imu_R_base,
                 gravity_up=gravity_up,
             )
+            self._ck("icp")
             self._log_registration(outcome)
             if self.debug_frames:
                 self.get_logger().info(
@@ -729,6 +750,7 @@ class ElevationNode(Node):
                 )
             else:
                 carve = self.dynamic_filter.carve(self.map_wp, carve_scan, sensor_origin)
+        self._ck("worldscan+carve")
         center = (world_T_base[0, 3], world_T_base[1, 3])
         if self.dynamic_recency_enable:
             self.map_wp, self.map_ages = self.acc.step(
@@ -738,12 +760,22 @@ class ElevationNode(Node):
         else:
             self.map_wp = self.acc.step(self.map_wp, carve, world_scan, valid, center)
             self.map_ages = None
+        self._ck("accumulate")
         mf = self._build_maps(world_T_base, world_scan)
+        self._ck("build_maps")
         if mf is not None:
             self._publish_maps(mf, cloud_msg.header.stamp)
             if self.plan_enable and self.goal_xy is not None and self.planner is not None:
                 self._plan(mf, world_T_base, cloud_msg.header.stamp)
         self._broadcast_map_tf(world_T_base, odom_msg)
+        self._ck("publish+plan+tf")
+        if self.profile_stages:
+            self._prof_n += 1
+            if self._prof_n % 30 == 0:
+                parts = " ".join(f"{k}={1000 * v / self._prof_n:.1f}"
+                                 for k, v in sorted(self._prof.items(), key=lambda kv: -kv[1]))
+                total = 1000 * sum(self._prof.values()) / self._prof_n
+                self.get_logger().info(f"PROFILE avg ms/frame (n={self._prof_n}) total={total:.1f} | {parts}")
 
     # ------------------------------------------------------------------
     # Dual elevation map (mirrors demos/pipeline_sim's heightmap stage)
