@@ -213,8 +213,10 @@ def run(
     shot=None,
     shot_frame=None,
     max_frames=2000,
+    rate=0.0,
 ):
     import glfw
+    import time
     from OpenGL import GL as gl
 
     wp.init()
@@ -324,6 +326,7 @@ def run(
         )
 
     f = 0
+    _t_frame = time.perf_counter()
     while not (glfw.window_should_close(win_l) or glfw.window_should_close(win_r)):
         glfw.poll_events()
         if any(
@@ -500,6 +503,10 @@ def run(
         img_r = _grab(win_r) if img_l is not None else None
         glfw.swap_buffers(win_r)
 
+        if rate > 0.0:  # hold each frame to at least `rate` wall-seconds (0.1 ~ real-time; larger = slow-mo)
+            time.sleep(max(0.0, rate - (time.perf_counter() - _t_frame)))
+        _t_frame = time.perf_counter()
+
         f += 1
         if f >= max_frames or img_l is not None:
             if img_l is not None:
@@ -551,9 +558,17 @@ def main():
         default=None,
         help="capture --shot at this frame (default: at goal reach)",
     )
+    ap.add_argument(
+        "--rate",
+        type=float,
+        default=0.0,
+        help="wall-seconds to hold each frame: 0 = as fast as possible, 0.1 ~ real-time "
+        "(sim dt), 0.3 = ~3x slow-mo. Use it to actually SEE the motion.",
+    )
     args = ap.parse_args()
     run(
         world=args.world,
+        rate=args.rate,
         dock_radius=args.dock_radius,
         lat_coarsen=args.lat_coarsen,
         win_m=args.win_m,
