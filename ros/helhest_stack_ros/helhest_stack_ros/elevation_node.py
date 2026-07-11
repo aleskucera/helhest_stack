@@ -157,6 +157,7 @@ _PLAN_BUILD = frozenset(
         "plan_effort",
         "plan_wmax",
         "plan_straight_frac",
+        "plan_elite_frac",
         "device",
     }
 )
@@ -505,6 +506,13 @@ class ElevationNode(Node):
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
         # a clear shot, no cost when a turn is actually needed. 0 = off.
         d("plan_straight_frac", 0.2)
+        # CEM elite fraction: MPPI commits the MEAN of the top-k lowest-cost candidates. Because the
+        # goal heading is free, small turns near the goal barely change cost -> the elite fills with
+        # near-equal micro-turn candidates and their mean WOBBLES. A PEAKIER elite (smaller frac ->
+        # average fewer, better candidates) drives markedly straighter: 0.02 -> 0.01 cut lateral wander
+        # ~20%, 0.005 ~33%, with 0 contact regressions in sim (even fixed one stress world). Too small
+        # (<~0.003) starves the mean. Batch size barely helps by comparison.
+        d("plan_elite_frac", 0.01)
         # ACTUATION (drive the robot). plan_actuate publishes wheel commands to a real robot; set
         # it false to run planning as visualization only. All motor-safety conditioning (the
         # left-wheel sign flip, rear-follower, magnitude clamp, slew limit) is in control/command.py.
@@ -613,6 +621,7 @@ class ElevationNode(Node):
         self.plan_goal_running: float = g("plan_goal_running")
         self.plan_effort: float = g("plan_effort")
         self.plan_straight_frac: float = g("plan_straight_frac")
+        self.plan_elite_frac: float = g("plan_elite_frac")
         self.plan_wmax: float = g("plan_wmax")
         self.plan_actuate: bool = g("plan_actuate")
         self.plan_max_omega: float = g("plan_max_omega")
@@ -727,7 +736,8 @@ class ElevationNode(Node):
         self.planner = MppiGpu(
             self.plan_sim,
             CostParams(goal_running=self.plan_goal_running, effort=self.plan_effort),
-            sampling=SamplingConfig(wmax=self.plan_wmax, straight_frac=self.plan_straight_frac),
+            sampling=SamplingConfig(wmax=self.plan_wmax, straight_frac=self.plan_straight_frac,
+                                    elite_frac=self.plan_elite_frac),
             n_theta=int(self.plan_n_theta),
         )
         self.planner.reset_nominal(self.plan_nominal_reset)
