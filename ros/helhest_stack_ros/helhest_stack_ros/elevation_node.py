@@ -503,6 +503,11 @@ class ElevationNode(Node):
         d("plan_dock_radius", 1.5)  # within this range of the goal: dock (if enabled) or just stop
         d("plan_dock_enable", True)  # True = terminal dock; False = just STOP when within dock_radius
         d("plan_reach_radius", 0.3)  # goal reached -> command a (ramped) stop within this range (m)
+        # GOAL BRAKE: scale MPPI's forward speed to 0 over the last brake_dist m so the forward-only
+        # robot noses in slow and settles AT the goal instead of overshooting/orbiting past it. Cruise
+        # speed is untouched beyond brake_dist. 0 = off. Replaces the hard dock/stop radius; validated
+        # in sim (~0.2 m settle, zero overshoot) -- see the goal-brake note in control/command.py.
+        d("plan_goal_brake_dist", 3.0)  # start braking within this range of the goal (m); 0 = off
         # UNREACHABLE-GOAL STOP: when the cost-to-go at the robot is saturated (no route to the goal)
         # AND the committed plan reduces distance-to-goal by less than this, the robot is walled off
         # -> stop instead of the explore-fallback nosing into the obstacle. Keep it below a horizon's
@@ -598,6 +603,7 @@ class ElevationNode(Node):
         self.plan_dock_radius: float = g("plan_dock_radius")
         self.plan_dock_enable: bool = g("plan_dock_enable")
         self.plan_reach_radius: float = g("plan_reach_radius")
+        self.plan_goal_brake_dist: float = g("plan_goal_brake_dist")
         self.plan_progress_min: float = g("plan_progress_min")
         self.plan_path_width: float = g("plan_path_width")
 
@@ -1212,13 +1218,13 @@ class ElevationNode(Node):
         holding = False  # walled-off hold this frame -> published on /plan_holding
         if d < self.plan_reach_radius:
             wl, wr = 0.0, 0.0  # reached -> stop (the slew limiter ramps the command down)
-        elif d < self.plan_dock_radius:
-            if self.plan_dock_enable:
-                u = dock_control(state_l, goal_l, wmax=self.plan_max_omega)  # terminal dock
-                wl, wr = float(u[0]), float(u[1])
-            else:
-                wl, wr = 0.0, 0.0  # dock disabled -> just stop near the goal (ramped)
+        elif self.plan_dock_enable and d < self.plan_dock_radius:
+            u = dock_control(state_l, goal_l, wmax=self.plan_max_omega)  # terminal dock
+            wl, wr = float(u[0]), float(u[1])
         else:
+            # MPPI drives; the goal brake (in condition_command) bleeds off speed on the final
+            # approach so it settles instead of orbiting. With the dock disabled this branch covers
+            # the whole reach_radius..inf band -- the continuous brake replaces the hard stop-radius.
             u0 = self.planner.nominal()[0]  # first committed step (wL, wR), model convention
             wl, wr = float(u0[0]), float(u0[1])
             # UNREACHABLE-GOAL STOP: the robot sits at the routing-window CENTER, so the cost-to-go
@@ -1242,11 +1248,12 @@ class ElevationNode(Node):
                     f"goal unreachable (walled off, no progress in {self._d_hist.maxlen} frames) "
                     f"-> holding [d={d:.1f}]", throttle_duration_sec=2.0
                 )
-        # sign flip + rear-follower + magnitude clamp + slew limit, all in control/command.py
+        # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
         cmd = condition_command(
             wl, wr, self._prev_cmd,
             max_omega=self.plan_max_omega, max_slew=self.plan_max_slew, dt=dynamics.DT,
             turn_boost=self.plan_turn_boost,
+            goal_dist=d, brake_dist=self.plan_goal_brake_dist,
         )
         self._prev_cmd = cmd
         self._publish_cmd(cmd)

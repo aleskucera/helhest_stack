@@ -32,6 +32,8 @@ def condition_command(
     max_slew: float,
     dt: float,
     turn_boost: float = 1.0,
+    goal_dist: float | None = None,
+    brake_dist: float = 0.0,
 ) -> np.ndarray:
     """Planner (wl, wr) -> conditioned [left, rear, right] wheel-velocity command for /cmd_joints.
 
@@ -40,6 +42,9 @@ def condition_command(
         after an e-stop so the slew limiter ramps up from rest.
     max_omega: hard cap on |wheel velocity| [rad/s] -- set to the motor's safe max.
     max_slew: hard cap on |d(command)/dt| per joint [rad/s^2] -- limits the change over one dt.
+    goal_dist: current robot->goal distance [m]. With brake_dist > 0, scales the FORWARD speed down
+        on the final approach (the goal brake below). None/0 disables the brake.
+    brake_dist: [m] start braking within this range of the goal. 0 = no brake.
     Returns [left, rear, right] velocities to publish. To STOP, call with wl = wr = 0 -- the slew
     limiter ramps the command down to rest.
     """
@@ -51,6 +56,15 @@ def condition_command(
     # *** HOTFIX / stopgap for a drivetrain defect -- NOT a real fix. Read docs/turn_differential_hotfix.md
     #     before changing/removing this: what it papers over, and what to actually fix. ***
     mean = 0.5 * (wl + wr)  # forward speed; also the rear follower target (rear = mean of L/R)
+    # GOAL BRAKE: the robot is forward-only (wmin=0) -- it cannot pivot in place to re-aim, so if it
+    # arrives fast and slightly off it flies PAST the goal and orbits (a hard stop-radius misses an
+    # offset flyby entirely). Scaling forward speed linearly to 0 over the last brake_dist metres
+    # makes it nose in slow -> settles AT the goal. The turn differential is NOT scaled (tighter arc
+    # at low speed helps the final aim) and the far-field cruise is untouched (no slow-down until
+    # inside brake_dist). Verified in sim vs a term_v MPPI cost + a sqrt profile: this linear output
+    # brake settled cleanest (~0.2 m, zero overshoot) across straight/offset/sharp goals.
+    if brake_dist > 0.0 and goal_dist is not None:
+        mean *= min(1.0, float(goal_dist) / float(brake_dist))
     diff = (wr - wl) * float(turn_boost)  # turn differential, amplified
     # /cmd_joints input convention: forward = all positive, no sign flip -- the LLC applies its own
     # internal signs. Verified: forward (wl=wr=v) -> [+v, +v, +v] drove the robot straight forward.

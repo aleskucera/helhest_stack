@@ -61,3 +61,20 @@ def test_turn_direction():
     # planner turn: wr > wl -> intended +yaw (left/CCW). Right wheel commanded faster than left.
     cmd = condition_command(1.0, 2.0, Z, max_omega=4.0, max_slew=1e6, dt=0.1)
     assert cmd[2] > cmd[0]  # right faster than left -> left/CCW turn
+
+
+def test_goal_brake_scales_forward_not_turn():
+    # brake_dist=4, goal_dist=2 -> forward scaled by 2/4 = 0.5; the turn differential is untouched.
+    cmd = condition_command(1.0, 3.0, Z, max_omega=10.0, max_slew=1e6, dt=0.1,
+                            goal_dist=2.0, brake_dist=4.0)
+    # unbraked would be [1, 2, 3] (mean 2, diff 2). mean -> 1, diff stays 2 -> [0, 1, 2].
+    np.testing.assert_allclose(cmd, [0.0, 1.0, 2.0], atol=1e-5)
+
+
+def test_goal_brake_noop_far_and_off():
+    # beyond brake_dist the brake is a no-op; brake_dist=0 (default) disables it entirely.
+    far = condition_command(2.0, 2.0, Z, max_omega=10.0, max_slew=1e6, dt=0.1,
+                            goal_dist=9.0, brake_dist=3.0)
+    off = condition_command(2.0, 2.0, Z, max_omega=10.0, max_slew=1e6, dt=0.1)
+    np.testing.assert_allclose(far, [2.0, 2.0, 2.0], atol=1e-5)
+    np.testing.assert_allclose(off, [2.0, 2.0, 2.0], atol=1e-5)
