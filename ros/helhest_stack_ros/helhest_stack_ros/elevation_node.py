@@ -479,14 +479,14 @@ class ElevationNode(Node):
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
         # NEVER commands above this regardless of the cost -- raising goal_running does nothing once
         # it saturates at plan_wmax. This is the real top-speed knob. Keep <= the motor safe max
-        # (plan_max_omega, the output clamp). ~1.4 m/s at 4.0; ~2.1 m/s at 6.0 (r=0.35).
-        d("plan_wmax", 4.0)  # max per-wheel omega the planner may command [rad/s]
+        # (plan_max_omega, the output clamp). ~1.4 m/s at 4.0; ~2.8 m/s at 8.0 (r=0.35).
+        d("plan_wmax", 8.0)  # max per-wheel omega the planner may command [rad/s]
         # ACTUATION (drive the robot). plan_actuate publishes wheel commands to a real robot; set
         # it false to run planning as visualization only. All motor-safety conditioning (the
         # left-wheel sign flip, rear-follower, magnitude clamp, slew limit) is in control/command.py.
         d("plan_actuate", True)  # publish /cmd_joints wheel commands
         d("cmd_topic", "/cmd_joints")  # JointState wheel-velocity command topic (to the LLC)
-        d("plan_max_omega", 4.0)  # hard cap on |wheel velocity| [rad/s] -- set to the motor safe max
+        d("plan_max_omega", 8.0)  # hard cap on |wheel velocity| [rad/s] -- set to the motor safe max
         d("plan_max_slew", 50.0)  # hard cap on |d(cmd)/dt| per wheel [rad/s^2]
         d("plan_dock_radius", 1.5)  # hand off MPPI routing -> terminal dock within this range (m)
         d("plan_reach_radius", 0.3)  # goal reached -> command a (ramped) stop within this range (m)
