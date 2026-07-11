@@ -19,9 +19,11 @@ inertia, motor torques, tyre slip evolving in time). The reasons:
 - **The command is kinematic.** The vehicle is speed-controlled at the wheels,
   not torque-controlled, so a kinematic model already captures the dominant
   input-output behaviour.
-- **Planning needs cheap, smooth, stable rollouts.** A quasi-static model is
-  differentiable and does not blow up under large steps, which matters when
-  thousands of candidate trajectories are simulated per planning cycle.
+- **Planning needs cheap, smooth, stable rollouts.** A quasi-static model does
+  not blow up under large steps, which matters when thousands of candidate
+  trajectories are simulated per planning cycle. The fused MPPI rollout is
+  forward-only; the separate calibration simulator keeps the differentiable
+  per-step path.
 
 The trade-off is that transient dynamics (suspension bounce, wheel spin-up,
 dynamic weight transfer during acceleration) are not represented.
@@ -85,15 +87,25 @@ $$
   should have ridden over, and it turns the wheel-placement problem into a
   simple point-on-surface condition.
 
-## 4. The per-timestep loop
+## 4. Initial settle and the per-timestep loop
+
+Before a rollout starts, the initial controlled pose $(x,y,\psi)$ is projected
+onto the terrain. The solver samples the wheel envelope at the start pose for
+$z_0 = H_\text{eff}(x,y) + R$, then Newton-solves the terrain-derived
+$(z,\theta,\phi)$.
 
 Each control step of duration $\Delta t$ transforms one valid state into the
-next. Let the wheel angular speeds be $\omega = (\omega_L, \omega_R,
-\omega_\text{rear})$.
+next. Let the commanded wheel angular speeds be
+$\omega^\star = (\omega^\star_L, \omega^\star_R, \omega^\star_\text{rear})$.
+With actuator lag enabled, the carried wheel-speed state
+$\omega = (\omega_L, \omega_R, \omega_\text{rear})$ is updated first and the
+resulting actual speed is used by the kinematic twist. With the default
+`tau_motor = 0`, commanded and actual wheel speeds are identical.
 
 ```mermaid
 flowchart TD
-    Start[Valid state at time t] --> Turn[a. Turning parameters from grip]
+    Start[Valid state at time t] --> Lag[a0. Optional motor lag]
+    Lag --> Turn[a. Turning parameters from grip]
     Turn --> Twist[b. Predict body twist]
     Twist --> Integrate[c. Integrate planar pose in world frame]
     Integrate --> Settle[d. Project: settle onto terrain]
@@ -102,12 +114,26 @@ flowchart TD
     Feas --> End[Valid state at time t + dt]
 ```
 
+### (a0) Optional motor lag
+
+The simulator can model first-order actuator lag between commanded and actual
+wheel speed:
+
+$$
+\omega \leftarrow \omega +
+\min\!\left(\frac{\Delta t}{\tau_\text{motor}}, 1\right)
+(\omega^\star - \omega).
+$$
+
+The update is applied before the twist calculation. A zero time constant
+recovers the original instantaneous speed-source behaviour.
+
 ### (a) Turning parameters from grip
 
 Skid-steer vehicles turn by forcing the wheels to slide laterally, so the turn
 geometry depends on where the grip is. Each wheel $i$ carries a lateral grip
-"weight" combining its friction coefficient $\mu_i$ (sampled at its contact
-point) and its normal load $N_i$:
+"weight" combining its friction coefficient $\mu_i$ (sampled at the world
+contact point on the wheel envelope, not at the hub) and its normal load $N_i$:
 
 $$
 w_i = \mu_i \, N_i.
@@ -235,19 +261,31 @@ $$
 c_\text{chassis} = \min_j\big(z_j - h(x_j, y_j)\big).
 $$
 
-If $c_\text{chassis} < 0$ the belly penetrates the ground: the vehicle is
-high-centred and the state is flagged invalid. A grid of sample points (rather
-than just the corners) is used so an obstacle under the centre of the belly is
-caught, not only ones beneath a corner. This unilateral clearance test is what
-distinguishes a drivable pose from a physically stuck one.
+If $c_\text{chassis}$ is below the configured clearance threshold, the vehicle is
+high-centred and the state is flagged invalid. Reference rollouts default this
+margin to zero; planner-facing robot parameters use a positive `clear_margin`
+default so near-contact poses can be rejected before penetration. A grid of
+sample points (rather than just the corners) is used so an obstacle under the
+centre of the belly is caught, not only ones beneath a corner.
+
+The final validity gate therefore combines two checks:
+
+$$
+c_\text{chassis} \ge \texttt{clear\_margin}
+\qquad\text{and}\qquad
+\max_i |c_i| \le \texttt{resid\_tol}.
+$$
+
 
 ## 5. Assumptions and limitations
 
 - **Quasi-static, per step.** Height and tilt are solved as an instantaneous
   equilibrium; there is no suspension transient or contact dynamics.
 - **No dynamic force integration.** Wheel torque, body inertia, and momentum are
-  not modelled; the wheels are speed sources and horizontal motion is
-  first-order (forward Euler).
+  not modelled; horizontal motion is first-order (forward Euler). With
+  `tau_motor = 0` the wheels are instantaneous speed sources; with
+  `tau_motor > 0` commanded wheel speed is filtered by the first-order actuator
+  lag state.
 - **Friction enters only through turning.** Contact friction shapes the
   turn geometry via $(\alpha, x_\text{ICR})$; there is no explicit longitudinal
   slip or traction-limit model.
@@ -258,3 +296,9 @@ distinguishes a drivable pose from a physically stuck one.
 - **Rigid terrain and rigid wheels.** Ground and wheels do not deform; wheel-terrain
   interaction is captured purely geometrically through the spherical-cap
   envelope.
+- **Simplified centre of mass height.** The default mass model uses the measured
+  longitudinal centre of mass but keeps `CoM_z = 0`, so slope load transfer does
+  not include a raised body mass unless the robot parameters are changed.
+- **Two solver fidelities.** `planning_solver()` uses fewer Newton iterations
+  and a looser tolerance for thousands of MPPI rollouts; `execution_solver()`
+  uses the deeper settle for the single driven robot.
