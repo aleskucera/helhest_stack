@@ -497,6 +497,7 @@ class ElevationNode(Node):
         d("plan_max_slew", 50.0)  # hard cap on |d(cmd)/dt| per wheel [rad/s^2]
         # amplify the commanded turn differential to compensate the drivetrain (motors realize only
         # ~half the commanded wheel-speed difference outdoors). 1.0 = off; ~2.0 recovers the loss.
+        # HOTFIX for a motor-control defect -- see docs/turn_differential_hotfix.md.
         d("plan_turn_boost", 1.0)
         d("plan_dock_radius", 1.5)  # hand off MPPI routing -> terminal dock within this range (m)
         d("plan_reach_radius", 0.3)  # goal reached -> command a (ramped) stop within this range (m)

@@ -47,7 +47,9 @@ def condition_command(
     # 1:1 but only ~half the TURN differential (the two motors equalize under load; measured over
     # outdoor bags). turn_boost amplifies the commanded differential to compensate so the wheels
     # actually deliver the yaw MPPI intended -- forward speed (mean) is untouched. 1.0 = no boost;
-    # ~2.0 recovers the measured ~0.5 realization. Tune in the field. See the turn-tracking analysis.
+    # ~2.0 recovers the measured ~0.5 realization. Tune in the field.
+    # *** HOTFIX / stopgap for a drivetrain defect -- NOT a real fix. Read docs/turn_differential_hotfix.md
+    #     before changing/removing this: what it papers over, and what to actually fix. ***
     mean = 0.5 * (wl + wr)  # forward speed; also the rear follower target (rear = mean of L/R)
     diff = (wr - wl) * float(turn_boost)  # turn differential, amplified
     # /cmd_joints input convention: forward = all positive, no sign flip -- the LLC applies its own
