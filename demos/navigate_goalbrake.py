@@ -37,7 +37,8 @@ DT = dynamics.DT
 
 
 def simulate(world, *, T, brake_dist, consistency, wmax, effort, max_frames, device, fan_n=60,
-             max_slew=50.0, raw=False, reach_radius=0.3, straight_frac=0.0, n_refine=3, sigma=0.5):
+             max_slew=50.0, raw=False, reach_radius=0.3, straight_frac=0.2, n_refine=3, sigma=0.5,
+             turn=0.03, elite_frac=0.01):
     """Run the closed loop; return per-frame snapshots for rendering."""
     builder, start, goal = W.WORLDS[world]
     scene = builder()
@@ -47,8 +48,9 @@ def simulate(world, *, T, brake_dist, consistency, wmax, effort, max_frames, dev
     plan_sim = ForwardSimulator(dynamics.robot_params(), dynamics.planning_solver(), grid, 4096, int(T), device)
     plan_sim.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device))
     plan_sim.set_friction(mu)
-    planner = MppiGpu(plan_sim, CostParams(effort=effort),
-                      sampling=SamplingConfig(wmax=wmax, straight_frac=straight_frac, sigma=sigma), n_theta=24)
+    planner = MppiGpu(plan_sim, CostParams(effort=effort, turn=turn),
+                      sampling=SamplingConfig(wmax=wmax, straight_frac=straight_frac, sigma=sigma,
+                                              elite_frac=elite_frac), n_theta=24)
     planner.reset_nominal(1.5)
     ctg = CostToGo(grid, dynamics.robot_params(), dynamics.planning_solver(), n_theta=24, device=device)
     V = ctg.compute(wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device), goal)
@@ -158,7 +160,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--world", default="pocket", choices=list(W.WORLDS))
     ap.add_argument("--out", default="/tmp/goalbrake.gif")
-    ap.add_argument("--legacy", action="store_true", help="T=70, no brake, no consistency (the old orbit)")
+    ap.add_argument("--legacy", action="store_true",
+                    help="the OLD config: T=70, no brake/consistency/turn-penalty/straight-prior, broad elite")
     ap.add_argument("--horizon", type=int, default=25)
     ap.add_argument("--brake-dist", type=float, default=3.0)
     ap.add_argument("--consistency", type=float, default=0.3)
@@ -172,17 +175,24 @@ def main():
     ap.add_argument("--straight-frac", type=float, default=0.2, help="fraction of straight-prior samples")
     ap.add_argument("--n-refine", type=int, default=3, help="MPPI refine iterations per frame")
     ap.add_argument("--sigma", type=float, default=0.5, help="per-step sampling noise")
+    ap.add_argument("--turn", type=float, default=0.03, help="turn penalty weight (wr-wl)^2; 0 = off")
+    ap.add_argument("--elite-frac", type=float, default=0.01, help="CEM elite fraction; smaller = peakier/straighter")
     ap.add_argument("--device", default="cuda")
     args = ap.parse_args()
     wp.init()
-    T, brake, cons = (70, 0.0, 0.0) if args.legacy else (args.horizon, args.brake_dist, args.consistency)
+    # --legacy = the old config (before the straightness/endgame work) for an A/B; else the shipped stack.
+    if args.legacy:
+        T, brake, cons, straight, turn, elite = 70, 0.0, 0.0, 0.0, 0.0, 0.02
+    else:
+        T, brake, cons = args.horizon, args.brake_dist, args.consistency
+        straight, turn, elite = args.straight_frac, args.turn, args.elite_frac
     scene, goal, frames = simulate(args.world, T=T, brake_dist=brake, consistency=cons, wmax=args.wmax,
                                    effort=args.effort, max_frames=args.max_frames, device=args.device,
-                                   max_slew=args.max_slew, raw=args.raw, straight_frac=args.straight_frac,
-                                   n_refine=args.n_refine, sigma=args.sigma)
+                                   max_slew=args.max_slew, raw=args.raw, straight_frac=straight,
+                                   n_refine=args.n_refine, sigma=args.sigma, turn=turn, elite_frac=elite)
     closest = min(fr["d"] for fr in frames)
-    print(f"world={args.world} {'LEGACY(T70,no-brake)' if args.legacy else f'FIXED(T{T},brake{brake},cons{cons})'}"
-          f" -> frames={len(frames)} closest={closest:.2f} reached={frames[-1]['reached']}")
+    tag = "LEGACY(old config)" if args.legacy else f"SHIPPED(T{T},brake{brake},cons{cons},turn{turn},elite{elite})"
+    print(f"world={args.world} {tag} -> frames={len(frames)} closest={closest:.2f} reached={frames[-1]['reached']}")
     render_gif(scene, goal, frames, args.out, args.stride, args.fps)
     print("wrote", args.out)
 
