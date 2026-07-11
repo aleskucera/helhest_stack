@@ -109,15 +109,16 @@ Visualization Manager:
         Value: /ouster/points
       Use Fixed Frame: true
       Value: false
-    - Class: rviz_default_plugins/Path
-      Name: planned_path
-      Color: 25; 255; 50
+    # Planned path as a thick LINE_STRIP marker (width = plan_path_width, color set node-side);
+    # the nav_msgs/Path renders as 1px GL lines with no width control, so we show the marker.
+    - Class: rviz_default_plugins/Marker
+      Name: planned_path_marker
       Enabled: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
         Reliability Policy: Reliable
-        Value: /planned_path
+        Value: /planned_path_marker
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Name: mppi_fan
@@ -136,6 +137,18 @@ Visualization Manager:
         Durability Policy: Volatile
         Reliability Policy: Reliable
         Value: /frame_marker
+      Value: true
+    # The planning goal set by the "2D Nav Goal" tool — a persistent arrow at the target.
+    - Class: rviz_default_plugins/Pose
+      Name: goal_pose
+      Color: 255; 170; 0
+      Shape: Arrow
+      Enabled: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        Value: /goal_pose
       Value: true
   Global Options:
     Background Color: 33; 33; 40

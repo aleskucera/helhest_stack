@@ -481,10 +481,10 @@ class ElevationNode(Node):
         # it saturates at plan_wmax. This is the real top-speed knob. Keep <= the motor safe max
         # (plan_max_omega, the output clamp). ~1.4 m/s at 4.0; ~2.1 m/s at 6.0 (r=0.35).
         d("plan_wmax", 4.0)  # max per-wheel omega the planner may command [rad/s]
-        # ACTUATION (drive the robot). plan_actuate is OFF by default -- publishing wheel commands
-        # to a real robot must be an explicit opt-in. All motor-safety conditioning (the left-wheel
-        # sign flip, rear-follower, magnitude clamp, slew limit) is in control/command.py.
-        d("plan_actuate", False)  # publish /cmd_joints wheel commands (SAFETY: OFF by default)
+        # ACTUATION (drive the robot). plan_actuate publishes wheel commands to a real robot; set
+        # it false to run planning as visualization only. All motor-safety conditioning (the
+        # left-wheel sign flip, rear-follower, magnitude clamp, slew limit) is in control/command.py.
+        d("plan_actuate", True)  # publish /cmd_joints wheel commands
         d("cmd_topic", "/cmd_joints")  # JointState wheel-velocity command topic (to the LLC)
         d("plan_max_omega", 4.0)  # hard cap on |wheel velocity| [rad/s] -- set to the motor safe max
         d("plan_max_slew", 50.0)  # hard cap on |d(cmd)/dt| per wheel [rad/s^2]
@@ -1206,7 +1206,7 @@ class ElevationNode(Node):
         m.type = Marker.LINE_STRIP
         m.action = Marker.ADD
         m.scale.x = float(self.plan_path_width)
-        m.color = ColorRGBA(r=0.1, g=1.0, b=0.2, a=1.0)
+        m.color = ColorRGBA(r=1.0, g=0.0, b=1.0, a=1.0)  # magenta: reads over the green height map
         m.pose.orientation.w = 1.0
         m.points = [Point(x=float(x), y=float(y), z=z) for x, y in xy]
         self.pub_path_marker.publish(m)
