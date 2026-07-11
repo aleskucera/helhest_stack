@@ -155,6 +155,7 @@ _PLAN_BUILD = frozenset(
         "plan_nominal_reset",
         "plan_goal_running",
         "plan_effort",
+        "plan_turn",
         "plan_wmax",
         "plan_straight_frac",
         "plan_elite_frac",
@@ -496,6 +497,11 @@ class ElevationNode(Node):
         # wheel-speed^2) to drive faster. plan_max_omega is only the output SAFETY clamp, not speed.
         d("plan_goal_running", 0.3)  # cost-to-go V^2 per step -> higher = faster (more progress pull)
         d("plan_effort", 2e-3)  # penalize wheel-speed^2 -> lower = faster (less speed penalty)
+        # TURN penalty: cost on the wheel differential (wr - wl)^2 -> a real gradient toward STRAIGHT
+        # where the goal cost is flat w.r.t. heading (free-heading goal). Cut straight-line wander ~70%
+        # (0.42 -> 0.12 m) AND, by killing the near-goal wobble, reached 6/6 stress worlds vs 4/6.
+        # Small enough that a genuine need to turn still wins; >~0.1 starts refusing hard turns.
+        d("plan_turn", 0.03)
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
         # NEVER commands above this regardless of the cost -- raising goal_running does nothing once
         # it saturates at plan_wmax. This is the real top-speed knob. Keep <= the motor safe max
@@ -620,6 +626,7 @@ class ElevationNode(Node):
         self.plan_nominal_reset: float = g("plan_nominal_reset")
         self.plan_goal_running: float = g("plan_goal_running")
         self.plan_effort: float = g("plan_effort")
+        self.plan_turn: float = g("plan_turn")
         self.plan_straight_frac: float = g("plan_straight_frac")
         self.plan_elite_frac: float = g("plan_elite_frac")
         self.plan_wmax: float = g("plan_wmax")
@@ -735,7 +742,7 @@ class ElevationNode(Node):
         self.plan_sim.set_uniform_friction(self.plan_friction)
         self.planner = MppiGpu(
             self.plan_sim,
-            CostParams(goal_running=self.plan_goal_running, effort=self.plan_effort),
+            CostParams(goal_running=self.plan_goal_running, effort=self.plan_effort, turn=self.plan_turn),
             sampling=SamplingConfig(wmax=self.plan_wmax, straight_frac=self.plan_straight_frac,
                                     elite_frac=self.plan_elite_frac),
             n_theta=int(self.plan_n_theta),

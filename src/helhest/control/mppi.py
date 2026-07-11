@@ -65,6 +65,9 @@ class CostWeights:
     effort: float
     smoothness: float
     infeasible: float
+    # penalize the turn differential (wr - wl)^2 -> a gradient toward STRAIGHT where the goal cost is
+    # flat w.r.t. heading (the free-heading goal). Distinct from effort (which penalizes total speed).
+    turn: float
 
 
 @dataclass(frozen=True)
@@ -84,6 +87,9 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     smoothness: float = 2e-3  # penalize wheel-speed CHANGES (jerk)
     # penalize clearance/residual/tip-over violations (does obstacle avoidance)
     infeasible: float = 1e5
+    # penalize turning (wr - wl)^2 -> prefer straight when the goal cost doesn't care about heading;
+    # small enough that a real need to turn (obstacle/offset goal) still wins. 0 = off.
+    turn: float = 0.0
 
     def build(self) -> CostWeights:
         cw = CostWeights()
@@ -95,6 +101,7 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.effort = self.effort
         cw.smoothness = self.smoothness
         cw.infeasible = self.infeasible
+        cw.turn = self.turn
         return cw
 
 
@@ -280,6 +287,7 @@ def _cost_kernel(
         terminal_cost = goal_cost  # last iter (t = horizon) sticks -> terminal goal cost
     effort_sum = float(0.0)
     smooth_sum = float(0.0)
+    turn_sum = float(0.0)
     penalty_sum = float(0.0)
     prev_l = float(0.0)
     prev_r = float(0.0)
@@ -287,6 +295,8 @@ def _cost_kernel(
         wheels = target_wheel_omega[t, r]  # (wL, wR)
         sp2 = wheels[0] * wheels[0] + wheels[1] * wheels[1]
         effort_sum += sp2
+        diff = wheels[1] - wheels[0]  # turn differential -> penalize (prefer straight)
+        turn_sum += diff * diff
         if t > 0:
             dl = wheels[0] - prev_l
             dr = wheels[1] - prev_r
@@ -317,6 +327,7 @@ def _cost_kernel(
         + cw.out_of_bounds * oob_sum
         + cw.effort * effort_sum
         + cw.smoothness * smooth_sum
+        + cw.turn * turn_sum
         + penalty_sum * cw.infeasible
     )
 
