@@ -215,6 +215,7 @@ class ElevationNode(Node):
         self.goal_xy: tuple[float, float] | None = None  # planning goal in map frame
         self._prev_cmd = np.zeros(3, np.float32)  # last published /cmd_joints [L, rear, R] (slew ref)
         self._d_hist: deque[float] = deque(maxlen=15)  # recent robot->goal distances (progress check)
+        self._goal_reached = False  # latched at the goal -> idle (no planning) until the goal changes
         self.planner: MppiGpu | None = None
         self.plan_sim: ForwardSimulator | None = None
         self.ctg: CostToGo | None = None
@@ -734,6 +735,7 @@ class ElevationNode(Node):
             )
         self.goal_xy = (msg.pose.position.x, msg.pose.position.y)
         self._d_hist.clear()  # fresh progress history for the new goal
+        self._goal_reached = False  # new goal -> resume planning
         self.get_logger().info(f"goal set: ({self.goal_xy[0]:.2f}, {self.goal_xy[1]:.2f})")
 
     def _on_parameters_changed(self, params) -> SetParametersResult:
@@ -1159,6 +1161,25 @@ class ElevationNode(Node):
         state_l = np.array([mf.ex - mf.lxmin, mf.ey - mf.lymin, eyaw], np.float32)
         goal_l = (gx - mf.lxmin, gy - mf.lymin)
         goal_r = (gx - mf.rxmin, gy - mf.rymin)
+
+        # --- goal reached: announce once, then IDLE (skip cost-to-go + MPPI) until the goal changes.
+        # Keep publishing a (ramped) stop each frame so the LLC stays fed at rest. Resumes on a new goal.
+        d_goal = float(np.hypot(gx - mf.ex, gy - mf.ey))
+        if not self._goal_reached and d_goal < self.plan_reach_radius:
+            self._goal_reached = True
+            self.get_logger().info(
+                f"REACHED goal (d={d_goal:.2f} m) -- stopping; idle until a new goal is set."
+            )
+        if self._goal_reached:
+            if self.plan_actuate:
+                cmd = condition_command(
+                    0.0, 0.0, self._prev_cmd, max_omega=self.plan_max_omega,
+                    max_slew=self.plan_max_slew, dt=dynamics.DT, turn_boost=self.plan_turn_boost,
+                )
+                self._prev_cmd = cmd
+                self._publish_cmd(cmd)
+                self.pub_holding.publish(Bool(data=False))
+            return
         with wp.ScopedDevice(self.device):
             self.plan_sim.set_terrain(
                 wp.array(np.ascontiguousarray(mf.elev_local), dtype=wp.float32, device=self.device)
