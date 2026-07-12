@@ -50,6 +50,7 @@ from sensor_msgs.msg import PointField
 from sensor_msgs_py.point_cloud2 import read_points_numpy
 from std_msgs.msg import Bool
 from std_msgs.msg import ColorRGBA
+from std_msgs.msg import Float32
 from visualization_msgs.msg import Marker
 from helhest.perception import DeviceMapAccumulator
 from helhest.perception import DynamicFilterConfig
@@ -287,6 +288,7 @@ class ElevationNode(Node):
         self.pub_frame = self.create_publisher(Marker, "frame_marker", 1)
         self.pub_cmd = self.create_publisher(JointState, self.get_parameter("cmd_topic").value, 10)
         self.pub_holding = self.create_publisher(Bool, "plan_holding", 10)  # True = walled-off hold
+        self.pub_turn_boost = self.create_publisher(Float32, "turn_boost", 10)  # turn_boost in effect (debug)
         self.add_on_set_parameters_callback(self._on_parameters_changed)
 
         self.get_logger().info(
@@ -1339,6 +1341,7 @@ class ElevationNode(Node):
         self._publish_cmd(cmd)
         self.pub_holding.publish(Bool(data=holding))  # True = walled-off hold, False = driving
         self._holding = holding  # colors the planned-path marker red next frame (see _publish_path)
+        self.pub_turn_boost.publish(Float32(data=float(turn_boost)))  # turn_boost in effect (debug/monitor)
         # ADAPTIVE turn_boost (optional): pair the PREVIOUS command's differential with the yaw it
         # produced (this frame's gyro) and slow-update the boost -- only while genuinely turning.
         if self._turn_adapt is not None and self._imu_buffer:
