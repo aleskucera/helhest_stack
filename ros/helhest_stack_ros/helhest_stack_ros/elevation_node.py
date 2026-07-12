@@ -72,6 +72,7 @@ from helhest.control.mppi import CostParams
 from helhest.control.mppi import MppiGpu
 from helhest.control.mppi import SamplingConfig
 from helhest.control.terminal import dock_control
+from helhest.control.turn_adapt import AdaptiveTurnBoost
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 from helhest.planning.costtogo import CostToGo
@@ -159,6 +160,8 @@ _PLAN_BUILD = frozenset(
         "plan_wmax",
         "plan_straight_frac",
         "plan_elite_frac",
+        "plan_turn_boost_adapt",
+        "plan_turn_boost_tau",
         "device",
     }
 )
@@ -219,6 +222,8 @@ class ElevationNode(Node):
         self._prev_cmd = np.zeros(3, np.float32)  # last published /cmd_joints [L, rear, R] (slew ref)
         self._d_hist: deque[float] = deque(maxlen=15)  # recent robot->goal distances (progress check)
         self._prev_plan_U: np.ndarray | None = None  # last frame's nominal plan (for plan-consistency EMA)
+        self._turn_adapt: AdaptiveTurnBoost | None = None  # optional online turn_boost (gyro feedback)
+        self._last_diff_out: float | None = None  # last commanded (wR-wL), paired with the yaw it caused
         self._goal_reached = False  # latched at the goal -> idle (no planning) until the goal changes
         self._holding = False  # walled-off hold active -> planned-path marker drawn red
         self.planner: MppiGpu | None = None
@@ -531,6 +536,13 @@ class ElevationNode(Node):
         # ~half the commanded wheel-speed difference outdoors). 1.0 = off; ~2.0 recovers the loss.
         # HOTFIX for a motor-control defect -- see docs/turn_differential_hotfix.md.
         d("plan_turn_boost", 1.0)
+        # OPTIONAL: self-tune plan_turn_boost online from gyro feedback (control/turn_adapt.py) so the
+        # realized yaw matches the plan across terrains + the drivetrain defect -- makes the fixed
+        # plan_turn_boost adaptive. False = off (use the fixed value above). When on, plan_turn_boost
+        # is the initial guess; plan_turn_boost_tau is the EMA time constant [s] (slow, so it can't
+        # fight replanning). Only adapts while turning; clamps to [1, 3].
+        d("plan_turn_boost_adapt", False)
+        d("plan_turn_boost_tau", 3.0)
         d("plan_dock_radius", 1.5)  # within this range of the goal: dock (if enabled) or just stop
         d("plan_dock_enable", True)  # True = terminal dock; False = just STOP when within dock_radius
         d("plan_reach_radius", 0.3)  # goal reached -> command a (ramped) stop within this range (m)
@@ -635,6 +647,8 @@ class ElevationNode(Node):
         self.plan_max_omega: float = g("plan_max_omega")
         self.plan_max_slew: float = g("plan_max_slew")
         self.plan_turn_boost: float = g("plan_turn_boost")
+        self.plan_turn_boost_adapt: bool = g("plan_turn_boost_adapt")
+        self.plan_turn_boost_tau: float = g("plan_turn_boost_tau")
         self.plan_dock_radius: float = g("plan_dock_radius")
         self.plan_dock_enable: bool = g("plan_dock_enable")
         self.plan_reach_radius: float = g("plan_reach_radius")
@@ -749,6 +763,23 @@ class ElevationNode(Node):
             n_theta=int(self.plan_n_theta),
         )
         self.planner.reset_nominal(self.plan_nominal_reset)
+        # optional online turn_boost from gyro feedback: alpha = 1 + k_turn*mu matches the plan model.
+        if self.plan_turn_boost_adapt:
+            rp = dynamics.robot_params()
+            self._turn_adapt = AdaptiveTurnBoost(
+                alpha_model=1.0 + kt * self.plan_friction,
+                wheel_radius=rp.wheel_radius,
+                half_track=rp.half_track,
+                dt=dynamics.DT,
+                tau_s=self.plan_turn_boost_tau,
+                init=self.plan_turn_boost,
+            )
+            self.get_logger().info(
+                f"adaptive turn_boost ON (alpha_model={1.0 + kt * self.plan_friction:.2f}, "
+                f"tau={self.plan_turn_boost_tau}s, init={self.plan_turn_boost})"
+            )
+        else:
+            self._turn_adapt = None
         self.ctg = CostToGo(
             GridParams(rcnx, rcny, rccell, 0.0, 0.0),
             dynamics.robot_params(),
@@ -1297,16 +1328,23 @@ class ElevationNode(Node):
                     f"-> holding [d={d:.1f}]", throttle_duration_sec=2.0
                 )
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
+        turn_boost = self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
         cmd = condition_command(
             wl, wr, self._prev_cmd,
             max_omega=self.plan_max_omega, max_slew=self.plan_max_slew, dt=dynamics.DT,
-            turn_boost=self.plan_turn_boost,
+            turn_boost=turn_boost,
             goal_dist=d, brake_dist=self.plan_goal_brake_dist,
         )
         self._prev_cmd = cmd
         self._publish_cmd(cmd)
         self.pub_holding.publish(Bool(data=holding))  # True = walled-off hold, False = driving
         self._holding = holding  # colors the planned-path marker red next frame (see _publish_path)
+        # ADAPTIVE turn_boost (optional): pair the PREVIOUS command's differential with the yaw it
+        # produced (this frame's gyro) and slow-update the boost -- only while genuinely turning.
+        if self._turn_adapt is not None and self._imu_buffer:
+            if self._last_diff_out is not None:
+                self._turn_adapt.update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
+            self._last_diff_out = float(cmd[2] - cmd[0])  # condition_command [L, rear, R] -> (wR - wL)
 
     def _publish_cmd(self, cmd: np.ndarray) -> None:
         """Publish the conditioned [left, rear, right] wheel velocities to /cmd_joints.
