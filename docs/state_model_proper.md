@@ -43,7 +43,9 @@ The turning parameters $\alpha$ and $x_\text{ICR}$ are grip- and terrain-depende
 
 ---
 
-## 3. Analytical system linearisation on flat ground
+## 3. System linearisation 
+
+### Flat ground - analytical model
 
 Assume $\theta = \phi = 0$ and uniform $\mu$. Under these conditions $\alpha$ and $x_\text{ICR}$ are constants (quasi-static normal loads reduce to the CoM weight distribution, independent of state), so $v_x^B$, $v_y^B$, and $q_6$ depend only on $\mathbf{u}$, not on $\mathbf{q}$. The only state that appears in any component of $f$ is $q_3 = \psi$, entering $f_4$ and $f_5$ through $R_z(\psi)$.
 
@@ -58,3 +60,8 @@ $$\frac{\partial f_4}{\partial q_3} = -v_x^B \sin q_3 - v_y^B \cos q_3 = -q_5, \
 Both equal the current world-frame velocity components, so $F$ requires no trigonometric evaluation at runtime — only the current state. The linearised dynamics are:
 
 $$\delta\dot{\mathbf{q}} \approx F\,\delta\mathbf{q}$$
+
+### Nonflat ground - numerical linearization
+On terrain, $F_t$ is computed numerically via central differences — three additional one-step `ForwardSimulator` rollouts, one per state dimension with perturbation $\delta$:
+
+$$F_t[:,\, j] \approx \frac{f(\mathbf{x}_t + \delta\,\mathbf{e}_j,\, \boldsymbol{\omega}_t) - f(\mathbf{x}_t - \delta\,\mathbf{e}_j,\, \boldsymbol{\omega}_t)}{2\delta}$$
