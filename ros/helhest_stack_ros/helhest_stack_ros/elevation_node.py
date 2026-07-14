@@ -487,6 +487,12 @@ class ElevationNode(Node):
         # Runtime-switchable: `ros2 param set /elevation_node goal_source follow` (no rebuild).
         d("goal_source", "click")
         d("follow_topic", "/radio/estimate_pose")  # PoseStamped to chase in "follow" mode
+        # FOLLOW STANDOFF: in "follow" mode, aim this far SHORT of the tag (m), back along the
+        # robot->tag line. The tag rides on a person = a LiDAR obstacle, so a goal placed ON them is
+        # untraversable -- the router can't seed there so the robot "walls off" and holds. Aiming at
+        # free space in front fixes that AND is a sane follow gap. 0 = target the tag exactly (walls
+        # off on a person). Runtime-tunable via `ros2 param set`.
+        d("follow_standoff", 1.5)
         d("plan_batch", 4096)  # MPPI rollouts B
         # rollout steps T (planning_solver dt = 0.1 s). SHORT is better here: the cost-to-go lattice
         # does the global routing, so a short MPPI just follows it decisively -- sim-validated to reach
@@ -642,6 +648,7 @@ class ElevationNode(Node):
         self.publish_accumulated: bool = g("publish_accumulated")
         self.plan_enable: bool = g("plan_enable")
         self.goal_source: str = g("goal_source")  # "click" | "follow" -- live-switchable
+        self.follow_standoff: float = g("follow_standoff")  # stop this far short of the tag (m)
         self.plan_batch: int = g("plan_batch")
         self.plan_horizon: int = g("plan_horizon")
         self.plan_consistency: float = g("plan_consistency")
@@ -851,7 +858,27 @@ class ElevationNode(Node):
             )
             return
         p = do_transform_pose(msg.pose, tf)
-        self.goal_xy = (p.position.x, p.position.y)
+        px, py = p.position.x, p.position.y
+        # Stand off short of the tag: it rides on a person (a LiDAR obstacle), so a goal placed ON
+        # them is untraversable and the router walls off. Aim follow_standoff m in front, back along
+        # the robot->tag line, into free space. Needs the robot's map pose; if that TF is missing,
+        # fall back to the raw tag point (keeps following, may wall off).
+        if self.follow_standoff > 0.0:
+            try:
+                rb = self.tf_buffer.lookup_transform(
+                    self.map_frame, self.base_frame, rclpy.time.Time()
+                )
+                rx, ry = rb.transform.translation.x, rb.transform.translation.y
+                dx, dy = px - rx, py - ry
+                dist = float(np.hypot(dx, dy))
+                if dist > self.follow_standoff:
+                    s = (dist - self.follow_standoff) / dist  # fraction of the way to the tag
+                    px, py = rx + s * dx, ry + s * dy
+                else:
+                    px, py = rx, ry  # already within standoff -> hold position
+            except TransformException:
+                pass  # no robot pose -> target the tag directly
+        self.goal_xy = (px, py)
 
     def _on_parameters_changed(self, params) -> SetParametersResult:
         names = {p.name for p in params}
