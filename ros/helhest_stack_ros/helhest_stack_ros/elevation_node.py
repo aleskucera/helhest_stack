@@ -84,6 +84,7 @@ from helhest.localization.pose_math import deskew_scan
 from helhest.localization.pose_math import invert_pose
 from helhest.localization.pose_math import matrix_to_quaternion
 from helhest.localization.pose_math import transform_points_xyz
+from tf2_geometry_msgs import do_transform_pose
 from tf2_ros import TransformBroadcaster
 from tf2_ros import TransformException
 
@@ -264,6 +265,9 @@ class ElevationNode(Node):
         # the latter.
         self.create_subscription(Imu, self.imu_topic, self._imu_callback, qos_profile_sensor_data)
         self.create_subscription(PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10)
+        self.create_subscription(
+            PoseStamped, self.get_parameter("follow_topic").value, self._follow_callback, 10
+        )
         # LiDAR is best-effort (SensorDataQoS); a reliable sub gets nothing from it.
         self.cloud_sub = Subscriber(
             self, PointCloud2, self.lidar_topic, qos_profile=qos_profile_sensor_data
@@ -475,7 +479,14 @@ class ElevationNode(Node):
         # cost-to-go routing field. Goal comes from RViz "2D Nav Goal" on goal_topic. Publishes
         # the intended path (nav_msgs/Path + a thick LINE_STRIP marker).
         d("plan_enable", True)
-        d("goal_topic", "/goal_pose")
+        d("goal_topic", "/goal_pose")  # RViz "2D Nav Goal" (a one-shot click, latches on reach)
+        # GOAL SOURCE: which stream drives the planner. "click" -> goal_topic (RViz); "follow" ->
+        # follow_topic, a live pose (e.g. the radio locator) continuously chased -- every update
+        # re-targets and the reach latch never sticks, so a MOVING tag is tracked. The follow pose
+        # is transformed into map_frame via TF, so it may arrive in any frame (e.g. 'locator').
+        # Runtime-switchable: `ros2 param set /elevation_node goal_source follow` (no rebuild).
+        d("goal_source", "click")
+        d("follow_topic", "/radio/estimate_pose")  # PoseStamped to chase in "follow" mode
         d("plan_batch", 4096)  # MPPI rollouts B
         # rollout steps T (planning_solver dt = 0.1 s). SHORT is better here: the cost-to-go lattice
         # does the global routing, so a short MPPI just follows it decisively -- sim-validated to reach
@@ -630,6 +641,7 @@ class ElevationNode(Node):
         self.publish_odom_tf: bool = g("publish_odom_tf")
         self.publish_accumulated: bool = g("publish_accumulated")
         self.plan_enable: bool = g("plan_enable")
+        self.goal_source: str = g("goal_source")  # "click" | "follow" -- live-switchable
         self.plan_batch: int = g("plan_batch")
         self.plan_horizon: int = g("plan_horizon")
         self.plan_consistency: float = g("plan_consistency")
@@ -806,6 +818,8 @@ class ElevationNode(Node):
     def _goal_callback(self, msg: PoseStamped) -> None:
         """RViz 2D Nav Goal. Assumes the pose is already in map_frame (RViz publishes in its
         fixed frame — set it to the map frame); warns otherwise and uses it as-is."""
+        if self.goal_source != "click":
+            return  # follow mode owns the goal; set goal_source:=click to drive from RViz
         if msg.header.frame_id and msg.header.frame_id != self.map_frame:
             self.get_logger().warn(
                 f"goal frame '{msg.header.frame_id}' != map_frame '{self.map_frame}'; "
@@ -816,6 +830,28 @@ class ElevationNode(Node):
         self._prev_plan_U = None  # new goal -> don't smooth against the old goal's plan
         self._goal_reached = False  # new goal -> resume planning
         self.get_logger().info(f"goal set: ({self.goal_xy[0]:.2f}, {self.goal_xy[1]:.2f})")
+
+    def _follow_callback(self, msg: PoseStamped) -> None:
+        """Follow-me target (e.g. the radio locator on /radio/estimate_pose). Active only while
+        goal_source == 'follow': the pose is transformed into map_frame via TF and becomes the live
+        goal on every update, so a MOVING tag is continuously chased. Warm-start (_prev_plan_U) and
+        progress history (_d_hist) are deliberately NOT reset here -- the target drifts smoothly, so
+        the last plan is still a good seed. The reach latch is handled per-frame in the plan loop
+        (stop within plan_reach_radius, resume when the tag moves away). Ignored in 'click' mode."""
+        if self.goal_source != "follow":
+            return
+        try:
+            tf = self.tf_buffer.lookup_transform(
+                self.map_frame, msg.header.frame_id, rclpy.time.Time()
+            )
+        except TransformException as exc:
+            self.get_logger().warn(
+                f"follow: no TF {msg.header.frame_id!r} -> {self.map_frame!r} ({exc})",
+                throttle_duration_sec=2.0,
+            )
+            return
+        p = do_transform_pose(msg.pose, tf)
+        self.goal_xy = (p.position.x, p.position.y)
 
     def _on_parameters_changed(self, params) -> SetParametersResult:
         names = {p.name for p in params}
@@ -1243,8 +1279,17 @@ class ElevationNode(Node):
 
         # --- goal reached: announce once, then IDLE (skip cost-to-go + MPPI) until the goal changes.
         # Keep publishing a (ramped) stop each frame so the LLC stays fed at rest. Resumes on a new goal.
+        # In "follow" mode the latch is NOT sticky: _goal_reached tracks "within radius" per-frame,
+        # so the robot stops on top of a stationary tag but resumes the instant the tag moves away.
         d_goal = float(np.hypot(gx - mf.ex, gy - mf.ey))
-        if not self._goal_reached and d_goal < self.plan_reach_radius:
+        within = d_goal < self.plan_reach_radius
+        if self.goal_source == "follow":
+            if within and not self._goal_reached:
+                self.get_logger().info(
+                    f"follow: within {self.plan_reach_radius:.2f} m -- holding at tag"
+                )
+            self._goal_reached = within  # per-frame, not latched -> chases again when the tag moves
+        elif not self._goal_reached and within:
             self._goal_reached = True
             self.get_logger().info(
                 f"REACHED goal (d={d_goal:.2f} m) -- stopping; idle until a new goal is set."
