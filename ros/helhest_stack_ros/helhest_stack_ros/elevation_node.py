@@ -493,7 +493,7 @@ class ElevationNode(Node):
         d("plan_friction", 0.8)  # uniform rollout friction
         # 'indoor' (K_TURN 0.4, alpha~1.33) or 'outdoor' (K_TURN 1.0, alpha~1.82 -- grass/dirt grips
         # harder so it understeers). ICP-calibrated per environment; see dynamics.k_turn_for.
-        d("terrain", "indoor")
+        d("terrain", "outdoor")
         d("k_turn", -1.0)  # explicit turn-gain override (e.g. from calibrate_turn.sh); <0 = use terrain
         d("plan_robust_margin_m", 0.3)  # cost-to-go safety tube: lateral (m) ~ robot half-width;
         # keeps the routed center a footprint-width off berms (validated in the Tier-C closed loop:
@@ -503,8 +503,8 @@ class ElevationNode(Node):
         # MPPI speed knobs (rebuild the planner on change): the robot drives slow because the cost
         # balance prefers it. Raise goal_running (reward progress) and/or lower effort (penalty on
         # wheel-speed^2) to drive faster. plan_max_omega is only the output SAFETY clamp, not speed.
-        d("plan_goal_running", 0.3)  # cost-to-go V^2 per step -> higher = faster (more progress pull)
-        d("plan_effort", 2e-3)  # penalize wheel-speed^2 -> lower = faster (less speed penalty)
+        d("plan_goal_running", 0.5)  # cost-to-go V^2 per step -> higher = faster (more progress pull)
+        d("plan_effort", 1e-3)  # penalize wheel-speed^2 -> lower = faster (less speed penalty)
         # TURN penalty: cost on the wheel differential (wr - wl)^2 -> a real gradient toward STRAIGHT
         # where the goal cost is flat w.r.t. heading (free-heading goal). Cut straight-line wander ~70%
         # (0.42 -> 0.12 m) AND, by killing the near-goal wobble, reached 6/6 stress worlds vs 4/6.
@@ -513,8 +513,8 @@ class ElevationNode(Node):
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
         # NEVER commands above this regardless of the cost -- raising goal_running does nothing once
         # it saturates at plan_wmax. This is the real top-speed knob. Keep <= the motor safe max
-        # (plan_max_omega, the output clamp). ~1.4 m/s at 4.0; ~2.8 m/s at 8.0 (r=0.35).
-        d("plan_wmax", 8.0)  # max per-wheel omega the planner may command [rad/s]
+        # (plan_max_omega, the output clamp). ~1.4 m/s at 4.0; ~2.8 m/s at 8.0; ~4.9 m/s at 14.0 (r=0.35).
+        d("plan_wmax", 14.0)  # max per-wheel omega the planner may command [rad/s]
         # STRAIGHT sampling prior: fraction of MPPI candidates drawn as zero-differential (straight
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
@@ -532,12 +532,12 @@ class ElevationNode(Node):
         # left-wheel sign flip, rear-follower, magnitude clamp, slew limit) is in control/command.py.
         d("plan_actuate", True)  # publish /cmd_joints wheel commands
         d("cmd_topic", "/cmd_joints")  # JointState wheel-velocity command topic (to the LLC)
-        d("plan_max_omega", 8.0)  # hard cap on |wheel velocity| [rad/s] -- set to the motor safe max
+        d("plan_max_omega", 14.0)  # hard cap on |wheel velocity| [rad/s] -- set to the motor safe max
         d("plan_max_slew", 50.0)  # hard cap on |d(cmd)/dt| per wheel [rad/s^2]
         # amplify the commanded turn differential to compensate the drivetrain (motors realize only
         # ~half the commanded wheel-speed difference outdoors). 1.0 = off; ~2.0 recovers the loss.
         # HOTFIX for a motor-control defect -- see docs/turn_differential_hotfix.md.
-        d("plan_turn_boost", 1.0)
+        d("plan_turn_boost", 2.0)
         # OPTIONAL: self-tune plan_turn_boost online from gyro feedback (control/turn_adapt.py) so the
         # realized yaw matches the plan across terrains + the drivetrain defect -- makes the fixed
         # plan_turn_boost adaptive. False = off (use the fixed value above). When on, plan_turn_boost
@@ -552,7 +552,7 @@ class ElevationNode(Node):
         # robot noses in slow and settles AT the goal instead of overshooting/orbiting past it. Cruise
         # speed is untouched beyond brake_dist. 0 = off. Replaces the hard dock/stop radius; validated
         # in sim (~0.2 m settle, zero overshoot) -- see the goal-brake note in control/command.py.
-        d("plan_goal_brake_dist", 3.0)  # start braking within this range of the goal (m); 0 = off
+        d("plan_goal_brake_dist", 2.0)  # start braking within this range of the goal (m); 0 = off
         # UNREACHABLE-GOAL STOP: when the cost-to-go at the robot is saturated (no route to the goal)
         # AND the committed plan reduces distance-to-goal by less than this, the robot is walled off
         # -> stop instead of the explore-fallback nosing into the obstacle. Keep it below a horizon's
