@@ -394,7 +394,8 @@ class ElevationNode(Node):
         # of the map (72% of structure past 8 m) — a distant real point lands in an empty el-bin
         # (128 bins / 180° = 1.4°/bin vs the ~0.35° beam pitch) and reads as a gap — plus the
         # wheel-occlusion shadows off to the sides. Near+front confines it to the path specks.
-        d("carve_gap_frames", 8)
+        # 4 (was 8): age out the trail's between-beam specks faster, matching the aggressive persist=5.
+        d("carve_gap_frames", 4)
         d("carve_gap_max_range_m", 10.0)  # only gap-carve within this range (0 = no range gate); 10 (was
         #                                   2.5) ages out the person's between-beam specks further out
         # Only gap-carve within this half-cone (deg) of the robot heading; excludes the wheel
