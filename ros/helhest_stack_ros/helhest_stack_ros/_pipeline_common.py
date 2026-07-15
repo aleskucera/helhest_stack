@@ -468,7 +468,7 @@ def grid_to_cloud(
     """
     if terrain_map.elevation is None:
         if logger is not None:
-            logger.warn("TerrainMap.elevation is None — skipping publish.")
+            logger.warning("TerrainMap.elevation is None — skipping publish.")
         return None
 
     rows, cols = terrain_map.elevation.shape  # (ny, nx)

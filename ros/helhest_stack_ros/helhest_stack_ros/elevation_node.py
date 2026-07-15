@@ -837,7 +837,7 @@ class ElevationNode(Node):
         if self.goal_source != "click":
             return  # follow mode owns the goal; set goal_source:=click to drive from RViz
         if msg.header.frame_id and msg.header.frame_id != self.map_frame:
-            self.get_logger().warn(
+            self.get_logger().warning(
                 f"goal frame '{msg.header.frame_id}' != map_frame '{self.map_frame}'; "
                 "set the RViz Fixed Frame to the map frame."
             )
@@ -861,7 +861,7 @@ class ElevationNode(Node):
                 self.map_frame, msg.header.frame_id, rclpy.time.Time()
             )
         except TransformException as exc:
-            self.get_logger().warn(
+            self.get_logger().warning(
                 f"follow: no TF {msg.header.frame_id!r} -> {self.map_frame!r} ({exc})",
                 throttle_duration_sec=2.0,
             )
@@ -961,14 +961,14 @@ class ElevationNode(Node):
         odom_T_base = self._odom_to_matrix(odom_msg)
         scan = self._scan_in_base(cloud_msg)
         if scan is None or scan[0].shape[0] == 0:
-            self.get_logger().warn("Empty / untransformable scan — skipping.")
+            self.get_logger().warning("Empty / untransformable scan — skipping.")
             return
         scan_base, point_times, base_T_sensor = scan
         scan_base, point_times = self._z_crop(scan_base, point_times)
         scan_base, point_times = self._self_filter(scan_base, point_times)
         scan_base, point_times = self._range_crop(scan_base, point_times)
         if scan_base.shape[0] == 0:
-            self.get_logger().warn("crop/self-filter removed all points — check bounds.")
+            self.get_logger().warning("crop/self-filter removed all points — check bounds.")
             return
         gravity_up = self._gravity_up_base(cloud_msg.header.stamp)
         imu_R_base = self._gyro_orientation_base(cloud_msg.header.stamp)
@@ -1016,7 +1016,7 @@ class ElevationNode(Node):
                 self.map_ages = None
                 self.map_streak = None
                 self._consecutive_rejects = 0
-                self.get_logger().warn(
+                self.get_logger().warning(
                     f"{self.reset_after_rejects} consecutive ICP rejects -> resetting global map."
                 )
 
@@ -1412,7 +1412,7 @@ class ElevationNode(Node):
             if saturated and stuck:
                 wl, wr = 0.0, 0.0  # walled off + no real progress -> hold
                 holding = True
-                self.get_logger().warn(
+                self.get_logger().warning(
                     f"goal unreachable (walled off, no progress in {self._d_hist.maxlen} frames) "
                     f"-> holding [d={d:.1f}]", throttle_duration_sec=2.0
                 )
@@ -1518,7 +1518,9 @@ class ElevationNode(Node):
             n = float(np.linalg.norm(a))
             if n < 1e-6:  # no accel either -> give up gracefully
                 if not self._imu_warned:
-                    self.get_logger().warn("IMU has no orientation and no accel — gravity off.")
+                    self.get_logger().warning(
+                        "IMU has no orientation and no accel — gravity off."
+                    )
                     self._imu_warned = True
                 return None
             up_imu = a / n  # accelerometer measures -g -> points up when static
@@ -1530,7 +1532,7 @@ class ElevationNode(Node):
                     self.base_frame, imu.header.frame_id, rclpy.time.Time()
                 )
             except TransformException as exc:
-                self.get_logger().warn(f"IMU->base TF failed: {exc}")
+                self.get_logger().warning(f"IMU->base TF failed: {exc}")
                 return None
         r = tf.transform.rotation
         base_R_imu = quaternion_to_matrix(r.x, r.y, r.z, r.w)[:3, :3]
@@ -1643,7 +1645,7 @@ class ElevationNode(Node):
                 timeout=rclpy.duration.Duration(seconds=0.1),
             )
         except TransformException as exc:
-            self.get_logger().warn(f"sensor->base TF lookup failed: {exc}")
+            self.get_logger().warning(f"sensor->base TF lookup failed: {exc}")
             return None
         t = transform.transform.translation
         r = transform.transform.rotation
@@ -1782,7 +1784,7 @@ class ElevationNode(Node):
     ) -> np.ndarray:
         if point_times is None:
             if not self._deskew_warned:
-                self.get_logger().warn(
+                self.get_logger().warning(
                     f"deskew on but cloud has no '{self.deskew_time_field}' field — skipping."
                 )
                 self._deskew_warned = True
@@ -1808,7 +1810,7 @@ class ElevationNode(Node):
                 f"submap too sparse ({outcome.submap_points} pts) — using odom prediction."
             )
         elif outcome.status == "rejected":
-            self.get_logger().warn(
+            self.get_logger().warning(
                 f"ICP rejected (inliers={outcome.num_inliers} "
                 f"Δrot={np.rad2deg(outcome.correction_rot_rad):.1f}° "
                 f"Δtrans={outcome.correction_trans_m:.2f}m "
