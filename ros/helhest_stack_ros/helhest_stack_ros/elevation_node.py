@@ -26,6 +26,7 @@ world frame is bootstrapped to odom at the first scan.
 from __future__ import annotations
 
 import time
+import traceback
 from collections import deque
 from dataclasses import dataclass
 
@@ -930,7 +931,10 @@ class ElevationNode(Node):
         try:
             self._process(cloud_msg, odom_msg)
         except Exception as exc:
-            self.get_logger().error(f"elevation error: {exc}")
+            # Log the traceback, not just the message: this handler swallows EVERY per-frame
+            # failure, and a bare message gives no line to look at -- the whole pipeline can be
+            # dying each frame with nothing to point at.
+            self.get_logger().error(f"elevation error: {exc}\n{traceback.format_exc()}")
 
     def _ck(self, label: str) -> None:
         """Profiling checkpoint: sync the GPU (Warp is async) and accrue time since the last _ck."""
