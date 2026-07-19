@@ -1,0 +1,37 @@
+# tmuxinator start ekf-demo
+# BAG=~/motion_toolkit/bags/outdoor_experiment_new2 RATE=0.25 tmuxinator start ekf-demo
+<%
+  home    = ENV['HOME']
+  exec_sh = "#{home}/exec.sh"
+  repo    = "#{home}/motion_toolkit"
+  bag     = ENV['BAG']  || "#{repo}/bags/outdoor_experiment_new2"
+  rate    = ENV['RATE'] || '0.25'
+  extra   = ''
+  extra  += ' -p dynamic_enable:=false -p dynamic_recency_enable:=false -p reset_map_on_reject:=false' if ENV['NO_FORGET']
+  extra  += ' -p dynamic_recency_enable:=true'                                                         if ENV['RECENCY']
+  extra  += " -p icp_yaw_restarts:=#{ENV['YAW']}"                                                     if ENV['YAW']
+  args    = extra.empty? ? '' : "--ros-args#{extra}"
+  dds     = "export FASTRTPS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\" && export FASTDDS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\""
+  ros     = "source /opt/ros/jazzy/setup.bash && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"
+  dev     = "source \"#{repo}/ros/dev-shell.sh\" && export PYTHONPATH=\"#{repo}/ros/helhest_stack_ros:$PYTHONPATH\" && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"
+%>
+
+name: ekf-demo
+root: <%= repo %>
+
+windows:
+  - demo:
+      layout: main-vertical
+      panes:
+        - bag:
+          - <%= exec_sh %> bash -c '<%= ros %> && ros2 bag play "<%= bag %>" --rate <%= rate %> --loop --start-paused; exec bash'
+        - node:
+          - <%= exec_sh %> bash -c '<%= dev %> && python3 -m helhest_stack_ros.elevation_node_ekf <%= args %>; exec bash'
+        - rviz:
+          - <%= exec_sh %> bash -c '<%= ros %> && rviz2 -d "<%= repo %>/ros/helhest_stack_ros/rviz/elevation.rviz"; exec bash'
+  - shell:
+      panes:
+        - <%= exec_sh %> bash -c '<%= dev %>; exec bash'
+  - rqt:
+      panes:
+        - <%= exec_sh %> bash -c '<%= ros %> && ros2 run rqt_reconfigure rqt_reconfigure; exec bash'
