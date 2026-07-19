@@ -521,6 +521,11 @@ class ElevationNode(Node):
         # keeps the routed center a footprint-width off berms (validated in the Tier-C closed loop:
         # 0 belly contacts). Tighten in narrow spaces -- it erodes the feasible set both sides.
         d("plan_robust_margin_deg", 0.0)  # cost-to-go safety tube: heading (deg)
+        # HARD-block cells within a footprint of a local step taller than this [m]. Catches thin
+        # vertical obstacles (sticks/poles) that the robot's settle STRADDLES between its wheel/belly
+        # contacts -- those read traversable for most headings, so the router drives through them.
+        # 0 = off (settle-only). ~0.2 blocks a stick the robot can't drive over. See costtogo _step_gate.
+        d("plan_obstacle_step_m", 0.2)
         d("plan_nominal_reset", 1.5)  # nominal wheel speed the planner seeds from
         # MPPI speed knobs (rebuild the planner on change): the robot drives slow because the cost
         # balance prefers it. Raise goal_running (reward progress) and/or lower effort (penalty on
@@ -675,6 +680,7 @@ class ElevationNode(Node):
         self.k_turn_override: float = g("k_turn")
         self.plan_robust_margin_m: float = g("plan_robust_margin_m")
         self.plan_robust_margin_deg: float = g("plan_robust_margin_deg")
+        self.plan_obstacle_step_m: float = g("plan_obstacle_step_m")
         self.plan_nominal_reset: float = g("plan_nominal_reset")
         self.plan_goal_running: float = g("plan_goal_running")
         self.plan_effort: float = g("plan_effort")
@@ -827,6 +833,7 @@ class ElevationNode(Node):
             n_theta=int(self.plan_n_theta),
             robust_margin_m=self.plan_robust_margin_m,
             robust_margin_deg=self.plan_robust_margin_deg,
+            obstacle_step_m=self.plan_obstacle_step_m,
             device=self.device,
         )
         self.planner.cw.lattice_cap = self.ctg._vcap
