@@ -323,8 +323,8 @@ class ElevationNode(Node):
         self.sim_pred: ForwardSimulator | None = None  # flat-ground predict model (batch 1)
         self.sim_jac: ForwardSimulator | None = None  # flat-ground Jacobian model (batch 6)
         self._world_T_base: np.ndarray | None = None  # last fused pose (SE(3)), the splice ref
-        # Wheel-speed command applied last frame [ω_L, ω_R, ω_rear] — the EKF predict input.
-        self._prev_cmd_model = np.zeros(3, np.float64)
+        # Last measured wheel speeds [ω_L, ω_R, ω_rear] from /joint_states — the EKF predict input.
+        self._prev_meas_wheel = np.zeros(3, np.float64)
         self._latest_imu: Imu | None = None
         # (t_sec, quaternion xyzw, angular_velocity xyz) history so the deskew and the
         # rotation prior can read the gyro rate at the *cloud* stamp (not whatever arrived
@@ -337,6 +337,7 @@ class ElevationNode(Node):
         self._gyro_t: float | None = None
         self._base_R_gyro: np.ndarray | None = None  # cached static base<-imu rotation for the gyro
         self._consecutive_rejects = 0  # for reset-on-sustained-divergence
+        self._consecutive_chi2_rejects = 0  # for chi²-gate force-accept escape
         self._prof: dict[str, float] = {}  # per-stage cumulative seconds (profile_stages)
         self._prof_n = 0
         self._prof_t = 0.0
@@ -359,6 +360,12 @@ class ElevationNode(Node):
         self.create_subscription(Imu, self.imu_topic, self._imu_callback, qos_profile_sensor_data)
         self.create_subscription(
             PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10
+        )
+        self.create_subscription(
+            JointState,
+            self.get_parameter("joints_topic").value,
+            self._joint_state_callback,
+            qos_profile_sensor_data,
         )
         # LiDAR is best-effort (SensorDataQoS); a reliable sub gets nothing from it.
         self.cloud_sub = Subscriber(
@@ -540,6 +547,17 @@ class ElevationNode(Node):
         # signal that lets the rot cap relax safely. Good rotate fits ~0.03-0.055, aliased/
         # diverged ones >=0.086, so 0.08 separates them. 0 = off (library default).
         d("icp_max_rms_residual_m", 0.08)
+        # Adaptive ICP measurement noise (R_ICP): scale = (rms / rms_nom)² × (N_nom / N_inl).
+        # At nominal values scale = 1 and R_ICP is used as-is; worse alignments get larger R.
+        d("icp_r_rms_nom", 0.04)   # [m] RMS reference — half the reject threshold
+        d("icp_r_inl_nom", 2000)   # [#] inlier-count reference for the adaptive scale
+        # Mahalanobis χ²(3) innovation gate: skip the EKF update if yᵀ S⁻¹ y exceeds this.
+        # 7.815 = 95%, 9.0 ≈ 97%, 11.345 = 99%; 0.0 disables the gate.
+        d("icp_chi2_thresh", 9.0)
+        # Force-accept the ICP update (ignore the chi² gate) after this many consecutive
+        # rejections — prevents the filter from silently walking its ICP seed away from
+        # the map during sustained filter divergence. 0 = never force-accept (not recommended).
+        d("icp_chi2_max_rejects", 5)
         # Yaw multi-start: run this many ICPs from headings spread over icp_yaw_search_deg about
         # the prediction and keep the best fit — escapes the wrong rotational basin under fast
         # skid-steer yaw. 1 = single ICP (off). GPU-parallel-friendly; costs ~N ICP launches.
@@ -639,6 +657,7 @@ class ElevationNode(Node):
         # left-wheel sign flip, rear-follower, magnitude clamp, slew limit) is in control/command.py.
         d("plan_actuate", True)  # publish /cmd_joints wheel commands
         d("cmd_topic", "/cmd_joints")  # JointState wheel-velocity command topic (to the LLC)
+        d("joints_topic", "/joint_states")  # measured wheel-velocity feedback from LLC
         d(
             "plan_max_omega", 10.0
         )  # hard cap on |wheel velocity| [rad/s] -- set to the motor safe max
@@ -713,6 +732,10 @@ class ElevationNode(Node):
         self.icp_max_corr_rot_rad: float = float(np.deg2rad(g("icp_max_corr_rot_deg")))
         self.icp_min_submap_points: int = g("icp_min_submap_points")
         self.icp_max_rms_residual_m: float = g("icp_max_rms_residual_m")
+        self.icp_r_rms_nom: float = g("icp_r_rms_nom")
+        self.icp_r_inl_nom: int = g("icp_r_inl_nom")
+        self.icp_chi2_thresh: float = g("icp_chi2_thresh")
+        self.icp_chi2_max_rejects: int = g("icp_chi2_max_rejects")
         self.icp_yaw_restarts: int = g("icp_yaw_restarts")
         self.icp_yaw_search_deg: float = g("icp_yaw_search_deg")
         self.dynamic_enable: bool = g("dynamic_enable")
@@ -834,7 +857,8 @@ class ElevationNode(Node):
         self.sim_jac.set_uniform_friction(self.plan_friction)
         self.ekf = None  # re-bootstrap on the next scan
         self._world_T_base = None
-        self._prev_cmd_model = np.zeros(3, np.float64)
+        self._prev_meas_wheel = np.zeros(3, np.float64)
+        self._consecutive_chi2_rejects = 0
 
     def _build_accumulator(self) -> None:
         g = lambda k: self.get_parameter(k).value  # noqa: E731
@@ -1005,6 +1029,14 @@ class ElevationNode(Node):
             t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             self._imu_buffer.append((t, np.array([q.x, q.y, q.z, q.w]), w_base))
 
+    def _joint_state_callback(self, msg: JointState) -> None:
+        # /joint_states velocity order: [ω_L, ω_rear, ω_R] (indices 0, 1, 2).
+        # Reorder to the model convention [ω_L, ω_R, ω_rear] used by predict_q6d / jacobian_F_6d.
+        if len(msg.velocity) >= 3:
+            self._prev_meas_wheel = np.array(
+                [msg.velocity[0], msg.velocity[2], msg.velocity[1]], dtype=np.float64
+            )
+
     def _synced_callback(self, cloud_msg: PointCloud2, odom_msg: Odometry) -> None:
         try:
             self._process(cloud_msg, odom_msg)
@@ -1045,6 +1077,7 @@ class ElevationNode(Node):
             # Bootstrap: adopt odom as the first world pose and seed the filter there
             # (velocity states start at zero; the predict step derives them from u).
             world_T_base = odom_T_base
+            map_T_base = world_T_base  # no ICP on bootstrap; map and export pose are the same
             self.localizer.bootstrap(odom_T_base, world_T_base, imu_R_base)
             bx, by, byaw = mat_to_se2(world_T_base)
             self.ekf = EKF6D(np.array([bx, by, byaw, 0.0, 0.0, 0.0]), P0, Q, R_ICP, R_ICP)
@@ -1052,9 +1085,8 @@ class ElevationNode(Node):
             scan_wp = wp.array(scan_base, dtype=wp.vec3, device=self.device)
             scan_wp = self._denoise(scan_wp, base_T_sensor)
         else:
-            # Seed ICP from the odom-predicted pose (same as the plain node): odom translation
-            # + gyro rotation applied to the last accepted pose. The EKF predict still runs to
-            # evolve the filter state; its measurement update then refines the accepted ICP pose.
+            # Seed ICP from the EKF-fused pose of the previous frame propagated
+            # forward by the odom+gyro delta. sweep_delta is the odom delta used for deskew.
             world_T_base_pred, sweep_delta = self.localizer.predict(odom_T_base, imu_R_base)
             if self.deskew_enable:
                 scan_base = self._deskew(
@@ -1068,7 +1100,7 @@ class ElevationNode(Node):
             # Flat ground is translation-invariant, so run the rollout in a robot-local frame
             # (robot at the grid center) and shift the result back; keeps the pose in-grid at
             # any world coordinate. Velocity states are world-frame, unaffected by the shift.
-            u = self._prev_cmd_model
+            u = self._prev_meas_wheel
             off_x, off_y = float(self.ekf.x[0]), float(self.ekf.x[1])
             q_local = self.ekf.x.copy()
             q_local[0] = 0.0
@@ -1100,12 +1132,42 @@ class ElevationNode(Node):
 
             # --- EKF MEASUREMENT UPDATE: the ICP pose [x, y, ψ] (only when accepted) ---
             if outcome.status == "ok":
-                self.ekf.update_icp(np.array(mat_to_se2(outcome.pose)))
+                rms = outcome.rms_residual_m
+                # scale = (rms / rms_nom)² × (N_nom / N_inl): worse alignments → larger R → less weight
+                scale = (rms / self.icp_r_rms_nom) ** 2 * (self.icp_r_inl_nom / max(outcome.num_inliers, 1))
+                R_adaptive = R_ICP * scale
+                z = np.array(mat_to_se2(outcome.pose))
+                applied = self.ekf.update_icp(z, R=R_adaptive, chi2_thresh=self.icp_chi2_thresh)
+                if applied:
+                    self._consecutive_chi2_rejects = 0
+                else:
+                    self._consecutive_chi2_rejects += 1
+                    if 0 < self.icp_chi2_max_rejects <= self._consecutive_chi2_rejects:
+                        # Sustained gating means the FILTER diverged from the map (the map is
+                        # still written from accepted raw ICP, so it remains trustworthy). Snap
+                        # the filter back before the drifting seed trips the localizer's gates.
+                        self.ekf.update_icp(z, R=R_adaptive)  # chi2_thresh=0.0 → force-accept
+                        self._consecutive_chi2_rejects = 0
+                        self.get_logger().warn(
+                            f"F{self._frame} chi2 gate: {self.icp_chi2_max_rejects} consecutive "
+                            "rejections -> force-accepted ICP update (filter snapped to map)"
+                        )
+                    else:
+                        self.get_logger().warn(
+                            f"F{self._frame} chi2 gate: update skipped "
+                            f"({self._consecutive_chi2_rejects}/{self.icp_chi2_max_rejects})"
+                        )
             # Reconstruct the SE(3) pose from the fused planar state, keeping the ICP pose's
             # z/roll/pitch (hybrid splice, docs/ekf.md 4.4). On a fallback (reject/sparse)
             # outcome.pose is the predicted seed and the state is unchanged, so this is a no-op.
             world_T_base = _splice_planar(outcome.pose, self.ekf.x[0], self.ekf.x[1], self.ekf.x[2])
+            # Raw ICP pose (or odom fallback on reject) goes to the map — no EKF blend enters
+            # the accumulated cloud. The EKF-blended world_T_base is exported to TF, planning,
+            # and the next ICP seed only. This severs the bias-feedback loop through the map.
+            map_T_base = outcome.pose
             self._world_T_base = world_T_base
+            # Feed the EKF-fused pose back so it seeds the next frame's ICP (not the raw ICP result).
+            self.localizer.set_corrected_pose(world_T_base)
 
             # A single reject just uses the fallback pose (the map keeps accumulating). Only
             # SUSTAINED divergence — tracking genuinely lost — wipes the map and re-seeds from
@@ -1123,7 +1185,7 @@ class ElevationNode(Node):
                     f"{self.reset_after_rejects} consecutive ICP rejects -> resetting global map."
                 )
 
-        world_scan = transform_points(scan_wp, len(scan_wp), world_T_base)
+        world_scan = transform_points(scan_wp, len(scan_wp), map_T_base)
         valid = wp.full(len(scan_wp), 1, dtype=wp.int32, device=self.device)
         # Dynamic-obstacle carving: drop accumulated points this scan saw THROUGH (moving
         # things). Carve the previous map by visibility against the fresh scan.
@@ -1132,7 +1194,7 @@ class ElevationNode(Node):
         persist = self.carve_persist_frames
         streak_mode = self.dynamic_enable and persist > 1
         if self.dynamic_enable and self.map_wp is not None and len(self.map_wp) > 0:
-            world_T_sensor = world_T_base @ base_T_sensor
+            world_T_sensor = map_T_base @ base_T_sensor
             sensor_origin = world_T_sensor[:3, 3].copy()
             # Carve against the free-space frontier (no-return beams = free space) so ghosts
             # with no background behind them are removed; returns-only if unavailable.
@@ -1154,7 +1216,7 @@ class ElevationNode(Node):
                 )
                 # Robot heading in world (base +x azimuth) — confines the gap age-out to the cone
                 # in front of the robot, so it can't erode the wheel shadows off to the sides.
-                fwd_az = float(np.arctan2(world_T_base[1, 0], world_T_base[0, 0]))
+                fwd_az = float(np.arctan2(map_T_base[1, 0], map_T_base[0, 0]))
                 carve, streak_out = self.dynamic_filter.carve_streak(
                     self.map_wp,
                     carve_scan,
@@ -1456,7 +1518,6 @@ class ElevationNode(Node):
                 f"REACHED goal (d={d_goal:.2f} m) -- stopping; idle until a new goal is set."
             )
         if self._goal_reached:
-            self._prev_cmd_model = np.zeros(3, np.float64)  # idle -> EKF predicts a stop
             if self.plan_actuate:
                 cmd = condition_command(
                     0.0,
@@ -1499,12 +1560,6 @@ class ElevationNode(Node):
                 U = (1.0 - self.plan_consistency) * U + self.plan_consistency * shifted
                 self.planner.set_nominal(U)
             self._prev_plan_U = U.copy()
-        # EKF predict input: this frame's committed wheel-speed command [ω_L, ω_R, ω_rear]
-        # (model convention, pre-conditioning), consumed by the predict step next frame.
-        u0 = self.planner.nominal()[0]
-        self._prev_cmd_model = np.array(
-            [float(u0[0]), float(u0[1]), 0.5 * (float(u0[0]) + float(u0[1]))], np.float64
-        )
         # candidate 0 is the committed nominal rollout; window-local -> map coords.
         ctrl = self.planner.sim.controlled.numpy()  # [T+1, B, 3] = (x, y, yaw)
         self._ck("plan:readback")

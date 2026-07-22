@@ -54,12 +54,22 @@ class EKF:
         self.x = x_pred.copy()
         self.P = A @ self.P @ A.T + self.Q
 
-    def update_icp(self, z: np.ndarray) -> None:
+    def update_icp(
+        self,
+        z: np.ndarray,
+        R: np.ndarray | None = None,
+        chi2_thresh: float = 0.0,
+    ) -> bool:
         """Measurement update from LiDAR ICP.
 
-        z : [3]  observed pose  [x, y, ψ]  in world frame [m, m, rad]
+        z            : [3]   observed pose  [x, y, ψ]  in world frame [m, m, rad]
+        R            : [3,3] measurement noise override; None uses stored R_icp
+        chi2_thresh  : Mahalanobis gate — skip update if yᵀ S⁻¹ y > chi2_thresh
+                       (χ²(3) dof: 7.815=95%, 9.0≈97%, 11.345=99%); 0.0 = disabled
+
+        Returns True if the update was applied, False if gated out.
         """
-        self._update(z, self.R_icp)
+        return self._update(z, self.R_icp if R is None else R, chi2_thresh)
 
     def update_odom_imu(self, z: np.ndarray) -> None:
         """Measurement update from wheel odometry (x, y) + IMU (ψ).
@@ -70,7 +80,7 @@ class EKF:
         """
         self._update(z, self.R_odom_imu)
 
-    def _update(self, z: np.ndarray, R: np.ndarray) -> None:
+    def _update(self, z: np.ndarray, R: np.ndarray, chi2_thresh: float = 0.0) -> bool:
         """Shared EKF update for any sensor whose observation model is H = I₃.
 
         S  = P⁻ + R
@@ -78,6 +88,8 @@ class EKF:
         y  = z − x⁻          (innovation; ψ component wrapped to (−π, π])
         x  = x⁻ + K y
         P  = (I − K) P⁻
+
+        Returns True if the update was applied, False if the χ² gate rejected it.
         """
         S = self.P + R
         # K = P S⁻¹; use solve(S, P)ᵀ to avoid explicit matrix inversion
@@ -88,8 +100,14 @@ class EKF:
         # wrap ψ innovation to (−π, π] so a 359° error is not treated as 359° [rad]
         y[2] = (y[2] + np.pi) % (2.0 * np.pi) - np.pi
 
+        if chi2_thresh > 0.0:
+            d2 = float(y @ np.linalg.solve(S, y))
+            if d2 > chi2_thresh:
+                return False  # outlier — leave state and covariance unchanged
+
         self.x = self.x + K @ y
         self.P = (np.eye(3) - K) @ self.P
+        return True
 
 
 class EKF6D:
@@ -143,12 +161,22 @@ class EKF6D:
         self.x = x_pred.copy()
         self.P = F @ self.P @ F.T + self.Q
 
-    def update_icp(self, z: np.ndarray) -> None:
+    def update_icp(
+        self,
+        z: np.ndarray,
+        R: np.ndarray | None = None,
+        chi2_thresh: float = 0.0,
+    ) -> bool:
         """Measurement update from a LiDAR ICP pose.
 
-        z : [3]  observed pose  [x, y, ψ]  in world frame [m, m, rad]
+        z            : [3]   observed pose  [x, y, ψ]  in world frame [m, m, rad]
+        R            : [3,3] measurement noise override; None uses stored R_icp
+        chi2_thresh  : Mahalanobis gate — skip update if yᵀ S⁻¹ y > chi2_thresh
+                       (χ²(3) dof: 7.815=95%, 9.0≈97%, 11.345=99%); 0.0 = disabled
+
+        Returns True if the update was applied, False if gated out.
         """
-        self._update(z, self.R_icp)
+        return self._update(z, self.R_icp if R is None else R, chi2_thresh)
 
     def update_odom_imu(self, z: np.ndarray) -> None:
         """Measurement update from wheel odometry (x, y) + IMU heading (ψ).
@@ -159,7 +187,7 @@ class EKF6D:
         """
         self._update(z, self.R_odom)
 
-    def _update(self, z: np.ndarray, R: np.ndarray) -> None:
+    def _update(self, z: np.ndarray, R: np.ndarray, chi2_thresh: float = 0.0) -> bool:
         """Shared EKF update for both [x, y, ψ] sensors (H = [I₃ | 0₃]).
 
         S = H P⁻ Hᵀ + R
@@ -167,6 +195,8 @@ class EKF6D:
         y = z − H x⁻          (innovation; ψ component wrapped to (−π, π])
         x = x⁻ + K y
         P = (I₆ − K H) P⁻
+
+        Returns True if the update was applied, False if the χ² gate rejected it.
         """
         H = self.H
         S = H @ self.P @ H.T + R
@@ -177,5 +207,11 @@ class EKF6D:
         # wrap ψ innovation to (−π, π] so a 359° error is not treated as 359° [rad]
         y[2] = (y[2] + np.pi) % (2.0 * np.pi) - np.pi
 
+        if chi2_thresh > 0.0:
+            d2 = float(y @ np.linalg.solve(S, y))
+            if d2 > chi2_thresh:
+                return False  # outlier — leave state and covariance unchanged
+
         self.x = self.x + K @ y
         self.P = (np.eye(6) - K @ H) @ self.P
+        return True

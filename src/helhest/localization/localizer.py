@@ -152,6 +152,15 @@ class Localizer:
         self._imu_R_base_prev = imu_R_base_curr
         return outcome
 
+    def set_corrected_pose(self, world_T_base: np.ndarray) -> None:
+        """Override the corrected pose that seeds the next predict().
+        Call after an external filter (e.g. EKF) has refined the pose so the
+        Kalman-fused x/y/yaw propagates into the next frame's ICP seed rather
+        than the raw ICP result. Only _world_T_base_prev is touched; the stored
+        odom and IMU references are unchanged (they drive sweep_delta, not the seed).
+        """
+        self._world_T_base_prev = world_T_base
+
     def _register(
         self,
         scan_base: wp.array,
