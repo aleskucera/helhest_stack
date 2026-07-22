@@ -126,22 +126,14 @@ placed into the map exactly where ICP put it.
               │  if outcome.status == "ok":                             │
               │    z   = [x_icp, y_icp, ψ_icp]   ← absolute ICP pose  │
               │    rms = outcome.rms_residual_m                         │
-              │    scale = (rms/rms_nom)² × (N_nom/N_inl)              │
+              │    scale = max((rms/rms_nom)² × (N_nom/N_inl), 0.25)  │
               │    R_adaptive = R_ICP × scale     ← adaptive noise      │
               │                                                         │
-              │    applied = ekf.update_icp(z, R=R_adaptive,           │
-              │                             chi2_thresh=...)            │
+              │    ekf.update_icp(z, R=R_adaptive)                     │
               │     S = H P⁻ Hᵀ + R_adaptive                          │
               │     y = z − H ekf.x                                    │
-              │     if yᵀ S⁻¹ y > chi2_thresh → skip (gate)           │
-              │     else: K = P⁻ Hᵀ S⁻¹                               │
-              │           ekf.x += K @ y   ← soft blend, NOT override  │
-              │                                                         │
-              │    if not applied:                                      │
-              │      _consecutive_chi2_rejects += 1                    │
-              │      if _consecutive_chi2_rejects >= max_rejects:      │
-              │        force-accept (chi2_thresh=0) → snap to map      │
-              │        _consecutive_chi2_rejects = 0                   │
+              │     K = P⁻ Hᵀ S⁻¹                                     │
+              │     ekf.x += K @ y   ← soft blend, NOT override        │
               └──────┬──────────────────────────────────────────────────┘
                      │
                      │  world_T_base = _splice_planar(
@@ -195,12 +187,11 @@ The design is the **raw-map / filtered-export separation**: the map is built fro
 raw sensor data only, so the ICP measurement cannot be biased by the filter's own
 history. The EKF measurement update itself is a standard **absolute-pose** loosely-
 coupled fusion (`z = [x_icp, y_icp, ψ_icp]`, `H = [I₃|0₃]`). The update uses an
-**adaptive measurement noise** `R_adaptive = R_ICP × scale` (scaled by the ICP
-fitness: RMS residual and inlier count) and a **Mahalanobis χ²(3) innovation gate**
-that skips updates whose innovation is statistically implausible given the filter's
-current uncertainty. A **force-accept escape hatch** fires after
-`icp_chi2_max_rejects` consecutive gate rejections, snapping the filter back to the
-ICP measurement to prevent the filter from silently diverging.
+**adaptive measurement noise** `R_adaptive = R_ICP × scale` where
+`scale = max((rms/rms_nom)² × (N_nom/N_inl), 0.25)` — scaled by ICP fitness
+(RMS residual and inlier count) so noisy alignments get less weight and clean ones
+get more, with a floor at 0.25 preventing R from collapsing to zero on exceptionally
+clean scans.
 
 ### Map-bias caveat
 
@@ -209,9 +200,9 @@ a localizer **reject** (`outcome.status == "rejected"`), `outcome.pose` falls ba
 `world_T_base_pred` — the odom/gyro delta applied to the previous fused (`world_T_base`)
 pose, which does include EKF influence. In that case `map_T_base = outcome.pose` is
 effectively EKF-derived, and if the filter is diverging the map will reflect it. The
-chi²-gate force-accept escape bounds this scenario by snapping the filter back to the
-ICP measurement before the ICP seed drifts far enough to cause sustained localizer
-rejects.
+sustained-reject reset machinery (`reset_after_rejects`) bounds this scenario by
+wiping and re-seeding the map before the ICP seed drifts far enough to cause permanent
+localizer rejects.
 
 ---
 
@@ -227,9 +218,7 @@ rejects.
 | **Fallback when ICP rejects** | odom-predicted pose | EKF-predicted pose (physics model) |
 | **Physics model input** | n/a | `_prev_meas_wheel` (wheel speeds) + `_gyro_wz_mean` (IMU ωz, slip-immune yaw) |
 | **Localizer seed override** | n/a | `set_corrected_pose(world_T_base)` each frame |
-| **ICP measurement noise** | n/a | adaptive: `R_ICP × (rms/rms_nom)² × (N_nom/N_inl)` |
-| **Innovation gate** | n/a | Mahalanobis χ²(3); skip if `yᵀS⁻¹y > icp_chi2_thresh` |
-| **Gate escape hatch** | n/a | force-accept after `icp_chi2_max_rejects` consecutive skips |
+| **ICP measurement noise** | n/a | adaptive: `R_ICP × scale`, `scale = max((rms/rms_nom)² × (N_nom/N_inl), 0.25)` |
 | **Accumulator code** | identical | identical |
 
 ---
@@ -251,3 +240,79 @@ The EKF predict step is driven by two inputs:
 The previous design used the MPPI planner's commanded output (`_prev_cmd_model`),
 which diverged during bag replay because the live planner generated commands for a
 different trajectory than the one in the bag.
+
+---
+
+## EKF noise matrices and tunable parameters
+
+All values live in `elevation_node_ekf.py` — the matrices near the top of the file,
+the ROS parameters in `_declare_parameters()`.
+
+### State vector
+
+```
+x = [x,  y,  ψ,  ẋᵂ,  ẏᵂ,  ψ̇]   (6-DOF)
+     pos  pos  yaw  world-frame velocities
+```
+
+### Initial state covariance P₀  (diagonal, `[6×6]`)
+
+```python
+_SIG_P0 = [0.10 m,  0.10 m,  2.0°,  0.30 m/s,  0.30 m/s,  0.20 rad/s]
+```
+
+| State | 1-σ | Rationale |
+|---|---|---|
+| x, y | 0.10 m | first ICP fix typically within 10 cm of the odom seed |
+| ψ | 2.0° | gyro heading is accurate at boot; small initial heading uncertainty |
+| ẋᵂ, ẏᵂ | 0.30 m/s | velocities not directly measured; generous to let the predict step dominate early |
+| ψ̇ | 0.20 rad/s | same rationale |
+
+### Process noise Q  (diagonal, `[6×6]`)
+
+```python
+_SIG_Q = [0.02 m,  0.02 m,  0.5°,  0.15 m/s,  0.15 m/s,  0.10 rad/s]
+```
+
+Represents uncertainty added per predict step (one LiDAR frame ≈ 0.1 s).
+Velocity rows are generous because F[:,3:6] = 0 — the simulator re-derives
+velocities from the wheel-speed input `u` at each step rather than integrating them.
+
+| State | 1-σ/step | Rationale |
+|---|---|---|
+| x, y | 0.02 m | ~2 cm/step model error for straight-line sliding terrain |
+| ψ | 0.5° | small heading model error; gyro covers most of it |
+| ẋᵂ, ẏᵂ | 0.15 m/s | unobservable states; kept ≈ P₀ so P_vv stays near its initial value |
+| ψ̇ | 0.10 rad/s | same |
+
+### ICP measurement noise R_ICP  (diagonal, `[3×3]`)
+
+```python
+_SIG_R_ICP = [0.05 m,  0.05 m,  1.0°]
+```
+
+Nominal (scale = 1) uncertainty of an ICP pose measurement. Used as the base
+matrix that `R_adaptive = R_ICP × scale` scales.
+
+| Component | 1-σ | Rationale |
+|---|---|---|
+| x, y | 0.05 m | typical lateral + longitudinal ICP position spread under normal conditions |
+| ψ | 1.0° | heading from ICP is usually better than position; 1° is conservative |
+
+### Adaptive measurement noise parameters (ROS params)
+
+| Parameter | Default | Units | Description |
+|---|---|---|---|
+| `icp_r_rms_nom` | `0.017` | m | Nominal ICP RMS residual.Set to the typical median RMS for your sensor and scene. |
+| `icp_r_inl_nom` | `4800` | # points | Nominal inlier count. Calibrated to observed mean inlier count. |
+
+`scale = max((rms / rms_nom)² × (N_nom / N_inl),  0.25)`
+
+- `scale = 1.0` at nominal operating conditions → `R_adaptive = R_ICP`
+- `scale > 1` for a noisy/sparse scan → larger R → smaller K → less ICP weight
+- `scale < 1` for a clean/dense scan → smaller R → larger K → more ICP weight
+- Floor at **0.25** prevents R from collapsing below ¼ R_ICP even on perfect scans
+
+Effective Kalman gain K_xy observed across two bags: **0.36–0.42** (takes roughly
+one-third of the ICP position innovation, discards two-thirds as predicted by the
+physics model). This was verified by bag replay in July 2026.

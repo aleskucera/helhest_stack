@@ -555,7 +555,7 @@ class ElevationNode(Node):
         # better ones get smaller R. Calibrate *_nom to your sensor's typical operating point
         # (measured mean values) so scale ≈ 1 at normal conditions. Too-low inl_nom or too-high
         # rms_nom makes scale << 1, over-shrinking R and giving ICP too much trust.
-        d("icp_r_rms_nom", 0.015)  # [m] RMS reference at nominal operating conditions
+        d("icp_r_rms_nom", 0.017)  # [m] RMS reference at nominal operating conditions
         d("icp_r_inl_nom", 4800)   # [#] inlier-count reference at nominal operating conditions
         # Yaw multi-start: run this many ICPs from headings spread over icp_yaw_search_deg about
         # the prediction and keep the best fit — escapes the wrong rotational basin under fast
@@ -1164,6 +1164,7 @@ class ElevationNode(Node):
                 rms = outcome.rms_residual_m
                 # scale = (rms / rms_nom)² × (N_nom / N_inl): worse alignments → larger R → less weight
                 scale = (rms / self.icp_r_rms_nom) ** 2 * (self.icp_r_inl_nom / max(outcome.num_inliers, 1))
+                scale = max(scale, 0.25)  # floor: never trust ICP more than 4× nominal
                 R_adaptive = R_ICP * scale
                 z = np.array(mat_to_se2(outcome.pose))
                 self.ekf.update_icp(z, R=R_adaptive)

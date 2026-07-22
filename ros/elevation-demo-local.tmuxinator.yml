@@ -1,12 +1,12 @@
 # tmuxinator start elevation-demo-local
-# BAG=~/motion_toolkit/bags/outdoor_experiment_new2 RATE=0.25 tmuxinator start elevation-demo-local
+# BAG=/media/maros/test/rosbags/outdoor_experiment_new2 RATE=0.25 tmuxinator start elevation-demo-local
 # Default replays ONLY the bag's inputs so the live node regenerates all outputs (no duplicate
 # /frame_marker etc.). FULL_REPLAY=1 tmuxinator start elevation-demo-local replays every topic.
 <%
   home    = ENV['HOME']
   exec_sh = "#{home}/exec.sh"
   repo    = "#{home}/motion_toolkit"
-  bag     = ENV['BAG']  || "#{repo}/bags/outdoor_experiment_new2"
+  bag     = ENV['BAG']  || "/media/maros/test/rosbags/outdoor_experiment_new2"
   rate    = ENV['RATE'] || '0.25'
   extra   = ''
   extra  += ' -p dynamic_enable:=false -p dynamic_recency_enable:=false -p reset_map_on_reject:=false' if ENV['NO_FORGET']
@@ -33,7 +33,7 @@ windows:
       layout: main-vertical
       panes:
         - bag:
-          - <%= exec_sh %> bash -c '<%= ros %> && ros2 bag play "<%= bag %>" --rate <%= rate %> --loop --start-paused<%= play_topics %>; exec bash'
+          - <%= exec_sh %> bash -c '<%= ros %> && echo BAG=<%= bag %> RATE=<%= rate %> && ros2 bag play "<%= bag %>" --rate <%= rate %> --loop --start-paused<%= play_topics %>; exec bash'
         - node:
           - <%= exec_sh %> bash -c '<%= dev %> && python3 -m helhest_stack_ros.elevation_node <%= args %>; exec bash'
         - rviz:
