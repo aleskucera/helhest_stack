@@ -92,9 +92,11 @@ placed into the map exactly where ICP put it.
           │  gyro Δ rot      │    │                                  │
           │                  │    │  x_pred = predict_q6d(ekf.x, u) │
           │  → world_T_base  │    │  F      = jacobian_F_6d(ekf.x,u)│
-          │    _pred         │    │  ekf.predict(F, x_pred)         │
-          │  → sweep_delta   │    │   → ekf.x updated (x,y,ψ,ẋ,ẏ,ψ̇)│
-          └────────┬─────────┘    │   → ekf.P updated               │
+          │    _pred         │    │  r = clamp(dt/DT, 0.5, 3.0)     │  ← dt from cloud stamps
+          │  → sweep_delta   │    │  scale Δxy,Δψ,F[0:2,2] by r     │
+          └────────┬─────────┘    │  ekf.predict(F,x_pred,q_scale=r)│
+                   │              │   → ekf.x updated (x,y,ψ,ẋ,ẏ,ψ̇)│
+                   │              │   → ekf.P updated  (Q×r growth)  │
                    │              └──────────────────────────────────┘
                    │  world_T_base_pred  (EKF-fused prev pose ⊕ odom Δ)
                    │  sweep_delta        (odom Δ only — used to deskew)

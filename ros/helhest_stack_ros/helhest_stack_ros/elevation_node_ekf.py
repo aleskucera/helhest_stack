@@ -325,6 +325,9 @@ class ElevationNode(Node):
         self._world_T_base: np.ndarray | None = None  # last fused pose (SE(3)), the splice ref
         # Last measured wheel speeds [ω_L, ω_R, ω_rear] from /joint_states — the EKF predict input.
         self._prev_meas_wheel = np.zeros(3, np.float64)
+        # Stamp of the last *processed* cloud [s], used to measure the real inter-cloud dt.
+        # None until the first scan is processed.
+        self._prev_cloud_t: float | None = None
         self._latest_imu: Imu | None = None
         # (t_sec, quaternion xyzw, angular_velocity xyz) history so the deskew and the
         # rotation prior can read the gyro rate at the *cloud* stamp (not whatever arrived
@@ -859,6 +862,7 @@ class ElevationNode(Node):
         self._world_T_base = None
         self._prev_meas_wheel = np.zeros(3, np.float64)
         self._consecutive_chi2_rejects = 0
+        self._prev_cloud_t = None  # don't carry a stale dt across a filter rebuild
 
     def _build_accumulator(self) -> None:
         g = lambda k: self.get_parameter(k).value  # noqa: E731
@@ -1073,6 +1077,8 @@ class ElevationNode(Node):
         imu_R_base = self._gyro_orientation_base(cloud_msg.header.stamp)
         self._ck("preproc+prior")
 
+        t_cloud = cloud_msg.header.stamp.sec + cloud_msg.header.stamp.nanosec * 1e-9
+
         if self.ekf is None:
             # Bootstrap: adopt odom as the first world pose and seed the filter there
             # (velocity states start at zero; the predict step derives them from u).
@@ -1082,6 +1088,7 @@ class ElevationNode(Node):
             bx, by, byaw = mat_to_se2(world_T_base)
             self.ekf = EKF6D(np.array([bx, by, byaw, 0.0, 0.0, 0.0]), P0, Q, R_ICP, R_ICP)
             self._world_T_base = world_T_base
+            self._prev_cloud_t = t_cloud  # seed dt so the first real predict has a valid interval
             scan_wp = wp.array(scan_base, dtype=wp.vec3, device=self.device)
             scan_wp = self._denoise(scan_wp, base_T_sensor)
         else:
@@ -1100,6 +1107,18 @@ class ElevationNode(Node):
             # Flat ground is translation-invariant, so run the rollout in a robot-local frame
             # (robot at the grid center) and shift the result back; keeps the pose in-grid at
             # any world coordinate. Velocity states are world-frame, unaffected by the shift.
+            #
+            # dt-scaling: the simulator advances exactly one DT step (0.1 s). Scale the
+            # resulting pose DELTA and the dt-proportional Jacobian columns by the ratio of the
+            # real inter-cloud interval to DT, so a dropped frame doesn't under-predict motion
+            # and false-trigger the χ² gate. The process noise is scaled by the same ratio
+            # (random-walk Q model: variance grows linearly with time). Clamped to [0.5, 3.0]×DT:
+            # below 0.5 likely indicates a clock/stamp issue; above 3 a linear extrapolation of
+            # one arc step is meaningless — Q growth + the reject/reset machinery own that case.
+            dt_ratio = 1.0
+            if self._prev_cloud_t is not None:
+                dt_ratio = float(np.clip((t_cloud - self._prev_cloud_t) / dynamics.DT, 0.5, 3.0))
+
             u = self._prev_meas_wheel
             off_x, off_y = float(self.ekf.x[0]), float(self.ekf.x[1])
             q_local = self.ekf.x.copy()
@@ -1107,9 +1126,18 @@ class ElevationNode(Node):
             q_local[1] = 0.0
             x_pred = predict_q6d(q_local, u, self.sim_pred)
             F = jacobian_F_6d(q_local, u, self.sim_jac)
-            x_pred[0] += off_x
-            x_pred[1] += off_y
-            self.ekf.predict(F, x_pred)
+            # Scale the xy pose delta (rollout started at the origin, so x_pred[0:2] IS the delta).
+            x_pred[0] = dt_ratio * x_pred[0] + off_x
+            x_pred[1] = dt_ratio * x_pred[1] + off_y
+            # Scale the yaw delta; wrap before and after to stay in (-π, π].
+            dpsi = (x_pred[2] - q_local[2] + np.pi) % (2.0 * np.pi) - np.pi
+            x_pred[2] = q_local[2] + dt_ratio * dpsi
+            # Velocity states [3:6] are re-derived from u each step — not a dt integral.
+            # Only F[0:2, 2] are dt-proportional (∂Δxy/∂ψ ∝ v·dt); the rest are instantaneous.
+            F[0, 2] *= dt_ratio
+            F[1, 2] *= dt_ratio
+            self.ekf.predict(F, x_pred, q_scale=dt_ratio)
+            self._prev_cloud_t = t_cloud
             self._ck("ekf_predict")
 
             outcome = self.localizer.update(

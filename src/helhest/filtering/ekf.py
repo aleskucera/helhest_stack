@@ -152,14 +152,17 @@ class EKF6D:
         self.R_icp: np.ndarray = R_icp.copy()
         self.R_odom: np.ndarray = R_odom.copy()
 
-    def predict(self, F: np.ndarray, x_pred: np.ndarray) -> None:
+    def predict(self, F: np.ndarray, x_pred: np.ndarray, q_scale: float = 1.0) -> None:
         """Propagate the filter by one timestep.
 
-        F      : [6,6] linearised state-transition matrix ∂f/∂q at (q, u) — from caller
-        x_pred : [6]   nonlinear model prediction f(q, u) — also from caller
+        F       : [6,6] linearised state-transition matrix ∂f/∂q at (q, u) — from caller
+        x_pred  : [6]   nonlinear model prediction f(q, u) — also from caller
+        q_scale : process-noise time scale — pass (actual_dt / model_DT) so P grows
+                  linearly with real elapsed time (random-walk Q model). Default 1.0
+                  keeps the original behaviour when dt is not measured.
         """
         self.x = x_pred.copy()
-        self.P = F @ self.P @ F.T + self.Q
+        self.P = F @ self.P @ F.T + q_scale * self.Q
 
     def update_icp(
         self,
