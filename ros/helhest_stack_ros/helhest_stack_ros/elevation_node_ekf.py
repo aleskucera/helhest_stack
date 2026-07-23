@@ -555,7 +555,7 @@ class ElevationNode(Node):
         # better ones get smaller R. Calibrate *_nom to your sensor's typical operating point
         # (measured mean values) so scale ≈ 1 at normal conditions. Too-low inl_nom or too-high
         # rms_nom makes scale << 1, over-shrinking R and giving ICP too much trust.
-        d("icp_r_rms_nom", 0.017)  # [m] RMS reference at nominal operating conditions
+        d("icp_r_rms_nom", 0.018)  # [m] RMS reference at nominal operating conditions
         d("icp_r_inl_nom", 4800)   # [#] inlier-count reference at nominal operating conditions
         # Yaw multi-start: run this many ICPs from headings spread over icp_yaw_search_deg about
         # the prediction and keep the best fit — escapes the wrong rotational basin under fast
