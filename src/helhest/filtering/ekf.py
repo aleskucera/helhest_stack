@@ -147,24 +147,30 @@ class EKF6D:
         self.x = x_pred.copy()
         self.P = F @ self.P @ F.T + q_scale * self.Q
 
-    def update_icp(self, z: np.ndarray, R: np.ndarray | None = None) -> None:
+    def update_icp(self, z: np.ndarray, R: np.ndarray | None = None) -> float:
         """Measurement update from a LiDAR ICP pose.
 
         z : [3]   observed pose  [x, y, ψ]  in world frame [m, m, rad]
         R : [3,3] measurement noise override; None uses stored R_icp
-        """
-        self._update(z, self.R_icp if R is None else R)
 
-    def update_odom_imu(self, z: np.ndarray) -> None:
+        Returns the Normalised Innovation Squared (NIS = yᵀ S⁻¹ y), which is
+        χ²(3) distributed when the filter is consistent.  Mean ≈ 3; 95th
+        percentile ≈ 7.81; 99th percentile ≈ 11.34.
+        """
+        return self._update(z, self.R_icp if R is None else R)
+
+    def update_odom_imu(self, z: np.ndarray) -> float:
         """Measurement update from wheel odometry (x, y) + IMU heading (ψ).
 
         z : [3]  observed pose  [x, y, ψ]  from dead-reckoning [m, m, rad]
             z[0:2] comes from integrated wheel-encoder translation
             z[2]   comes from gyro / IMU heading integration
-        """
-        self._update(z, self.R_odom)
 
-    def _update(self, z: np.ndarray, R: np.ndarray) -> None:
+        Returns NIS (see update_icp for interpretation).
+        """
+        return self._update(z, self.R_odom)
+
+    def _update(self, z: np.ndarray, R: np.ndarray) -> float:
         """Shared EKF update for both [x, y, ψ] sensors (H = [I₃ | 0₃]).
 
         S = H P⁻ Hᵀ + R
@@ -172,6 +178,8 @@ class EKF6D:
         y = z − H x⁻          (innovation; ψ component wrapped to (−π, π])
         x = x⁻ + K y
         P = (I₆ − K H) P⁻
+
+        Returns NIS = yᵀ S⁻¹ y (pre-update innovation squared, normalised).
         """
         H = self.H
         S = H @ self.P @ H.T + R
@@ -182,5 +190,9 @@ class EKF6D:
         # wrap ψ innovation to (−π, π] so a 359° error is not treated as 359° [rad]
         y[2] = (y[2] + np.pi) % (2.0 * np.pi) - np.pi
 
+        # NIS = yᵀ S⁻¹ y — computed before the state update so it uses the pre-update S.
+        nis = float(y @ np.linalg.solve(S, y))
+
         self.x = self.x + K @ y
         self.P = (np.eye(6) - K @ H) @ self.P
+        return nis

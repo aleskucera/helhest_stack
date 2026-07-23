@@ -40,6 +40,9 @@ import numpy as np
 import rclpy
 import tf2_ros
 import warp as wp
+from diagnostic_msgs.msg import DiagnosticArray
+from diagnostic_msgs.msg import DiagnosticStatus
+from diagnostic_msgs.msg import KeyValue
 from geometry_msgs.msg import Point
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import TransformStamped
@@ -397,6 +400,10 @@ class ElevationNode(Node):
         self.pub_turn_boost = self.create_publisher(
             Float32, "turn_boost", 10
         )  # turn_boost in effect (debug)
+        # EKF debug topics — informational only; no stack component subscribes to these.
+        self.pub_ekf_odom = self.create_publisher(Odometry, "ekf/odom", 10)
+        self.pub_ekf_nis = self.create_publisher(Float32, "ekf/nis_icp", 10)
+        self.pub_ekf_diag = self.create_publisher(DiagnosticArray, "ekf/diagnostics", 10)
         self.add_on_set_parameters_callback(self._on_parameters_changed)
 
         self.get_logger().info(
@@ -572,6 +579,11 @@ class ElevationNode(Node):
         d(
             "profile_stages", False
         )  # GPU-synced per-stage timing, logged every 30 frames (debugging)
+        # EKF debug publishing (informational only — nothing in the stack subscribes to these):
+        #   ekf/odom          — nav_msgs/Odometry: fused pose+twist with full 6x6 covariance
+        #   ekf/nis_icp       — std_msgs/Float32: NIS of the ICP update (χ²(3), mean≈3)
+        #   ekf/diagnostics   — diagnostic_msgs/DiagnosticArray: per-frame scalar summary
+        d("publish_ekf_debug", True)
         # Gravity prior (IMU anchors ICP roll/pitch)
         d("gravity_enable", True)
         d("gravity_weight", 2000.0)
@@ -757,6 +769,7 @@ class ElevationNode(Node):
         self.reset_after_rejects: int = g("reset_after_rejects")
         self.debug_frames: bool = g("debug_frames")
         self.profile_stages: bool = g("profile_stages")
+        self.publish_ekf_debug: bool = g("publish_ekf_debug")
         self.publish_map_tf: bool = g("publish_map_tf")
         self.publish_odom_tf: bool = g("publish_odom_tf")
         self.publish_accumulated: bool = g("publish_accumulated")
@@ -1160,6 +1173,9 @@ class ElevationNode(Node):
                 )
 
             # --- EKF MEASUREMENT UPDATE: the ICP pose [x, y, ψ] (only when accepted) ---
+            icp_nis: float | None = None
+            icp_innov: np.ndarray | None = None  # [Δx, Δy, Δψ] in [m, m, rad]
+            icp_r_scale: float | None = None
             if outcome.status == "ok":
                 rms = outcome.rms_residual_m
                 # scale = (rms / rms_nom)² × (N_nom / N_inl): worse alignments → larger R → less weight
@@ -1167,7 +1183,12 @@ class ElevationNode(Node):
                 scale = max(scale, 0.25)  # floor: never trust ICP more than 4× nominal
                 R_adaptive = R_ICP * scale
                 z = np.array(mat_to_se2(outcome.pose))
-                self.ekf.update_icp(z, R=R_adaptive)
+                # Capture the pre-update innovation for diagnostics: z − H·x (ψ wrapped).
+                innov = z - self.ekf.x[:3]
+                innov[2] = (innov[2] + np.pi) % (2.0 * np.pi) - np.pi
+                icp_nis = self.ekf.update_icp(z, R=R_adaptive)
+                icp_innov = innov
+                icp_r_scale = scale
             # Reconstruct the SE(3) pose from the fused planar state, keeping the ICP pose's
             # z/roll/pitch (hybrid splice, docs/ekf.md 4.4). On a fallback (reject/sparse)
             # outcome.pose is the predicted seed and the state is unchanged, so this is a no-op.
@@ -1179,6 +1200,16 @@ class ElevationNode(Node):
             self._world_T_base = world_T_base
             # Feed the EKF-fused pose back so it seeds the next frame's ICP (not the raw ICP result).
             self.localizer.set_corrected_pose(world_T_base)
+            if self.publish_ekf_debug:
+                self._publish_ekf_debug(
+                    world_T_base,
+                    outcome,
+                    icp_nis,
+                    icp_innov,
+                    icp_r_scale,
+                    dt_ratio,
+                    cloud_msg.header.stamp,
+                )
 
             # A single reject just uses the fallback pose (the map keeps accumulating). Only
             # SUSTAINED divergence — tracking genuinely lost — wipes the map and re-seeds from
@@ -1835,6 +1866,166 @@ class ElevationNode(Node):
                 a = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
                 return (1.0 - a) * w0 + a * w1
         return None
+
+    # ------------------------------------------------------------------
+    # EKF debug publishing (informational only — nothing in the stack subscribes)
+    # ------------------------------------------------------------------
+
+    # χ²(3) NIS thresholds: filter is consistent when the rolling mean is near 3.
+    _NIS_WARN = 11.34  # 99th percentile of χ²(3) — sustained > this → R or Q mismatch
+
+    def _publish_ekf_debug(
+        self,
+        world_T_base: np.ndarray,
+        outcome: RegistrationOutcome,
+        nis: float | None,
+        innov: np.ndarray | None,
+        r_scale: float | None,
+        dt_ratio: float,
+        stamp,
+    ) -> None:
+        """Publish all three EKF debug topics for this frame."""
+        self._publish_ekf_odom(world_T_base, stamp)
+        self._publish_ekf_diag(outcome, nis, innov, r_scale, dt_ratio, stamp)
+        if nis is not None:
+            self.pub_ekf_nis.publish(Float32(data=float(nis)))
+
+    def _publish_ekf_odom(self, world_T_base: np.ndarray, stamp) -> None:
+        """Publish nav_msgs/Odometry with the fused EKF pose, twist, and covariance.
+
+        pose:  EKF-blended x/y/yaw with ICP z/roll/pitch spliced in (world_T_base).
+        twist: world-frame velocity rotated into base_frame per the ROS convention for
+               child_frame_id-expressed twist.  This finally gives the 6D velocity states
+               (ekf.x[3:6]) a consumer — they are unobservable but encode the model's
+               prediction of how fast the robot is currently moving.
+        covariance: the planar EKF covariance P[0:3, 0:3] mapped to the 6×6 ROS
+               row-major pose covariance (x,y,z,roll,pitch,yaw order).  z/roll/pitch
+               diagonals are set to a large sentinel (1e6) — those DOF are not filtered.
+               Twist covariance is similarly planar: vx/vy in base frame + yaw rate.
+        """
+        if self.ekf is None:
+            return
+        msg = Odometry()
+        msg.header.stamp = stamp
+        msg.header.frame_id = self.map_frame
+        msg.child_frame_id = self.base_frame
+
+        # --- pose ---
+        qx, qy, qz, qw = matrix_to_quaternion(world_T_base)
+        p = msg.pose.pose
+        p.position.x = float(world_T_base[0, 3])
+        p.position.y = float(world_T_base[1, 3])
+        p.position.z = float(world_T_base[2, 3])
+        p.orientation.x = qx
+        p.orientation.y = qy
+        p.orientation.z = qz
+        p.orientation.w = qw
+
+        # Pose covariance (6×6, row-major, ROS order x y z roll pitch yaw).
+        # EKF tracks x(0), y(1), ψ(2); map them to ROS slots 0, 1, 5.
+        # z(2), roll(3), pitch(4) are unfiltered → large diagonal sentinel.
+        _UNFILTERED = 1e6
+        P = self.ekf.P  # [6,6] EKF covariance
+        cov = np.zeros((6, 6))
+        # planar block: indices (0,1,5) ↔ EKF (0,1,2)
+        ekf_idx = [0, 1, 2]
+        ros_idx = [0, 1, 5]
+        for i, ei in zip(ros_idx, ekf_idx):
+            for j, ej in zip(ros_idx, ekf_idx):
+                cov[i, j] = P[ei, ej]
+        cov[2, 2] = _UNFILTERED  # z
+        cov[3, 3] = _UNFILTERED  # roll
+        cov[4, 4] = _UNFILTERED  # pitch
+        msg.pose.covariance = cov.flatten().tolist()
+
+        # --- twist (expressed in child_frame_id = base_frame) ---
+        psi = float(np.arctan2(world_T_base[1, 0], world_T_base[0, 0]))
+        c, s = np.cos(-psi), np.sin(-psi)
+        # Rotate world-frame vx/vy into base frame.
+        vx_w, vy_w = float(self.ekf.x[3]), float(self.ekf.x[4])
+        vx_b = c * vx_w - s * vy_w
+        vy_b = s * vx_w + c * vy_w
+        msg.twist.twist.linear.x = vx_b
+        msg.twist.twist.linear.y = vy_b
+        msg.twist.twist.angular.z = float(self.ekf.x[5])
+
+        # Twist covariance: rotate the world-frame vx/vy block by -ψ, fill yaw-rate.
+        # EKF P rows/cols 3,4 are vx_W,vy_W; row/col 5 is ψ̇.
+        R2 = np.array([[c, -s], [s, c]])
+        P_vv = P[3:5, 3:5]
+        P_vv_base = R2 @ P_vv @ R2.T
+        cov_t = np.zeros((6, 6))
+        cov_t[0, 0] = P_vv_base[0, 0]  # vx_b var
+        cov_t[0, 1] = cov_t[1, 0] = P_vv_base[0, 1]
+        cov_t[1, 1] = P_vv_base[1, 1]  # vy_b var
+        cov_t[2, 2] = _UNFILTERED  # vz — not filtered
+        cov_t[5, 5] = float(P[5, 5])  # ψ̇ var
+        msg.twist.covariance = cov_t.flatten().tolist()
+
+        self.pub_ekf_odom.publish(msg)
+
+    def _publish_ekf_diag(
+        self,
+        outcome: RegistrationOutcome,
+        nis: float | None,
+        innov: np.ndarray | None,
+        r_scale: float | None,
+        dt_ratio: float,
+        stamp,
+    ) -> None:
+        """Publish diagnostic_msgs/DiagnosticArray with per-frame EKF scalar summary.
+
+        Level OK when the ICP update was accepted and NIS is below the χ²(3) 99th
+        percentile (11.34).  Level WARN otherwise — a sustained WARN on NIS signals
+        that R_ICP or Q need retuning; WARN on status signals tracking loss.
+
+        Key/value pairs (all plain strings, readable with `ros2 topic echo`):
+          status            — ICP outcome: "ok" | "rejected" | "sparse" | "disabled"
+          nis               — Normalised Innovation Squared (χ²(3), mean≈3 when consistent)
+          innov_x_m         — innovation x component [m]
+          innov_y_m         — innovation y component [m]
+          innov_yaw_deg     — innovation yaw component [deg]
+          r_scale           — adaptive-R scale factor applied this frame
+          rms_residual_m    — ICP RMS point-to-plane residual [m]
+          num_inliers       — ICP inlier count
+          dt_ratio          — real inter-cloud dt / model DT (1.0 = on-time)
+          consecutive_rejects — sustained reject counter (triggers map reset at threshold)
+        """
+        level = DiagnosticStatus.OK
+        if outcome.status != "ok":
+            level = DiagnosticStatus.WARN
+        elif nis is not None and nis > self._NIS_WARN:
+            # NIS above χ²(3) 99th percentile — filter may be inconsistent.
+            level = DiagnosticStatus.WARN
+
+        def kv(k: str, v: str) -> KeyValue:
+            return KeyValue(key=k, value=v)
+
+        values = [
+            kv("status", outcome.status),
+            kv("nis", f"{nis:.3f}" if nis is not None else "n/a"),
+            kv("innov_x_m", f"{innov[0]:.4f}" if innov is not None else "n/a"),
+            kv("innov_y_m", f"{innov[1]:.4f}" if innov is not None else "n/a"),
+            kv(
+                "innov_yaw_deg",
+                f"{float(np.rad2deg(innov[2])):.3f}" if innov is not None else "n/a",
+            ),
+            kv("r_scale", f"{r_scale:.3f}" if r_scale is not None else "n/a"),
+            kv("rms_residual_m", f"{outcome.rms_residual_m:.4f}"),
+            kv("num_inliers", str(outcome.num_inliers)),
+            kv("dt_ratio", f"{dt_ratio:.3f}"),
+            kv("consecutive_rejects", str(self._consecutive_rejects)),
+        ]
+        ds = DiagnosticStatus()
+        ds.level = level
+        ds.name = "ekf_localization"
+        ds.message = outcome.status
+        ds.values = values
+
+        arr = DiagnosticArray()
+        arr.header.stamp = stamp
+        arr.status = [ds]
+        self.pub_ekf_diag.publish(arr)
 
     # ------------------------------------------------------------------
     # Scan / odom / deskew / TF (shared shape with terrain_accumulator_node)

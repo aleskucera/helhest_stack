@@ -316,3 +316,33 @@ matrix that `R_adaptive = R_ICP × scale` scales.
 Effective Kalman gain K_xy observed across two bags: **0.36–0.42** (takes roughly
 one-third of the ICP position innovation, discards two-thirds as predicted by the
 physics model). This was verified by bag replay in July 2026.
+
+---
+
+## Debug topics (`publish_ekf_debug`)
+
+`elevation_node_ekf` publishes three informational topics when the ROS parameter
+`publish_ekf_debug` is `true` (default).  Nothing in the stack subscribes to them;
+they exist purely for monitoring and tuning.
+
+| Topic | Type | Rate | Contents |
+|---|---|---|---|
+| `ekf/odom` | `nav_msgs/Odometry` | every frame | Fused pose (EKF x/y/yaw, ICP z/roll/pitch), world-frame velocity rotated into base_frame, and the full 6×6 covariance blocks (z/roll/pitch diagonal = 1e6 sentinel — not filtered). |
+| `ekf/nis_icp` | `std_msgs/Float32` | accepted ICP frames only | Normalised Innovation Squared (NIS) of the ICP measurement update. |
+| `ekf/diagnostics` | `diagnostic_msgs/DiagnosticArray` | every frame | Per-frame scalar summary: `status`, `nis`, `innov_x_m`, `innov_y_m`, `innov_yaw_deg`, `r_scale`, `rms_residual_m`, `num_inliers`, `dt_ratio`, `consecutive_rejects`. Level `WARN` on rejected/sparse frames or when NIS exceeds the χ²(3) 99th percentile. |
+
+### Reading NIS
+
+The ICP update observes three DOF (`[x, y, ψ]`), so NIS = yᵀ S⁻¹ y is **χ²(3)** distributed
+when the filter is consistent (Q and R match the true noise):
+
+| NIS value | Interpretation |
+|---|---|
+| mean ≈ 3 | consistent — Q/R are well tuned |
+| sustained > 7.81 (95th percentile) | innovation is too large → R_ICP too small, or Q too small (filter over-confident), or predict is biased |
+| sustained < 1 | innovation is too small → R_ICP too large (filter ignores ICP) |
+| > 11.34 (99th percentile) | single-frame: flags in `ekf/diagnostics` as WARN |
+
+Watch `ekf/nis_icp` in PlotJuggler or `rqt_plot`; a rolling mean well above 7 during
+normal driving is a signal to raise `_SIG_R_ICP` or lower `_SIG_Q` (or vice-versa).
+`ekf/odom` covariance gives a sanity check that P does not collapse or diverge over time.
