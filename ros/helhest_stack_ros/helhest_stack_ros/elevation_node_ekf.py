@@ -16,8 +16,8 @@ traversability), mirroring the closed-loop sim's heightmap stage (demos/pipeline
 
 Pose comes from an Extended Kalman Filter over the 6-DOF Helhest state
 q = [x, y, ψ, ẋ, ẏ, ψ̇]: a physics-model PREDICT step (the kinematic
-ForwardSimulator + its numerical Jacobian, driven by the planner's last
-wheel-speed command) fused with a single MEASUREMENT — the scan-to-submap
+ForwardSimulator + its flat-ground analytical Jacobian, driven by measured
+wheel speeds) fused with a single MEASUREMENT — the scan-to-submap
 6-DOF point-to-plane ICP pose [x, y, ψ]. The `Localizer` is kept purely as the
 ICP front-end (submap crop + gated registration). Because the robot drives real
 (non-flat) terrain, the fused planar state is spliced back into the ICP pose's
@@ -87,7 +87,7 @@ from helhest.control.turn_adapt import AdaptiveTurnBoost
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 from helhest.filtering.ekf import EKF6D
-from helhest.filtering.jacobian import jacobian_F_6d
+from helhest.filtering.jacobian import jacobian_F_6d_analytical
 from helhest.filtering.jacobian import predict_q6d
 from helhest.planning.costtogo import CostToGo
 from helhest.localization import Localizer
@@ -324,7 +324,6 @@ class ElevationNode(Node):
         # EKF6D localization: physics-model predict fused with the ICP measurement.
         self.ekf: EKF6D | None = None  # None until bootstrapped on the first scan
         self.sim_pred: ForwardSimulator | None = None  # flat-ground predict model (batch 1)
-        self.sim_jac: ForwardSimulator | None = None  # flat-ground Jacobian model (batch 6)
         self._world_T_base: np.ndarray | None = None  # last fused pose (SE(3)), the splice ref
         # Last measured wheel speeds [ω_L, ω_R, ω_rear] from /joint_states — the EKF predict input.
         self._prev_meas_wheel = np.zeros(3, np.float64)
@@ -854,13 +853,14 @@ class ElevationNode(Node):
         self.localizer = Localizer(self.aligner, self._localizer_config())
 
     def _build_ekf(self) -> None:
-        """Build the flat-ground process-model simulators for the EKF predict step.
+        """Build the flat-ground process-model simulator for the EKF predict step.
 
-        Two ForwardSimulators on flat z=0 terrain size the predict (batch 1, evaluates f)
-        and the Jacobian (batch 6, evaluates F = ∂f/∂q in one launch). Flat ground is
-        translation-invariant, so a small fixed grid centered on the origin suffices for
-        any world coordinate — the predict is run in a robot-local frame each step (see
-        _process). The filter itself (self.ekf) bootstraps from odom on the first scan.
+        One ForwardSimulator on flat z=0 terrain (batch 1) evaluates the nonlinear f.
+        The state-transition Jacobian F is the flat-ground analytical form
+        (jacobian_F_6d_analytical). Flat ground is translation-invariant, so a small
+        fixed grid centered on the origin suffices for any world coordinate — the
+        predict is run in a robot-local frame each step (see _process). The filter
+        itself (self.ekf) bootstraps from odom on the first scan.
         """
         cell = 0.1
         n = int(round(8.0 / cell))  # 8 m flat grid, centered on the origin
@@ -870,9 +870,6 @@ class ElevationNode(Node):
         self.sim_pred = ForwardSimulator(robot, solver, grid, 1, 1, self.device)
         self.sim_pred.set_terrain(elev0)
         self.sim_pred.set_uniform_friction(self.plan_friction)
-        self.sim_jac = ForwardSimulator(robot, solver, grid, 6, 1, self.device)
-        self.sim_jac.set_terrain(elev0)
-        self.sim_jac.set_uniform_friction(self.plan_friction)
         self.ekf = None  # re-bootstrap on the next scan
         self._world_T_base = None
         self._prev_meas_wheel = np.zeros(3, np.float64)
@@ -1049,7 +1046,7 @@ class ElevationNode(Node):
 
     def _joint_state_callback(self, msg: JointState) -> None:
         # /joint_states velocity order: [ω_L, ω_rear, ω_R] (indices 0, 1, 2).
-        # Reorder to the model convention [ω_L, ω_R, ω_rear] used by predict_q6d / jacobian_F_6d.
+        # Reorder to the model convention [ω_L, ω_R, ω_rear] used by predict_q6d.
         if len(msg.velocity) >= 3:
             self._prev_meas_wheel = np.array(
                 [msg.velocity[0], msg.velocity[2], msg.velocity[1]], dtype=np.float64
@@ -1135,7 +1132,7 @@ class ElevationNode(Node):
 
             # Gyro yaw rate averaged over the inter-cloud window: slip-immune heading prediction.
             # Falls back to None when no IMU samples are available (first frame, IMU dropout),
-            # which causes predict_q6d / jacobian_F_6d to use the wheel-differential model.
+            # which causes predict_q6d to use the wheel-differential model.
             omega_z = self._gyro_wz_mean(
                 self._prev_cloud_t if self._prev_cloud_t is not None else t_cloud,
                 t_cloud,
@@ -1146,7 +1143,9 @@ class ElevationNode(Node):
             q_local[0] = 0.0
             q_local[1] = 0.0
             x_pred = predict_q6d(q_local, u, self.sim_pred, omega_z=omega_z)
-            F = jacobian_F_6d(q_local, u, self.sim_jac, omega_z=omega_z)
+            # Analytical F uses x_pred BEFORE the world-frame shift: velocity rows [3:6]
+            # are body-frame derived and unaffected by the xy translation.
+            F = jacobian_F_6d_analytical(q_local, x_pred, dynamics.DT)
             # Scale the xy pose delta (rollout started at the origin, so x_pred[0:2] IS the delta).
             x_pred[0] = dt_ratio * x_pred[0] + off_x
             x_pred[1] = dt_ratio * x_pred[1] + off_y

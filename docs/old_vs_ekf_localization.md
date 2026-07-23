@@ -93,8 +93,8 @@ placed into the map exactly where ICP put it.
           │                  │    │       fallback: wheel diff       │
           │                  │    │  x_pred = predict_q6d(ekf.x,    │
           │  → world_T_base  │    │             u, omega_z=ωz)       │
-          │    _pred         │    │  F      = jacobian_F_6d(ekf.x,  │
-          │  → sweep_delta   │    │             u, omega_z=ωz)       │
+          │    _pred         │    │  F = jacobian_F_6d_analytical(  │
+          │  → sweep_delta   │    │             ekf.x, x_pred, DT)   │
           └────────┬─────────┘    │  r = clamp(dt/DT, 0.5, 3.0)     │  ← dt from cloud stamps
                    │              │  scale Δxy,Δψ,F[0:2,2] by r     │
                    │              │  ekf.predict(F,x_pred,q_scale=r) │

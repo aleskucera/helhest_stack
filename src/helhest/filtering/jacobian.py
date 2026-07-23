@@ -142,6 +142,56 @@ def jacobian_F_6d(
     return F
 
 
+def jacobian_F_6d_analytical(
+    q: np.ndarray,
+    x_pred: np.ndarray,
+    dt: float,
+) -> np.ndarray:
+    """Flat-ground analytical discrete Jacobian F_d = ∂q_next/∂q.
+
+    Implements the closed-form result from docs/state_model_proper.md §3, assuming
+    θ = φ = 0 (flat ground) and uniform friction (so α and x_ICR are constants that
+    do not depend on state).  Under these conditions only the ψ column is non-trivial.
+
+    q      : [6]  current state [x, y, ψ, ẋ_W, ẏ_W, ψ̇]
+    x_pred : [6]  next state from predict_q6d — provides ψ_next-accurate world velocities
+                  for the exact discrete entries in rows 3–4
+    dt     : simulator timestep [s] (pass dynamics.DT; caller applies dt_ratio scaling
+             to F[0,2] and F[1,2] afterwards, identical to the numerical path)
+
+    Non-zero off-diagonal entries (column 2 only — all others are 0):
+        F[0, 2] = -vx_b · sin(ψ) · dt   ∂x_next/∂ψ  (sim integrates forward drive only)
+        F[1, 2] =  vx_b · cos(ψ) · dt   ∂y_next/∂ψ
+        F[3, 2] = -x_pred[4]             ∂ẋ_W_next/∂ψ = −ẏ_W_next  (uses ψ_next)
+        F[4, 2] =  x_pred[3]             ∂ẏ_W_next/∂ψ =  ẋ_W_next  (uses ψ_next)
+
+    Why vx_b and not −ẏ_W (which the continuous Euler formula gives): the simulator
+    only integrates position from the wheel-driven forward component vx_b; ICR lateral
+    velocity vy_b enters the velocity states (rows 3–4) but NOT the position update
+    (rows 0–1).  The body-frame forward speed vx_b is extracted from x_pred without
+    any extra arguments via the inverse rotation vx_b = ẋ_W_next·cos ψ_next + ẏ_W_next·sin ψ_next.
+
+    Columns 3–5 are zero for the same structural reason as jacobian_F_6d: the forward
+    model re-derives velocity from (q[0:3], u) and never reads q[3:6].
+    """
+    F = np.zeros((6, 6))
+    # Identity on the pose diagonal: position and heading propagate as q_next = q + f(q)*dt.
+    F[0, 0] = F[1, 1] = F[2, 2] = 1.0
+    # Body-frame forward speed: back-rotate world-frame velocities at ψ_next.
+    # This equals WHEEL_RADIUS*(ω_L+ω_R)/2 exactly; derived here to avoid an extra arg.
+    psi_n = float(x_pred[2])
+    vx_b = x_pred[3] * np.cos(psi_n) + x_pred[4] * np.sin(psi_n)
+    # Position rows: sim integrates only the forward drive component, so vy_b from ICR
+    # does not appear here (only in velocity rows 3–4).
+    F[0, 2] = -vx_b * np.sin(q[2]) * dt   # ∂x_next/∂ψ = −vx_b · sin(ψ) · dt
+    F[1, 2] = vx_b * np.cos(q[2]) * dt    # ∂y_next/∂ψ =  vx_b · cos(ψ) · dt
+    # Velocity rows use x_pred velocities for the exact discrete form: velocity at t+1
+    # is rotated into world frame using ψ_next, so ∂/∂ψ = −ẏ_W_next / +ẋ_W_next.
+    F[3, 2] = -x_pred[4]   # ∂ẋ_W_next/∂ψ
+    F[4, 2] = x_pred[3]    # ∂ẏ_W_next/∂ψ
+    return F
+
+
 def predict_q6d(
     q0: np.ndarray,
     u0: np.ndarray,
@@ -242,6 +292,14 @@ if __name__ == "__main__":
     print(F_ref)
     print(f"max |F_numerical - F_analytical| = {np.abs(F - F_ref).max():.2e}")
 
+    # Cross-check jacobian_F_6d_analytical against F_ref for test 1.
+    x_pred_t1 = predict_q6d(q0, u0, sim)
+    F_ana_t1 = jacobian_F_6d_analytical(q0, x_pred_t1, dt)
+    print("F (jacobian_F_6d_analytical) =")
+    print(F_ana_t1)
+    print(f"max |F_numerical - F_analytical_fn| = {np.abs(F - F_ana_t1).max():.2e}")
+    print(f"max |F_ref      - F_analytical_fn| = {np.abs(F_ref - F_ana_t1).max():.2e}")
+
     # -----------------------------------------------------------------------
     # Test 2: turning, ψ = π/4, differential wheel speeds.
     #
@@ -285,6 +343,17 @@ if __name__ == "__main__":
     print(F1_ref)
     print(f"max |F_numerical - F_analytical| = {np.abs(F1 - F1_ref).max():.2e}")
     print("(residual discrepancy in test 2 is expected: sim uses α>1 with mu=0.8)")
+
+    # Cross-check jacobian_F_6d_analytical for test 2.
+    sim_pred2 = ForwardSimulator(robot, solver, grid_params, batch_size=1, n_steps=1, device=DEVICE)
+    sim_pred2.set_terrain(elevation)
+    sim_pred2.set_uniform_friction(0.8)
+    x_pred_t2 = predict_q6d(q1, u1, sim_pred2)
+    F_ana_t2 = jacobian_F_6d_analytical(q1, x_pred_t2, dt)
+    print("F (jacobian_F_6d_analytical) =")
+    print(F_ana_t2)
+    print(f"max |F_numerical - F_analytical_fn| = {np.abs(F1 - F_ana_t2).max():.2e}")
+    print("(discrepancy driven by same α>1 difference as the F_ref comparison above)")
 
     # -----------------------------------------------------------------------
     # Test 3: non-flat ground — linear ramp sloping uphill in the +x direction.

@@ -40,6 +40,8 @@ windows:
           - <%= exec_sh %> bash -c '<%= ros %> && rviz2 -d "<%= repo %>/ros/helhest_stack_ros/rviz/elevation.rviz"; exec bash'
         - traj:
           - <%= exec_sh %> bash -c '<%= ros %> && python3 "<%= repo %>/ros/traj_logger.py"; exec bash'
+        - diag:
+          - <%= exec_sh %> bash -c '<%= ros %> && ros2 topic echo /ekf/diagnostics; exec bash'
   - shell:
       panes:
         - <%= exec_sh %> bash -c '<%= dev %>; exec bash'

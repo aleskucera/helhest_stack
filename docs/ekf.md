@@ -32,9 +32,7 @@ The kinematic model \(f\) and its Jacobian \(F\) are described in `docs/state_mo
 F = \begin{pmatrix} F_{3\times3} & \mathbf{0}_{3\times3} \\ F_{3\times3}^{vel} & \mathbf{0}_{3\times3} \end{pmatrix}
 \]
 
-This means perturbing the velocity sub-state has no effect on the next state, and the Jacobian computation only needs \(3 \times 2 = 6\) forward-simulation rollouts (one central-difference pair per position/heading dimension), run in a single batched GPU launch.
-
-On flat ground \(F\) can be written analytically (see `state_model_proper.md`). On real terrain it is computed numerically by `jacobian_F_6d` using central differences with perturbation \(\delta = 10^{-4}\).
+This means perturbing the velocity sub-state has no effect on the next state. On flat ground \(F\) is evaluated analytically by `jacobian_F_6d_analytical` (see `state_model_proper.md`). A numerical central-difference form (`jacobian_F_6d`, \(\delta = 10^{-4}\)) remains available for offline validation and nonflat terrain; the ROS EKF node uses the analytical path.
 
 ---
 
@@ -113,9 +111,9 @@ Only these three numbers enter the EKF as the measurement \(\mathbf{z}_\text{ICP
 ```
 frame t:
   1. PREDICT
-     x_pred  = predict_q6d(ekf.x, u_{t-1}, sim_pred)   # nonlinear f, GPU
-     F       = jacobian_F_6d(ekf.x, u_{t-1}, sim_jac)  # numerical ∂f/∂x, GPU
-     ekf.predict(F, x_pred)                             # P⁻ = F P Fᵀ + Q
+     x_pred  = predict_q6d(ekf.x, u_{t-1}, sim_pred)          # nonlinear f, GPU
+     F       = jacobian_F_6d_analytical(ekf.x, x_pred, DT)    # flat-ground ∂f/∂x
+     ekf.predict(F, x_pred)                                    # P⁻ = F P Fᵀ + Q
 
   2. ICP SEED & UPDATE  (if map available)
      T_pred  = se2_to_mat(ekf.x[0:3])                  # EKF → SE(3)
