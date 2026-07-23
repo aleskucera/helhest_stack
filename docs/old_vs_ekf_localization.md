@@ -238,10 +238,6 @@ The EKF predict step is driven by two inputs:
   corrections for the duration of the turn. Falls back to the wheel differential when
   no IMU samples are available.
 
-The previous design used the MPPI planner's commanded output (`_prev_cmd_model`),
-which diverged during bag replay because the live planner generated commands for a
-different trajectory than the one in the bag.
-
 ---
 
 ## EKF noise matrices and tunable parameters
@@ -322,15 +318,16 @@ physics model). This was verified by bag replay in July 2026.
 
 ## Debug topics (`publish_ekf_debug`)
 
-`elevation_node_ekf` publishes three informational topics when the ROS parameter
+`elevation_node_ekf` publishes four informational topics when the ROS parameter
 `publish_ekf_debug` is `true` (default).  Nothing in the stack subscribes to them;
 they exist purely for monitoring and tuning.
 
 | Topic | Type | Rate | Contents |
 |---|---|---|---|
+| `ekf/pose_pred` | `geometry_msgs/PoseStamped` | every frame | Planar x/y/ψ immediately after `ekf.predict()`, before the ICP measurement update. Same stamp as `ekf/odom` so a logger can pair the predict-only pose against the posterior. |
 | `ekf/odom` | `nav_msgs/Odometry` | every frame | Fused pose (EKF x/y/yaw, ICP z/roll/pitch), world-frame velocity rotated into base_frame, and the full 6×6 covariance blocks (z/roll/pitch diagonal = 1e6 sentinel — not filtered). |
 | `ekf/nis_icp` | `std_msgs/Float32` | accepted ICP frames only | Normalised Innovation Squared (NIS) of the ICP measurement update. |
-| `ekf/diagnostics` | `diagnostic_msgs/DiagnosticArray` | every frame | Per-frame scalar summary: `status`, `nis`, `innov_x_m`, `innov_y_m`, `innov_yaw_deg`, `r_scale`, `rms_residual_m`, `num_inliers`, `dt_ratio`, `consecutive_rejects`. Level `WARN` on rejected/sparse frames or when NIS exceeds the χ²(3) 99th percentile. |
+| `ekf/diagnostics` | `diagnostic_msgs/DiagnosticArray` | every frame | Per-frame scalar summary: `status`, `nis`, `innov_x_m`, `innov_y_m`, `innov_yaw_deg`, `r_scale`, `rms_residual_m`, `num_inliers`, `dt_ratio`, `consecutive_rejects`. Level `WARN` on rejected/sparse frames or when NIS exceeds the χ²(3) 99th percentile. Once a predict step has run this session, the message also carries covariance fields: `cov_pred_{x,y,psi,vx,vy,psidot}` and `cov_upd_{x,y,psi,vx,vy,psidot}` (per-state diagonal of P⁻ and P⁺), `cov_pred_trace`, `cov_pred_logdet`, `cov_upd_trace`, `cov_upd_logdet` (PSD-size scalars of the full matrix), and `cov_updated` (`"1"` when an ICP update was applied this frame, `"0"` for predict-only). |
 
 ### Reading NIS
 
