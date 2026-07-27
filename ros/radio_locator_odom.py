@@ -237,7 +237,7 @@ class Locator(Node):
         self.mount_height = self.get_parameter("mount_height").value
         self.max_msg_delay = self.get_parameter("max_msg_delay").value
         if not self.use_3d:
-            self.get_logger().warn(
+            self.get_logger().warning(
                 "radio localisation is set to operate just in the x-y plane"
             )
         self.br = TransformBroadcaster(self)
@@ -361,7 +361,7 @@ class Locator(Node):
 
     def intersectionPoint(self, guess, init, p_init):
         if self.use_aoa and self.heading_estimate is None:
-            self.get_logger().warn("No estimate available")
+            self.get_logger().warning("No estimate available")
             return None
         valid_ids = []
         x_t = []
@@ -409,7 +409,7 @@ class Locator(Node):
         if self.use_aoa:
             heading_age = t - self.heading_stamp
             if heading_age > self.max_msg_delay:
-                self.get_logger().warn(
+                self.get_logger().warning(
                     "AoA heading estimate is more than %.2f seconds old, disregarding it"
                     % self.max_msg_delay
                 )
@@ -492,7 +492,7 @@ class Locator(Node):
     def publish_pose(self):
         for id in self.ids:
             if np.isnan(self.ranges[id]):
-                self.get_logger().warn("missing data")
+                self.get_logger().warning("missing data")
                 return
 
         # find the intersection point (BODY frame -- the anchors are defined in fixed_frame/locator)
@@ -521,7 +521,7 @@ class Locator(Node):
             init = True
         x = self.intersectionPoint(self.last_pos, init, p_init)
         if x is None:
-            self.get_logger().warn("intersection point not found")
+            self.get_logger().warning("intersection point not found")
             return
         if not self.use_3d:
             x = np.concatenate((x, np.array([self.mount_height])))
@@ -532,7 +532,7 @@ class Locator(Node):
         # point into odom). Skip this cycle if the TF isn't available yet (elevation stack down).
         filt_T_loc = get_transform(self, self.tf_buffer, self.filter_frame, self.fixed_frame)
         if filt_T_loc is None:
-            self.get_logger().warn(
+            self.get_logger().warning(
                 f"no TF {self.filter_frame}<-{self.fixed_frame}, skipping this estimate",
                 throttle_duration_sec=2.0,
             )
