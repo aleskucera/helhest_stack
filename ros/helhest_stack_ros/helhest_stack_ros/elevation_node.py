@@ -525,7 +525,12 @@ class ElevationNode(Node):
         # vertical obstacles (sticks/poles) that the robot's settle STRADDLES between its wheel/belly
         # contacts -- those read traversable for most headings, so the router drives through them.
         # 0 = off (settle-only). ~0.2 blocks a stick the robot can't drive over. See costtogo _step_gate.
-        d("plan_obstacle_step_m", 0.2)
+        # OPT-IN (default off) until the blind-cell interaction is fixed: relev_mem fills unmeasured
+        # cells with 0.0 while the ground sits at -footprint_robot_height, so every blind/measured
+        # frontier reads as a ~0.4 m step and hard-blocks -- a closed ring around the robot whenever
+        # the map does not fill the routing window. Set 0.2 AT LAUNCH to re-enable -- a runtime
+        # `param set` does NOT take: not in _PLAN_BUILD, and the gate is baked into the CUDA graph.
+        d("plan_obstacle_step_m", 0.0)
         d("plan_nominal_reset", 1.5)  # nominal wheel speed the planner seeds from
         # MPPI speed knobs (rebuild the planner on change): the robot drives slow because the cost
         # balance prefers it. Raise goal_running (reward progress) and/or lower effort (penalty on
