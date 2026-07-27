@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""EKF predict vs update logger — trajectory and/or covariance report.
+"""EKF predict vs update logger — trajectory, covariance, and/or predict-input report.
 
 Subscribes to:
   /ekf/pose_pred    — planar x/y/ψ after the EKF predict step (PoseStamped)      [traj]
   /ekf/odom         — fused pose after the ICP measurement update (Odometry)      [traj]
   /ekf/diagnostics  — per-frame scalar summary incl. covariance kv pairs          [cov]
+                      and EKF predict wheel speeds + gyro_z (model order)           [cmd]
 
-On Ctrl-C: writes CSV(s) and opens matplotlib figure(s) for each active report.
+On Ctrl-C: writes CSV(s) and opens matplotlib figure(s) for traj/cov (cmd has no plot).
+
+The cmd CSV (t_sec, omega_l, omega_r, omega_rear, gyro_z) feeds
+helhest.reference.lin_model_simulation for open-loop predict replay.
 
 Usage inside the ekf-demo tmuxinator session (ROS sourced):
 
     python3 ros/ekf_traj_logger.py                   # --report all (default)
     python3 ros/ekf_traj_logger.py --report traj
     python3 ros/ekf_traj_logger.py --report cov
+    python3 ros/ekf_traj_logger.py --report cmd
 """
 
 from __future__ import annotations
@@ -435,6 +440,57 @@ class EkfCovLogger(Node):
 
 
 # ---------------------------------------------------------------------------
+# Predict-input report (open-loop sim replay)
+# ---------------------------------------------------------------------------
+
+
+class EkfCmdLogger(Node):
+    """Subscribes to ekf/diagnostics and buffers per-frame EKF predict inputs."""
+
+    def __init__(self, out: pathlib.Path) -> None:
+        super().__init__("ekf_cmd_logger")
+        self._out = out
+        self._rows: list[tuple[float, float, float, float, float]] = []
+        self.create_subscription(DiagnosticArray, "ekf/diagnostics", self._on_diag, 50)
+        self.get_logger().info(f"cmd: /ekf/diagnostics  →  {out}")
+
+    def _on_diag(self, msg: DiagnosticArray) -> None:
+        if not msg.status:
+            return
+        kv_map = {kv.key: kv.value for kv in msg.status[0].values}
+        if "omega_l" not in kv_map:
+            return
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        try:
+            omega_l = float(kv_map["omega_l"])
+            omega_r = float(kv_map["omega_r"])
+            omega_rear = float(kv_map["omega_rear"])
+        except (KeyError, ValueError):
+            return
+        gz_raw = kv_map.get("gyro_z", "n/a")
+        gyro_z = float("nan") if gz_raw == "n/a" else float(gz_raw)
+        self._rows.append((t, omega_l, omega_r, omega_rear, gyro_z))
+
+    def flush(self) -> None:
+        if not self._rows:
+            self.get_logger().warn(
+                "No predict-input frames — cmd CSV not written.  "
+                "Check publish_ekf_debug on elevation_node_ekf."
+            )
+            return
+        self._out.parent.mkdir(parents=True, exist_ok=True)
+        with self._out.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["t_sec", "omega_l", "omega_r", "omega_rear", "gyro_z"])
+            writer.writerows(self._rows)
+        self.get_logger().info(f"Wrote {len(self._rows)} cmd frames to {self._out}")
+
+    @property
+    def rows(self) -> list[tuple[float, float, float, float, float]]:
+        return self._rows
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -442,55 +498,83 @@ class EkfCovLogger(Node):
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Log EKF state and/or covariance and plot on exit.  "
-            "--report traj|cov|all (default: all)"
+            "Log EKF state, covariance, and/or predict inputs; plot traj/cov on exit.  "
+            "--report traj|cov|cmd|all (default: all)"
         )
     )
     parser.add_argument("--out", default=None, help="Base path for CSV output (no extension).")
     parser.add_argument(
         "--report",
-        choices=["traj", "cov", "all"],
+        choices=["traj", "cov", "cmd", "all"],
         default="all",
-        help="Which reports to produce: traj (x/y/ψ timeline), cov (covariance), all (both).",
+        help=(
+            "Which reports: traj (x/y/ψ timeline), cov (covariance), "
+            "cmd (wheel+gyro for lin_model_simulation), all (three CSVs)."
+        ),
     )
     args, ros_args = parser.parse_known_args()
 
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_dir = pathlib.Path.home() / "bags"
+    base_dir = pathlib.Path(__file__).resolve().parents[1] / "data"
 
     do_traj = args.report in ("traj", "all")
-    do_cov  = args.report in ("cov",  "all")
+    do_cov = args.report in ("cov", "all")
+    do_cmd = args.report in ("cmd", "all")
+    n_reports = sum((do_traj, do_cov, do_cmd))
+
+    traj_out: pathlib.Path | None = None
+    cov_out: pathlib.Path | None = None
+    cmd_out: pathlib.Path | None = None
 
     if args.out:
         base = pathlib.Path(args.out).expanduser()
-        traj_out = base.with_suffix("") if do_traj else None
-        cov_out  = base.with_suffix("") if do_cov  else None
-        if do_traj and do_cov:
-            traj_out = pathlib.Path(str(base) + "_traj.csv")
-            cov_out  = pathlib.Path(str(base) + "_cov.csv")
-        elif do_traj:
-            traj_out = base.with_suffix(".csv")
+        if n_reports == 1:
+            single = base if base.suffix == ".csv" else base.with_suffix(".csv")
+            if do_traj:
+                traj_out = single
+            elif do_cov:
+                cov_out = single
+            else:
+                cmd_out = single
         else:
-            cov_out = base.with_suffix(".csv")
+            stem = base.with_suffix("")
+            if do_traj:
+                traj_out = pathlib.Path(str(stem) + "_traj.csv")
+            if do_cov:
+                cov_out = pathlib.Path(str(stem) + "_cov.csv")
+            if do_cmd:
+                cmd_out = pathlib.Path(str(stem) + "_cmd.csv")
     else:
-        traj_out = base_dir / f"ekf_traj_{ts}.csv" if do_traj else None
-        cov_out  = base_dir / f"ekf_cov_{ts}.csv"  if do_cov  else None
+        if do_traj:
+            traj_out = base_dir / f"ekf_traj_{ts}.csv"
+        if do_cov:
+            cov_out = base_dir / f"ekf_cov_{ts}.csv"
+        if do_cmd:
+            cmd_out = base_dir / f"ekf_cmd_{ts}.csv"
 
     rclpy.init(args=ros_args or None)
 
     traj_node: EkfTrajLogger | None = None
-    cov_node:  EkfCovLogger  | None = None
+    cov_node: EkfCovLogger | None = None
+    cmd_node: EkfCmdLogger | None = None
 
     if do_traj:
+        assert traj_out is not None
         traj_node = EkfTrajLogger(out=traj_out)
     if do_cov:
+        assert cov_out is not None
         cov_node = EkfCovLogger(out=cov_out)
+    if do_cmd:
+        assert cmd_out is not None
+        cmd_node = EkfCmdLogger(out=cmd_out)
 
     executor = rclpy.executors.SingleThreadedExecutor()
     if traj_node:
         executor.add_node(traj_node)
     if cov_node:
         executor.add_node(cov_node)
+    if cmd_node:
+        executor.add_node(cmd_node)
 
     try:
         executor.spin()
@@ -501,14 +585,18 @@ def main() -> None:
             traj_node.flush()
         if cov_node:
             cov_node.flush()
+        if cmd_node:
+            cmd_node.flush()
         traj_rows = traj_node.rows if traj_node else []
-        cov_rows  = cov_node.rows  if cov_node  else []
+        cov_rows = cov_node.rows if cov_node else []
         executor.shutdown()
         rclpy.try_shutdown()
 
     if do_traj:
+        assert traj_out is not None
         _plot_traj(traj_rows, traj_out)
     if do_cov:
+        assert cov_out is not None
         _plot_cov(cov_rows, cov_out)
 
 

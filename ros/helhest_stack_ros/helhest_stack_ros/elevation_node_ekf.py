@@ -1255,6 +1255,8 @@ class ElevationNode(Node):
                     icp_r_scale,
                     dt_ratio,
                     cloud_msg.header.stamp,
+                    u,
+                    omega_z,
                 )
 
             # A single reject just uses the fallback pose (the map keeps accumulating). Only
@@ -1929,10 +1931,12 @@ class ElevationNode(Node):
         r_scale: float | None,
         dt_ratio: float,
         stamp,
+        u: np.ndarray,
+        omega_z: float | None,
     ) -> None:
         """Publish post-update EKF debug topics for this frame (pose_pred is published earlier)."""
         self._publish_ekf_odom(world_T_base, stamp)
-        self._publish_ekf_diag(outcome, nis, innov, r_scale, dt_ratio, stamp)
+        self._publish_ekf_diag(outcome, nis, innov, r_scale, dt_ratio, stamp, u, omega_z)
         if nis is not None:
             self.pub_ekf_nis.publish(Float32(data=float(nis)))
 
@@ -2037,6 +2041,8 @@ class ElevationNode(Node):
         r_scale: float | None,
         dt_ratio: float,
         stamp,
+        u: np.ndarray,
+        omega_z: float | None,
     ) -> None:
         """Publish diagnostic_msgs/DiagnosticArray with per-frame EKF scalar summary.
 
@@ -2055,6 +2061,8 @@ class ElevationNode(Node):
           num_inliers       — ICP inlier count
           dt_ratio          — real inter-cloud dt / model DT (1.0 = on-time)
           consecutive_rejects — sustained reject counter (triggers map reset at threshold)
+          omega_l, omega_r, omega_rear — EKF predict wheel speeds [rad/s], model order
+          gyro_z            — window-mean base-frame yaw rate [rad/s], or "n/a" (wheel model)
 
           Covariance fields (present when publish_ekf_debug is true):
           cov_pred_{x,y,psi,vx,vy,psidot} — diagonal of P⁻ (after predict, before update)
@@ -2089,6 +2097,10 @@ class ElevationNode(Node):
             kv("num_inliers", str(outcome.num_inliers)),
             kv("dt_ratio", f"{dt_ratio:.3f}"),
             kv("consecutive_rejects", str(self._consecutive_rejects)),
+            kv("omega_l", f"{float(u[0]):.6g}"),
+            kv("omega_r", f"{float(u[1]):.6g}"),
+            kv("omega_rear", f"{float(u[2]):.6g}"),
+            kv("gyro_z", f"{omega_z:.6g}" if omega_z is not None else "n/a"),
         ]
         # Covariance diagnostics — appended only when P_pred was captured this frame.
         # P_pred = P⁻ (after predict, before update); self.ekf.P = P⁺ (after update, or P⁻

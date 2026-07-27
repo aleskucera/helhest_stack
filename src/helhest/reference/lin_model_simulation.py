@@ -26,9 +26,13 @@ from helhest.model import WHEEL_RADIUS
 # ---------------------------------------------------------------------------
 # Knobs — edit these to change input source and simulator tuning.
 # ---------------------------------------------------------------------------
-INPUT_CSV: pathlib.Path | None = None
+INPUT_CSV: pathlib.Path | None = "data/ekf_cmd_20260727_155452.csv"
 DEVICE: str = "cuda:0"
-INIT_POSE: tuple[float, float, float] = (0.0, 0.0, 0.0)  # x, y, psi [m, m, rad]
+# INIT_POSE is the world-frame starting pose [x, y, ψ] in metres and radians.
+# Set to None (default) to read it automatically from the companion ekf_traj_*
+# CSV (same directory, same timestamp suffix) — first row's updated pose.
+# Override manually when you want to force a specific start pose.
+INIT_POSE: tuple[float, float, float] | None = None # None = read from ekf_traj CSV
 FRICTION: float = 0.8
 K_TURN: float = dynamics.K_TURN_INDOOR  # matches elevation_node_ekf _build_ekf default
 ROS_JOINT_ORDER: bool = False  # True if CSV columns are ROS [omega_l, omega_rear, omega_r]
@@ -194,6 +198,8 @@ def simulate(
     dt0 = float(t_sec[1] - t_sec[0]) if len(t_sec) > 1 else dynamics.DT
     t_hist[0] = float(t_sec[0]) - dt0
     t_hist[1:] = t_sec[:t_steps]
+    # Plot / dashboard use time relative to the first sample (CSV stores absolute ROS stamps).
+    t_hist -= t_hist[0]
 
     return t_hist, states, sigmas
 
@@ -363,14 +369,79 @@ def _verify_synthetic(states: np.ndarray, u: np.ndarray, gyro_z: np.ndarray) -> 
     print(f"[verify] alpha={alpha:.2f}: wheel yaw rate {wz_wheel:.3f} vs ideal {wz_ideal:.3f} rad/s")
 
 
+def _traj_first_pose(traj_path: pathlib.Path) -> tuple[float, float, float, float] | None:
+    """First row of an ekf_traj CSV as (t_sec, x, y, psi), or None if unreadable."""
+    try:
+        row = np.genfromtxt(traj_path, delimiter=",", names=True, max_rows=1)
+        return (
+            float(row["t_sec"]),
+            float(row["x_upd_m"]),
+            float(row["y_upd_m"]),
+            float(row["psi_upd_rad"]),
+        )
+    except (ValueError, KeyError, OSError):
+        return None
+
+
+def _resolve_init_pose(
+    cmd_path: pathlib.Path,
+    t_start: float,
+    override: tuple[float, float, float] | None,
+) -> tuple[float, float, float]:
+    """Initial world pose [x, y, psi] for a real-data CSV run.
+
+    `override` (INIT_POSE) wins when set. Otherwise find the companion ekf_traj
+    CSV and take its first row's fused pose. Matching is on the first `t_sec`,
+    not the filename: cmd and traj are often logged in separate sessions
+    replaying the same bag, so the filename timestamps differ while the bag
+    stamps are identical. Falls back to (0, 0, 0) with a warning.
+
+    Heading matters most here — x/y only translate the path, but a wrong psi
+    rotates the whole trajectory.
+    """
+    if override is not None:
+        return override
+
+    cmd_path = pathlib.Path(cmd_path)
+    candidates = sorted(cmd_path.parent.glob("ekf_traj_*.csv"))
+    # Same bag segment => identical first cloud stamp. Tolerance covers the
+    # bootstrap frame the cmd log skips (traj starts one frame earlier).
+    best: tuple[float, pathlib.Path, tuple[float, float, float]] | None = None
+    for traj_path in candidates:
+        first = _traj_first_pose(traj_path)
+        if first is None:
+            continue
+        t_traj, x, y, psi = first
+        dt = abs(t_traj - t_start)
+        if dt < 1.0 and (best is None or dt < best[0]):
+            best = (dt, traj_path, (x, y, psi))
+
+    if best is not None:
+        _dt, traj_path, pose = best
+        print(
+            f"[init_pose] matched {traj_path.name} on bag stamp: "
+            f"x={pose[0]:.3f} y={pose[1]:.3f} psi={np.rad2deg(pose[2]):.1f} deg"
+        )
+        return pose
+
+    print(
+        f"[init_pose] no ekf_traj_*.csv in {cmd_path.parent} starts at t={t_start:.3f} "
+        f"(checked {len(candidates)}) - using (0, 0, 0). "
+        "Set INIT_POSE manually; a wrong start heading rotates the whole path."
+    )
+    return (0.0, 0.0, 0.0)
+
+
 def main() -> None:
     if INPUT_CSV is not None:
-        t_sec, u, gyro_z = load_commands(INPUT_CSV)
+        t_sec, u, gyro_z = load_commands(pathlib.Path(INPUT_CSV))
+        init_pose = _resolve_init_pose(pathlib.Path(INPUT_CSV), float(t_sec[0]), INIT_POSE)
     else:
         t_sec, u, gyro_z = synthetic_commands()
+        init_pose = INIT_POSE if INIT_POSE is not None else (0.0, 0.0, 0.0)
 
     sim = build_predict_sim(DEVICE, FRICTION, K_TURN)
-    t_hist, states, sigmas = simulate(t_sec, u, gyro_z, sim, INIT_POSE)
+    t_hist, states, sigmas = simulate(t_sec, u, gyro_z, sim, init_pose)
 
     if INPUT_CSV is None:
         assert gyro_z is not None
