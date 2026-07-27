@@ -534,8 +534,8 @@ class ElevationNode(Node):
         d("plan_turn", 0.03)
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
         # NEVER commands above this regardless of the cost. This is the real top-speed knob.
-        # ~1.4 m/s at 4.0; ~1.75 m/s at 5.0 (r=0.35). With the /cmd_joints unit fix in _publish_cmd
-        # active, plan_wmax maps to the REAL wheel speed.
+        # ~1.4 m/s at 4.0; ~1.75 m/s at 5.0 (r=0.35). plan_wmax maps to the REAL wheel speed -- the
+        # LLC consumes /cmd_joints as wheel rad/s (see _publish_cmd).
         # TURNING HEADROOM (2026-07-15): the motor ceiling is ~5.3 rad/s. Post-fix bags showed the
         # turn differential is realized ~1:1 BELOW the ceiling but collapses as the wheels approach it
         # (the outer wheel mean+diff/2 pegs). So keep plan_wmax a notch BELOW the ceiling (4.0) -- both
@@ -1448,21 +1448,15 @@ class ElevationNode(Node):
     def _publish_cmd(self, cmd: np.ndarray) -> None:
         """Publish the conditioned [left, rear, right] wheel command to /cmd_joints.
 
-        `cmd` is in WHEEL rad/s (the planner/model convention). The LLC, however, consumes
-        /cmd_joints as MOTOR rev/s and internally does wheel_rad/s = cmd * 2*pi / 22.5 -- so it
-        under-drives everything by 22.5/(2*pi) ~= 3.58x. Until the LLC is fixed we compensate here by
-        converting wheel rad/s -> motor rev/s on the way out (see the TEMPORARY block below).
+        `cmd` is in WHEEL rad/s (the planner/model convention) and the LLC now consumes /cmd_joints
+        as wheel rad/s directly, so we publish it as-is. (Before 2026-07-27 the LLC misread the
+        command as motor rev/s and we scaled by 22.5/(2*pi); that compensation was dropped once the
+        LLC was fixed -- verified on the robot: realized wheel speed == commanded.)
 
         Stamped with the current clock (not the sensor stamp) so an LLC deadman sees a fresh
         command. VELOCITY ONLY: position/effort are left empty. Filling them with inf breaks
         serialization across the micro-ROS/XRCE bridge, so the LLC never receives the command
         (found live on the robot 2026-07-10)."""
-        # ===== TEMPORARY: /cmd_joints unit compensation -- REMOVE when the LLC is fixed =====
-        # The LLC misreads /cmd_joints as motor rev/s. Convert our wheel rad/s to motor rev/s so the
-        # realized wheel speed matches intent: motor_rps = wheel_rad_s * gearbox / (2*pi), gearbox=22.5.
-        # When the LLC is changed to accept wheel rad/s, delete this line (publish `cmd` directly).
-        cmd = cmd * (22.5 / (2.0 * np.pi))
-        # ===================================================================================
         m = JointState()
         m.header.stamp = self.get_clock().now().to_msg()
         m.name = list(JOINT_NAMES)
