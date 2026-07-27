@@ -108,6 +108,7 @@ _EZ = np.array([0.0, 0.0, 1.0], dtype=np.float64)  # world up
 
 _IMU_BUFFER_LEN = 500  # ~5 s of 100 Hz IMU — enough to bracket any cloud stamp
 _IMU_MAX_EXTRAP_S = 0.05  # fall back to odom if no IMU sample within this of the cloud stamp
+_JOINT_STATES_STALE_S = 15  # warn if no valid /joint_states for this long
 
 # ---------------------------------------------------------------------------
 # EKF tuning — the single place to read / tweak the noise model (mirrors
@@ -327,6 +328,7 @@ class ElevationNode(Node):
         self._world_T_base: np.ndarray | None = None  # last fused pose (SE(3)), the splice ref
         # Last measured wheel speeds [ω_L, ω_R, ω_rear] from /joint_states — the EKF predict input.
         self._prev_meas_wheel = np.zeros(3, np.float64)
+        self._joint_states_mono: float | None = None  # time.monotonic() of last valid JointState
         # Stamp of the last *processed* cloud [s], used to measure the real inter-cloud dt.
         # None until the first scan is processed.
         self._prev_cloud_t: float | None = None
@@ -1064,6 +1066,13 @@ class ElevationNode(Node):
             self._prev_meas_wheel = np.array(
                 [msg.velocity[0], msg.velocity[2], msg.velocity[1]], dtype=np.float64
             )
+            self._joint_states_mono = time.monotonic()
+            return
+        self.get_logger().warn(
+            f"{self.get_parameter('joints_topic').value} has {len(msg.velocity)} velocities "
+            f"(need >= 3) — EKF predict u unchanged",
+            throttle_duration_sec=5.0,
+        )
 
     def _synced_callback(self, cloud_msg: PointCloud2, odom_msg: Odometry) -> None:
         try:
@@ -1150,6 +1159,21 @@ class ElevationNode(Node):
                 self._prev_cloud_t if self._prev_cloud_t is not None else t_cloud,
                 t_cloud,
             )
+            now_mono = time.monotonic()
+            topic = self.get_parameter("joints_topic").value
+            if self._joint_states_mono is None:
+                self.get_logger().warn(
+                    f"no {topic} yet — EKF predict uses u=[0,0,0]; "
+                    f"translation prior will be wrong until joint_states arrives",
+                    throttle_duration_sec=5.0,
+                )
+            elif now_mono - self._joint_states_mono > _JOINT_STATES_STALE_S:
+                age = now_mono - self._joint_states_mono
+                self.get_logger().warn(
+                    f"{topic} stale ({age:.1f}s > {_JOINT_STATES_STALE_S}s) — "
+                    f"EKF predict holding last u={self._prev_meas_wheel}",
+                    throttle_duration_sec=5.0,
+                )
             u = self._prev_meas_wheel
             off_x, off_y = float(self.ekf.x[0]), float(self.ekf.x[1])
             q_local = self.ekf.x.copy()
