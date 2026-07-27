@@ -11,8 +11,8 @@ import numpy as np
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # BAG 0
-TRAJ_A_CSV: pathlib.Path = _REPO_ROOT / "data" / "traj_20260723_095447.csv"
-TRAJ_B_CSV: pathlib.Path = _REPO_ROOT / "data" / "ekf_traj_20260723_164718.csv"     # EKF
+# TRAJ_A_CSV: pathlib.Path = _REPO_ROOT / "data" / "traj_20260723_095447.csv"
+# TRAJ_B_CSV: pathlib.Path = _REPO_ROOT / "data" / "ekf_traj_20260723_164718.csv"     # EKF
 
 # BAG 1
 #TRAJ_A_CSV: pathlib.Path = _REPO_ROOT / "data" / "traj_20260722_155940.csv"
@@ -22,14 +22,18 @@ TRAJ_B_CSV: pathlib.Path = _REPO_ROOT / "data" / "ekf_traj_20260723_164718.csv" 
 # TRAJ_A_CSV: pathlib.Path = _REPO_ROOT / "data" / "traj_20260720_142618.csv"
 # TRAJ_B_CSV: pathlib.Path = _REPO_ROOT / "data" / "traj_20260722_131017.csv"     # EKF
 
+# BAG 3
+TRAJ_A_CSV: pathlib.Path = _REPO_ROOT / "data" / "traj_20260727_133747.csv"
+TRAJ_B_CSV: pathlib.Path = _REPO_ROOT / "data" / "ekf_traj_20260727_141522.csv"     # EKF
+
 LABEL_A: str = "old localization"
 LABEL_B: str = "ekf"
 
 # Show a third trajectory from the EKF predict (pre-update) state.
-SHOW_EKF_PRED: bool = True
+SHOW_EKF_PRED: bool = False
 LABEL_PRED: str = "ekf pred"
 
-TITLE = "ROSBAG 0"
+TITLE = "out_experiment_follow3"
 # ---------------------------------------------------------------------------
 
 # EKF CSV columns: t_sec,x_pred_m,y_pred_m,psi_pred_rad,x_upd_m,y_upd_m,psi_upd_rad

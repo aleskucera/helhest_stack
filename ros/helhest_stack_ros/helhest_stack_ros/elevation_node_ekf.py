@@ -501,15 +501,15 @@ class ElevationNode(Node):
         # at 25 only ~24%. A moving obstacle's vacated spot is seen-through CONSECUTIVELY (open
         # ground, never re-hit), so its trail still carves — measured unchanged 8->25. Cost: a
         # vacated spot lingers ~2.5 s (25 frames @ 10 Hz) before clearing. Makes the frontier safe.
-        d("carve_persist_frames", 25)
+        d("carve_persist_frames", 5)
         # Age out a BETWEEN-BEAM speck: a map point on a bearing no beam reached, but whose
         # NEIGHBOURS were scanned, is dropped after this many frames (0 disables). Gated to NEAR +
         # IN-FRONT space (the two params below): ungated, the coarse-elevation gap test erased 37%
         # of the map (72% of structure past 8 m) — a distant real point lands in an empty el-bin
         # (128 bins / 180° = 1.4°/bin vs the ~0.35° beam pitch) and reads as a gap — plus the
         # wheel-occlusion shadows off to the sides. Near+front confines it to the path specks.
-        d("carve_gap_frames", 8)
-        d("carve_gap_max_range_m", 2.5)  # only gap-carve within this range (0 = no range gate)
+        d("carve_gap_frames", 4)
+        d("carve_gap_max_range_m", 10.0)  # only gap-carve within this range (0 = no range gate)
         # Only gap-carve within this half-cone (deg) of the robot heading; excludes the wheel
         # shadows (~55-87° off heading) and the rear. 0 = no forward gate (carve all around).
         d("carve_gap_fwd_deg", 45.0)
@@ -517,7 +517,7 @@ class ElevationNode(Node):
         d("dynamic_el_bins", 128)
         d("dynamic_el_min_deg", -90.0)  # full hemisphere (world-frame binning, robust to mount)
         d("dynamic_el_max_deg", 90.0)
-        d("dynamic_margin_m", 0.3)  # carve only if the scan is farther by this + range*margin_rel
+        d("dynamic_margin_m", 0.1)  # carve only if the scan is farther by this + range*margin_rel
         d("dynamic_margin_rel", 0.05)  # range-proportional slack; absorbs angular-bin quantization
         #                                on slanted/radial walls that else reads as seen-through
         d("dynamic_min_range_m", 0.5)
@@ -656,10 +656,15 @@ class ElevationNode(Node):
         # Small enough that a genuine need to turn still wins; >~0.1 starts refusing hard turns.
         d("plan_turn", 0.03)
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
-        # NEVER commands above this regardless of the cost -- raising goal_running does nothing once
-        # it saturates at plan_wmax. This is the real top-speed knob. Keep <= the motor safe max
-        # (plan_max_omega, the output clamp). ~1.4 m/s at 4.0; ~2.8 m/s at 8.0; ~3.5 m/s at 10.0 (r=0.35).
-        d("plan_wmax", 10.0)  # max per-wheel omega the planner may command [rad/s]
+        # NEVER commands above this regardless of the cost. This is the real top-speed knob.
+        # ~1.4 m/s at 4.0; ~1.75 m/s at 5.0 (r=0.35). plan_wmax maps to the REAL wheel speed -- the
+        # LLC consumes /cmd_joints as wheel rad/s (see _publish_cmd).
+        # TURNING HEADROOM (2026-07-15): the motor ceiling is ~5.3 rad/s. Post-fix bags showed the
+        # turn differential is realized ~1:1 BELOW the ceiling but collapses as the wheels approach it
+        # (the outer wheel mean+diff/2 pegs). So keep plan_wmax a notch BELOW the ceiling (4.0) -- both
+        # wheels then stay <5.3 even in a turn, so the differential survives. Trades ~0.35 m/s of top
+        # speed for reliable turning. (The turn "defect" was mostly this saturation, not a fixed gain.)
+        d("plan_wmax", 4.0)  # max per-wheel omega the planner may command [rad/s] -- below the ceiling
         # STRAIGHT sampling prior: fraction of MPPI candidates drawn as zero-differential (straight
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
@@ -678,14 +683,17 @@ class ElevationNode(Node):
         d("plan_actuate", True)  # publish /cmd_joints wheel commands
         d("cmd_topic", "/cmd_joints")  # JointState wheel-velocity command topic (to the LLC)
         d("joints_topic", "/joint_states")  # measured wheel-velocity feedback from LLC
-        d(
-            "plan_max_omega", 10.0
-        )  # hard cap on |wheel velocity| [rad/s] -- set to the motor safe max
-        d("plan_max_slew", 50.0)  # hard cap on |d(cmd)/dt| per wheel [rad/s^2]
-        # amplify the commanded turn differential to compensate the drivetrain (motors realize only
-        # ~half the commanded wheel-speed difference outdoors). 1.0 = off; ~2.0 recovers the loss.
-        # HOTFIX for a motor-control defect -- see docs/turn_differential_hotfix.md.
-        d("plan_turn_boost", 2.0)
+        d("plan_max_omega", 5.0)  # hard cap on |wheel velocity| [rad/s] -- the motor safe max (~5, see plan_wmax)
+        # hard cap on |d(cmd)/dt| per wheel [rad/s^2]. At DT=0.1s the command may change by
+        # max_slew*0.1 per step; 50 let it jump 0->cruise in ONE step (harsh launch, ~5 m/s^2). 6.0
+        # ramps 0->~1.3 m/s cruise over ~0.65s (ground ~2.1 m/s^2) -- softer start/stop, still responsive.
+        d("plan_max_slew", 6.0)
+        # amplify the commanded turn differential. 1.0 = off. REVISED 2026-07-15: post-fix bags showed
+        # the differential is realized ~1:1 below the motor ceiling -- the earlier "~half" was SATURATION
+        # (over-commanded wheels), not a real drivetrain gain. So boosting over-turns below the limit and
+        # worsens saturation at it. Keep at 1.0 now that plan_wmax leaves turning headroom; the fixed-2.0
+        # story in docs/turn_differential_hotfix.md is superseded.
+        d("plan_turn_boost", 1.0)
         # OPTIONAL: self-tune plan_turn_boost online from gyro feedback (control/turn_adapt.py) so the
         # realized yaw matches the plan across terrains + the drivetrain defect -- makes the fixed
         # plan_turn_boost adaptive. False = off (use the fixed value above). When on, plan_turn_boost
