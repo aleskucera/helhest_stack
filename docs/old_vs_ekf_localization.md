@@ -75,99 +75,162 @@ placed into the map exactly where ICP put it.
 
 ## `elevation_node_ekf` — odom + ICP + EKF physics filter
 
+Steps are sequential in code order. "State carried across frames" shows what
+each step reads from / writes to persistent fields.
+
+**Pipeline rate:** the entire per-frame pipeline runs once per incoming lidar
+cloud — **10 Hz** (DT = 0.1 s, confirmed in `dynamics.py` and referenced in
+comments at lines 503 and 536 of `elevation_node_ekf.py`). IMU samples arrive
+at ~100 Hz and are buffered; they are consumed in bulk inside each 10 Hz frame
+(gyro integration for deskew + yaw-rate mean for EKF predict). The odom TF
+broadcast runs at the full wheel-odom rate (higher than 10 Hz) so `base_link`
+stays dense for TF lookups between frames.
+
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  Per-frame inputs: odom_msg, cloud_msg, imu_buffer, _prev_meas_wheel         │
-└─────────────────────────────────────────────┬────────────────────────────────┘
-                                              │
-               ┌──────────────────────────────┴─────────────────────────────┐
-               │  (A) MOTION PREDICTION — two independent paths             │
-               └──────────────────────────────┬─────────────────────────────┘
-                                              │
-          ┌──────────────────┐    ┌───────────┴──────────────────────┐
-          │ localizer.       │    │  EKF predict step                │
-          │ predict()        │    │                                  │
-          │                  │    │  u  = _prev_meas_wheel           │
-          │  odom Δ trans    │    │       (measured /joint_states)   │
-          │  gyro Δ rot      │    │  ωz = _gyro_wz_mean(t0, t1)     │ ← IMU gyro (slip-immune)
-          │                  │    │       fallback: wheel diff       │
-          │                  │    │  x_pred = predict_q6d(ekf.x,    │
-          │  → world_T_base  │    │             u, omega_z=ωz)       │
-          │    _pred         │    │  F = jacobian_F_6d_analytical(  │
-          │  → sweep_delta   │    │             ekf.x, x_pred, DT)   │
-          └────────┬─────────┘    │  r = clamp(dt/DT, 0.5, 3.0)     │  ← dt from cloud stamps
-                   │              │  scale Δxy,Δψ,F[0:2,2] by r     │
-                   │              │  ekf.predict(F,x_pred,q_scale=r) │
-                   │              │   → ekf.x updated (x,y,ψ,ẋ,ẏ,ψ̇)│
-                   │              │   → ekf.P updated  (Q×r growth)  │
-                   │              └──────────────────────────────────┘
-                   │  world_T_base_pred  (EKF-fused prev pose ⊕ odom Δ)
-                   │  sweep_delta        (odom Δ only — used to deskew)
-                   ▼
-          ┌───────────────────────┐
-          │  Scan pre-processing  │
-          │  (identical to plain) │
-          └──────────┬────────────┘
-                     │  scan_wp
-                     ▼
-          ┌───────────────────────────────────────┐
-          │  localizer.update()  — ICP             │
-          │                                       │
-          │  seed:    world_T_base_pred            │  ← EKF-fused prev ⊕ odom Δ
-          │  target:  map_wp                       │
-          │  prior:   gravity_up                   │
-          │                                       │
-          │  → outcome.pose  (or fallback)         │
-          └──────────┬────────────────────────────┘
-                     │
-              ┌──────┴──────────────────────────────────────────────────┐
-              │  (B) EKF MEASUREMENT UPDATE                             │
-              │                                                         │
-              │  if outcome.status == "ok":                             │
-              │    z   = [x_icp, y_icp, ψ_icp]   ← absolute ICP pose  │
-              │    rms = outcome.rms_residual_m                         │
-              │    scale = max((rms/rms_nom)² × (N_nom/N_inl), 0.25)  │
-              │    R_adaptive = R_ICP × scale     ← adaptive noise      │
-              │                                                         │
-              │    ekf.update_icp(z, R=R_adaptive)                     │
-              │     S = H P⁻ Hᵀ + R_adaptive                          │
-              │     y = z − H ekf.x                                    │
-              │     K = P⁻ Hᵀ S⁻¹                                     │
-              │     ekf.x += K @ y   ← soft blend, NOT override        │
-              └──────┬──────────────────────────────────────────────────┘
-                     │
-                     │  world_T_base = _splice_planar(
-                     │      outcome.pose,          ← z, roll, pitch from ICP
-                     │      ekf.x[0],              ← x     from EKF (blended)
-                     │      ekf.x[1],              ← y     from EKF (blended)
-                     │      ekf.x[2])              ← yaw   from EKF (blended)
-                     │
-                     │  map_T_base = outcome.pose   ← raw ICP (no EKF blend)
-                     │
-                     │  localizer.set_corrected_pose(world_T_base)
-                     │      ↑ feeds EKF-fused pose back so the NEXT frame's
-                     │        ICP seed uses it instead of the raw ICP result
-                     │
-              ┌──────┴──────────────────┐    ┌────────────────────────────┐
-              │  MAP WRITING            │    │  EXPORT (TF / planning)    │
-              │  (map_T_base)           │    │  (world_T_base)            │
-              └──────┬──────────────────┘    └────────────────────────────┘
-                     ▼
-          ┌───────────────────────┐
-          │  world_scan =         │
-          │  transform_points(    │
-          │    scan_wp,           │
-          │    map_T_base)        │   ← raw ICP pose; on accepted frames EKF bias
-          │                       │     does not enter the map. On localizer rejects
-          │                       │     map_T_base falls back to the EKF-derived seed
-          │                       │     (see "Map-bias caveat" below).
-          └──────────┬────────────┘
-                     │
-                     ▼
-          ┌───────────────────────┐
-          │  acc.step()           │
-          │  (identical to plain) │   accumulated_map = self.map_wp
-          └───────────────────────┘
+════════════════════════════════════════════════════════════════════════════════
+  PER-FRAME INPUTS
+  odom_T_base   (current wheel-odom SE(3))
+  cloud_msg     (raw lidar sweep + per-point timestamps)
+  imu_buffer    (recent IMU samples covering this sweep)
+  _prev_meas_wheel  (joint_states velocities from the previous frame)
+════════════════════════════════════════════════════════════════════════════════
+
+  PERSISTENT STATE ENTERING THIS FRAME
+  localizer._world_T_base_prev   ← EKF-blended pose from frame N-1
+                                   (set by set_corrected_pose at end of N-1)
+  localizer._odom_T_base_prev    ← odom pose stored at end of frame N-1
+  localizer._imu_R_base_prev     ← IMU orientation stored at end of N-1
+  ekf.x  = [x, y, ψ, ẋ, ẏ, ψ̇]  ← EKF state after measurement update of N-1
+  ekf.P  = 6×6 covariance        ← EKF covariance after measurement update of N-1
+
+────────────────────────────────────────────────────────────────────────────────
+  STEP 1 — DESKEW SEED: localizer.predict()
+────────────────────────────────────────────────────────────────────────────────
+  reads:  localizer._world_T_base_prev   (EKF-blended pose, frame N-1)
+          localizer._odom_T_base_prev    (odom at frame N-1)
+          odom_T_base                    (odom at frame N)
+          imu_R_base                     (IMU world_R_base at frame N)
+          localizer._imu_R_base_prev     (IMU world_R_base at frame N-1)
+
+  computes:
+    sweep_delta[:3,:3] = imu_R_base_prev.T @ imu_R_base    ← rotation from IMU
+    sweep_delta[:3, 3] = odom translation delta             ← translation from wheels
+    world_T_base_pred  = _world_T_base_prev @ sweep_delta   ← dead-reckoned ICP seed
+
+  produces:
+    world_T_base_pred   SE(3) — ICP seed for this frame; used in STEP 3
+    sweep_delta         SE(3) — odom-only motion delta; used for deskew in STEP 2
+
+  NOTE: does NOT touch ekf.x / ekf.P
+
+────────────────────────────────────────────────────────────────────────────────
+  STEP 2 — SCAN PREPROCESSING (deskew + denoise)
+────────────────────────────────────────────────────────────────────────────────
+  uses sweep_delta to motion-compensate the lidar sweep → scan_wp  (device array)
+
+────────────────────────────────────────────────────────────────────────────────
+  STEP 3 — EKF PREDICT  (physics model advance)
+────────────────────────────────────────────────────────────────────────────────
+  reads:  ekf.x, ekf.P  (state from end of frame N-1)
+          _prev_meas_wheel  u = [v_l, v_r]
+          _gyro_wz_mean(t_prev, t_curr)  ωz  (slip-immune heading rate; or None)
+          dt_ratio = clamp((t_cloud − t_prev) / DT, 0.5, 3.0)
+
+  computes (robot-local frame to avoid float overflow at large world coords):
+    q_local    = ekf.x with xy zeroed (shift to local origin)
+    x_pred     = predict_q6d(q_local, u, omega_z=ωz)    ← physics rollout
+    F          = jacobian_F_6d_analytical(q_local, x_pred, DT)
+    x_pred[0:2] += [off_x, off_y]   ← shift back to world coords
+    x_pred[2]  adjusted by dt_ratio  ← scale yaw delta
+    F[0,2], F[1,2] *= dt_ratio       ← scale dt-proportional Jacobian columns
+
+    ekf.predict(F, x_pred, q_scale=dt_ratio)
+      ekf.x  ← x_pred                (physics-predicted state)
+      ekf.P  ← F @ P @ Fᵀ + Q*r     (predicted covariance; P⁻ for step 5)
+
+  produces:
+    ekf.x  updated to physics-predicted state  → consumed by STEP 5
+    ekf.P  = P⁻ (prior covariance)             → consumed by STEP 5 Kalman gain
+
+  NOTE: does NOT produce a pose matrix; world_T_base_pred is still from STEP 1
+
+────────────────────────────────────────────────────────────────────────────────
+  STEP 4 — ICP: localizer.update()
+────────────────────────────────────────────────────────────────────────────────
+  reads:  scan_wp           (preprocessed device cloud from STEP 2)
+          world_T_base_pred (ICP seed from STEP 1)
+          map_wp            (accumulated reference cloud, device)
+          gravity_up        (gravity direction in base frame from IMU)
+
+  runs point-to-plane ICP seeded at world_T_base_pred
+
+  produces:
+    outcome.pose    SE(3) — refined robot pose (or fallback = seed if rejected)
+    outcome.status  "ok" | "rejected" | "sparse"
+    outcome.rms_residual_m, outcome.num_inliers  (used in STEP 5 for R_adaptive)
+
+────────────────────────────────────────────────────────────────────────────────
+  STEP 5 — EKF MEASUREMENT UPDATE  (only when outcome.status == "ok")
+────────────────────────────────────────────────────────────────────────────────
+  reads:  outcome.pose       → z = [x_icp, y_icp, ψ_icp]
+          outcome.rms_residual_m, outcome.num_inliers
+          ekf.x, ekf.P = P⁻  (from STEP 3)
+
+  computes:
+    scale      = max((rms/rms_nom)² × (N_nom/N_inl), 0.25)  ← ICP quality weight
+    R_adaptive = R_ICP × scale
+
+    ekf.update_icp(z, R=R_adaptive):
+      y = z − H·ekf.x            innovation [Δx, Δy, Δψ]
+      S = H·P⁻·Hᵀ + R_adaptive
+      K = P⁻·Hᵀ·S⁻¹             Kalman gain  (K < I: soft blend)
+      ekf.x += K @ y             blended state
+      ekf.P  = (I − K·H)·P⁻
+
+  produces:
+    ekf.x  = EKF-blended [x, y, ψ, ẋ, ẏ, ψ̇]  → consumed by STEP 6
+    ekf.P  = posterior covariance               → carried to next frame
+
+────────────────────────────────────────────────────────────────────────────────
+  STEP 6 — POSE ASSEMBLY  (_splice_planar)
+────────────────────────────────────────────────────────────────────────────────
+  reads:  outcome.pose        → z, roll, pitch  (gravity-anchored from ICP)
+          ekf.x[0:3]          → x, y, ψ         (physics+ICP blended)
+
+  world_T_base = _splice_planar(outcome.pose, ekf.x[0], ekf.x[1], ekf.x[2])
+    z / roll / pitch  ←  ICP  (terrain tilt, not modelled by planar EKF)
+    x / y / yaw       ←  EKF  (physics + ICP blended; smoother than raw ICP)
+
+  map_T_base = outcome.pose   ← raw ICP only; EKF bias never enters the map
+
+  localizer.set_corrected_pose(world_T_base)
+    → writes world_T_base into localizer._world_T_base_prev
+    → NEXT frame's STEP 1 will propagate this EKF-fused pose forward
+
+────────────────────────────────────────────────────────────────────────────────
+  STEP 7 — MAP WRITING  (transform + accumulate)
+────────────────────────────────────────────────────────────────────────────────
+  world_scan = transform_points(scan_wp, map_T_base)   ← raw ICP pose only
+  acc.step(world_scan, ...)   → map_wp updated
+
+  On accepted ICP frames: map_T_base == outcome.pose  (no EKF bias in the map).
+  On rejected frames:     map_T_base == world_T_base_pred (odom fallback seed);
+                          EKF-derived seed enters the map only in this fallback
+                          case (see "Map-bias caveat" below).
+
+────────────────────────────────────────────────────────────────────────────────
+  OUTPUTS OF THIS FRAME
+────────────────────────────────────────────────────────────────────────────────
+  → TF / planning:  world_T_base  (EKF-blended; smooth)
+  → map_wp:         accumulated cloud built from map_T_base  (raw ICP; unbiased)
+
+  PERSISTENT STATE WRITTEN FOR NEXT FRAME
+  localizer._world_T_base_prev  ← world_T_base  (EKF-blended)
+  localizer._odom_T_base_prev   ← odom_T_base   (current odom tick)
+  localizer._imu_R_base_prev    ← imu_R_base    (current IMU orientation)
+  ekf.x                         ← posterior state  [x, y, ψ, ẋ, ẏ, ψ̇]
+  ekf.P                         ← posterior covariance
+════════════════════════════════════════════════════════════════════════════════
 ```
 
 ### Key property
