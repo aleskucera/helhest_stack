@@ -66,6 +66,7 @@ TOPICS=(
   /joint_states           # actual wheel speeds (was the command executed?)
   /motors_enable          # motor-enable request
   /motors_enabled         # motor-enable state (are the motors even live?)
+  /radio/estimate_pose
 )
 
 # Optional: the produced maps. Reproducible by replaying the INPUTS above, and large, so
