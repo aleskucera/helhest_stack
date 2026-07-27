@@ -30,7 +30,7 @@ Measured against ICP-truth localization (verified against the gyro), all four of
 **The drivetrain realizes the commanded *forward* speed 1:1 but only ~49 % of the commanded *turn*
 differential.** The two drive motors equalize a commanded wheel-speed difference under load.
 
-Evidence (binned means ± SE, pooled over the 3 outdoor bags; `/joint_setpoint` command vs
+Evidence (binned means ± SE, pooled over the 3 outdoor bags; `/joint_setpoints` command vs
 `/joint_states` measured, same motor-side units):
 
 | command component | measured / commanded |
@@ -90,9 +90,9 @@ matches what MPPI intended, so the robot turns as planned.
 
 The measurement that produced the numbers above (no node/GPU needed — gyro + wheels only):
 
-- Record: `/joint_setpoint`, `/joint_states`, `/ouster/imu`, `/imu/data`, `/odom_2d` (see
+- Record: `/joint_setpoints`, `/joint_states`, `/ouster/imu`, `/imu/data`, `/odom_2d` (see
   `ros/calibrate_turn.sh` for a lean recorder).
-- Realization factor: bin `/joint_setpoint` `(R+L)` and `(R−L)` and plot the mean `/joint_states`
+- Realization factor: bin `/joint_setpoints` `(R+L)` and `(R−L)` and plot the mean `/joint_states`
   response per bin — forward should be slope ~1, turn is the number to watch (was ~0.49).
 - After enabling the boost, record a drive and re-run this: the realized differential should move
   toward 1:1, and the actual yaw should track the MPPI-intended yaw.

@@ -5,7 +5,7 @@ wmin=0). The robot's /cmd_joints INPUT convention is the same: forward = all whe
 ([+wl, +rear, +wr]), so the command passes straight through -- no sign flip. Verified live on the
 robot 2026-07-10 (an all-positive /cmd_joints drove straight forward).
 
-  NOTE the LLC's /joint_setpoint OUTPUT echoes forward as [-, -, +] (it negates left/rear
+  NOTE the LLC's /joint_setpoints OUTPUT echoes forward as [-, -, +] (it negates left/rear
   internally). That output convention is what the manual-drive bags recorded, but it does NOT
   apply to commands -- the LLC does its own internal sign mapping on the /cmd_joints input.
 
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 
-# /cmd_joints JointState.name order -- matches /joint_setpoint on the robot. The [left, rear, right]
+# /cmd_joints JointState.name order -- matches /joint_setpoints on the robot. The [left, rear, right]
 # arrays returned by condition_command are in THIS order.
 JOINT_NAMES = ("left_wheel_j", "rear_wheel_j", "right_wheel_j")
 

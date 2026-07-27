@@ -16,7 +16,7 @@ set -e
 # bag or the maneuver is un-analyzable. Edit here if a topic name differs on the robot.
 TOPICS=(
   # --- commanded wheel omegas (the control input) ---
-  /joint_setpoint         # per-wheel target the LLC drives to (100 Hz) -- the command
+  /joint_setpoints        # per-wheel target the LLC drives to (100 Hz) -- the command
   /cmd_joints             # incoming per-wheel request (populates while driving)
   /cmd_vel                # high-level remote command, if published
   # --- actual wheel speeds (the response) ---
