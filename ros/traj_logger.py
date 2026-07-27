@@ -7,7 +7,7 @@ opens a 3-panel matplotlib figure showing x(t), y(t), ψ(t), and the x-y track.
 
 Usage:
     python3 ros/traj_logger.py [--map-frame map] [--base-frame base_link]
-                               [--rate 10] [--out ~/bags/traj_TIMESTAMP.csv]
+                               [--rate 10] [--out data/traj_TIMESTAMP.csv]
 """
 
 from __future__ import annotations
@@ -148,14 +148,14 @@ def main() -> None:
     parser.add_argument("--rate",       type=float, default=10.0, help="Poll rate in Hz (default: 10)")
     parser.add_argument(
         "--out", default=None,
-        help="CSV output path (default: ~/bags/traj_YYYYMMDD_HHMMSS.csv)",
+        help="CSV output path (default: <repo>/data/traj_YYYYMMDD_HHMMSS.csv)",
     )
     # parse_known_args so any leftover ROS args (--ros-args ...) pass through to rclpy
     args, ros_args = parser.parse_known_args()
 
     out = pathlib.Path(
         args.out
-        or pathlib.Path.home() / "bags" / f"traj_{datetime.datetime.now():%Y%m%d_%H%M%S}.csv"
+        or pathlib.Path(__file__).parent.parent / "data" / f"traj_{datetime.datetime.now():%Y%m%d_%H%M%S}.csv"
     ).expanduser()
 
     rclpy.init(args=ros_args or None)
