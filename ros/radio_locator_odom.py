@@ -218,7 +218,9 @@ class Locator(Node):
         self.declare_parameter("human_frame", radio_cfg["human_frame"])
         # CHANGED: the NON-ROTATING frame the estimate is filtered and published in -- the whole
         # point of this fork. `fixed_frame` stays the body frame the anchors are defined in.
-        self.declare_parameter("filter_frame", "odom")
+        # NB: on this robot elevation_node names the odom frame "odom_2d" (it inherits /odom_2d's
+        # header.frame_id), NOT "odom" -- so map->odom_2d->base_link is the live chain.
+        self.declare_parameter("filter_frame", "odom_2d")
         self.declare_parameter("use_3d", radio_cfg.get("use_3d", False))
         self.declare_parameter("use_aoa", radio_cfg.get("use_aoa", False))
         self.declare_parameter("mount_height", radio_cfg.get("mount_height", 0.0))
