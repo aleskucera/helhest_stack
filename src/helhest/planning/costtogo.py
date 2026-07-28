@@ -91,21 +91,32 @@ def _feasibility_kernel(
 @wp.kernel
 def _local_step_kernel(
     elev: wp.array2d(dtype=wp.float32),
+    measured: wp.array2d(dtype=wp.float32),  # 1 = cell has real data, 0 = never observed
     step: wp.array2d(dtype=wp.float32),
 ):
     """Per-cell prominence: how much a cell rises above its immediate (3x3) neighbourhood -- a STEP.
     A thin pole rises ~its full height above the adjacent ground (large step); a drivable slope rises
     only cell_size*tan(theta) per cell (small step). This lets the gate below catch vertical obstacles
-    the settle STRADDLES (a stick that fits between the wheel/belly contacts) without blocking slopes."""
+    the settle STRADDLES (a stick that fits between the wheel/belly contacts) without blocking slopes.
+
+    UNOBSERVED cells carry no elevation evidence, so they neither get a prominence of their own nor
+    lower a neighbour's minimum. Without that, the caller's blind-cell fill (a constant, e.g. 0.0)
+    reads as a real step wherever the ground sits away from that constant, and the map frontier
+    gates off as a closed ring. Prominence at the frontier is still taken over MEASURED
+    neighbours, so a pole standing at the edge of the mapped area is still caught."""
     r, c = wp.tid()
     ny = elev.shape[0]
     nx = elev.shape[1]
+    if measured[r, c] < 0.5:
+        step[r, c] = 0.0
+        return
     lo = elev[r, c]
     for i in range(-1, 2):
         rr = wp.clamp(r + i, 0, ny - 1)
         for j in range(-1, 2):
             cc = wp.clamp(c + j, 0, nx - 1)
-            lo = wp.min(lo, elev[rr, cc])
+            if measured[rr, cc] > 0.5:
+                lo = wp.min(lo, elev[rr, cc])
     step[r, c] = elev[r, c] - lo
 
 
@@ -256,6 +267,9 @@ class CostToGo:
         self._step = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)  # per-cell prominence
 
         self._elev_in = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
+        # Stable mask buffer the captured graph reads. Defaults to all-measured, so a caller that
+        # passes no mask gets exactly the pre-mask behaviour.
+        self._measured_in = wp.full((ny, nx), 1.0, dtype=wp.float32, device=self.device)
         self._goal_xy = wp.zeros(2, dtype=wp.float32, device=self.device)
         self._goal_rc = wp.zeros(2, dtype=wp.int32, device=self.device)
         self._graph = None
@@ -295,7 +309,7 @@ class CostToGo:
             wp.launch(
                 _local_step_kernel,
                 dim=(self.grid.cells_y, self.grid.cells_x),
-                inputs=[self._elev_in],
+                inputs=[self._elev_in, self._measured_in],
                 outputs=[self._step],
                 device=self.device,
             )
@@ -343,15 +357,32 @@ class CostToGo:
         )
         self._prof.mark(4)  # clamp done
 
-    def compute(self, elevation: wp.array, goal_xy: tuple[float, float]) -> wp.array:
+    def compute(
+        self,
+        elevation: wp.array,
+        goal_xy: tuple[float, float],
+        measured: wp.array | None = None,
+    ) -> wp.array:
         """elevation [ny, nx] device wp.array + goal -> clamped V[ny, nx, n_theta]. The entire solve
         (settle + value iteration) is captured ONCE as a CUDA graph and replayed each call with the
-        new terrain/goal (copied into stable device buffers first) -- no host syncs in the loop."""
+        new terrain/goal (copied into stable device buffers first) -- no host syncs in the loop.
+
+        `measured` [ny, nx] (1 = observed, 0 = blind) is read ONLY by the obstacle_step_m gate, to
+        keep the caller's blind-cell fill from reading as a real step. Omit it (or pass
+        obstacle_step_m=0) and every cell counts as observed."""
         assert (
             elevation.device == self.device
         ), f"elevation must be a wp.array on {self.device}, got {elevation.device}"
 
         wp.copy(self._elev_in, elevation)
+        if self._step_gate > 0.0:  # only the gate reads the mask
+            if measured is None:
+                self._measured_in.fill_(1.0)
+            else:
+                assert (
+                    measured.device == self.device
+                ), f"measured must be a wp.array on {self.device}, got {measured.device}"
+                wp.copy(self._measured_in, measured)
         self._goal_xy.assign(np.asarray(goal_xy[:2], np.float32))
 
         if self.device.is_cuda:

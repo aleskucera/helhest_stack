@@ -252,6 +252,7 @@ class _MapFrame:
     elev_local_view: np.ndarray  # (wh, ww) NaN in unknown cells — for RViz
     relev_view: np.ndarray  # (rwh, rww) NaN in unknown cells — for RViz
     relev_mem: np.ndarray  # (rwh, rww) blind cells = 0 — cost-to-go routing terrain
+    relev_measured: np.ndarray  # (rwh, rww) bool: True where the accumulated map has data
     cell: float
     ex: float
     ey: float
@@ -1515,6 +1516,7 @@ class ElevationNode(Node):
             elev_local_view=elev_local_view,
             relev_view=relev_view,
             relev_mem=relev_mem,
+            relev_measured=rmeasured,
             cell=cell,
             ex=ex,
             ey=ey,
@@ -1640,12 +1642,25 @@ class ElevationNode(Node):
             )
             self._ck("plan:set_terrain")
             relev = mf.relev_mem  # (rwh, rww), blind cells = 0
+            rmeas = mf.relev_measured
             if kr > 1:
-                Hc = relev[: rcny * kr, : rcnx * kr].reshape(rcny, kr, rcnx, kr).max(axis=(1, 3))
+                # Reduce over MEASURED cells only. A plain .max() picks the blind-cell fill
+                # (0.0) over real ground (~ -0.4 m), so a single unobserved fine cell would report
+                # the whole coarse cell as a 0.4 m mesa. -inf drops blind cells out of the max; a
+                # coarse cell counts as measured if ANY of its fine cells is.
+                blk = np.where(rmeas, relev, -np.inf)[: rcny * kr, : rcnx * kr]
+                Hm = blk.reshape(rcny, kr, rcnx, kr).max(axis=(1, 3))
+                Mc = np.isfinite(Hm)
+                Hc = np.where(Mc, Hm, 0.0).astype(np.float32)  # blind -> the same 0.0 fallback
             else:
                 Hc = relev
+                Mc = rmeas
             V = self.ctg.compute(
-                wp.array(np.ascontiguousarray(Hc), dtype=wp.float32, device=self.device), goal_r
+                wp.array(np.ascontiguousarray(Hc), dtype=wp.float32, device=self.device),
+                goal_r,
+                measured=wp.array(
+                    np.ascontiguousarray(Mc, dtype=np.float32), dtype=wp.float32, device=self.device
+                ),
             )
             self._ck("plan:ctg")
             self.planner.set_lattice(V, self.sgrid)
