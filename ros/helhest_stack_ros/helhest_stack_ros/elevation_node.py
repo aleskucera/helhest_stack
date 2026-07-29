@@ -62,6 +62,7 @@ from helhest.perception import HeightMapBuilder
 from helhest.perception import IcpAligner
 from helhest.perception import IcpConfig
 from helhest.perception import multigrid_inpaint
+from helhest.perception import ScanPreprocessor
 from helhest.perception import OutlierFilterConfig
 from helhest.perception import StatisticalOutlierFilter
 from helhest.perception import TerrainMap
@@ -81,10 +82,8 @@ from helhest.planning.costtogo import CostToGo
 from helhest.localization import Localizer
 from helhest.localization import LocalizerConfig
 from helhest.localization import RegistrationOutcome
-from helhest.localization.pose_math import deskew_scan
 from helhest.localization.pose_math import invert_pose
 from helhest.localization.pose_math import matrix_to_quaternion
-from helhest.localization.pose_math import transform_points_xyz
 from tf2_geometry_msgs import do_transform_pose
 from tf2_ros import TransformBroadcaster
 from tf2_ros import TransformException
@@ -251,6 +250,7 @@ class ElevationNode(Node):
         self._prof_n = 0
         self._prof_t = 0.0
         self._deskew_warned = False
+        self._preproc: ScanPreprocessor | None = None  # device scan entry path
         self._imu_warned = False
 
         self.device = self._resolve_device(self.get_parameter("device").value)
@@ -928,6 +928,7 @@ class ElevationNode(Node):
                 self.map_wp = None
                 self.map_ages = None
                 self.map_streak = None
+                self._preproc = None  # buffers live on the old device
                 self._build_localizer()  # fresh pose state; re-bootstraps on the next scan
         except Exception as exc:  # a bad value must not kill the node
             return SetParametersResult(successful=False, reason=str(exc))
@@ -983,11 +984,14 @@ class ElevationNode(Node):
         if scan is None or scan[0].shape[0] == 0:
             self.get_logger().warning("Empty / untransformable scan — skipping.")
             return
-        scan_base, point_times, base_T_sensor = scan
-        scan_base, point_times = self._z_crop(scan_base, point_times)
-        scan_base, point_times = self._self_filter(scan_base, point_times)
-        scan_base, point_times = self._range_crop(scan_base, point_times)
-        if scan_base.shape[0] == 0:
+        points_sensor, point_times, base_T_sensor = scan
+        # Sensor->base transform, z / self-footprint / range rejection and compaction, all on
+        # device in ONE pass. Done on the host these were four full-cloud numpy copies (~9.6 ms
+        # for a 131k-point sweep); the cloud now crosses to the GPU once and stays there.
+        scan_buf, n_scan, t_min, t_span = self._scan_preproc(
+            points_sensor, point_times, base_T_sensor
+        )
+        if n_scan == 0:
             self.get_logger().warning("crop/self-filter removed all points — check bounds.")
             return
         gravity_up = self._gravity_up_base(cloud_msg.header.stamp)
@@ -997,14 +1001,14 @@ class ElevationNode(Node):
         if not self.localizer.initialized:
             world_T_base = odom_T_base
             self.localizer.bootstrap(odom_T_base, world_T_base, imu_R_base)
-            scan_wp = wp.array(scan_base, dtype=wp.vec3, device=self.device)
-            scan_wp = self._denoise(scan_wp, base_T_sensor)
+            scan_wp = self._denoise(scan_buf[:n_scan], base_T_sensor)
         else:
             world_T_base_pred, sweep_delta = self.localizer.predict(odom_T_base, imu_R_base)
             if self.deskew_enable:
-                scan_base = self._deskew(scan_base, point_times, sweep_delta, cloud_msg.header.stamp)
-            scan_wp = wp.array(scan_base, dtype=wp.vec3, device=self.device)
-            scan_wp = self._denoise(scan_wp, base_T_sensor)
+                self._deskew(
+                    n_scan, t_min, t_span, point_times, sweep_delta, cloud_msg.header.stamp
+                )
+            scan_wp = self._denoise(scan_buf[:n_scan], base_T_sensor)
             self._ck("deskew+denoise")
             outcome = self.localizer.update(
                 scan_wp,
@@ -1021,7 +1025,7 @@ class ElevationNode(Node):
                     f"F{self._frame} {outcome.status} "
                     f"rot={np.rad2deg(outcome.correction_rot_rad):.1f} "
                     f"trans={outcome.correction_trans_m:.2f} rms={outcome.rms_residual_m:.3f} "
-                    f"inl={outcome.num_inliers} sub={outcome.submap_points} scan={len(scan_base)}"
+                    f"inl={outcome.num_inliers} sub={outcome.submap_points} scan={n_scan}"
                 )
             world_T_base = outcome.pose
             # A single reject just uses the fallback pose (the map keeps accumulating). Only
@@ -1035,6 +1039,7 @@ class ElevationNode(Node):
                 self.map_wp = None
                 self.map_ages = None
                 self.map_streak = None
+                self._preproc = None  # buffers live on the old device
                 self._consecutive_rejects = 0
                 self.get_logger().warning(
                     f"{self.reset_after_rejects} consecutive ICP rejects -> resetting global map."
@@ -1701,56 +1706,12 @@ class ElevationNode(Node):
         points, point_times = pointcloud2_to_xyz_time_array(cloud_msg, self.deskew_time_field)
         if points.size == 0:
             return np.empty((0, 3), dtype=np.float32), None, base_T_sensor
-        scan_base = transform_points_xyz(base_T_sensor, points.astype(np.float64))
-        return scan_base.astype(np.float32), point_times, base_T_sensor
+        # Points stay in the SENSOR frame and in float32: the transform is fused into the
+        # device gate kernel, so casting to float64 here would only double the upload.
+        return np.ascontiguousarray(points, dtype=np.float32), point_times, base_T_sensor
 
-    def _z_crop(
-        self, scan_base: np.ndarray, point_times: np.ndarray | None
-    ) -> tuple[np.ndarray, np.ndarray | None]:
-        """Keep only base_frame points with z in [z_crop_min, z_crop_max]; times stay aligned."""
-        if not self.z_crop_enable:
-            return scan_base, point_times
-        z = scan_base[:, 2]
-        keep = (z >= self.z_crop_min) & (z <= self.z_crop_max)
-        if point_times is not None:
-            point_times = point_times[keep]
-        return scan_base[keep], point_times
 
-    def _range_crop(
-        self, scan_base: np.ndarray, point_times: np.ndarray | None
-    ) -> tuple[np.ndarray, np.ndarray | None]:
-        """Drop returns past scan_max_range_m (horizontal xy distance from the robot).
 
-        Far Ouster returns are sparse grazing-angle ground — noise that only pollutes ICP
-        and both maps. Cropping per scan keeps it out of every downstream stage. 0 disables;
-        times stay aligned.
-        """
-        if self.scan_max_range_m <= 0.0:
-            return scan_base, point_times
-        r2 = scan_base[:, 0] ** 2 + scan_base[:, 1] ** 2
-        keep = r2 <= self.scan_max_range_m * self.scan_max_range_m
-        if point_times is not None:
-            point_times = point_times[keep]
-        return scan_base[keep], point_times
-
-    def _self_filter(
-        self, scan_base: np.ndarray, point_times: np.ndarray | None
-    ) -> tuple[np.ndarray, np.ndarray | None]:
-        """Drop the robot's own returns (wheels/body): base_frame points inside the
-        footprint box [self_x_min,max] x [self_y_min,max]. Times stay aligned."""
-        if not self.self_filter_enable:
-            return scan_base, point_times
-        x, y = scan_base[:, 0], scan_base[:, 1]
-        inside = (
-            (x >= self.self_x_min)
-            & (x <= self.self_x_max)
-            & (y >= self.self_y_min)
-            & (y <= self.self_y_max)
-        )
-        keep = ~inside
-        if point_times is not None:
-            point_times = point_times[keep]
-        return scan_base[keep], point_times
 
     def _denoise(self, scan_wp: wp.array, base_T_sensor: np.ndarray) -> wp.array:
         """GPU-native statistical outlier removal on the base-frame scan (device in/out).
@@ -1826,19 +1787,50 @@ class ElevationNode(Node):
         fr_wp = wp.array(np.ascontiguousarray(frontier), dtype=wp.vec3, device=self.device)
         return transform_points(fr_wp, len(fr_wp), world_T_sensor)
 
+    def _scan_preproc(
+        self, points_sensor: np.ndarray, point_times: np.ndarray | None, base_T_sensor: np.ndarray
+    ) -> tuple[wp.array, int, float, float]:
+        """Sensor->base transform + z / self / range gates + compaction, on device.
+
+        Returns `(buffer, count, t_min, t_span)`; the buffer is owned by the preprocessor and is
+        valid only until the next call. `t_span` is 0 when the cloud has no per-point times.
+        """
+        if self._preproc is None or self._preproc.max_points < points_sensor.shape[0]:
+            self._preproc = ScanPreprocessor(int(points_sensor.shape[0]), device=self.device)
+        # the per-point times stay on device -- only the deskew kernel reads them
+        buf, count, _times, t_min, t_span = self._preproc.run(
+            points_sensor,
+            point_times,
+            base_T_sensor,
+            z_range=(self.z_crop_min, self.z_crop_max) if self.z_crop_enable else None,
+            self_box=(
+                (self.self_x_min, self.self_x_max, self.self_y_min, self.self_y_max)
+                if self.self_filter_enable
+                else None
+            ),
+            max_range=self.scan_max_range_m,
+        )
+        return buf, count, t_min, t_span
+
     def _deskew(
-        self, scan_base: np.ndarray, point_times: np.ndarray | None, delta: np.ndarray, stamp
-    ) -> np.ndarray:
+        self,
+        n_scan: int,
+        t_min: float,
+        t_span: float,
+        point_times: np.ndarray | None,
+        delta: np.ndarray,
+        stamp,
+    ) -> None:
+        """Motion-compensate the compacted device scan IN PLACE (no-op without per-point times)."""
         if point_times is None:
             if not self._deskew_warned:
                 self.get_logger().warning(
                     f"deskew on but cloud has no '{self.deskew_time_field}' field — skipping."
                 )
                 self._deskew_warned = True
-            return scan_base
-        span = float(point_times.max() - point_times.min())
-        if span <= 0.0:
-            return scan_base
+            return
+        if t_span <= 0.0:
+            return
         # Sweep rotation from the GYRO RATE: omega * sweep_duration. Uses only the per-point `t`
         # (for both the fractions and the duration) and the instantaneous angular velocity — the
         # rate is smooth, so this needs no absolute-window integration and doesn't depend on
@@ -1847,9 +1839,8 @@ class ElevationNode(Node):
         omega = self._imu_omega_at(stamp.sec + stamp.nanosec * 1e-9)
         if omega is not None:
             delta = delta.copy()
-            delta[:3, :3] = _rodrigues(omega * (span * 1e-9))  # base_start_R_base_end
-        alphas = (point_times - point_times.min()) / span
-        return deskew_scan(scan_base, alphas, delta).astype(np.float32)
+            delta[:3, :3] = _rodrigues(omega * (t_span * 1e-9))  # base_start_R_base_end
+        self._preproc.deskew(n_scan, t_min, t_span, delta)
 
     def _log_registration(self, outcome: RegistrationOutcome) -> None:
         if outcome.status == "sparse":
