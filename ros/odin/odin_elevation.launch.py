@@ -119,11 +119,11 @@ def generate_launch_description() -> LaunchDescription:
             {"map_frame": "map"},
             {"publish_map_tf": True},  # elevation owns map -> odom_odin ...
             {"publish_odom_tf": True},  # ... and odom_odin -> odin1_base_link
-            # VIZ ONLY. plan_actuate DEFAULTS TRUE -> a /goal_pose would publish /cmd_joints and
-            # DRIVE the robot. Here the plan is relative to odin1_base_link (the device, offset
-            # from the real base_link), so any command would be geometrically wrong. Keep off
-            # until the base_link->odin1_base_link mount TF exists and driving is intended.
-            {"plan_actuate": False},
+            # ACTUATION ENABLED (operator choice): a /goal_pose publishes /cmd_joints and DRIVES
+            # the robot. CAVEAT: the plan is relative to odin1_base_link (the device), offset from
+            # the real base_link until a measured mount TF exists -> the footprint is device-
+            # centered and commands are geometrically offset. Drive with a clear space + e-stop.
+            {"plan_actuate": True},
         ],
     )
 
