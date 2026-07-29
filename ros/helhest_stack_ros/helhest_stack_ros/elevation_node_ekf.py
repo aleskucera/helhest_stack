@@ -251,7 +251,7 @@ class _MapFrame:
     elev_local: np.ndarray  # (wh, ww) filled, NaN-free — planner terrain
     elev_local_view: np.ndarray  # (wh, ww) NaN in unknown cells — for RViz
     relev_view: np.ndarray  # (rwh, rww) NaN in unknown cells — for RViz
-    relev_mem: np.ndarray  # (rwh, rww) blind cells = 0 — cost-to-go routing terrain
+    relev_mem: np.ndarray  # (rwh, rww) blind cells inpainted — cost-to-go routing terrain
     relev_measured: np.ndarray  # (rwh, rww) bool: True where the accumulated map has data
     cell: float
     ex: float
@@ -1480,7 +1480,21 @@ class ElevationNode(Node):
             rmax = rgl.max.numpy()
             rmeasured = rcount > 0
             relev_view = np.where(rmeasured, rmax, np.nan).astype(np.float32)
-            relev_mem = np.where(rmeasured, rmax, 0.0).astype(np.float32)  # blind-cell fallback
+            # Blind cells: INPAINT from the measured neighbourhood instead of a constant. 0.0 is the
+            # MAP ORIGIN height, not ground -- as the terrain descends relative to that origin, the
+            # unmeasured part of the window turns into a phantom plateau metres tall and the settle
+            # walls the robot in. Measured on out_experiment_goal_unreachable1: ground at -1.29 m
+            # with 66% of the window unmeasured -> V saturated at the robot -> "goal unreachable".
+            relev_mem = np.nan_to_num(
+                np.asarray(
+                    multigrid_inpaint(  # copies its input, so the NaN view for RViz is untouched
+                        relev_view,
+                        iters_per_level=self.inpaint_iters_per_level,
+                        coarse_iters=self.inpaint_coarse_iters,
+                    )
+                ),
+                nan=0.0,  # nothing measured anywhere -> fall back to the old constant
+            ).astype(np.float32)
 
             # LOCAL single-scan map over the (centered) MPPI window.
             lww = lwh = int(round(self.win_m / cell))
@@ -1641,17 +1655,20 @@ class ElevationNode(Node):
                 wp.array(np.ascontiguousarray(mf.elev_local), dtype=wp.float32, device=self.device)
             )
             self._ck("plan:set_terrain")
-            relev = mf.relev_mem  # (rwh, rww), blind cells = 0
+            relev = mf.relev_mem  # (rwh, rww), blind cells inpainted from measured neighbours
             rmeas = mf.relev_measured
             if kr > 1:
-                # Reduce over MEASURED cells only. A plain .max() picks the blind-cell fill
-                # (0.0) over real ground (~ -0.4 m), so a single unobserved fine cell would report
-                # the whole coarse cell as a 0.4 m mesa. -inf drops blind cells out of the max; a
+                # Reduce over MEASURED cells only: a plain .max() would let the inpainted fill
+                # outvote real ground wherever the fill sits higher, so one unobserved fine cell
+                # would speak for the whole coarse cell. -inf drops blind cells out of the max; a
                 # coarse cell counts as measured if ANY of its fine cells is.
                 blk = np.where(rmeas, relev, -np.inf)[: rcny * kr, : rcnx * kr]
                 Hm = blk.reshape(rcny, kr, rcnx, kr).max(axis=(1, 3))
                 Mc = np.isfinite(Hm)
-                Hc = np.where(Mc, Hm, 0.0).astype(np.float32)  # blind -> the same 0.0 fallback
+                # Fully-blind coarse cells fall back to the INPAINTED surface (not a constant), so
+                # unmeasured ground reads as terrain rather than a plateau at the map origin.
+                Hall = relev[: rcny * kr, : rcnx * kr].reshape(rcny, kr, rcnx, kr).max(axis=(1, 3))
+                Hc = np.where(Mc, Hm, Hall).astype(np.float32)
             else:
                 Hc = relev
                 Mc = rmeas
