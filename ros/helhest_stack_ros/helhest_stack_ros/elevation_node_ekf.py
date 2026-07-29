@@ -546,7 +546,13 @@ class ElevationNode(Node):
         # ICP
         d("icp_enable", True)
         d("icp_submap_radius_m", 15.0)
-        d("icp_max_iters", 30)
+        # 30 was well past the plateau: measured on rotate_fast + out_experiment_goal_unreachable1,
+        # the RMS residual is FLAT from 30 down to 8 iterations (outdoor 0.0200 vs 0.0201) with zero
+        # rejects at every level, even though the 30-cap was being hit on 27% of outdoor frames --
+        # those extra Gauss-Newton steps were plateau iterations that did not improve the fit. 10
+        # keeps the fit (rms unchanged on both bags) and cuts the ICP stage 15.5 -> 9.8 ms outdoors.
+        # Agreement with the (independent) gyro yaw rate improved slightly rather than degrading.
+        d("icp_max_iters", 10)
         d("icp_max_corr_dist_m", 0.5)
         d("icp_trim_residual_m", 0.0)  # reject correspondences past this p2plane residual; 0=off
         d("icp_normal_radius_m", 0.3)
