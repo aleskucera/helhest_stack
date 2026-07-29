@@ -5,9 +5,9 @@
 #     --params-file <repo>/ros/odin/odin_elevation.params.yaml \
 #     -p plan_wmax:=5.0 -p k_turn:=0.6 -p plan_turn:=0.08
 #
-# SAFETY: plan_actuate stays false -> VIZ ONLY. Enable driving ONLY by a deliberate
-# -p plan_actuate:=true (or `ros2 param set /elevation plan_actuate true`). Motor safe
-# max ~5.3 rad/s (~1.85 m/s), so plan_wmax/plan_max_omega above that just peg the wheels.
+# SAFETY: plan_actuate is TRUE here (operator choice) -> a /goal_pose DRIVES the robot.
+# Run viz-only with -p plan_actuate:=false. (Motor limit ~15 rad/s, so plan_wmax /
+# plan_max_omega here have plenty of headroom -- raise plan_wmax for more speed.)
 /**:
   ros__parameters:
     # --- sources (topics / frames) ---
@@ -32,14 +32,16 @@
     self_y_max: 0.75
     footprint_robot_height: 0.49        # odin1_base_link sits ~0.49 m above the floor
 
-    # --- ACTUATION: VIZ ONLY. enable driving only by a deliberate -p plan_actuate:=true ---
-    plan_actuate: false
+    # --- ACTUATION: ARMED by default (operator choice) -- a /goal_pose DRIVES the robot.
+    #     Run viz-only with -p plan_actuate:=false. Plan is device-centered (offset from the
+    #     real base_link) until a mount TF exists; drive with a clear space + e-stop. ---
+    plan_actuate: true
 
     # --- tuning knobs (override inline with -p) ---
-    plan_wmax: 4.0            # top per-wheel speed [rad/s] -- real speed cap (<= plan_max_omega, motor ~5.3)
-    plan_max_omega: 5.0       # hard output clamp on |wheel vel| [rad/s] -- motor safe max (<= ~5.3)
-    k_turn: -1.0              # turn gain override; <0 = use terrain preset
-    plan_turn: 0.03           # wheel-differential penalty -> higher = gentler/straighter (<= ~0.1)
-    plan_max_slew: 6.0        # accel cap d(cmd)/dt [rad/s^2] -> lower = smoother turn ease-in
+    plan_wmax: 6.0            # top per-wheel speed [rad/s] -- motor limit ~15, so headroom to raise this
+    plan_max_omega: 7.5       # hard output clamp on |wheel vel| [rad/s] -- keep >= plan_wmax
+    k_turn: 1.0              # turn gain override (outdoor-preset value)
+    plan_turn: 0.08           # wheel-differential penalty -> gentler / straighter turns
+    plan_max_slew: 2.0        # accel cap d(cmd)/dt [rad/s^2] -> smooth turn ease-in
     plan_goal_running: 0.3    # progress pull -> higher = faster toward goal
     plan_effort: 0.001        # wheel-speed^2 penalty -> lower = faster
