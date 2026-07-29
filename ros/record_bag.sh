@@ -51,4 +51,4 @@ source ~/workspaces/helhest_ws/install/setup.bash >/dev/null 2>&1
 mkdir -p ~/bags
 echo "recording -> ~/bags/$NAME   (Ctrl-C to stop)"
 exec ros2 bag record -o ~/bags/"$NAME" \
-  /ouster/points /odom_2d /imu/data /ouster/imu /tf /tf_static
+  /ouster/points /odom_2d /imu/data /ouster/imu /tf /tf_static /radio/estimate_pose

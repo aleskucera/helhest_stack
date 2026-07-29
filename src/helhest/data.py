@@ -32,8 +32,8 @@ def load_setpoints(h5_path, drive, dt, duration):
     Returns (setpoints[T, 3] in sim order+sign [L,R,rear], real dict, run_id, t_grid).
     """
     with h5py.File(h5_path, "r") as f:
-        src = "/joint_setpoint/velocity" if drive == "setpoint" else "/joint_states/velocity"
-        t_src = "/joint_setpoint/t" if drive == "setpoint" else "/joint_states/t"
+        src = "/joint_setpoints/velocity" if drive == "setpoint" else "/joint_states/velocity"
+        t_src = "/joint_setpoints/t" if drive == "setpoint" else "/joint_states/t"
         sp_t = f[t_src][:]
         sp_v = f[src][:]  # [N, 3] in [left, rear, right]
         real = {

@@ -149,6 +149,19 @@ Visualization Manager:
       Length: 0.8
       Radius: 0.1
       Value: true
+    # The radio locator target (/radio/estimate_pose) — the follow-me goal in goal_source:=follow.
+    # Published in the 'locator' frame; RViz transforms it into the map fixed frame for display.
+    - Class: rviz_default_plugins/Pose
+      Name: radio_estimate
+      Color: 0; 255; 255
+      Shape: Arrow
+      Enabled: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        Value: /radio/estimate_pose
+      Value: true
   Global Options:
     Background Color: 33; 33; 40
     Fixed Frame: map

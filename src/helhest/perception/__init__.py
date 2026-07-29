@@ -7,6 +7,7 @@ estimation) is a sibling package, `helhest.localization`.
 """
 
 from .cloud_ops import BoxCrop
+from .cloud_ops import ScanPreprocessor
 from .cloud_ops import transform_points
 from .confidence import OcclusionConfig
 from .confidence import OcclusionMask
