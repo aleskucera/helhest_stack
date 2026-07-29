@@ -1,6 +1,6 @@
 #!/bin/bash
 # Record the Odin1 elevation pipeline's INPUT topics for offline replay / param tuning.
-# Mirrors record_bag.sh but for the Odin stack (odin_driver + odin_elevation launches):
+# Mirrors record_bag.sh but for the Odin stack (odin_driver.launch.py + elevation_node):
 # the Odin SLAM pose + raw dTOF cloud replace /odom_2d + /ouster/points.
 #
 # Usage:  ./record_odin.sh <scenario>     (do the maneuver, then Ctrl-C to stop)

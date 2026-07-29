@@ -1,4 +1,4 @@
-# Odin1 driver config for the odom+raw-cloud integration (odin_elevation.launch.py).
+# Odin1 driver config for the odom+raw-cloud integration (odin_driver.launch.py).
 # Derived from cras_odin_driver/config/control_command.yaml with two flags flipped:
 #   senddtof: 0 -> 1      publish the raw dTOF cloud on /odin1/cloud_raw
 #   sendcloudslam: 1 -> 0 drop the on-device SLAM cloud (we map the raw cloud ourselves)
