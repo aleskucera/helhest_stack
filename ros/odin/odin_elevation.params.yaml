@@ -1,0 +1,45 @@
+# Odin1 elevation_node params. Run the node directly; override ANY param inline with -p
+# (inline -p wins over this file):
+#
+#   ros2 run helhest_stack_ros elevation_node --ros-args \
+#     --params-file <repo>/ros/odin/odin_elevation.params.yaml \
+#     -p plan_wmax:=5.0 -p k_turn:=0.6 -p plan_turn:=0.08
+#
+# SAFETY: plan_actuate stays false -> VIZ ONLY. Enable driving ONLY by a deliberate
+# -p plan_actuate:=true (or `ros2 param set /elevation plan_actuate true`). Motor safe
+# max ~5.3 rad/s (~1.85 m/s), so plan_wmax/plan_max_omega above that just peg the wheels.
+/**:
+  ros__parameters:
+    # --- sources (topics / frames) ---
+    lidar_topic: /odin1/cloud_raw       # raw dTOF cloud replaces Ouster
+    odom_topic: /odin1/odometry         # Odin SLAM pose replaces /odom_2d + ICP/EKF
+    imu_topic: /odin1/imu
+    base_frame: odin1_base_link         # cloud already in this frame -> sensor TF = identity
+    map_frame: map
+
+    # --- Odin pipeline: no ICP, no EKF, no deskew, no gyro prior ---
+    icp_enable: false                   # trust the Odin pose directly (dead-reckoning)
+    deskew_enable: false                # Odin per-point time is seconds; deskew assumes ns
+    imu_rotation_prior: false           # gyro prior + identity IMU TF rolls the map ~40 deg
+    publish_map_tf: true                # elevation owns map -> odom_odin ...
+    publish_odom_tf: true               # ... and odom_odin -> odin1_base_link
+
+    # --- robot self-filter box (measured for the Odin mount) ---
+    self_filter_enable: true
+    self_x_min: -0.05
+    self_x_max: 0.55
+    self_y_min: -0.75
+    self_y_max: 0.75
+    footprint_robot_height: 0.49        # odin1_base_link sits ~0.49 m above the floor
+
+    # --- ACTUATION: VIZ ONLY. enable driving only by a deliberate -p plan_actuate:=true ---
+    plan_actuate: false
+
+    # --- tuning knobs (override inline with -p) ---
+    plan_wmax: 4.0            # top per-wheel speed [rad/s] -- real speed cap (<= plan_max_omega, motor ~5.3)
+    plan_max_omega: 5.0       # hard output clamp on |wheel vel| [rad/s] -- motor safe max (<= ~5.3)
+    k_turn: -1.0              # turn gain override; <0 = use terrain preset
+    plan_turn: 0.03           # wheel-differential penalty -> higher = gentler/straighter (<= ~0.1)
+    plan_max_slew: 6.0        # accel cap d(cmd)/dt [rad/s^2] -> lower = smoother turn ease-in
+    plan_goal_running: 0.3    # progress pull -> higher = faster toward goal
+    plan_effort: 0.001        # wheel-speed^2 penalty -> lower = faster
