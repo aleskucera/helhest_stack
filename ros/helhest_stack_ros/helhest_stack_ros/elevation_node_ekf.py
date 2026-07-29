@@ -14,10 +14,17 @@ traversability), mirroring the closed-loop sim's heightmap stage (demos/pipeline
     small route-window heightmap driven by the planner), this shows the full
     mapped extent, so it's the topic to watch to confirm the map is persisting.
 
-Pose comes from odometry (`nav_msgs/Odometry`) refined by scan-to-submap 6-DOF
-point-to-plane ICP. When `gravity_enable`, the IMU's gravity vector anchors the
-ICP roll/pitch each scan (see IcpConfig.gravity_weight), so geometry-only tilt
-cannot drift the map off level.
+Pose comes from an Extended Kalman Filter over the 6-DOF Helhest state
+q = [x, y, ψ, ẋ, ẏ, ψ̇]: a physics-model PREDICT step (the kinematic
+ForwardSimulator + its flat-ground analytical Jacobian, driven by measured
+wheel speeds) fused with a single MEASUREMENT — the scan-to-submap
+6-DOF point-to-plane ICP pose [x, y, ψ]. The `Localizer` is kept purely as the
+ICP front-end (submap crop + gated registration). Because the robot drives real
+(non-flat) terrain, the fused planar state is spliced back into the ICP pose's
+z/roll/pitch (a hybrid SE(3) reconstruction) so the footprint stamp and the map
+z-accuracy on slopes are preserved. When `gravity_enable`, the IMU's gravity
+vector anchors the ICP roll/pitch each scan (see IcpConfig.gravity_weight), so
+geometry-only tilt cannot drift the map off level.
 
 Frames: sensor -> base (base_frame, static TF) -> odom -> world == map_frame. The
 world frame is bootstrapped to odom at the first scan.
@@ -26,7 +33,6 @@ world frame is bootstrapped to odom at the first scan.
 from __future__ import annotations
 
 import time
-import traceback
 from collections import deque
 from dataclasses import dataclass
 
@@ -34,6 +40,9 @@ import numpy as np
 import rclpy
 import tf2_ros
 import warp as wp
+from diagnostic_msgs.msg import DiagnosticArray
+from diagnostic_msgs.msg import DiagnosticStatus
+from diagnostic_msgs.msg import KeyValue
 from geometry_msgs.msg import Point
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import TransformStamped
@@ -78,13 +87,15 @@ from helhest.control.terminal import dock_control
 from helhest.control.turn_adapt import AdaptiveTurnBoost
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
+from helhest.filtering.ekf import EKF6D
+from helhest.filtering.jacobian import jacobian_F_6d_analytical
+from helhest.filtering.jacobian import predict_q6d
 from helhest.planning.costtogo import CostToGo
 from helhest.localization import Localizer
 from helhest.localization import LocalizerConfig
 from helhest.localization import RegistrationOutcome
 from helhest.localization.pose_math import invert_pose
 from helhest.localization.pose_math import matrix_to_quaternion
-from tf2_geometry_msgs import do_transform_pose
 from tf2_ros import TransformBroadcaster
 from tf2_ros import TransformException
 
@@ -96,6 +107,68 @@ _EZ = np.array([0.0, 0.0, 1.0], dtype=np.float64)  # world up
 
 _IMU_BUFFER_LEN = 500  # ~5 s of 100 Hz IMU — enough to bracket any cloud stamp
 _IMU_MAX_EXTRAP_S = 0.05  # fall back to odom if no IMU sample within this of the cloud stamp
+_JOINT_STATES_STALE_S = 15  # warn if no valid /joint_states for this long
+
+# ---------------------------------------------------------------------------
+# EKF tuning — the single place to read / tweak the noise model (mirrors
+# demos/pipeline_ekf.py). P0: initial covariance; Q: process noise (velocity rows
+# are generous because F[:,3:6]=0 — the sim re-derives velocity from u each step);
+# R_ICP: measurement noise on the ICP pose [x, y, ψ]. The odom measurement path is
+# not used in this node, so only R_ICP is defined.
+_SIG_P0 = np.array([0.10, 0.10, np.deg2rad(2.0), 0.30, 0.30, 0.20])  # [m,m,rad,m/s,m/s,rad/s]
+_SIG_Q = np.array([0.02, 0.02, np.deg2rad(0.5), 0.15, 0.15, 0.10])  # [m,m,rad,m/s,m/s,rad/s]
+_SIG_R_ICP = np.array([0.05, 0.05, np.deg2rad(1.0)])  # [m, m, rad]
+
+P0 = np.diag(_SIG_P0**2)  # [6×6] initial state covariance
+Q = np.diag(_SIG_Q**2)  # [6×6] process-noise covariance
+R_ICP = np.diag(_SIG_R_ICP**2)  # [3×3] ICP measurement-noise covariance
+# ---------------------------------------------------------------------------
+
+
+def se2_to_mat(x: float, y: float, yaw: float) -> np.ndarray:
+    """(x, y, yaw) -> 4x4 SE(3) with a planar (z=0) base pose."""
+    c, s = np.cos(yaw), np.sin(yaw)
+    T = np.eye(4, dtype=np.float64)
+    T[0, 0], T[0, 1] = c, -s
+    T[1, 0], T[1, 1] = s, c
+    T[0, 3], T[1, 3] = x, y
+    return T
+
+
+def mat_to_se2(T: np.ndarray) -> tuple[float, float, float]:
+    """4x4 SE(3) -> planar (x, y, yaw); yaw read from the rotation's first column."""
+    return float(T[0, 3]), float(T[1, 3]), float(np.arctan2(T[1, 0], T[0, 0]))
+
+
+def _euler_zyx(yaw: float, pitch: float, roll: float) -> np.ndarray:
+    """Rotation matrix R = Rz(yaw) @ Ry(pitch) @ Rx(roll), shape (3, 3)."""
+    cy, sy = np.cos(yaw), np.sin(yaw)
+    cp, sp = np.cos(pitch), np.sin(pitch)
+    cr, sr = np.cos(roll), np.sin(roll)
+    return np.array(
+        [
+            [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+            [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+            [-sp, cp * sr, cp * cr],
+        ]
+    )
+
+
+def _splice_planar(T_ref: np.ndarray, x: float, y: float, yaw: float) -> np.ndarray:
+    """SE(3) with the EKF's planar (x, y, yaw), keeping T_ref's z, roll, and pitch.
+
+    The EKF filters only the planar pose, but the ICP pose carries genuine roll/pitch
+    (gravity-anchored) and z on real terrain. Overwriting only xy-translation and the
+    Z-Y-X yaw — while preserving T_ref's tilt and height — keeps the footprint stamp
+    and the accumulated map's z-accuracy correct on slopes (see docs/ekf.md 4.4).
+    """
+    r = T_ref[:3, :3]
+    pitch = float(np.arctan2(-r[2, 0], np.hypot(r[2, 1], r[2, 2])))
+    roll = float(np.arctan2(r[2, 1], r[2, 2]))
+    out = np.eye(4, dtype=np.float64)
+    out[:3, :3] = _euler_zyx(yaw, pitch, roll)
+    out[0, 3], out[1, 3], out[2, 3] = x, y, float(T_ref[2, 3])
+    return out
 
 
 def _rodrigues(omega: np.ndarray) -> np.ndarray:
@@ -106,6 +179,7 @@ def _rodrigues(omega: np.ndarray) -> np.ndarray:
     k = omega / theta
     kx = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
     return np.eye(3) + np.sin(theta) * kx + (1.0 - np.cos(theta)) * (kx @ kx)
+
 
 # Construction-time params: a change to any rebuilds the owning object.
 _ICP_BUILD = frozenset(
@@ -204,7 +278,7 @@ class ElevationNode(Node):
     """Publish the single-scan (MPPI) and accumulated (planning) elevation maps."""
 
     def __init__(self) -> None:
-        super().__init__("elevation")
+        super().__init__("elevation_ekf")
 
         self._declare_parameters()
         self._cache_params()
@@ -222,12 +296,24 @@ class ElevationNode(Node):
         self._map_T_odom: np.ndarray | None = None
         self._beam_dirs: np.ndarray | None = None  # per-beam unit dirs, built once for the frontier
         self.goal_xy: tuple[float, float] | None = None  # planning goal in map frame
-        self._prev_cmd = np.zeros(3, np.float32)  # last published /cmd_joints [L, rear, R] (slew ref)
-        self._d_hist: deque[float] = deque(maxlen=15)  # recent robot->goal distances (progress check)
-        self._prev_plan_U: np.ndarray | None = None  # last frame's nominal plan (for plan-consistency EMA)
-        self._turn_adapt: AdaptiveTurnBoost | None = None  # optional online turn_boost (gyro feedback)
-        self._last_diff_out: float | None = None  # last commanded (wR-wL), paired with the yaw it caused
-        self._goal_reached = False  # latched at the goal -> idle (no planning) until the goal changes
+        self._prev_cmd = np.zeros(
+            3, np.float32
+        )  # last published /cmd_joints [L, rear, R] (slew ref)
+        self._d_hist: deque[float] = deque(
+            maxlen=15
+        )  # recent robot->goal distances (progress check)
+        self._prev_plan_U: np.ndarray | None = (
+            None  # last frame's nominal plan (for plan-consistency EMA)
+        )
+        self._turn_adapt: AdaptiveTurnBoost | None = (
+            None  # optional online turn_boost (gyro feedback)
+        )
+        self._last_diff_out: float | None = (
+            None  # last commanded (wR-wL), paired with the yaw it caused
+        )
+        self._goal_reached = (
+            False  # latched at the goal -> idle (no planning) until the goal changes
+        )
         self._holding = False  # walled-off hold active -> planned-path marker drawn red
         self.planner: MppiGpu | None = None
         self.plan_sim: ForwardSimulator | None = None
@@ -236,16 +322,32 @@ class ElevationNode(Node):
         self._plan_kr: int = 1
         self._plan_dims: tuple[int, int, int, int, int, int] | None = None
         self.localizer: Localizer | None = None
+        # EKF6D localization: physics-model predict fused with the ICP measurement.
+        self.ekf: EKF6D | None = None  # None until bootstrapped on the first scan
+        self.sim_pred: ForwardSimulator | None = None  # flat-ground predict model (batch 1)
+        self._world_T_base: np.ndarray | None = None  # last fused pose (SE(3)), the splice ref
+        # Last measured wheel speeds [ω_L, ω_R, ω_rear] from /joint_states — the EKF predict input.
+        self._prev_meas_wheel = np.zeros(3, np.float64)
+        self._joint_states_mono: float | None = None  # time.monotonic() of last valid JointState
+        # Stamp of the last *processed* cloud [s], used to measure the real inter-cloud dt.
+        # None until the first scan is processed.
+        self._prev_cloud_t: float | None = None
         self._latest_imu: Imu | None = None
         # (t_sec, quaternion xyzw, angular_velocity xyz) history so the deskew and the
         # rotation prior can read the gyro rate at the *cloud* stamp (not whatever arrived
         # last). The quaternion is buffered for gravity/debug only — the prior uses the gyro.
-        self._imu_buffer: deque[tuple[float, np.ndarray, np.ndarray]] = deque(maxlen=_IMU_BUFFER_LEN)
+        self._imu_buffer: deque[tuple[float, np.ndarray, np.ndarray]] = deque(
+            maxlen=_IMU_BUFFER_LEN
+        )
         # Running gyro-integrated world_R_base + the stamp it is integrated to (rotation prior).
         self._gyro_R_base: np.ndarray | None = None
         self._gyro_t: float | None = None
         self._base_R_gyro: np.ndarray | None = None  # cached static base<-imu rotation for the gyro
         self._consecutive_rejects = 0  # for reset-on-sustained-divergence
+        # Covariance snapshot taken right after ekf.predict(), before ekf.update_icp().
+        # Used by _publish_ekf_diag to emit both P⁻ (predicted) and P⁺ (posterior) metrics.
+        self._P_pred: np.ndarray | None = None
+
         self._prof: dict[str, float] = {}  # per-stage cumulative seconds (profile_stages)
         self._prof_n = 0
         self._prof_t = 0.0
@@ -256,6 +358,7 @@ class ElevationNode(Node):
         self.device = self._resolve_device(self.get_parameter("device").value)
         self._build_aligner()
         self._build_localizer()
+        self._build_ekf()
         self._build_accumulator()
         self._build_dynamic_filter()
         self._build_outlier_filter()
@@ -266,9 +369,14 @@ class ElevationNode(Node):
         # (`/imu/data`) and a best-effort one (`/ouster/imu`); a reliable sub gets nothing from
         # the latter.
         self.create_subscription(Imu, self.imu_topic, self._imu_callback, qos_profile_sensor_data)
-        self.create_subscription(PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10)
         self.create_subscription(
-            PoseStamped, self.get_parameter("follow_topic").value, self._follow_callback, 10
+            PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10
+        )
+        self.create_subscription(
+            JointState,
+            self.get_parameter("joints_topic").value,
+            self._joint_state_callback,
+            qos_profile_sensor_data,
         )
         # LiDAR is best-effort (SensorDataQoS); a reliable sub gets nothing from it.
         self.cloud_sub = Subscriber(
@@ -294,11 +402,19 @@ class ElevationNode(Node):
         self.pub_frame = self.create_publisher(Marker, "frame_marker", 1)
         self.pub_cmd = self.create_publisher(JointState, self.get_parameter("cmd_topic").value, 10)
         self.pub_holding = self.create_publisher(Bool, "plan_holding", 10)  # True = walled-off hold
-        self.pub_turn_boost = self.create_publisher(Float32, "turn_boost", 10)  # turn_boost in effect (debug)
+        self.pub_turn_boost = self.create_publisher(
+            Float32, "turn_boost", 10
+        )  # turn_boost in effect (debug)
+        # EKF debug topics — informational only; no stack component subscribes to these.
+        self.pub_ekf_odom = self.create_publisher(Odometry, "ekf/odom", 10)
+        self.pub_ekf_pose_pred = self.create_publisher(PoseStamped, "ekf/pose_pred", 10)
+        self.pub_ekf_nis = self.create_publisher(Float32, "ekf/nis_icp", 10)
+        self.pub_ekf_diag = self.create_publisher(DiagnosticArray, "ekf/diagnostics", 10)
         self.add_on_set_parameters_callback(self._on_parameters_changed)
 
         self.get_logger().info(
-            f"ElevationNode: cloud={self.lidar_topic} odom={self.odom_topic} imu={self.imu_topic} "
+            f"ElevationNode(EKF): pose=EKF6D (physics predict + ICP measurement) "
+            f"cloud={self.lidar_topic} odom={self.odom_topic} imu={self.imu_topic} "
             f"map_frame={self.map_frame} win_m={self.win_m} route_m={self.route_m} "
             f"gravity={'on' if self.gravity_enable else 'off'} device={self.device}"
         )
@@ -379,15 +495,15 @@ class ElevationNode(Node):
         # Dynamic-obstacle carving: remove accumulated points the current scan sees
         # through (moving things). Visibility ray-carve against the new scan.
         d("dynamic_enable", True)
-        # Consecutive-free carve: only drop a point seen-through for this many frames IN A ROW, so one
-        # grazing/dark/dropped-beam no-return can't delete static geometry. <=1 = instantaneous carve.
-        # A moving obstacle's vacated spot is seen-through CONSECUTIVELY (open ground, never re-hit) so
-        # its trail clears in ~this many frames; a static wall grazed while driving reads free only
-        # INTERMITTENTLY (the 360° scan re-hits it) so the counter resets and it survives.
-        # AGGRESSIVE default 5 (2026-07-15): the follow-me person's trail must clear fast (~0.5 s) or it
-        # walls off the moving goal. Cost: a corridor wall grazed while driving erodes more than at 25
-        # (~43% vs ~24% measured). Accepted -- we don't split follow/click. Raise toward 25 for
-        # map fidelity if you're not following.
+        # Consecutive-free carve: only drop a point seen-through for this many frames IN A ROW,
+        # so one grazing/dark/dropped-beam no-return can't delete static geometry. <=1 = the old
+        # instantaneous carve. Threaded per-cell through the accumulator (survives re-voxelizing).
+        # 25, not 8: when the robot drives PARALLEL to a wall the beams graze along it and read as
+        # seen-through, but only INTERMITTENTLY (the 360° scan re-hits it as the pose changes), so a
+        # high consecutive threshold keeps it — at 8 both corridor walls eroded ~43% while driving,
+        # at 25 only ~24%. A moving obstacle's vacated spot is seen-through CONSECUTIVELY (open
+        # ground, never re-hit), so its trail still carves — measured unchanged 8->25. Cost: a
+        # vacated spot lingers ~2.5 s (25 frames @ 10 Hz) before clearing. Makes the frontier safe.
         d("carve_persist_frames", 5)
         # Age out a BETWEEN-BEAM speck: a map point on a bearing no beam reached, but whose
         # NEIGHBOURS were scanned, is dropped after this many frames (0 disables). Gated to NEAR +
@@ -395,10 +511,8 @@ class ElevationNode(Node):
         # of the map (72% of structure past 8 m) — a distant real point lands in an empty el-bin
         # (128 bins / 180° = 1.4°/bin vs the ~0.35° beam pitch) and reads as a gap — plus the
         # wheel-occlusion shadows off to the sides. Near+front confines it to the path specks.
-        # 4 (was 8): age out the trail's between-beam specks faster, matching the aggressive persist=5.
         d("carve_gap_frames", 4)
-        d("carve_gap_max_range_m", 10.0)  # only gap-carve within this range (0 = no range gate); 10 (was
-        #                                   2.5) ages out the person's between-beam specks further out
+        d("carve_gap_max_range_m", 10.0)  # only gap-carve within this range (0 = no range gate)
         # Only gap-carve within this half-cone (deg) of the robot heading; excludes the wheel
         # shadows (~55-87° off heading) and the rear. 0 = no forward gate (carve all around).
         d("carve_gap_fwd_deg", 45.0)
@@ -406,9 +520,7 @@ class ElevationNode(Node):
         d("dynamic_el_bins", 128)
         d("dynamic_el_min_deg", -90.0)  # full hemisphere (world-frame binning, robust to mount)
         d("dynamic_el_max_deg", 90.0)
-        # carve only if the scan is farther by this + range*margin_rel. 0.1 (was 0.3) = smaller slack ->
-        # more aggressive visibility carve (clears the person's trail faster; also erodes more static).
-        d("dynamic_margin_m", 0.1)
+        d("dynamic_margin_m", 0.1)  # carve only if the scan is farther by this + range*margin_rel
         d("dynamic_margin_rel", 0.05)  # range-proportional slack; absorbs angular-bin quantization
         #                                on slanted/radial walls that else reads as seen-through
         d("dynamic_min_range_m", 0.5)
@@ -457,6 +569,18 @@ class ElevationNode(Node):
         # signal that lets the rot cap relax safely. Good rotate fits ~0.03-0.055, aliased/
         # diverged ones >=0.086, so 0.08 separates them. 0 = off (library default).
         d("icp_max_rms_residual_m", 0.08)
+        # Bypass the translation correction cap when ICP RMS is strictly below this value — a
+        # sub-threshold RMS cannot be an aliased fit, so the cap should not apply. Set to ~half
+        # of icp_max_rms_residual_m (e.g. 0.04 m) to recover well-converged registrations after
+        # odom drift. 0.0 = disabled (default, no behaviour change).
+        d("icp_rms_bypass_trans_m", 0.00)
+        # Adaptive ICP measurement noise (R_ICP): scale = (rms / rms_nom)² × (N_nom / N_inl).
+        # At nominal values scale = 1 and R_ICP is used as-is; worse alignments get larger R,
+        # better ones get smaller R. Calibrate *_nom to your sensor's typical operating point
+        # (measured mean values) so scale ≈ 1 at normal conditions. Too-low inl_nom or too-high
+        # rms_nom makes scale << 1, over-shrinking R and giving ICP too much trust.
+        d("icp_r_rms_nom", 0.018)  # [m] RMS reference at nominal operating conditions
+        d("icp_r_inl_nom", 4800)   # [#] inlier-count reference at nominal operating conditions
         # Yaw multi-start: run this many ICPs from headings spread over icp_yaw_search_deg about
         # the prediction and keep the best fit — escapes the wrong rotational basin under fast
         # skid-steer yaw. 1 = single ICP (off). GPU-parallel-friendly; costs ~N ICP launches.
@@ -465,9 +589,19 @@ class ElevationNode(Node):
         # On a REJECTED registration the pose fell back to raw odom, so the old
         # accumulated map would smear against it — drop it and re-seed from this scan.
         d("reset_map_on_reject", True)
-        d("reset_after_rejects", 5)  # wipe only after this many CONSECUTIVE rejects (sustained loss)
+        d(
+            "reset_after_rejects", 5
+        )  # wipe only after this many CONSECUTIVE rejects (sustained loss)
         d("debug_frames", False)  # INFO-log each frame's registration metrics (debugging)
-        d("profile_stages", False)  # GPU-synced per-stage timing, logged every 30 frames (debugging)
+        d(
+            "profile_stages", False
+        )  # GPU-synced per-stage timing, logged every 30 frames (debugging)
+        # EKF debug publishing (informational only — nothing in the stack subscribes to these):
+        #   ekf/pose_pred     — geometry_msgs/PoseStamped: planar x/y/ψ after predict (pre-ICP)
+        #   ekf/odom          — nav_msgs/Odometry: fused pose+twist with full 6x6 covariance
+        #   ekf/nis_icp       — std_msgs/Float32: NIS of the ICP update (χ²(3), mean≈3)
+        #   ekf/diagnostics   — diagnostic_msgs/DiagnosticArray: per-frame scalar summary
+        d("publish_ekf_debug", True)
         # Gravity prior (IMU anchors ICP roll/pitch)
         d("gravity_enable", True)
         d("gravity_weight", 2000.0)
@@ -491,20 +625,7 @@ class ElevationNode(Node):
         # cost-to-go routing field. Goal comes from RViz "2D Nav Goal" on goal_topic. Publishes
         # the intended path (nav_msgs/Path + a thick LINE_STRIP marker).
         d("plan_enable", True)
-        d("goal_topic", "/goal_pose")  # RViz "2D Nav Goal" (a one-shot click, latches on reach)
-        # GOAL SOURCE: which stream drives the planner. "click" -> goal_topic (RViz); "follow" ->
-        # follow_topic, a live pose (e.g. the radio locator) continuously chased -- every update
-        # re-targets and the reach latch never sticks, so a MOVING tag is tracked. The follow pose
-        # is transformed into map_frame via TF, so it may arrive in any frame (e.g. 'locator').
-        # Runtime-switchable: `ros2 param set /elevation_node goal_source follow` (no rebuild).
-        d("goal_source", "click")
-        d("follow_topic", "/radio/estimate_pose")  # PoseStamped to chase in "follow" mode
-        # FOLLOW STANDOFF: in "follow" mode, aim this far SHORT of the tag (m), back along the
-        # robot->tag line. The tag rides on a person = a LiDAR obstacle, so a goal placed ON them is
-        # untraversable -- the router can't seed there so the robot "walls off" and holds. Aiming at
-        # free space in front fixes that AND is a sane follow gap. 0 = target the tag exactly (walls
-        # off on a person). Runtime-tunable via `ros2 param set`.
-        d("follow_standoff", 1.5)
+        d("goal_topic", "/goal_pose")
         d("plan_batch", 4096)  # MPPI rollouts B
         # rollout steps T (planning_solver dt = 0.1 s). SHORT is better here: the cost-to-go lattice
         # does the global routing, so a short MPPI just follows it decisively -- sim-validated to reach
@@ -523,7 +644,9 @@ class ElevationNode(Node):
         # 'indoor' (K_TURN 0.4, alpha~1.33) or 'outdoor' (K_TURN 1.0, alpha~1.82 -- grass/dirt grips
         # harder so it understeers). ICP-calibrated per environment; see dynamics.k_turn_for.
         d("terrain", "outdoor")
-        d("k_turn", -1.0)  # explicit turn-gain override (e.g. from calibrate_turn.sh); <0 = use terrain
+        d(
+            "k_turn", -1.0
+        )  # explicit turn-gain override (e.g. from calibrate_turn.sh); <0 = use terrain
         d("plan_robust_margin_m", 0.3)  # cost-to-go safety tube: lateral (m) ~ robot half-width;
         # keeps the routed center a footprint-width off berms (validated in the Tier-C closed loop:
         # 0 belly contacts). Tighten in narrow spaces -- it erodes the feasible set both sides.
@@ -542,7 +665,9 @@ class ElevationNode(Node):
         # MPPI speed knobs (rebuild the planner on change): the robot drives slow because the cost
         # balance prefers it. Raise goal_running (reward progress) and/or lower effort (penalty on
         # wheel-speed^2) to drive faster. plan_max_omega is only the output SAFETY clamp, not speed.
-        d("plan_goal_running", 0.3)  # cost-to-go V^2 per step -> higher = faster (more progress pull)
+        d(
+            "plan_goal_running", 0.3
+        )  # cost-to-go V^2 per step -> higher = faster (more progress pull)
         d("plan_effort", 1e-3)  # penalize wheel-speed^2 -> lower = faster (less speed penalty)
         # TURN penalty: cost on the wheel differential (wr - wl)^2 -> a real gradient toward STRAIGHT
         # where the goal cost is flat w.r.t. heading (free-heading goal). Cut straight-line wander ~70%
@@ -576,14 +701,12 @@ class ElevationNode(Node):
         # left-wheel sign flip, rear-follower, magnitude clamp, slew limit) is in control/command.py.
         d("plan_actuate", True)  # publish /cmd_joints wheel commands
         d("cmd_topic", "/cmd_joints")  # JointState wheel-velocity command topic (to the LLC)
+        d("joints_topic", "/joint_states")  # measured wheel-velocity feedback from LLC
         d("plan_max_omega", 5.0)  # hard cap on |wheel velocity| [rad/s] -- the motor safe max (~5, see plan_wmax)
         # hard cap on |d(cmd)/dt| per wheel [rad/s^2]. At DT=0.1s the command may change by
         # max_slew*0.1 per step; 50 let it jump 0->cruise in ONE step (harsh launch, ~5 m/s^2). 6.0
         # ramps 0->~1.3 m/s cruise over ~0.65s (ground ~2.1 m/s^2) -- softer start/stop, still responsive.
         d("plan_max_slew", 6.0)
-        # deceleration cap [rad/s^2] -- separate from accel so stops can be firmer than the gentle
-        # launch. 12.0 = ground ~4.2 m/s^2, stops from cruise in ~0.32s. None/<=0 would mean symmetric.
-        d("plan_max_decel", 12.0)
         # amplify the commanded turn differential. 1.0 = off. REVISED 2026-07-15: post-fix bags showed
         # the differential is realized ~1:1 below the motor ceiling -- the earlier "~half" was SATURATION
         # (over-commanded wheels), not a real drivetrain gain. So boosting over-turns below the limit and
@@ -598,7 +721,9 @@ class ElevationNode(Node):
         d("plan_turn_boost_adapt", False)
         d("plan_turn_boost_tau", 3.0)
         d("plan_dock_radius", 1.5)  # within this range of the goal: dock (if enabled) or just stop
-        d("plan_dock_enable", True)  # True = terminal dock; False = just STOP when within dock_radius
+        d(
+            "plan_dock_enable", True
+        )  # True = terminal dock; False = just STOP when within dock_radius
         d("plan_reach_radius", 0.3)  # goal reached -> command a (ramped) stop within this range (m)
         # GOAL BRAKE: scale MPPI's forward speed to 0 over the last brake_dist m so the forward-only
         # robot noses in slow and settles AT the goal instead of overshooting/orbiting past it. Cruise
@@ -609,7 +734,9 @@ class ElevationNode(Node):
         # AND the committed plan reduces distance-to-goal by less than this, the robot is walled off
         # -> stop instead of the explore-fallback nosing into the obstacle. Keep it below a horizon's
         # worth of forward progress so genuine exploration down an open corridor is NOT stopped.
-        d("plan_progress_min", 0.3)  # min plan progress toward the goal to keep driving when saturated (m)
+        d(
+            "plan_progress_min", 0.3
+        )  # min plan progress toward the goal to keep driving when saturated (m)
         d("plan_path_width", 0.08)  # intended-path line marker width (m)
 
     def _cache_params(self) -> None:
@@ -652,6 +779,10 @@ class ElevationNode(Node):
         self.icp_max_corr_rot_rad: float = float(np.deg2rad(g("icp_max_corr_rot_deg")))
         self.icp_min_submap_points: int = g("icp_min_submap_points")
         self.icp_max_rms_residual_m: float = g("icp_max_rms_residual_m")
+        self.icp_rms_bypass_trans_m: float = g("icp_rms_bypass_trans_m")
+        self.icp_r_rms_nom: float = g("icp_r_rms_nom")
+        self.icp_r_inl_nom: int = g("icp_r_inl_nom")
+
         self.icp_yaw_restarts: int = g("icp_yaw_restarts")
         self.icp_yaw_search_deg: float = g("icp_yaw_search_deg")
         self.dynamic_enable: bool = g("dynamic_enable")
@@ -675,12 +806,11 @@ class ElevationNode(Node):
         self.reset_after_rejects: int = g("reset_after_rejects")
         self.debug_frames: bool = g("debug_frames")
         self.profile_stages: bool = g("profile_stages")
+        self.publish_ekf_debug: bool = g("publish_ekf_debug")
         self.publish_map_tf: bool = g("publish_map_tf")
         self.publish_odom_tf: bool = g("publish_odom_tf")
         self.publish_accumulated: bool = g("publish_accumulated")
         self.plan_enable: bool = g("plan_enable")
-        self.goal_source: str = g("goal_source")  # "click" | "follow" -- live-switchable
-        self.follow_standoff: float = g("follow_standoff")  # stop this far short of the tag (m)
         self.plan_batch: int = g("plan_batch")
         self.plan_horizon: int = g("plan_horizon")
         self.plan_consistency: float = g("plan_consistency")
@@ -703,7 +833,6 @@ class ElevationNode(Node):
         self.plan_actuate: bool = g("plan_actuate")
         self.plan_max_omega: float = g("plan_max_omega")
         self.plan_max_slew: float = g("plan_max_slew")
-        self.plan_max_decel: float = g("plan_max_decel")
         self.plan_turn_boost: float = g("plan_turn_boost")
         self.plan_turn_boost_adapt: bool = g("plan_turn_boost_adapt")
         self.plan_turn_boost_tau: float = g("plan_turn_boost_tau")
@@ -748,12 +877,36 @@ class ElevationNode(Node):
             max_correction_trans_m=self.icp_max_corr_trans_m,
             max_correction_rot_rad=self.icp_max_corr_rot_rad,
             max_rms_residual_m=self.icp_max_rms_residual_m,
+            min_rms_to_bypass_trans_m=self.icp_rms_bypass_trans_m,
             yaw_restarts=self.icp_yaw_restarts,
             yaw_search_deg=self.icp_yaw_search_deg,
         )
 
     def _build_localizer(self) -> None:
         self.localizer = Localizer(self.aligner, self._localizer_config())
+
+    def _build_ekf(self) -> None:
+        """Build the flat-ground process-model simulator for the EKF predict step.
+
+        One ForwardSimulator on flat z=0 terrain (batch 1) evaluates the nonlinear f.
+        The state-transition Jacobian F is the flat-ground analytical form
+        (jacobian_F_6d_analytical). Flat ground is translation-invariant, so a small
+        fixed grid centered on the origin suffices for any world coordinate — the
+        predict is run in a robot-local frame each step (see _process). The filter
+        itself (self.ekf) bootstraps from odom on the first scan.
+        """
+        cell = 0.1
+        n = int(round(8.0 / cell))  # 8 m flat grid, centered on the origin
+        grid = GridParams(n, n, cell, -0.5 * n * cell, -0.5 * n * cell)
+        elev0 = wp.zeros((n, n), dtype=wp.float32, device=self.device)
+        robot, solver = dynamics.robot_params(), dynamics.planning_solver()
+        self.sim_pred = ForwardSimulator(robot, solver, grid, 1, 1, self.device)
+        self.sim_pred.set_terrain(elev0)
+        self.sim_pred.set_uniform_friction(self.plan_friction)
+        self.ekf = None  # re-bootstrap on the next scan
+        self._world_T_base = None
+        self._prev_meas_wheel = np.zeros(3, np.float64)
+        self._prev_cloud_t = None  # don't carry a stale dt across a filter rebuild
 
     def _build_accumulator(self) -> None:
         g = lambda k: self.get_parameter(k).value  # noqa: E731
@@ -815,9 +968,14 @@ class ElevationNode(Node):
         self.plan_sim.set_uniform_friction(self.plan_friction)
         self.planner = MppiGpu(
             self.plan_sim,
-            CostParams(goal_running=self.plan_goal_running, effort=self.plan_effort, turn=self.plan_turn),
-            sampling=SamplingConfig(wmax=self.plan_wmax, straight_frac=self.plan_straight_frac,
-                                    elite_frac=self.plan_elite_frac),
+            CostParams(
+                goal_running=self.plan_goal_running, effort=self.plan_effort, turn=self.plan_turn
+            ),
+            sampling=SamplingConfig(
+                wmax=self.plan_wmax,
+                straight_frac=self.plan_straight_frac,
+                elite_frac=self.plan_elite_frac,
+            ),
             n_theta=int(self.plan_n_theta),
         )
         self.planner.reset_nominal(self.plan_nominal_reset)
@@ -841,7 +999,9 @@ class ElevationNode(Node):
         self.ctg = CostToGo(
             GridParams(rcnx, rcny, rccell, 0.0, 0.0),
             dynamics.robot_params(),
-            dynamics.planning_solver(k_turn=kt),  # static settle ignores k_turn; passed for consistency
+            dynamics.planning_solver(
+                k_turn=kt
+            ),  # static settle ignores k_turn; passed for consistency
             n_theta=int(self.plan_n_theta),
             robust_margin_m=self.plan_robust_margin_m,
             robust_margin_deg=self.plan_robust_margin_deg,
@@ -860,10 +1020,8 @@ class ElevationNode(Node):
     def _goal_callback(self, msg: PoseStamped) -> None:
         """RViz 2D Nav Goal. Assumes the pose is already in map_frame (RViz publishes in its
         fixed frame — set it to the map frame); warns otherwise and uses it as-is."""
-        if self.goal_source != "click":
-            return  # follow mode owns the goal; set goal_source:=click to drive from RViz
         if msg.header.frame_id and msg.header.frame_id != self.map_frame:
-            self.get_logger().warning(
+            self.get_logger().warn(
                 f"goal frame '{msg.header.frame_id}' != map_frame '{self.map_frame}'; "
                 "set the RViz Fixed Frame to the map frame."
             )
@@ -872,48 +1030,6 @@ class ElevationNode(Node):
         self._prev_plan_U = None  # new goal -> don't smooth against the old goal's plan
         self._goal_reached = False  # new goal -> resume planning
         self.get_logger().info(f"goal set: ({self.goal_xy[0]:.2f}, {self.goal_xy[1]:.2f})")
-
-    def _follow_callback(self, msg: PoseStamped) -> None:
-        """Follow-me target (e.g. the radio locator on /radio/estimate_pose). Active only while
-        goal_source == 'follow': the pose is transformed into map_frame via TF and becomes the live
-        goal on every update, so a MOVING tag is continuously chased. Warm-start (_prev_plan_U) and
-        progress history (_d_hist) are deliberately NOT reset here -- the target drifts smoothly, so
-        the last plan is still a good seed. The reach latch is handled per-frame in the plan loop
-        (stop within plan_reach_radius, resume when the tag moves away). Ignored in 'click' mode."""
-        if self.goal_source != "follow":
-            return
-        try:
-            tf = self.tf_buffer.lookup_transform(
-                self.map_frame, msg.header.frame_id, rclpy.time.Time()
-            )
-        except TransformException as exc:
-            self.get_logger().warning(
-                f"follow: no TF {msg.header.frame_id!r} -> {self.map_frame!r} ({exc})",
-                throttle_duration_sec=2.0,
-            )
-            return
-        p = do_transform_pose(msg.pose, tf)
-        px, py = p.position.x, p.position.y
-        # Stand off short of the tag: it rides on a person (a LiDAR obstacle), so a goal placed ON
-        # them is untraversable and the router walls off. Aim follow_standoff m in front, back along
-        # the robot->tag line, into free space. Needs the robot's map pose; if that TF is missing,
-        # fall back to the raw tag point (keeps following, may wall off).
-        if self.follow_standoff > 0.0:
-            try:
-                rb = self.tf_buffer.lookup_transform(
-                    self.map_frame, self.base_frame, rclpy.time.Time()
-                )
-                rx, ry = rb.transform.translation.x, rb.transform.translation.y
-                dx, dy = px - rx, py - ry
-                dist = float(np.hypot(dx, dy))
-                if dist > self.follow_standoff:
-                    s = (dist - self.follow_standoff) / dist  # fraction of the way to the tag
-                    px, py = rx + s * dx, ry + s * dy
-                else:
-                    px, py = rx, ry  # already within standoff -> hold position
-            except TransformException:
-                pass  # no robot pose -> target the tag directly
-        self.goal_xy = (px, py)
 
     def _on_parameters_changed(self, params) -> SetParametersResult:
         names = {p.name for p in params}
@@ -936,6 +1052,7 @@ class ElevationNode(Node):
                 self.map_streak = None
                 self._preproc = None  # buffers live on the old device
                 self._build_localizer()  # fresh pose state; re-bootstraps on the next scan
+                self._build_ekf()  # rebuild the predict sims on the new device; re-bootstraps EKF
         except Exception as exc:  # a bad value must not kill the node
             return SetParametersResult(successful=False, reason=str(exc))
         self.localizer.config = self._localizer_config()
@@ -962,14 +1079,26 @@ class ElevationNode(Node):
             t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             self._imu_buffer.append((t, np.array([q.x, q.y, q.z, q.w]), w_base))
 
+    def _joint_state_callback(self, msg: JointState) -> None:
+        # /joint_states velocity order: [ω_L, ω_rear, ω_R] (indices 0, 1, 2).
+        # Reorder to the model convention [ω_L, ω_R, ω_rear] used by predict_q6d.
+        if len(msg.velocity) >= 3:
+            self._prev_meas_wheel = np.array(
+                [msg.velocity[0], msg.velocity[2], msg.velocity[1]], dtype=np.float64
+            )
+            self._joint_states_mono = time.monotonic()
+            return
+        self.get_logger().warn(
+            f"{self.get_parameter('joints_topic').value} has {len(msg.velocity)} velocities "
+            f"(need >= 3) — EKF predict u unchanged",
+            throttle_duration_sec=5.0,
+        )
+
     def _synced_callback(self, cloud_msg: PointCloud2, odom_msg: Odometry) -> None:
         try:
             self._process(cloud_msg, odom_msg)
         except Exception as exc:
-            # Log the traceback, not just the message: this handler swallows EVERY per-frame
-            # failure, and a bare message gives no line to look at -- the whole pipeline can be
-            # dying each frame with nothing to point at.
-            self.get_logger().error(f"elevation error: {exc}\n{traceback.format_exc()}")
+            self.get_logger().error(f"elevation error: {exc}")
 
     def _ck(self, label: str) -> None:
         """Profiling checkpoint: sync the GPU (Warp is async) and accrue time since the last _ck."""
@@ -988,7 +1117,7 @@ class ElevationNode(Node):
         odom_T_base = self._odom_to_matrix(odom_msg)
         scan = self._scan_in_base(cloud_msg)
         if scan is None or scan[0].shape[0] == 0:
-            self.get_logger().warning("Empty / untransformable scan — skipping.")
+            self.get_logger().warn("Empty / untransformable scan — skipping.")
             return
         points_sensor, point_times, base_T_sensor = scan
         # Sensor->base transform, z / self-footprint / range rejection and compaction, all on
@@ -998,17 +1127,28 @@ class ElevationNode(Node):
             points_sensor, point_times, base_T_sensor
         )
         if n_scan == 0:
-            self.get_logger().warning("crop/self-filter removed all points — check bounds.")
+            self.get_logger().warn("crop/self-filter removed all points — check bounds.")
             return
         gravity_up = self._gravity_up_base(cloud_msg.header.stamp)
         imu_R_base = self._gyro_orientation_base(cloud_msg.header.stamp)
         self._ck("preproc+prior")
 
-        if not self.localizer.initialized:
+        t_cloud = cloud_msg.header.stamp.sec + cloud_msg.header.stamp.nanosec * 1e-9
+
+        if self.ekf is None:
+            # Bootstrap: adopt odom as the first world pose and seed the filter there
+            # (velocity states start at zero; the predict step derives them from u).
             world_T_base = odom_T_base
+            map_T_base = world_T_base  # no ICP on bootstrap; map and export pose are the same
             self.localizer.bootstrap(odom_T_base, world_T_base, imu_R_base)
+            bx, by, byaw = mat_to_se2(world_T_base)
+            self.ekf = EKF6D(np.array([bx, by, byaw, 0.0, 0.0, 0.0]), P0, Q, R_ICP, R_ICP)
+            self._world_T_base = world_T_base
+            self._prev_cloud_t = t_cloud  # seed dt so the first real predict has a valid interval
             scan_wp = self._denoise(scan_buf[:n_scan], base_T_sensor)
         else:
+            # Seed ICP from the EKF-fused pose of the previous frame propagated
+            # forward by the odom+gyro delta. sweep_delta is the odom delta used for deskew.
             world_T_base_pred, sweep_delta = self.localizer.predict(odom_T_base, imu_R_base)
             if self.deskew_enable:
                 self._deskew(
@@ -1016,6 +1156,71 @@ class ElevationNode(Node):
                 )
             scan_wp = self._denoise(scan_buf[:n_scan], base_T_sensor)
             self._ck("deskew+denoise")
+
+            # --- EKF PREDICT: physics model f(q, u) + Jacobian F, on flat ground ---
+            # Flat ground is translation-invariant, so run the rollout in a robot-local frame
+            # (robot at the grid center) and shift the result back; keeps the pose in-grid at
+            # any world coordinate. Velocity states are world-frame, unaffected by the shift.
+            #
+            # dt-scaling: the simulator advances exactly one DT step (0.1 s). Scale the
+            # resulting pose DELTA and the dt-proportional Jacobian columns by the ratio of the
+            # real inter-cloud interval to DT, so a dropped frame doesn't under-predict motion
+            # and false-trigger the χ² gate. The process noise is scaled by the same ratio
+            # (random-walk Q model: variance grows linearly with time). Clamped to [0.5, 3.0]×DT:
+            # below 0.5 likely indicates a clock/stamp issue; above 3 a linear extrapolation of
+            # one arc step is meaningless — Q growth + the reject/reset machinery own that case.
+            dt_ratio = 1.0
+            if self._prev_cloud_t is not None:
+                dt_ratio = float(np.clip((t_cloud - self._prev_cloud_t) / dynamics.DT, 0.5, 3.0))
+
+            # Gyro yaw rate averaged over the inter-cloud window: slip-immune heading prediction.
+            # Falls back to None when no IMU samples are available (first frame, IMU dropout),
+            # which causes predict_q6d to use the wheel-differential model.
+            omega_z = self._gyro_wz_mean(
+                self._prev_cloud_t if self._prev_cloud_t is not None else t_cloud,
+                t_cloud,
+            )
+            now_mono = time.monotonic()
+            topic = self.get_parameter("joints_topic").value
+            if self._joint_states_mono is None:
+                self.get_logger().warn(
+                    f"no {topic} yet — EKF predict uses u=[0,0,0]; "
+                    f"translation prior will be wrong until joint_states arrives",
+                    throttle_duration_sec=5.0,
+                )
+            elif now_mono - self._joint_states_mono > _JOINT_STATES_STALE_S:
+                age = now_mono - self._joint_states_mono
+                self.get_logger().warn(
+                    f"{topic} stale ({age:.1f}s > {_JOINT_STATES_STALE_S}s) — "
+                    f"EKF predict holding last u={self._prev_meas_wheel}",
+                    throttle_duration_sec=5.0,
+                )
+            u = self._prev_meas_wheel
+            off_x, off_y = float(self.ekf.x[0]), float(self.ekf.x[1])
+            q_local = self.ekf.x.copy()
+            q_local[0] = 0.0
+            q_local[1] = 0.0
+            x_pred = predict_q6d(q_local, u, self.sim_pred, omega_z=omega_z)
+            # Analytical F uses x_pred BEFORE the world-frame shift: velocity rows [3:6]
+            # are body-frame derived and unaffected by the xy translation.
+            F = jacobian_F_6d_analytical(q_local, x_pred, dynamics.DT)
+            # Scale the xy pose delta (rollout started at the origin, so x_pred[0:2] IS the delta).
+            x_pred[0] = dt_ratio * x_pred[0] + off_x
+            x_pred[1] = dt_ratio * x_pred[1] + off_y
+            # Scale the yaw delta; wrap before and after to stay in (-π, π].
+            dpsi = (x_pred[2] - q_local[2] + np.pi) % (2.0 * np.pi) - np.pi
+            x_pred[2] = q_local[2] + dt_ratio * dpsi
+            # Velocity states [3:6] are re-derived from u each step — not a dt integral.
+            # Only F[0:2, 2] are dt-proportional (∂Δxy/∂ψ ∝ v·dt); the rest are instantaneous.
+            F[0, 2] *= dt_ratio
+            F[1, 2] *= dt_ratio
+            self.ekf.predict(F, x_pred, q_scale=dt_ratio)
+            self._prev_cloud_t = t_cloud
+            self._ck("ekf_predict")
+            if self.publish_ekf_debug:
+                self._publish_ekf_pose_pred(cloud_msg.header.stamp)
+                self._P_pred = self.ekf.P.copy()  # P⁻: before ICP update overwrites P
+
             outcome = self.localizer.update(
                 scan_wp,
                 world_T_base_pred,
@@ -1033,7 +1238,48 @@ class ElevationNode(Node):
                     f"trans={outcome.correction_trans_m:.2f} rms={outcome.rms_residual_m:.3f} "
                     f"inl={outcome.num_inliers} sub={outcome.submap_points} scan={n_scan}"
                 )
-            world_T_base = outcome.pose
+
+            # --- EKF MEASUREMENT UPDATE: the ICP pose [x, y, ψ] (only when accepted) ---
+            icp_nis: float | None = None
+            icp_innov: np.ndarray | None = None  # [Δx, Δy, Δψ] in [m, m, rad]
+            icp_r_scale: float | None = None
+            if outcome.status == "ok":
+                rms = outcome.rms_residual_m
+                # scale = (rms / rms_nom)² × (N_nom / N_inl): worse alignments → larger R → less weight
+                scale = (rms / self.icp_r_rms_nom) ** 2 * (self.icp_r_inl_nom / max(outcome.num_inliers, 1))
+                scale = max(scale, 0.25)  # floor: never trust ICP more than 4× nominal
+                R_adaptive = R_ICP * scale
+                z = np.array(mat_to_se2(outcome.pose))
+                # Capture the pre-update innovation for diagnostics: z − H·x (ψ wrapped).
+                innov = z - self.ekf.x[:3]
+                innov[2] = (innov[2] + np.pi) % (2.0 * np.pi) - np.pi
+                icp_nis = self.ekf.update_icp(z, R=R_adaptive)
+                icp_innov = innov
+                icp_r_scale = scale
+            # Reconstruct the SE(3) pose from the fused planar state, keeping the ICP pose's
+            # z/roll/pitch (hybrid splice, docs/ekf.md 4.4). On a fallback (reject/sparse)
+            # outcome.pose is the predicted seed and the state is unchanged, so this is a no-op.
+            world_T_base = _splice_planar(outcome.pose, self.ekf.x[0], self.ekf.x[1], self.ekf.x[2])
+            # Raw ICP pose (or odom fallback on reject) goes to the map — no EKF blend enters
+            # the accumulated cloud. The EKF-blended world_T_base is exported to TF, planning,
+            # and the next ICP seed only. This severs the bias-feedback loop through the map.
+            map_T_base = outcome.pose
+            self._world_T_base = world_T_base
+            # Feed the EKF-fused pose back so it seeds the next frame's ICP (not the raw ICP result).
+            self.localizer.set_corrected_pose(world_T_base)
+            if self.publish_ekf_debug:
+                self._publish_ekf_debug(
+                    world_T_base,
+                    outcome,
+                    icp_nis,
+                    icp_innov,
+                    icp_r_scale,
+                    dt_ratio,
+                    cloud_msg.header.stamp,
+                    u,
+                    omega_z,
+                )
+
             # A single reject just uses the fallback pose (the map keeps accumulating). Only
             # SUSTAINED divergence — tracking genuinely lost — wipes the map and re-seeds from
             # this scan, so one bad frame no longer starves the ICP submap into a reset spiral.
@@ -1045,13 +1291,12 @@ class ElevationNode(Node):
                 self.map_wp = None
                 self.map_ages = None
                 self.map_streak = None
-                self._preproc = None  # buffers live on the old device
                 self._consecutive_rejects = 0
-                self.get_logger().warning(
+                self.get_logger().warn(
                     f"{self.reset_after_rejects} consecutive ICP rejects -> resetting global map."
                 )
 
-        world_scan = transform_points(scan_wp, len(scan_wp), world_T_base)
+        world_scan = transform_points(scan_wp, len(scan_wp), map_T_base)
         valid = wp.full(len(scan_wp), 1, dtype=wp.int32, device=self.device)
         # Dynamic-obstacle carving: drop accumulated points this scan saw THROUGH (moving
         # things). Carve the previous map by visibility against the fresh scan.
@@ -1060,11 +1305,15 @@ class ElevationNode(Node):
         persist = self.carve_persist_frames
         streak_mode = self.dynamic_enable and persist > 1
         if self.dynamic_enable and self.map_wp is not None and len(self.map_wp) > 0:
-            world_T_sensor = world_T_base @ base_T_sensor
+            world_T_sensor = map_T_base @ base_T_sensor
             sensor_origin = world_T_sensor[:3, 3].copy()
             # Carve against the free-space frontier (no-return beams = free space) so ghosts
             # with no background behind them are removed; returns-only if unavailable.
-            carve_scan = self._frontier_world(cloud_msg, world_T_sensor) if self.dynamic_frontier_enable else None
+            carve_scan = (
+                self._frontier_world(cloud_msg, world_T_sensor)
+                if self.dynamic_frontier_enable
+                else None
+            )
             if carve_scan is None:
                 carve_scan = world_scan
             if streak_mode:
@@ -1078,10 +1327,16 @@ class ElevationNode(Node):
                 )
                 # Robot heading in world (base +x azimuth) — confines the gap age-out to the cone
                 # in front of the robot, so it can't erode the wheel shadows off to the sides.
-                fwd_az = float(np.arctan2(world_T_base[1, 0], world_T_base[0, 0]))
+                fwd_az = float(np.arctan2(map_T_base[1, 0], map_T_base[0, 0]))
                 carve, streak_out = self.dynamic_filter.carve_streak(
-                    self.map_wp, carve_scan, sensor_origin, streak_in, persist,
-                    self.carve_gap_frames, self.carve_gap_max_range_m, fwd_az,
+                    self.map_wp,
+                    carve_scan,
+                    sensor_origin,
+                    streak_in,
+                    persist,
+                    self.carve_gap_frames,
+                    self.carve_gap_max_range_m,
+                    fwd_az,
                     self.carve_gap_fwd_rad,
                 )
             elif self.dynamic_recency_enable and self.map_ages is not None:
@@ -1106,15 +1361,29 @@ class ElevationNode(Node):
         center = (world_T_base[0, 3], world_T_base[1, 3])
         if streak_mode:
             # Seed streaks at 0 on frames with no prior map (bootstrap / just reset).
-            streak_arg = streak_out if streak_out is not None else wp.zeros(0, dtype=wp.int32, device=self.device)
+            streak_arg = (
+                streak_out
+                if streak_out is not None
+                else wp.zeros(0, dtype=wp.int32, device=self.device)
+            )
             self.map_wp, self.map_streak = self.acc.step(
-                self.map_wp, carve, world_scan, valid, center, map_streak=streak_arg,
+                self.map_wp,
+                carve,
+                world_scan,
+                valid,
+                center,
+                map_streak=streak_arg,
             )
             self.map_ages = None
         elif self.dynamic_recency_enable:
             self.map_wp, self.map_ages = self.acc.step(
-                self.map_wp, carve, world_scan, valid, center,
-                map_ages=self.map_ages, frame=self._frame,
+                self.map_wp,
+                carve,
+                world_scan,
+                valid,
+                center,
+                map_ages=self.map_ages,
+                frame=self._frame,
             )
             self.map_streak = None
         else:
@@ -1134,10 +1403,14 @@ class ElevationNode(Node):
         if self.profile_stages:
             self._prof_n += 1
             if self._prof_n % 30 == 0:
-                parts = " ".join(f"{k}={1000 * v / self._prof_n:.1f}"
-                                 for k, v in sorted(self._prof.items(), key=lambda kv: -kv[1]))
+                parts = " ".join(
+                    f"{k}={1000 * v / self._prof_n:.1f}"
+                    for k, v in sorted(self._prof.items(), key=lambda kv: -kv[1])
+                )
                 total = 1000 * sum(self._prof.values()) / self._prof_n
-                self.get_logger().info(f"PROFILE avg ms/frame (n={self._prof_n}) total={total:.1f} | {parts}")
+                self.get_logger().info(
+                    f"PROFILE avg ms/frame (n={self._prof_n}) total={total:.1f} | {parts}"
+                )
 
     # ------------------------------------------------------------------
     # Dual elevation map (mirrors demos/pipeline_sim's heightmap stage)
@@ -1364,17 +1637,8 @@ class ElevationNode(Node):
 
         # --- goal reached: announce once, then IDLE (skip cost-to-go + MPPI) until the goal changes.
         # Keep publishing a (ramped) stop each frame so the LLC stays fed at rest. Resumes on a new goal.
-        # In "follow" mode the latch is NOT sticky: _goal_reached tracks "within radius" per-frame,
-        # so the robot stops on top of a stationary tag but resumes the instant the tag moves away.
         d_goal = float(np.hypot(gx - mf.ex, gy - mf.ey))
-        within = d_goal < self.plan_reach_radius
-        if self.goal_source == "follow":
-            if within and not self._goal_reached:
-                self.get_logger().info(
-                    f"follow: within {self.plan_reach_radius:.2f} m -- holding at tag"
-                )
-            self._goal_reached = within  # per-frame, not latched -> chases again when the tag moves
-        elif not self._goal_reached and within:
+        if not self._goal_reached and d_goal < self.plan_reach_radius:
             self._goal_reached = True
             self.get_logger().info(
                 f"REACHED goal (d={d_goal:.2f} m) -- stopping; idle until a new goal is set."
@@ -1382,8 +1646,12 @@ class ElevationNode(Node):
         if self._goal_reached:
             if self.plan_actuate:
                 cmd = condition_command(
-                    0.0, 0.0, self._prev_cmd, max_omega=self.plan_max_omega,
-                    max_slew=self.plan_max_slew, max_decel=self.plan_max_decel, dt=dynamics.DT,
+                    0.0,
+                    0.0,
+                    self._prev_cmd,
+                    max_omega=self.plan_max_omega,
+                    max_slew=self.plan_max_slew,
+                    dt=dynamics.DT,
                     turn_boost=self.plan_turn_boost,
                 )
                 self._prev_cmd = cmd
@@ -1475,38 +1743,44 @@ class ElevationNode(Node):
             if saturated and stuck:
                 wl, wr = 0.0, 0.0  # walled off + no real progress -> hold
                 holding = True
-                self.get_logger().warning(
+                self.get_logger().warn(
                     f"goal unreachable (walled off, no progress in {self._d_hist.maxlen} frames) "
-                    f"-> holding [d={d:.1f}]", throttle_duration_sec=2.0
+                    f"-> holding [d={d:.1f}]",
+                    throttle_duration_sec=2.0,
                 )
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
-        turn_boost = self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
+        turn_boost = (
+            self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
+        )
         cmd = condition_command(
-            wl, wr, self._prev_cmd,
-            max_omega=self.plan_max_omega, max_slew=self.plan_max_slew,
-            max_decel=self.plan_max_decel, dt=dynamics.DT,
+            wl,
+            wr,
+            self._prev_cmd,
+            max_omega=self.plan_max_omega,
+            max_slew=self.plan_max_slew,
+            dt=dynamics.DT,
             turn_boost=turn_boost,
-            goal_dist=d, brake_dist=self.plan_goal_brake_dist,
+            goal_dist=d,
+            brake_dist=self.plan_goal_brake_dist,
         )
         self._prev_cmd = cmd
         self._publish_cmd(cmd)
         self.pub_holding.publish(Bool(data=holding))  # True = walled-off hold, False = driving
         self._holding = holding  # colors the planned-path marker red next frame (see _publish_path)
-        self.pub_turn_boost.publish(Float32(data=float(turn_boost)))  # turn_boost in effect (debug/monitor)
+        self.pub_turn_boost.publish(
+            Float32(data=float(turn_boost))
+        )  # turn_boost in effect (debug/monitor)
         # ADAPTIVE turn_boost (optional): pair the PREVIOUS command's differential with the yaw it
         # produced (this frame's gyro) and slow-update the boost -- only while genuinely turning.
         if self._turn_adapt is not None and self._imu_buffer:
             if self._last_diff_out is not None:
                 self._turn_adapt.update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
-            self._last_diff_out = float(cmd[2] - cmd[0])  # condition_command [L, rear, R] -> (wR - wL)
+            self._last_diff_out = float(
+                cmd[2] - cmd[0]
+            )  # condition_command [L, rear, R] -> (wR - wL)
 
     def _publish_cmd(self, cmd: np.ndarray) -> None:
-        """Publish the conditioned [left, rear, right] wheel command to /cmd_joints.
-
-        `cmd` is in WHEEL rad/s (the planner/model convention) and the LLC now consumes /cmd_joints
-        as wheel rad/s directly, so we publish it as-is. (Before 2026-07-27 the LLC misread the
-        command as motor rev/s and we scaled by 22.5/(2*pi); that compensation was dropped once the
-        LLC was fixed -- verified on the robot: realized wheel speed == commanded.)
+        """Publish the conditioned [left, rear, right] wheel velocities to /cmd_joints.
 
         Stamped with the current clock (not the sensor stamp) so an LLC deadman sees a fresh
         command. VELOCITY ONLY: position/effort are left empty. Filling them with inf breaks
@@ -1544,7 +1818,9 @@ class ElevationNode(Node):
         if self._holding:
             m.color = ColorRGBA(r=1.0, g=0.1, b=0.1, a=1.0)
         else:
-            m.color = ColorRGBA(r=1.0, g=0.0, b=1.0, a=1.0)  # magenta: reads over the green height map
+            m.color = ColorRGBA(
+                r=1.0, g=0.0, b=1.0, a=1.0
+            )  # magenta: reads over the green height map
         m.pose.orientation.w = 1.0
         m.points = [Point(x=float(x), y=float(y), z=z) for x, y in xy]
         self.pub_path_marker.publish(m)
@@ -1576,9 +1852,7 @@ class ElevationNode(Node):
             n = float(np.linalg.norm(a))
             if n < 1e-6:  # no accel either -> give up gracefully
                 if not self._imu_warned:
-                    self.get_logger().warning(
-                        "IMU has no orientation and no accel — gravity off."
-                    )
+                    self.get_logger().warn("IMU has no orientation and no accel — gravity off.")
                     self._imu_warned = True
                 return None
             up_imu = a / n  # accelerometer measures -g -> points up when static
@@ -1590,7 +1864,7 @@ class ElevationNode(Node):
                     self.base_frame, imu.header.frame_id, rclpy.time.Time()
                 )
             except TransformException as exc:
-                self.get_logger().warning(f"IMU->base TF failed: {exc}")
+                self.get_logger().warn(f"IMU->base TF failed: {exc}")
                 return None
         r = tf.transform.rotation
         base_R_imu = quaternion_to_matrix(r.x, r.y, r.z, r.w)[:3, :3]
@@ -1642,6 +1916,18 @@ class ElevationNode(Node):
         self._gyro_t = t
         return R.copy()
 
+    def _gyro_wz_mean(self, t0: float, t1: float) -> float | None:
+        """Mean base-frame yaw rate [rad/s] averaged over IMU samples in (t0, t1].
+
+        Returns None when no buffered samples fall in the window (e.g. the first
+        inter-cloud interval before IMU messages have arrived, or an IMU dropout).
+        Falls back gracefully so the caller can use the wheel-differential model.
+        """
+        samples = [w[2] for ts, _q, w in self._imu_buffer if t0 < ts <= t1]
+        if not samples:
+            return None
+        return float(sum(samples) / len(samples))
+
     def _gyro_base_rotation(self, frame_id: str) -> np.ndarray | None:
         """Cached base_R_imu (rotation only) from the static IMU mount TF, or None if not ready yet.
 
@@ -1682,6 +1968,222 @@ class ElevationNode(Node):
         return None
 
     # ------------------------------------------------------------------
+    # EKF debug publishing (informational only — nothing in the stack subscribes)
+    # ------------------------------------------------------------------
+
+    # χ²(3) NIS thresholds: filter is consistent when the rolling mean is near 3.
+    _NIS_WARN = 11.34  # 99th percentile of χ²(3) — sustained > this → R or Q mismatch
+
+    def _publish_ekf_debug(
+        self,
+        world_T_base: np.ndarray,
+        outcome: RegistrationOutcome,
+        nis: float | None,
+        innov: np.ndarray | None,
+        r_scale: float | None,
+        dt_ratio: float,
+        stamp,
+        u: np.ndarray,
+        omega_z: float | None,
+    ) -> None:
+        """Publish post-update EKF debug topics for this frame (pose_pred is published earlier)."""
+        self._publish_ekf_odom(world_T_base, stamp)
+        self._publish_ekf_diag(outcome, nis, innov, r_scale, dt_ratio, stamp, u, omega_z)
+        if nis is not None:
+            self.pub_ekf_nis.publish(Float32(data=float(nis)))
+
+    def _publish_ekf_pose_pred(self, stamp) -> None:
+        """Publish planar x/y/ψ after the predict step (pre-ICP measurement update).
+
+        Same stamp as the cloud / later ekf/odom so a logger can pair predict vs update.
+        """
+        if self.ekf is None:
+            return
+        x, y, psi = float(self.ekf.x[0]), float(self.ekf.x[1]), float(self.ekf.x[2])
+        half = 0.5 * psi
+        msg = PoseStamped()
+        msg.header.stamp = stamp
+        msg.header.frame_id = self.map_frame
+        msg.pose.position.x = x
+        msg.pose.position.y = y
+        msg.pose.position.z = 0.0
+        msg.pose.orientation.z = float(np.sin(half))
+        msg.pose.orientation.w = float(np.cos(half))
+        self.pub_ekf_pose_pred.publish(msg)
+
+    def _publish_ekf_odom(self, world_T_base: np.ndarray, stamp) -> None:
+        """Publish nav_msgs/Odometry with the fused EKF pose, twist, and covariance.
+
+        pose:  EKF-blended x/y/yaw with ICP z/roll/pitch spliced in (world_T_base).
+        twist: world-frame velocity rotated into base_frame per the ROS convention for
+               child_frame_id-expressed twist.  This finally gives the 6D velocity states
+               (ekf.x[3:6]) a consumer — they are unobservable but encode the model's
+               prediction of how fast the robot is currently moving.
+        covariance: the planar EKF covariance P[0:3, 0:3] mapped to the 6×6 ROS
+               row-major pose covariance (x,y,z,roll,pitch,yaw order).  z/roll/pitch
+               diagonals are set to a large sentinel (1e6) — those DOF are not filtered.
+               Twist covariance is similarly planar: vx/vy in base frame + yaw rate.
+        """
+        if self.ekf is None:
+            return
+        msg = Odometry()
+        msg.header.stamp = stamp
+        msg.header.frame_id = self.map_frame
+        msg.child_frame_id = self.base_frame
+
+        # --- pose ---
+        qx, qy, qz, qw = matrix_to_quaternion(world_T_base)
+        p = msg.pose.pose
+        p.position.x = float(world_T_base[0, 3])
+        p.position.y = float(world_T_base[1, 3])
+        p.position.z = float(world_T_base[2, 3])
+        p.orientation.x = qx
+        p.orientation.y = qy
+        p.orientation.z = qz
+        p.orientation.w = qw
+
+        # Pose covariance (6×6, row-major, ROS order x y z roll pitch yaw).
+        # EKF tracks x(0), y(1), ψ(2); map them to ROS slots 0, 1, 5.
+        # z(2), roll(3), pitch(4) are unfiltered → large diagonal sentinel.
+        _UNFILTERED = 1e6
+        P = self.ekf.P  # [6,6] EKF covariance
+        cov = np.zeros((6, 6))
+        # planar block: indices (0,1,5) ↔ EKF (0,1,2)
+        ekf_idx = [0, 1, 2]
+        ros_idx = [0, 1, 5]
+        for i, ei in zip(ros_idx, ekf_idx):
+            for j, ej in zip(ros_idx, ekf_idx):
+                cov[i, j] = P[ei, ej]
+        cov[2, 2] = _UNFILTERED  # z
+        cov[3, 3] = _UNFILTERED  # roll
+        cov[4, 4] = _UNFILTERED  # pitch
+        msg.pose.covariance = cov.flatten().tolist()
+
+        # --- twist (expressed in child_frame_id = base_frame) ---
+        psi = float(np.arctan2(world_T_base[1, 0], world_T_base[0, 0]))
+        c, s = np.cos(-psi), np.sin(-psi)
+        # Rotate world-frame vx/vy into base frame.
+        vx_w, vy_w = float(self.ekf.x[3]), float(self.ekf.x[4])
+        vx_b = c * vx_w - s * vy_w
+        vy_b = s * vx_w + c * vy_w
+        msg.twist.twist.linear.x = vx_b
+        msg.twist.twist.linear.y = vy_b
+        msg.twist.twist.angular.z = float(self.ekf.x[5])
+
+        # Twist covariance: rotate the world-frame vx/vy block by -ψ, fill yaw-rate.
+        # EKF P rows/cols 3,4 are vx_W,vy_W; row/col 5 is ψ̇.
+        R2 = np.array([[c, -s], [s, c]])
+        P_vv = P[3:5, 3:5]
+        P_vv_base = R2 @ P_vv @ R2.T
+        cov_t = np.zeros((6, 6))
+        cov_t[0, 0] = P_vv_base[0, 0]  # vx_b var
+        cov_t[0, 1] = cov_t[1, 0] = P_vv_base[0, 1]
+        cov_t[1, 1] = P_vv_base[1, 1]  # vy_b var
+        cov_t[2, 2] = _UNFILTERED  # vz — not filtered
+        cov_t[5, 5] = float(P[5, 5])  # ψ̇ var
+        msg.twist.covariance = cov_t.flatten().tolist()
+
+        self.pub_ekf_odom.publish(msg)
+
+    def _publish_ekf_diag(
+        self,
+        outcome: RegistrationOutcome,
+        nis: float | None,
+        innov: np.ndarray | None,
+        r_scale: float | None,
+        dt_ratio: float,
+        stamp,
+        u: np.ndarray,
+        omega_z: float | None,
+    ) -> None:
+        """Publish diagnostic_msgs/DiagnosticArray with per-frame EKF scalar summary.
+
+        Level OK when the ICP update was accepted and NIS is below the χ²(3) 99th
+        percentile (11.34).  Level WARN otherwise — a sustained WARN on NIS signals
+        that R_ICP or Q need retuning; WARN on status signals tracking loss.
+
+        Key/value pairs (all plain strings, readable with `ros2 topic echo`):
+          status            — ICP outcome: "ok" | "rejected" | "sparse" | "disabled"
+          nis               — Normalised Innovation Squared (χ²(3), mean≈3 when consistent)
+          innov_x_m         — innovation x component [m]
+          innov_y_m         — innovation y component [m]
+          innov_yaw_deg     — innovation yaw component [deg]
+          r_scale           — adaptive-R scale factor applied this frame
+          rms_residual_m    — ICP RMS point-to-plane residual [m]
+          num_inliers       — ICP inlier count
+          dt_ratio          — real inter-cloud dt / model DT (1.0 = on-time)
+          consecutive_rejects — sustained reject counter (triggers map reset at threshold)
+          omega_l, omega_r, omega_rear — EKF predict wheel speeds [rad/s], model order
+          gyro_z            — window-mean base-frame yaw rate [rad/s], or "n/a" (wheel model)
+
+          Covariance fields (present when publish_ekf_debug is true):
+          cov_pred_{x,y,psi,vx,vy,psidot} — diagonal of P⁻ (after predict, before update)
+          cov_upd_{x,y,psi,vx,vy,psidot}  — diagonal of P⁺ (after update; equals P⁻ on reject)
+          cov_pred_trace   — trace(P⁻): total predicted uncertainty
+          cov_pred_logdet  — log|det(P⁻)|: PSD size of predicted covariance
+          cov_upd_trace    — trace(P⁺): total posterior uncertainty
+          cov_upd_logdet   — log|det(P⁺)|: PSD size of posterior covariance
+          cov_updated      — "1" if ICP update was applied this frame, "0" for predict-only
+        """
+        level = DiagnosticStatus.OK
+        if outcome.status != "ok":
+            level = DiagnosticStatus.WARN
+        elif nis is not None and nis > self._NIS_WARN:
+            # NIS above χ²(3) 99th percentile — filter may be inconsistent.
+            level = DiagnosticStatus.WARN
+
+        def kv(k: str, v: str) -> KeyValue:
+            return KeyValue(key=k, value=v)
+
+        values = [
+            kv("status", outcome.status),
+            kv("nis", f"{nis:.3f}" if nis is not None else "n/a"),
+            kv("innov_x_m", f"{innov[0]:.4f}" if innov is not None else "n/a"),
+            kv("innov_y_m", f"{innov[1]:.4f}" if innov is not None else "n/a"),
+            kv(
+                "innov_yaw_deg",
+                f"{float(np.rad2deg(innov[2])):.3f}" if innov is not None else "n/a",
+            ),
+            kv("r_scale", f"{r_scale:.3f}" if r_scale is not None else "n/a"),
+            kv("rms_residual_m", f"{outcome.rms_residual_m:.4f}"),
+            kv("num_inliers", str(outcome.num_inliers)),
+            kv("dt_ratio", f"{dt_ratio:.3f}"),
+            kv("consecutive_rejects", str(self._consecutive_rejects)),
+            kv("omega_l", f"{float(u[0]):.6g}"),
+            kv("omega_r", f"{float(u[1]):.6g}"),
+            kv("omega_rear", f"{float(u[2]):.6g}"),
+            kv("gyro_z", f"{omega_z:.6g}" if omega_z is not None else "n/a"),
+        ]
+        # Covariance diagnostics — appended only when P_pred was captured this frame.
+        # P_pred = P⁻ (after predict, before update); self.ekf.P = P⁺ (after update, or P⁻
+        # if no update occurred because status != "ok").
+        if self._P_pred is not None:
+            P_pred = self._P_pred
+            P_upd = self.ekf.P
+            _state_names = ["x", "y", "psi", "vx", "vy", "psidot"]
+            for i, name in enumerate(_state_names):
+                values.append(kv(f"cov_pred_{name}", f"{P_pred[i, i]:.6g}"))
+            for i, name in enumerate(_state_names):
+                values.append(kv(f"cov_upd_{name}", f"{P_upd[i, i]:.6g}"))
+            # PSD-size scalars computed from the full matrix (not just the diagonal).
+            values.append(kv("cov_pred_trace", f"{float(np.trace(P_pred)):.6g}"))
+            values.append(kv("cov_pred_logdet", f"{float(np.linalg.slogdet(P_pred)[1]):.6g}"))
+            values.append(kv("cov_upd_trace", f"{float(np.trace(P_upd)):.6g}"))
+            values.append(kv("cov_upd_logdet", f"{float(np.linalg.slogdet(P_upd)[1]):.6g}"))
+            # "1" when an ICP measurement update actually happened this frame, "0" for predict-only.
+            values.append(kv("cov_updated", "1" if outcome.status == "ok" else "0"))
+        ds = DiagnosticStatus()
+        ds.level = level
+        ds.name = "ekf_localization"
+        ds.message = outcome.status
+        ds.values = values
+
+        arr = DiagnosticArray()
+        arr.header.stamp = stamp
+        arr.status = [ds]
+        self.pub_ekf_diag.publish(arr)
+
+    # ------------------------------------------------------------------
     # Scan / odom / deskew / TF (shared shape with terrain_accumulator_node)
     # ------------------------------------------------------------------
 
@@ -1703,7 +2205,7 @@ class ElevationNode(Node):
                 timeout=rclpy.duration.Duration(seconds=0.1),
             )
         except TransformException as exc:
-            self.get_logger().warning(f"sensor->base TF lookup failed: {exc}")
+            self.get_logger().warn(f"sensor->base TF lookup failed: {exc}")
             return None
         t = transform.transform.translation
         r = transform.transform.rotation
@@ -1771,7 +2273,9 @@ class ElevationNode(Node):
         self._beam_dirs = beam.reshape(n, 3).astype(np.float32)
         return self._beam_dirs
 
-    def _frontier_world(self, cloud_msg: PointCloud2, world_T_sensor: np.ndarray) -> wp.array | None:
+    def _frontier_world(
+        self, cloud_msg: PointCloud2, world_T_sensor: np.ndarray
+    ) -> wp.array | None:
         """Free-space frontier as a device cloud in the world frame, for ray-carving.
 
         Hits keep their measured point; no-return beams become a far point along the beam
@@ -1854,7 +2358,7 @@ class ElevationNode(Node):
                 f"submap too sparse ({outcome.submap_points} pts) — using odom prediction."
             )
         elif outcome.status == "rejected":
-            self.get_logger().warning(
+            self.get_logger().warn(
                 f"ICP rejected (inliers={outcome.num_inliers} "
                 f"Δrot={np.rad2deg(outcome.correction_rot_rad):.1f}° "
                 f"Δtrans={outcome.correction_trans_m:.2f}m "

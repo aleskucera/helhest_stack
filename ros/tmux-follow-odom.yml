@@ -1,0 +1,43 @@
+# Radio follower with the ROTATION-FIX locator, standalone on the robot (helhest-jr-robot).
+# Mirrors tmux-adam.yml. This is the ONLY config run on the robot; the Jetson runs `helhest-stack`
+# (Ouster + driver + elevation_node, which supplies `odom` over /tf).
+#
+# Brings up EVERYTHING the follower needs on the robot side:
+#   * zenoh router (peers with the Jetson's router)
+#   * publish_tfs        -> base_link->locator static TF
+#   * sensors.launch.py  -> UWB TWR + Bluetooth AoA drivers (raw range/angle topics)
+#   * radio_locator_odom -> the fork that filters the person estimate in the non-rotating `odom`
+#                           frame (kills the "follow point swings when the robot turns" lag)
+#
+# This replaces follow_me's radio.launch.py -- do NOT also run that (its radio_locator would
+# fight this fork on /radio/estimate_pose). Needs `odom` over /tf from elevation_node (Jetson).
+#
+# Start it:  tmuxinator start tmux-follow-odom      (or: mux start tmux-follow-odom)
+name: follow-odom
+root: /home/robot
+
+startup_window: locator
+pre_window: export ROS_DISTRO=kilted; export RMW_IMPLEMENTATION=rmw_zenoh_cpp; source /opt/ros/kilted/setup.bash; source /home/robot/workspaces/helhest_ws/install/setup.bash
+
+windows:
+  - zenoh-server:
+      panes:
+        - |
+          ZENOH_ROUTER_CONFIG_URI="$HOME/zkurvenej_zenoh.json" ros2 run rmw_zenoh_cpp rmw_zenohd
+
+  # UWB drivers + base_link->locator static TF -- follow_me's radio.launch.py stack MINUS its
+  # radio_locator (which the fork replaces).
+  - sensors:
+      layout: even-vertical
+      panes:
+        - |
+          ros2 run follow_me publish_tfs
+        - |
+          sleep 2
+          ros2 launch follow_me sensors.launch.py twr_available:=true bt_aoa_available:=true
+
+  - locator:
+      panes:
+        - |
+          sleep 6
+          python3 /home/robot/radio_locator_odom.py

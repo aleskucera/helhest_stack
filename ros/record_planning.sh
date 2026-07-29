@@ -61,10 +61,12 @@ TOPICS=(
   /frame_marker           # per-frame counter (sync replay to the run)
   # 3. COMMAND + EXECUTION -- did the decision reach and move the wheels?
   /cmd_joints             # the conditioned wheel-velocity command the node published
-  /joint_setpoint         # per-wheel target the LLC actually drives to
+  /turn_boost             # the turn_boost in effect (fixed or adaptive) -- for turn tuning
+  /joint_setpoints        # per-wheel target the LLC actually drives to
   /joint_states           # actual wheel speeds (was the command executed?)
   /motors_enable          # motor-enable request
   /motors_enabled         # motor-enable state (are the motors even live?)
+  /radio/estimate_pose
 )
 
 # Optional: the produced maps. Reproducible by replaying the INPUTS above, and large, so

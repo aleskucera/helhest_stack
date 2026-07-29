@@ -28,6 +28,7 @@ setup(
             "single_scan_terrain_node = helhest_stack_ros.single_scan_terrain_node:main",
             "terrain_accumulator_node = helhest_stack_ros.terrain_accumulator_node:main",
             "elevation_node = helhest_stack_ros.elevation_node:main",
+            "elevation_node_ekf = helhest_stack_ros.elevation_node_ekf:main",
         ],
     },
 )
