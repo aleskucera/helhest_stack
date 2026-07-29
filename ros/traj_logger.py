@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Trajectory logger — reads map→base_link from /tf and writes x, y, ψ to a CSV.
 
-Run inside the elevation-demo-local or ekf-demo tmuxinator session (ROS sourced).
+Run inside the elevation-demo or ekf-demo tmuxinator session (ROS sourced).
 Polls at 10 Hz (matching the node's cloud rate). On Ctrl-C: flushes the CSV and
 opens a 3-panel matplotlib figure showing x(t), y(t), ψ(t), and the x-y track.
 

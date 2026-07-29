@@ -1,12 +1,21 @@
-# tmuxinator start bag-view
-# BAG=~/motion_toolkit/bags/outdoor_experiment_new2 RATE=0.5 tmuxinator start bag-view
-# Replays the full bag (all recorded topics) and opens RViz for visualization.
-# No node is started — you see exactly what was recorded.
+# Replays the full bag (all recorded topics) and opens RViz — no node started.
+# You see exactly what was recorded.
+#
+#   BAG=/path/to/bag tmuxinator start bag-view
+#   BAG=/path/to/bag RATE=0.5 tmuxinator start bag-view
+#
+# BAG is required. EXEC_SH defaults to ~/projects/helhest-singularity/exec.sh;
+# override locally, e.g. export EXEC_SH=~/exec.sh in .bashrc.
 <%
   home    = ENV['HOME']
-  exec_sh = "#{home}/exec.sh"
-  repo    = "#{home}/motion_toolkit"
-  bag     = ENV['BAG']  || "#{repo}/bags/outdoor_experiment_new2"
+  # tmuxinator renders this through Erubis inside Project.load(path), so the local `path`
+  # (the ~/.config/tmuxinator symlink) is in scope; realpath follows it back into the repo.
+  # REPO is the escape hatch if a future tmuxinator renames that local.
+  repo    = ENV['REPO'] || File.expand_path('..', File.dirname(File.realpath(path)))
+  exec_sh = ENV['EXEC_SH'] || "#{home}/projects/helhest-singularity/exec.sh"
+  bag     = ENV['BAG'] or abort(
+    'ERROR: BAG env var is required. Usage: BAG=/path/to/bag tmuxinator start bag-view'
+  )
   rate    = ENV['RATE'] || '1.0'
   dds     = "export FASTRTPS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\" && export FASTDDS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\""
   ros     = "source /opt/ros/jazzy/setup.bash && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"

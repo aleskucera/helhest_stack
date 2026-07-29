@@ -4,26 +4,35 @@
 # Symlinked into ~/.config/tmuxinator/elevation-demo.yml so it can be launched
 # from anywhere with:
 #
-#   tmuxinator start elevation-demo                    # defaults: rotate bag @ 0.25x
-#   BAG=~/projects/helhest_stack/bags/dynamic \
-#       tmuxinator start elevation-demo                # override bag
-#   RATE=0.5 tmuxinator start elevation-demo           # override playback rate
-#   FULL_REPLAY=1 tmuxinator start elevation-demo      # override topic filter
+#   BAG=/path/to/bag tmuxinator start elevation-demo
+#   BAG=/path/to/bag RATE=0.5 tmuxinator start elevation-demo
+#   BAG=/path/to/bag FULL_REPLAY=1 tmuxinator start elevation-demo
+#
+# BAG is required. EXEC_SH defaults to ~/projects/helhest-singularity/exec.sh;
+# override locally, e.g. export EXEC_SH=~/exec.sh in .bashrc.
+#
+# Default replays ONLY the bag's sensor/odom inputs so the live node regenerates
+# all outputs (no duplicate /frame_marker etc.). FULL_REPLAY=1 replays every topic.
 #
 # Panes: bag (start-paused — hit <space> to play once the node is up),
-# elevation_node, and rviz2 with the preconfigured elevation.rviz.
+# elevation_node, rviz2 (elevation.rviz), traj_logger.
 #
 # Each pane runs inside the helhest Apptainer via exec.sh. The node is run as a
-# module with PYTHONPATH set (no colcon workspace needed) — the same way it is
-# validated in this repo. Every pane forces LOCALHOST discovery (see README).
+# module with PYTHONPATH set (no colcon workspace needed). Every pane forces
+# LOCALHOST discovery (see ros/README.md).
 
 <%
   home    = ENV['HOME']
-  exec_sh = "#{home}/projects/helhest-singularity/exec.sh"
-  repo    = "#{home}/projects/helhest_stack"
-  bag     = ENV['BAG']  || "#{repo}/bags/rotate"
+  # tmuxinator renders this through Erubis inside Project.load(path), so the local `path`
+  # (the ~/.config/tmuxinator symlink) is in scope; realpath follows it back into the repo.
+  # REPO is the escape hatch if a future tmuxinator renames that local.
+  repo    = ENV['REPO'] || File.expand_path('..', File.dirname(File.realpath(path)))
+  exec_sh = ENV['EXEC_SH'] || "#{home}/projects/helhest-singularity/exec.sh"
+  bag     = ENV['BAG'] or abort(
+    'ERROR: BAG env var is required. Usage: BAG=/path/to/bag tmuxinator start elevation-demo'
+  )
   rate    = ENV['RATE'] || '0.25'
-  
+
   # Optional param overrides:
   #   NO_FORGET=1  -> pure accumulation (no dynamic carve/recency, never wipe on reject).
   #   RECENCY=1    -> re-enable the time-based age-out (default OFF; removes moving-obstacle
@@ -47,10 +56,10 @@
   # dropping on UDP (default rmem_max=4 MB < one cloud). MUST be set on every participant
   # (bag publisher, node, rviz) or clouds are lost. See ros/fastdds_shm.xml.
   dds     = "export FASTRTPS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\" && export FASTDDS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\""
-  
+
   # Plain ROS + localhost discovery (for bag / rviz / rqt panes).
   ros     = "source /opt/ros/jazzy/setup.bash && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"
-  
+
   # Full dev env: dev-shell (venv + src + ROS) plus the ros package on PYTHONPATH.
   dev     = "source \"#{repo}/ros/dev-shell.sh\" && export PYTHONPATH=\"#{repo}/ros/helhest_stack_ros:$PYTHONPATH\" && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"
 %>
@@ -63,11 +72,13 @@ windows:
       layout: main-vertical
       panes:
         - bag:
-          - <%= exec_sh %> bash -c '<%= ros %> && ros2 bag play "<%= bag %>" --rate <%= rate %> --loop --start-paused<%= play_topics %>; exec bash'
+          - <%= exec_sh %> bash -c '<%= ros %> && echo BAG=<%= bag %> RATE=<%= rate %> && ros2 bag play "<%= bag %>" --rate <%= rate %> --loop --start-paused<%= play_topics %>; exec bash'
         - node:
           - <%= exec_sh %> bash -c '<%= dev %> && python3 -m helhest_stack_ros.elevation_node <%= args %>; exec bash'
         - rviz:
           - <%= exec_sh %> bash -c '<%= ros %> && rviz2 -d "<%= repo %>/ros/helhest_stack_ros/rviz/elevation.rviz"; exec bash'
+        - traj:
+          - <%= exec_sh %> bash -c '<%= ros %> && python3 "<%= repo %>/ros/traj_logger.py"; exec bash'
   # Scratch shell — same Apptainer + ROS + helhest env, ready for `ros2 topic ...`,
   # `python3 -c "import helhest"`, etc.
   - shell:
