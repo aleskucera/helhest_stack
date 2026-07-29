@@ -1,0 +1,109 @@
+# tmuxinator project for the helhest_stack_ros elevation_node driven by Odin
+# (Odin dTOF cloud + on-device SLAM pose, no ICP, no EKF -- see
+# ros/odin/odin_elevation.launch.py).
+#
+# Symlinked into ~/.config/tmuxinator/odin-demo.yml so it can be launched
+# from anywhere with:
+#
+#   BAG=/path/to/bag tmuxinator start odin-demo
+#   BAG=/path/to/bag RATE=0.5 tmuxinator start odin-demo
+#   BAG=/path/to/bag FULL_REPLAY=1 tmuxinator start odin-demo
+#
+# BAG is required. EXEC_SH defaults to ~/projects/helhest-singularity/exec.sh;
+# override locally, e.g. export EXEC_SH=~/exec.sh in .bashrc.
+#
+# Default replays ONLY the bag's sensor/odom inputs so the live node regenerates
+# all outputs (no duplicate /frame_marker etc.). FULL_REPLAY=1 replays every topic.
+#
+# The node pane runs `python3 -m helhest_stack_ros.elevation_node` directly (NOT
+# `ros2 launch ros/odin/odin_elevation.launch.py`) so no colcon-built/installed
+# workspace is required -- same PYTHONPATH-only pattern as elevation-demo/ekf-demo.
+# Its --ros-args mirror odin_elevation.launch.py's Node parameters verbatim; keep
+# them in sync if that launch file changes.
+#
+# Panes: bag (start-paused -- hit <space> to play once the node is up),
+# elevation_node, rviz2 (odin_elevation.rviz), traj_logger.
+#
+# Each pane runs inside the helhest Apptainer via exec.sh. The node is run as a
+# module with PYTHONPATH set (no colcon workspace needed). Every pane forces
+# LOCALHOST discovery (see ros/README.md).
+
+<%
+  home    = ENV['HOME']
+  # tmuxinator renders this through Erubis inside Project.load(path), so the local `path`
+  # (the ~/.config/tmuxinator symlink) is in scope; realpath follows it back into the repo.
+  # REPO is the escape hatch if a future tmuxinator renames that local.
+  repo    = ENV['REPO'] || File.expand_path('..', File.dirname(File.realpath(path)))
+  exec_sh = ENV['EXEC_SH'] || "#{home}/projects/helhest-singularity/exec.sh"
+  bag     = ENV['BAG'] or abort(
+    'ERROR: BAG env var is required. Usage: BAG=/path/to/bag tmuxinator start odin-demo'
+  )
+  rate    = ENV['RATE'] || '0.25'
+
+  # elevation_node params mirrored verbatim from ros/odin/odin_elevation.launch.py.
+  node_params = %w[
+    lidar_topic:=/odin1/cloud_raw
+    odom_topic:=/odin1/odometry
+    imu_topic:=/odin1/imu
+    icp_enable:=false
+    deskew_enable:=false
+    imu_rotation_prior:=false
+    base_frame:=odin1_base_link
+    self_filter_enable:=true
+    self_x_min:=-0.05
+    self_x_max:=0.55
+    self_y_min:=-0.75
+    self_y_max:=0.75
+    footprint_robot_height:=0.49
+    map_frame:=map
+    publish_map_tf:=true
+    publish_odom_tf:=true
+    plan_actuate:=true
+  ].map { |kv| "-p #{kv}" }.join(' ')
+  args = "--ros-args #{node_params}"
+
+  full_replay = ENV['FULL_REPLAY'] && !ENV['FULL_REPLAY'].empty?
+  # Default: replay ONLY the bag's sensor/odom inputs (+ static TF + recorded goals) and let the
+  # LIVE node regenerate every output. Without this, the bag's recorded /frame_marker, /planned_path*,
+  # /cmd_joints and dynamic /tf collide with the live node's publications (the alternating #N markers,
+  # TF flicker). Set FULL_REPLAY=1 to replay every recorded topic instead (e.g. to view the original
+  # run without running the node).
+  play_topics = full_replay ? '' : ' --topics /odin1/cloud_raw /odin1/odometry /odin1/imu /tf_static /goal_pose'
+
+  # Large-SHM Fast DDS profile so large clouds transfer via shared memory instead of dropping on
+  # UDP. MUST be set on every participant (bag publisher, node, rviz) or clouds are lost. See
+  # ros/fastdds_shm.xml.
+  dds     = "export FASTRTPS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\" && export FASTDDS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\""
+
+  # Plain ROS + localhost discovery (for bag / rviz / rqt panes).
+  ros     = "source /opt/ros/jazzy/setup.bash && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"
+
+  # Full dev env: dev-shell (venv + src + ROS) plus the ros package on PYTHONPATH.
+  dev     = "source \"#{repo}/ros/dev-shell.sh\" && export PYTHONPATH=\"#{repo}/ros/helhest_stack_ros:$PYTHONPATH\" && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"
+%>
+
+name: odin-demo
+root: <%= repo %>
+
+windows:
+  - demo:
+      layout: main-vertical
+      panes:
+        - bag:
+          - <%= exec_sh %> bash -c '<%= ros %> && echo BAG=<%= bag %> RATE=<%= rate %> && ros2 bag play "<%= bag %>" --rate <%= rate %> --loop --start-paused<%= play_topics %>; exec bash'
+        - node:
+          - <%= exec_sh %> bash -c '<%= dev %> && python3 -m helhest_stack_ros.elevation_node <%= args %>; exec bash'
+        - rviz:
+          - <%= exec_sh %> bash -c '<%= ros %> && rviz2 -d "<%= repo %>/ros/helhest_stack_ros/rviz/odin_elevation.rviz"; exec bash'
+        - traj:
+          - <%= exec_sh %> bash -c '<%= ros %> && python3 "<%= repo %>/ros/traj_logger.py" --base-frame odin1_base_link; exec bash'
+  # Scratch shell — same Apptainer + ROS + helhest env, ready for `ros2 topic ...`,
+  # `python3 -c "import helhest"`, etc.
+  - shell:
+      panes:
+        - <%= exec_sh %> bash -c '<%= dev %>; exec bash'
+  # rqt_reconfigure GUI for live parameter tuning of the running node
+  # (icp_*, reset_after_rejects, imu_rotation_prior, dynamic_*, footprint_*, ...).
+  - rqt:
+      panes:
+        - <%= exec_sh %> bash -c '<%= ros %> && ros2 run rqt_reconfigure rqt_reconfigure; exec bash'
