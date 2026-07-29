@@ -1,0 +1,14 @@
+# QoS overrides for ros2 bag record of the high-rate Odin topics.
+# /odin1/imu (400 Hz) and /odin1/odometry_highfreq (400 Hz) are published RELIABLE; the
+# recorder's default keep_last/depth=10 buffers only ~25 ms at 400 Hz, so a disk-flush
+# stall silently drops samples on the SUBSCRIBER side (SDK + `ros2 topic hz` see no drop).
+# Raise the recorder-side queue. (Copied from odin_ros_driver/script/rosbag2_qos.yaml.)
+/odin1/imu:
+  reliability: reliable
+  history: keep_last
+  depth: 4000
+
+/odin1/odometry_highfreq:
+  reliability: reliable
+  history: keep_last
+  depth: 4000
