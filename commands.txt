@@ -1,0 +1,2 @@
+scp -r robot@192.168.18.5:/home/robot/bags/outdoor_experiment_new2 /home/maros/motion_toolkit/bags
+

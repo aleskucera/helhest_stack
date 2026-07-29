@@ -8,15 +8,19 @@ $$\mathbf{x}_t = \begin{pmatrix} x \\ y \\ \psi \end{pmatrix}, \qquad (z,\;\thet
 
 $$w_i = \mu_i N_i, \qquad x_\text{ICR} = \frac{\sum_i w_i x_i}{\sum_i w_i}, \qquad \alpha = 1 + k \frac{\sum_i w_i}{mg}$$
 
+Here $x_i$ is the longitudinal body-frame coordinate of wheel $i$'s contact point (positive forward), with $i = 0, 1, 2$ indexing left, right, and rear; see the constants table for values.
+
 ### Body-frame twist from wheel speeds
 
 Given the command $\boldsymbol{\omega} = (\omega_L,\, \omega_R,\, \omega_\text{rear})$:
 
 $$\begin{aligned}
 \dot{x}^B &= \frac{r(\omega_L + \omega_R)}{2} \\
-\omega_z   &= \frac{r(\omega_R - \omega_L)}{2b\alpha} \\
-\dot{y}^B &= -x_\text{ICR}\,\omega_z
+\dot{\psi}^B &= \frac{r(\omega_R - \omega_L)}{2b\alpha} \\
+\dot{y}^B &= -x_\text{ICR}\,\dot{\psi}^B
 \end{aligned}$$
+
+> **Note:** $\dot{\psi}^B = \omega_z$ — the body-frame yaw rate equals the heading rate directly. This holds because the model is planar: the body z-axis is assumed aligned with the world vertical, so no kinematic coupling from roll/pitch enters the heading equation.
 
 The rear wheel is kinematically redundant and does not enter the twist.
 
@@ -24,7 +28,7 @@ The rear wheel is kinematically redundant and does not enter the twist.
 
 $$\begin{aligned}
 \begin{pmatrix}\dot{x}^W \\ \dot{y}^W \\ 0\end{pmatrix} &= \mathbf{R}(\psi,\, \theta,\, \phi) \begin{pmatrix}\dot{x}^B \\ \dot{y}^B \\ 0\end{pmatrix} \\[6pt]
-\mathbf{x}_{t+1} &= f(\mathbf{x}_t,\, \boldsymbol{\omega}_t) = \mathbf{x}_t + \begin{pmatrix}\dot{x}^W \\ \dot{y}^W \\ \omega_z\end{pmatrix}\Delta t
+\mathbf{x}_{t+1} &= f(\mathbf{x}_t,\, \boldsymbol{\omega}_t) = \mathbf{x}_t + \begin{pmatrix}\dot{x}^W \\ \dot{y}^W \\ \dot{\psi}\end{pmatrix}\Delta t
 \end{aligned}$$
 
 ### Rotation matrix
@@ -62,16 +66,6 @@ Helhest Junior defaults (source: `src/helhest/model.py` and `src/helhest/dynamic
 
 ---
 
-## 3. Jacobian for EKF linearisation
+## 3. Full 6x6 state space model and it linearization 
 
-**[WARNING: non-exist in the codebase, recommended by AI]**
-
-The process function $f(\mathbf{x}_t, \boldsymbol{\omega}_t)$ is nonlinear due to the rotation $\mathbf{R}(\psi,\theta,\phi)$ and the terrain-dependent turning parameters $(\alpha, x_\text{ICR})$. The EKF predict step requires the state-transition Jacobian:
-
-$$F_t = \left.\frac{\partial f}{\partial \mathbf{x}}\right|_{\mathbf{x}_t,\,\boldsymbol{\omega}_t}$$
-
-**On flat ground** ($\theta = \phi = 0$, uniform $\mu$), $\alpha$ and $x_\text{ICR}$ are constant and the Jacobian reduces to a closed-form 3×3 matrix in $\psi$, $\dot{x}^B$, $\dot{y}^B$, and $\omega_z$.
-
-**On terrain**, $F_t$ is computed numerically via central differences — three additional one-step `ForwardSimulator` rollouts, one per state dimension with perturbation $\delta$:
-
-$$F_t[:,\, j] \approx \frac{f(\mathbf{x}_t + \delta\,\mathbf{e}_j,\, \boldsymbol{\omega}_t) - f(\mathbf{x}_t - \delta\,\mathbf{e}_j,\, \boldsymbol{\omega}_t)}{2\delta}$$
+In `docs/state_model_proper.md`. 
