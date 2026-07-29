@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
-bags/
+bags/*
+!bags/fetch_bag.sh
 .venv/
 venv/
 *.egg-info/
