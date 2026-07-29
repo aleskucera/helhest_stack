@@ -9,18 +9,50 @@ is trusted directly (pure dead-reckoning, no scan-to-map correction) and the clo
 feeds the map / traversability / planning. The plain node has no EKF. It owns the whole
 map -> odom_odin -> odin1_base_link TF chain (publish_map_tf + publish_odom_tf).
 
+TUNING: the speed / turn knobs are exposed as launch arguments, so e.g.
+    ros2 launch <repo>/ros/odin/odin_elevation.launch.py plan_wmax:=5.0 k_turn:=0.6
+actually applies them (defaults match elevation_node). See TUNABLE below.
+
+SAFETY: plan_actuate is hardcoded False here -- this launch ALWAYS comes up viz-only. To
+drive, set it live yourself: `ros2 param set /elevation plan_actuate true` (motor ceiling
+~5.3 rad/s; plan is device-centered until a base_link->odin1_base_link mount TF exists).
+
 Run (source ~/.rosrc + the helhest install; zenoh router up; driver launch running):
 
-    ros2 launch <repo>/ros/odin/odin_elevation.launch.py
+    ros2 launch <repo>/ros/odin/odin_elevation.launch.py [arg:=value ...]
 """
 
 from __future__ import annotations
 
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+
+# name -> (default, one-line help). Defaults match elevation_node's own defaults, so a
+# no-arg launch behaves exactly as before. All are floats.
+TUNABLE = {
+    "plan_wmax": ("4.0", "planner top per-wheel speed [rad/s] -- the real speed cap (<= plan_max_omega, motor ~5.3)"),
+    "plan_max_omega": ("5.0", "hard output clamp on |wheel vel| [rad/s] -- motor safe max (<= ~5.3)"),
+    "k_turn": ("-1.0", "turn gain override; <0 = use terrain preset"),
+    "plan_turn": ("0.03", "wheel-differential penalty -> higher = gentler/straighter (<= ~0.1)"),
+    "plan_max_slew": ("6.0", "accel cap on d(cmd)/dt [rad/s^2] -> lower = smoother turn ease-in"),
+    "plan_goal_running": ("0.3", "progress pull -> higher = faster toward goal"),
+    "plan_effort": ("0.001", "wheel-speed^2 penalty -> lower = faster"),
+}
 
 
 def generate_launch_description() -> LaunchDescription:
+    args = [
+        DeclareLaunchArgument(name, default_value=default, description=help_)
+        for name, (default, help_) in TUNABLE.items()
+    ]
+    tuned = [
+        {name: ParameterValue(LaunchConfiguration(name), value_type=float)}
+        for name in TUNABLE
+    ]
+
     elevation = Node(
         package="helhest_stack_ros",
         executable="elevation_node",
@@ -54,12 +86,11 @@ def generate_launch_description() -> LaunchDescription:
             {"map_frame": "map"},
             {"publish_map_tf": True},  # elevation owns map -> odom_odin ...
             {"publish_odom_tf": True},  # ... and odom_odin -> odin1_base_link
-            # ACTUATION ENABLED (operator choice): a /goal_pose publishes /cmd_joints and DRIVES
-            # the robot. CAVEAT: the plan is relative to odin1_base_link (the device), offset from
-            # the real base_link until a measured mount TF exists -> the footprint is device-
-            # centered and commands are geometrically offset. Drive with a clear space + e-stop.
-            {"plan_actuate": True},
+            # VIZ ONLY. Hardcoded False (not a launch arg) so this launch NEVER comes up armed.
+            # Drive only by a deliberate live `ros2 param set /elevation plan_actuate true`.
+            {"plan_actuate": False},
+            *tuned,  # the launch-argument-driven speed/turn knobs
         ],
     )
 
-    return LaunchDescription([elevation])
+    return LaunchDescription([*args, elevation])
