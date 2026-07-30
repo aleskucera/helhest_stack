@@ -41,8 +41,9 @@
     plan_wmax: 6.0            # top per-wheel speed [rad/s] -- motor limit ~15, so headroom to raise this
     plan_max_omega: 7.5       # hard output clamp on |wheel vel| [rad/s] -- keep >= plan_wmax
     k_turn: 1.0              # turn gain override (outdoor-preset value)
-    plan_turn: 0.08           # wheel-differential penalty -> gentler / straighter turns
+    plan_turn: 0.8            # wheel-differential penalty -> strong straight bias / gentler turns
     plan_max_slew: 2.0        # accel cap d(cmd)/dt [rad/s^2] -> smooth turn ease-in
+    plan_max_decel: 8.0       # decel cap d(cmd)/dt [rad/s^2] -> softer slow-down (also the stop ramp)
     plan_goal_running: 0.3    # progress pull -> higher = faster toward goal
     plan_effort: 0.001        # wheel-speed^2 penalty -> lower = faster
 
@@ -53,7 +54,7 @@
     # a_max caps lateral acceleration [m/s^2]; forward speed and turn differential are scaled
     # TOGETHER so the planned arc is unchanged, only slower. At plan_wmax 6 / k_turn 1 the
     # hardest arc the planner can command is ~1.5 m/s^2, so start around 0.6-1.2.
-    plan_turn_brake_a_max: 0.0
+    plan_turn_brake_a_max: 1.1
     # Pre-apply the tightest cap found this far ahead along the committed plan, so the robot is
     # already slow when it enters the corner. 0 = react to the current command only.
-    plan_turn_brake_lookahead_s: 0.0
+    plan_turn_brake_lookahead_s: 1.5
