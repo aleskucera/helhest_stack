@@ -16,6 +16,8 @@ This is the single place all actuator-safety logic lives, so it is auditable and
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 # /cmd_joints JointState.name order -- matches /joint_setpoints on the robot. The [left, rear, right]
@@ -35,6 +37,9 @@ def condition_command(
     turn_boost: float = 1.0,
     goal_dist: float | None = None,
     brake_dist: float = 0.0,
+    turn_brake_a_max: float = 0.0,
+    lat_gain: float = 0.0,
+    turn_brake_scale: float = 1.0,
 ) -> np.ndarray:
     """Planner (wl, wr) -> conditioned [left, rear, right] wheel-velocity command for /cmd_joints.
 
@@ -48,6 +53,11 @@ def condition_command(
     goal_dist: current robot->goal distance [m]. With brake_dist > 0, scales the FORWARD speed down
         on the final approach (the goal brake below). None/0 disables the brake.
     brake_dist: [m] start braking within this range of the goal. 0 = no brake.
+    turn_brake_a_max: [m/s^2] lateral-acceleration ceiling for the TURN BRAKE below. 0 = off.
+    lat_gain: [m/s^2 per (rad/s)^2] converts mean*diff into lateral acceleration for this robot,
+        = wheel_radius^2 / (2*half_track*alpha). Only read when turn_brake_a_max > 0.
+    turn_brake_scale: extra speed scale in [0, 1] from the caller's LOOKAHEAD along the committed
+        plan (1.0 = no anticipation). Applied the same way as the reactive brake.
     Returns [left, rear, right] velocities to publish. To STOP, call with wl = wr = 0 -- the slew
     limiter ramps the command down to rest.
     """
@@ -69,6 +79,20 @@ def condition_command(
     if brake_dist > 0.0 and goal_dist is not None:
         mean *= min(1.0, float(goal_dist) / float(brake_dist))
     diff = (wr - wl) * float(turn_boost)  # turn differential, amplified
+    # TURN BRAKE: slow INTO a corner the way a driver does, instead of carrying cruise speed
+    # through it. v = R*mean and wz = R*diff/(2*half_track*alpha), so lateral acceleration is
+    # a_lat = v*wz = lat_gain * mean * diff. Scaling `mean` ALONE (what the goal brake does) would
+    # leave diff untouched and TIGHTEN the arc -- lifting off mid-corner while holding the same
+    # steering lock. Scaling mean and diff by the SAME s keeps v/wz, hence the radius, and drops
+    # a_lat by s^2, so the robot tracks the planned path at a lower speed. The rate limiter below
+    # then gives the gentle accelerate-out for free (max_slew < max_decel).
+    scale = float(np.clip(turn_brake_scale, 0.0, 1.0))  # caller's lookahead cap
+    if turn_brake_a_max > 0.0 and lat_gain > 0.0:
+        a_lat = abs(lat_gain * mean * diff)  # uses the BOOSTED diff -- what the robot will do
+        if a_lat > turn_brake_a_max:
+            scale = min(scale, math.sqrt(float(turn_brake_a_max) / a_lat))
+    mean *= scale
+    diff *= scale
     # /cmd_joints input convention: forward = all positive, no sign flip -- the LLC applies its own
     # internal signs. Verified: forward (wl=wr=v) -> [+v, +v, +v] drove the robot straight forward.
     target = np.array([mean - 0.5 * diff, mean, mean + 0.5 * diff], dtype=np.float32)

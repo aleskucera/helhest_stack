@@ -32,6 +32,7 @@ world frame is bootstrapped to odom at the first scan.
 
 from __future__ import annotations
 
+import math
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -730,6 +731,17 @@ class ElevationNode(Node):
         # speed is untouched beyond brake_dist. 0 = off. Replaces the hard dock/stop radius; validated
         # in sim (~0.2 m settle, zero overshoot) -- see the goal-brake note in control/command.py.
         d("plan_goal_brake_dist", 2.0)  # start braking within this range of the goal (m); 0 = off
+        # TURN BRAKE: ceiling on lateral acceleration [m/s^2] -- the robot slows INTO a corner
+        # instead of carrying cruise speed through it, then the slew limiter eases it back out.
+        # Scales the forward mean AND the turn differential together, so the planned arc is held
+        # (scaling mean alone would tighten it). 0 = off. For reference, at plan_wmax 6 and
+        # k_turn 1 the HARDEST corner the planner can command is ~1.5 m/s^2 (v 1.05 m/s,
+        # wz 1.44 rad/s), so useful values sit below that -- try ~0.6-1.2. Live-tunable.
+        d("plan_turn_brake_a_max", 0.0)
+        # Look this far ahead along the COMMITTED plan and pre-apply the tightest cap it finds, so
+        # the robot brakes BEFORE the corner rather than in it. 0 = reactive only (cap the current
+        # command). The plan is plan_horizon * DT long, so this saturates at 2.5 s by default.
+        d("plan_turn_brake_lookahead_s", 0.0)
         # UNREACHABLE-GOAL STOP: when the cost-to-go at the robot is saturated (no route to the goal)
         # AND the committed plan reduces distance-to-goal by less than this, the robot is walled off
         # -> stop instead of the explore-fallback nosing into the obstacle. Keep it below a horizon's
@@ -840,6 +852,8 @@ class ElevationNode(Node):
         self.plan_dock_enable: bool = g("plan_dock_enable")
         self.plan_reach_radius: float = g("plan_reach_radius")
         self.plan_goal_brake_dist: float = g("plan_goal_brake_dist")
+        self.plan_turn_brake_a_max: float = g("plan_turn_brake_a_max")
+        self.plan_turn_brake_lookahead_s: float = g("plan_turn_brake_lookahead_s")
         self.plan_progress_min: float = g("plan_progress_min")
         self.plan_path_width: float = g("plan_path_width")
 
@@ -1009,6 +1023,12 @@ class ElevationNode(Node):
             device=self.device,
         )
         self.planner.cw.lattice_cap = self.ctg._vcap
+        # Lateral-accel constant for the turn brake: a_lat = lat_gain * mean * diff, from
+        # v = R*mean and wz = R*diff/(2*half_track*alpha). alpha = 1 + k_turn*grip/(m*g) is the
+        # model's turn resistance; on flat ground with the wheels carrying the full weight that
+        # is 1 + k_turn, which is the value the planner itself is tuned against.
+        _rp = dynamics.robot_params()
+        self._lat_gain = _rp.wheel_radius**2 / (2.0 * _rp.half_track * (1.0 + kt))
         # Routing field expressed in the PLANNING window's frame: both windows are robot-centered,
         # so their origins differ by a constant cell offset.
         self.sgrid = GridParams(
@@ -1620,6 +1640,30 @@ class ElevationNode(Node):
     # MPPI planning (visualization only)
     # ------------------------------------------------------------------
 
+    def _turn_brake_lookahead(self, turn_boost: float) -> float:
+        """Tightest turn-brake speed scale over the next `plan_turn_brake_lookahead_s` of the plan.
+
+        The reactive brake in `condition_command` only sees the step being published, so it slows
+        IN the corner. The committed plan already says what the next plan_horizon*DT holds, so
+        scanning it and pre-applying the worst cap makes the robot shed speed BEFORE the corner.
+        Returns 1.0 (no anticipation) when disabled or when nothing ahead exceeds the ceiling.
+        """
+        if self.plan_turn_brake_a_max <= 0.0 or self.plan_turn_brake_lookahead_s <= 0.0:
+            return 1.0
+        if self.planner is None:
+            return 1.0
+        U = self.planner.nominal()  # [T, 2] committed (wL, wR), model convention
+        n = min(len(U), max(1, int(round(self.plan_turn_brake_lookahead_s / dynamics.DT))))
+        scale = 1.0
+        for k in range(n):
+            wl_k, wr_k = float(U[k][0]), float(U[k][1])
+            mean_k = 0.5 * (wl_k + wr_k)
+            diff_k = (wr_k - wl_k) * float(turn_boost)  # match what the output will actually send
+            a_lat = abs(self._lat_gain * mean_k * diff_k)
+            if a_lat > self.plan_turn_brake_a_max:
+                scale = min(scale, math.sqrt(self.plan_turn_brake_a_max / a_lat))
+        return scale
+
     def _plan(self, mf: _MapFrame, world_T_base: np.ndarray, stamp) -> None:
         """Run MPPI toward the goal on this frame's maps; publish the intended path.
 
@@ -1762,6 +1806,9 @@ class ElevationNode(Node):
             turn_boost=turn_boost,
             goal_dist=d,
             brake_dist=self.plan_goal_brake_dist,
+            turn_brake_a_max=self.plan_turn_brake_a_max,
+            lat_gain=self._lat_gain,
+            turn_brake_scale=self._turn_brake_lookahead(turn_boost),
         )
         self._prev_cmd = cmd
         self._publish_cmd(cmd)
