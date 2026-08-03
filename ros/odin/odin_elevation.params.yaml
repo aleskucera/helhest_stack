@@ -30,7 +30,7 @@
     self_x_max: 0.55
     self_y_min: -0.75
     self_y_max: 0.75
-    footprint_robot_height: 0.49        # odin1_base_link sits ~0.49 m above the floor
+    footprint_robot_height: 0.45        # odin1_base_link sits ~0.45 m above the floor (measured from floor plane)
 
     # --- ACTUATION: ARMED by default (operator choice) -- a /goal_pose DRIVES the robot.
     #     Run viz-only with -p plan_actuate:=false. Plan is device-centered (offset from the
