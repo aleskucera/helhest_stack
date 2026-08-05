@@ -165,3 +165,88 @@ the graph-captured hot path is unchanged bit-for-bit.
   the twist.
 - float32 throughout; the ε-sweep plateau guards against reading FD noise as error.
 - The probe set is capped per region (`metrics.probe_cells`); counts are printed per row.
+
+---
+
+# Study B — is first order adequate?
+
+```
+.venv/bin/python -m studies.adjoint.study_b     # ~2 min
+```
+
+Writes `studies/out/study_b.{png,npz,json}`. Study A established the adjoint is *correct*;
+Study B asks whether a correct derivative *describes* what happens when the map is wrong by a
+realistic σ. Two measurements share one Monte-Carlo budget — terrain is per-rollout, so an
+entire MC batch is one launch.
+
+**σ is a deliberate placeholder** (`sigma.py`), shaped like the layers the perception builder
+already exports. `SENSITIVITY_PLAN.md` §2 is explicit that a calibrated uncertainty layer is
+not this project's contribution. So absolute σ scales mean nothing here; only curve shapes and
+region contrasts do.
+
+**Self-check first.** At σ×0.03 the FOSM/MC ratio is **1.00 ± 0.02**, which validates both the
+noise normalisation and the correlated FOSM formula `‖Wᵀ(σg)‖² / Σw²`. Every later deviation
+is physics, not harness.
+
+## Results
+
+**1. i.i.d. per-cell map noise is not a valid model for this engine.** Median |bias|/sd is
+**3.4 σ** independent vs **0.4 σ** at a 0.15 m correlation length. The envelope is a max over
+~37 cells, so zero-mean independent noise raises it systematically — a second-order effect
+FOSM cannot see, swamping the variance it does predict. Only correlated draws are meaningful.
+
+**2. Global adequacy is regime-dependent.** Within ~10% of 1 up to σ×0.3 for every rollout; by
+×3 the ratio spans 0.26–1.0.
+
+**3. THE CRITERION — and the bad news with it.** Probe cells are stratified by the per-source
+validity radius `contact.source_slack`, ranked by |gradient| *within* each stratum. Note the
+radius must be **per-source-cell**: the engine's `contact_margin` is indexed by *output* cell
+and answers a different question (683 cells here have slack < 1 mm, 462 have margin < 1 mm,
+only 211 are both — v1 of this study read the wrong one).
+
+Pooled over every σ scale, by perturbation measured **in validity radii**:
+
+| σ / slack | median ratio | worse than 2× | n |
+|---|---|---|---|
+| < 1 | **1.02** | **0.0%** | 265 |
+| 1–10 | 1.71 | 41.2% | 690 |
+| ≥ 10 | 2.61 | 63.7% | 314 |
+
+Inside its own validity radius, per-cell first-order attribution is essentially exact, and it
+degrades monotonically outside. That is a crisp, scale-free, transferable criterion.
+
+**The catch:** at realistic σ almost nothing is inside it — only **3 of 846** probes at σ×1 or
+above — because slack is ~3.6 mm while σ is centimetres. The method is not blocked by a
+missing criterion; it is blocked by the radius being too small. Study A already showed that
+3.6 mm is contact *quantization*, not physics, so **sub-cell contact refinement is now
+measurably the thing that gates the whole method**, not an accuracy nicety.
+
+**4. Per-cell and global adequacy come apart.** `slope-climb` is the most globally accurate
+rollout (mean |ratio−1| = 0.08) yet its per-cell ratios at σ×1 have median 1.71, p90 3.4.
+Errors cancel in the sum. Since the project's claim is **attribution**, not Var(J), B1 alone
+would have been misleadingly reassuring.
+
+**5. Attribution ignores the decoy, as intended.** The unobserved patch holds **67.3% of the
+map's total σ²** but **0.000% of the FOSM variance** — it is offset 1.4 m from the driven
+line, beyond the 0.715 m wheel-envelope reach. An entropy-directed sensor spends two-thirds of
+its budget there; an attribution-directed one spends none. That is `SENSITIVITY_PLAN.md` §6's
+benchmark in miniature, and the C4 claim demonstrated.
+
+## Caveats
+
+- The σ field is a placeholder; absolute breakdown scales are not meaningful.
+- B2's single-cell MC uses 512 draws (~9% relative SE on a variance), fine for a ratio plot,
+  not for a precise per-cell number.
+- Correlation is a single isotropic Gaussian length. Real map error is anisotropic along
+  sensor rays; ProTerrain (arXiv:2510.19364) models this properly.
+- Not yet done: the sub-cell-refined gradient measured against the same MC truth, which is now
+  the highest-value next experiment.
+
+## Next
+
+1. **Sub-cell contact refinement**, then re-run B2 against the same Monte-Carlo truth. Study
+   A's follow-up already showed `∂env/∂δ` becomes continuous once the contact may slide; B2
+   now says the resulting increase in slack is *the* quantity gating the method. Measure the
+   gain before building it into the tiled hot path.
+2. A scene whose rollouts load exact-tie cells more heavily (only 32 probes had slack < 1 mm).
+3. Study C (`SENSITIVITY_PLAN.md` §5) — one-shot attribution vs BPTT-style repeated descent.

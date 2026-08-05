@@ -32,6 +32,8 @@ from pathlib import Path
 import numpy as np
 import warp as wp
 
+from . import contact
+from . import plot_b
 from . import sigma as sigma_mod
 from .harness import Harness
 from .harness import TERM_NAMES
@@ -55,7 +57,16 @@ MC_DRAWS = 2048  # total Monte-Carlo draws per (rollout, sigma scale, correlatio
 SIGMA_SCALES = (0.03, 0.1, 0.3, 1.0, 3.0)
 CORR_LENS = (0.0, 0.15)  # [m] independent cells, and a realistic patchy map error
 CELL_DRAWS = 512  # draws per probe cell in B2
+B2_ROLLOUTS = (2, 4, 5, 6)  # slope, curb head-on, curb from ON the edge, rock
+SLACK_BUCKETS = ((0.0, 1e-3), (1e-3, 3e-3), (3e-3, np.inf))  # [m] validity-radius strata
+# Floor on the validity radius when forming sigma/slack. 10 um is below float32 resolution on
+# a 0.35 m height, so anything smaller is an exact tie and the ratio is meaningless anyway.
+SLACK_FLOOR = 1e-5
 SELF_CHECK_TOL = 0.05  # |ratio - 1| allowed at the smallest sigma scale
+# Lateral offset of the decoy patch from the driven line. Must exceed the widest wheel-envelope
+# contact reach (half_track 0.365 + wheel_radius 0.35 = 0.715 m) or it is not a decoy at all --
+# it would be genuinely decision-relevant and the whole contrast collapses.
+DECOY_OFFSET = 1.4
 
 
 def _cost(terms: np.ndarray) -> np.ndarray:
@@ -110,28 +121,47 @@ def _perturb_cell_random(arr: wp.array3d(dtype=wp.float32), iy: int, ix: int, sd
     arr[b, iy, ix] = arr[b, iy, ix] + sd * wp.randn(state)
 
 
-def run_b2(scene, sigma_np, margin, poses, omega, labels, gains=(0.3, 1.0, 3.0)) -> list[dict]:
+def _probe_by_slack(g, slack, thresh_frac=0.02, per_bucket=70):
+    """Probe cells stratified BY the validity radius, ranked by |gradient| WITHIN each bucket.
+
+    Study B v1 ranked purely by gradient magnitude and drew n=3 cells below 1 mm, which was
+    far too few to say anything about the flag. Stratifying first guarantees each bucket is
+    populated; ranking by |g| inside it keeps every probed cell one the adjoint says matters,
+    so the ratio stays meaningful.
+    """
+    strength = np.abs(g)
+    thresh = thresh_frac * strength.max()
+    out = []
+    for lo, hi in SLACK_BUCKETS:
+        m = (slack >= lo) & (slack < hi) & (strength > thresh)
+        idx = np.argwhere(m)
+        if not len(idx):
+            continue
+        order = np.argsort(-strength[idx[:, 0], idx[:, 1]])
+        out.append(idx[order][:per_bucket])
+    return np.concatenate(out) if out else np.zeros((0, 2), int)
+
+
+def run_b2(scene, sigma_np, poses, omega, labels, gains=(0.3, 1.0, 3.0)) -> list[dict]:
     """Per-cell FOSM contribution vs a single-cell Monte-Carlo variance.
 
     For cell i perturbed alone by delta ~ N(0, (gain*sigma_i)^2), first order predicts
     Var(J) = (g_i * gain * sigma_i)^2. The measured ratio is the per-cell adequacy of the
-    linearisation, which is what the project's attribution claim actually rests on -- an
+    linearisation -- what the project's attribution claim actually rests on, since an
     aggregate Var(J) can be right while every individual attribution is wrong.
     """
-    from . import metrics
-
     rows: list[dict] = []
-    for b in (2, 4, 6):  # one rollout per non-flat lane: slope, curb, rock
+    for b in B2_ROLLOUTS:
         mc = MonteCarlo(scene, poses[b], omega[:, b, :], CELL_DRAWS)
+        slack = contact.source_slack(mc.h)
         grads, _ = mc.h.adjoint(dilate=True, leaf="elevation")
         g = _cost_gradient(grads)[0]
-        cells, is_zero = metrics.probe_cells(grads, scene.region, per_region=60, n_zero=0)
-        keep = ~is_zero
-        cells = cells[keep]
-        # Only cells the adjoint says matter: a ratio is meaningless where FOSM predicts ~0.
-        strength = np.abs(g[cells[:, 0], cells[:, 1]])
-        cells = cells[strength > 0.02 * strength.max()]
-        print(f"    {labels[b]:<15} {len(cells)} cells x {len(gains)} sigma scales", flush=True)
+        cells = _probe_by_slack(g, slack)
+        print(
+            f"    {labels[b]:<15} {len(cells)} cells x {len(gains)} sigma scales"
+            f"  (slack<1mm: {sum(1 for iy, ix in cells if slack[iy, ix] < 1e-3)})",
+            flush=True,
+        )
         for gain in gains:
             for iy, ix in cells:
                 sd = gain * float(sigma_np[iy, ix])
@@ -149,8 +179,14 @@ def run_b2(scene, sigma_np, margin, poses, omega, labels, gains=(0.3, 1.0, 3.0))
                         "rollout": labels[b],
                         "sigma_scale": gain,
                         "region": REGION_NAMES[int(scene.region[iy, ix])],
-                        "margin_mm": 1e3 * float(margin[iy, ix]),
+                        "slack_mm": 1e3 * float(slack[iy, ix]),
                         "sigma_mm": 1e3 * float(sigma_np[iy, ix]),
+                        # sigma / slack: how many validity radii the perturbation spans. If the
+                        # flag works at all, THIS is what the ratio should track, not sigma or
+                        # slack alone.
+                        "sigma_over_slack": float(
+                            gain * sigma_np[iy, ix] / max(slack[iy, ix], SLACK_FLOOR)
+                        ),
                         "grad": float(g[iy, ix]),
                         "ratio": float(np.sqrt(v_mc / v_fo)) if v_fo > 0 else float("nan"),
                     }
@@ -212,6 +248,25 @@ def _contact_margin(scene) -> np.ndarray:
     return m
 
 
+def _decoy_check(scene, sigma_np, decoy, poses, omega, labels) -> None:
+    """How much FOSM variance lands in the high-sigma patch that is NOT decision-relevant?
+
+    SENSITIVITY_PLAN.md section 6 wants a case where the highest-entropy cell and the
+    highest-dJ/dh cell differ. An entropy-directed sensor spends its budget where sigma is
+    largest; if attribution is doing anything, its mass here is negligible.
+    """
+    for b in (0, 1):
+        mc = MonteCarlo(scene, poses[b], omega[:, b, :], 8)
+        contrib = (mc.gradient() * sigma_np) ** 2
+        share = contrib[decoy].sum() / max(contrib.sum(), 1e-30)
+        ent = (sigma_np[decoy] ** 2).sum() / (sigma_np**2).sum()
+        print(
+            f"    {labels[b]:<15} decoy holds {ent:6.1%} of the map's total sigma^2 but only "
+            f"{share:8.3%} of the FOSM variance"
+        )
+        del mc
+
+
 def _self_check(b1: list[dict]) -> tuple[bool, list[str]]:
     """At the smallest sigma the ratio MUST be 1: that validates the noise normalisation and
     the correlated FOSM formula, so any later deviation is physics rather than a harness bug."""
@@ -240,9 +295,13 @@ def _report_b2(b2: list[dict]) -> None:
         groups = [("region " + n, [r for r in sub if r["region"] == n]) for n in REGION_NAMES[:-1]]
         # The flag under test: does a small contact margin predict the breakdown?
         groups += [
-            ("margin < 1 mm", [r for r in sub if r["margin_mm"] < 1.0]),
-            ("margin 1-3 mm", [r for r in sub if 1.0 <= r["margin_mm"] < 3.0]),
-            ("margin >= 3 mm", [r for r in sub if r["margin_mm"] >= 3.0]),
+            ("slack < 1 mm", [r for r in sub if r["slack_mm"] < 1.0]),
+            ("slack 1-3 mm", [r for r in sub if 1.0 <= r["slack_mm"] < 3.0]),
+            ("slack >= 3 mm", [r for r in sub if r["slack_mm"] >= 3.0]),
+            # The flag's real claim: the ratio should track sigma measured in validity radii.
+            ("sigma/slack < 1", [r for r in sub if r["sigma_over_slack"] < 1.0]),
+            ("sigma/slack 1-10", [r for r in sub if 1.0 <= r["sigma_over_slack"] < 10.0]),
+            ("sigma/slack >= 10", [r for r in sub if r["sigma_over_slack"] >= 10.0]),
         ]
         for name, rs in groups:
             if not rs:
@@ -294,32 +353,59 @@ def _summarise(b1: list[dict], b2: list[dict], ok: bool, notes: list[str]) -> No
             + "".join(f"{cells.get(g, float('nan')):<8.2f}" for g in scales)
         )
 
-    low = [r for r in b2 if r["margin_mm"] < 1.0 and r["sigma_scale"] == 1.0]
-    mid = [r for r in b2 if 1.0 <= r["margin_mm"] < 3.0 and r["sigma_scale"] == 1.0]
-    hi = [r for r in b2 if r["margin_mm"] >= 3.0 and r["sigma_scale"] == 1.0]
+    def _pool(pred):
+        """Pooled across ALL sigma scales: the criterion is scale-free by construction, so
+        pooling is the honest presentation and avoids reporting an n=2 bucket."""
+        v = [r["ratio"] for r in b2 if pred(r) and np.isfinite(r["ratio"])]
+        return (
+            (np.median(v) if v else float("nan")),
+            (np.mean(np.array(v) > 2.0) if v else 0.0),
+            len(v),
+        )
+
+    u = _pool(lambda r: r["sigma_over_slack"] < 1.0)
+    m = _pool(lambda r: 1.0 <= r["sigma_over_slack"] < 10.0)
+    o = _pool(lambda r: r["sigma_over_slack"] >= 10.0)
+    inside = [r for r in b2 if r["sigma_over_slack"] < 1.0 and r["sigma_scale"] >= 1.0]
     print(
-        "\n3. THE CONTACT-MARGIN FLAG DOES NOT PREDICT PER-CELL BREAKDOWN -- as measured, and\n"
-        "   the measurement is UNDERPOWERED. At sigma x1 the median per-cell ratio is\n"
-        f"   {np.median([r['ratio'] for r in low]):.2f} for margin < 1 mm (n={len(low)}), "
-        f"{np.median([r['ratio'] for r in mid]):.2f} for 1-3 mm (n={len(mid)}), "
-        f"{np.median([r['ratio'] for r in hi]):.2f} for >= 3 mm (n={len(hi)}).\n"
-        f"   That ordering is backwards from the hypothesis, but n={len(low)} in the low bucket "
-        "is far too\n   few to conclude anything: the probe cells are ranked by gradient "
-        "magnitude, and the\n   near-tied cells sit at curb edges which this scene's rollouts "
-        "barely load. The 1-3 mm\n   bucket is also confounded -- it is essentially the slope "
-        "lane, whose margin is 1.35 mm\n   everywhere, so that column is a region effect wearing "
-        "a margin label.\n"
-        "   -> NEXT: sample probe cells stratified BY MARGIN rather than by gradient magnitude,\n"
-        "      and add a rollout that drives the curb edge square-on. Until then the flag is\n"
-        "      neither confirmed nor refuted."
+        "\n3. A CRISP VALIDITY CRITERION, AND THE BAD NEWS THAT COMES WITH IT.\n"
+        "   Probe cells are stratified BY the per-source validity radius (contact.source_slack)\n"
+        "   rather than by gradient magnitude -- v1 drew n=3 below 1 mm and could conclude\n"
+        "   nothing. Note the radius must be per-SOURCE-cell: the engine's contact_margin is\n"
+        "   indexed by OUTPUT cell and answers a different question (683 cells here have\n"
+        "   slack < 1 mm, 462 have margin < 1 mm, only 211 are both).\n"
+        "   Pooled over every sigma scale, by perturbation measured IN validity radii:\n"
+        f"     sigma/slack <  1   median ratio {u[0]:.2f},  {u[1]:.1%} of cells worse than 2x  (n={u[2]})\n"
+        f"     sigma/slack 1-10   median ratio {m[0]:.2f},  {m[1]:.1%} worse than 2x  (n={m[2]})\n"
+        f"     sigma/slack >= 10  median ratio {o[0]:.2f},  {o[1]:.1%} worse than 2x  (n={o[2]})\n"
+        "   -> THE CRITERION HOLDS: inside its own validity radius, per-cell first-order\n"
+        "      attribution is essentially exact, and it degrades monotonically outside it.\n"
+        f"   -> THE CATCH: at realistic sigma almost nothing is inside. Only {len(inside)} of the\n"
+        f"      {sum(1 for r in b2 if r['sigma_scale'] >= 1.0)} probes at sigma x1 or above satisfy it, "
+        "because slack is ~3.6 mm\n      (Study A's cap step) while sigma is centimetres. So the "
+        "method is not blocked by\n      a missing criterion -- it is blocked by the radius being "
+        "too small.\n"
+        "   -> WHICH POINTS AT THE FIX: Study A showed the 3.6 mm radius is contact QUANTIZATION,\n"
+        "      not physics -- letting the contact slide sub-cell makes d(env)/dh continuous. That\n"
+        "      raises slack, which is now measurably the thing that gates the whole method."
     )
+    # Which rollout is most globally accurate, and how does it look per-cell?
+    glob = {}
+    for r in corr:
+        glob.setdefault(r["rollout"], []).append(abs(r["ratio"] - 1.0))
+    best = min(
+        (k for k in glob if any(x["rollout"] == k for x in b2)), key=lambda k: np.mean(glob[k])
+    )
+    cell = [r["ratio"] for r in b2 if r["rollout"] == best and r["sigma_scale"] == 1.0]
     print(
-        "\n4. PER-CELL AND GLOBAL ADEQUACY COME APART. slope-climb has the best GLOBAL ratio\n"
-        "   (~1.0 across the whole sweep) and among the worst PER-CELL ratios (median 1.94,\n"
-        "   p90 16 at sigma x1). Aggregate Var(J) can be accurate while individual cell\n"
-        "   attributions are badly wrong, because the per-cell errors cancel in the sum.\n"
-        "   This matters: the project's claim is ATTRIBUTION, not Var(J), so B2 is the\n"
-        "   measurement that gates it and B1 alone would have been misleadingly reassuring."
+        "\n4. PER-CELL AND GLOBAL ADEQUACY COME APART.\n"
+        f"   '{best}' is the most accurate rollout GLOBALLY (mean |ratio-1| "
+        f"{np.mean(glob[best]):.2f} over\n   the sigma sweep) yet its PER-CELL ratios at sigma x1 "
+        f"have median {np.median(cell):.2f} and p90\n   {np.percentile(cell, 90):.1f}. Aggregate "
+        "Var(J) can be accurate while individual cell\n   attributions are badly wrong, because "
+        "the per-cell errors cancel in the sum.\n"
+        "   The project's claim is ATTRIBUTION, not Var(J), so B2 is the measurement that gates\n"
+        "   it -- B1 alone would have been misleadingly reassuring."
     )
 
 
@@ -330,7 +416,7 @@ def main() -> None:
     poses, omega, labels = rollouts()
 
     # The decoy: a high-sigma unobserved patch offset from the flat lane's driven line.
-    decoy = sigma_mod.decoy_mask(scene, LANE_Y[0] + 1.05)
+    decoy = sigma_mod.decoy_mask(scene, LANE_Y[0] + DECOY_OFFSET)
     sigma_np = sigma_mod.sigma_field(scene, inpainted=decoy)
     print(
         f"scene {scene.shape}; placeholder sigma: median {1e2 * np.median(sigma_np):.1f} cm, "
@@ -345,9 +431,12 @@ def main() -> None:
     b1 = run_b1(scene, sigma_np, labels, poses, omega)
     ok, notes = _self_check(b1)
 
+    print("\n    decoy check -- is high sigma the same thing as decision-relevant?")
+    _decoy_check(scene, sigma_np, decoy, poses, omega, labels)
+
     print(f"\nB2  per-cell attribution   ({CELL_DRAWS} draws per cell)")
     margin = _contact_margin(scene)
-    b2 = run_b2(scene, sigma_np, margin, poses, omega, labels)
+    b2 = run_b2(scene, sigma_np, poses, omega, labels)
     _report_b2(b2)
     _summarise(b1, b2, ok, notes)
     np.savez_compressed(
@@ -357,6 +446,7 @@ def main() -> None:
         region=scene.region,
         contact_margin=margin,
     )
+    plot_b.figure(scene, sigma_np, decoy, b1, b2, OUT_DIR / "study_b.png")
     (OUT_DIR / "study_b.json").write_text(
         json.dumps({"b1": b1, "b2": b2, "self_check_pass": ok, "self_check": notes}, indent=2)
     )
