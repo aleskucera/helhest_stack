@@ -36,10 +36,11 @@ OUT = Path(__file__).resolve().parents[2] / "studies" / "out" / "bench"
 ARMS = ("none", "sigma", "entropy", "cvar", "attribution")
 
 
-def run_all(n_seeds: int, max_frames: int) -> list[dict]:
+def run_all(n_seeds: int, max_frames: int, variant: str = "gap") -> list[dict]:
+    build = W.build if variant == "gap" else W.build_corridor
     rows: list[dict] = []
     for seed in range(n_seeds):
-        bw = W.build(seed)
+        bw = build(seed)
         rec = {"seed": seed, "gap_y": bw.gap_y, "approach_yaw": bw.approach_yaw}
         orc = L.run(bw, policy=None, omniscient=True, max_frames=max_frames)
         rec["oracle"] = _score(orc)
@@ -155,15 +156,27 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, default=12)
     ap.add_argument("--max-frames", type=int, default=L.MAX_FRAMES)
+    ap.add_argument(
+        "--variant",
+        choices=("gap", "corridor"),
+        default="gap",
+        help="gap = critical feature is an APERTURE (entropy and attribution coincide); "
+        "corridor = critical feature is OPAQUE (they should diverge)",
+    )
     args = ap.parse_args()
 
     wp.init()
     OUT.mkdir(parents=True, exist_ok=True)
-    print(f"section-6 benchmark: {args.seeds} seeds x {len(ARMS)} policies + oracle")
-    rows = run_all(args.seeds, args.max_frames)
+    print(
+        f"section-6 benchmark [{args.variant}]: {args.seeds} seeds x {len(ARMS)} policies + oracle"
+    )
+    rows = run_all(args.seeds, args.max_frames, args.variant)
     summary = report(rows)
-    (OUT / "results.json").write_text(json.dumps({"rows": rows, "summary": summary}, indent=2))
-    print(f"\nwrote {OUT / 'results.json'}")
+    out = OUT / f"results_{args.variant}.json"
+    out.write_text(
+        json.dumps({"variant": args.variant, "rows": rows, "summary": summary}, indent=2)
+    )
+    print(f"\nwrote {out}")
 
 
 if __name__ == "__main__":
