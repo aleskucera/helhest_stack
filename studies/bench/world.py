@@ -68,8 +68,17 @@ LOOK_FOV = 40.0  # [deg] and costs field of view, so the bearing is a real choic
 WALL_X = 8.0  # [m] across the route
 WALL_HALF_DEPTH = 0.3
 WALL_HEIGHT = 0.8  # [m] far above the 0.35 m wheel radius: impassable, unambiguously
-GAP_Y = (2.4, 4.0)  # [m] randomised lateral position of the only opening
-GAP_HALF_WIDTH = 0.85  # [m] wide enough to drive through, narrow enough to have to find
+# Far enough off the approach line that finding it is a real search. At |y| in [2.4, 4.0] the
+# robot met the wall and stumbled onto the gap almost immediately -- an ignorant run came
+# within 6% of the omniscient one, leaving no headroom for any sensing policy to recover.
+# Out here the robot must sweep along the barrier and guess which way first.
+GAP_Y = (5.0, 8.0)
+# Wide enough to actually DRIVE through. At 0.85 m the clearance either side was only
+# 0.85 - 0.715 = 0.135 m against the wheel-envelope reach, and the settle-based feasibility
+# would not commit: an omniscient robot parked in front of the gap and oscillated for 900
+# frames while an ignorant one got through by accident. A benchmark whose ORACLE cannot solve
+# it measures nothing.
+GAP_HALF_WIDTH = 1.5
 
 # --- the decoy -------------------------------------------------------------------------
 # LATERAL, and near enough that its whole look cone stays in front of the barrier. The
@@ -87,6 +96,8 @@ DECOY_HALF_Y = 2.5
 # entropy-directed sensor counts revealed area. With sharp relief the decoy stopped being
 # tempting at all and gate 6 failed, which would have quietly voided the whole comparison.
 DECOY_RELIEF = 0.12
+
+BORDER = 0.5  # [m] impassable perimeter -- see build()
 
 ENVELOPE_REACH = 0.715  # [m] half_track + wheel_radius: the widest a contact can ever be
 
@@ -114,7 +125,12 @@ def build(seed: int = 0, cell: float = CELL) -> BenchWorld:
     # angular separation to ~5 deg, let one look cone cover both, and ran the true route
     # straight through the decoy -- destroying four gates at once. Variety is worth having;
     # variety that breaks the design is not.
-    side = 1.0 if rng.random() < 0.5 else -1.0
+    # STRATIFIED, not sampled: alternating by seed guarantees an equal split of gap sides.
+    # Drawing it at random gave 6 of one side and 2 of the other in the first 8 seeds, and the
+    # two sides are NOT equally hard -- the planner breaks its search direction consistently,
+    # so which side the gap is on dominates the null baseline's time. Balancing removes that
+    # confound instead of hoping it averages out at the sample sizes a closed-loop study affords.
+    side = 1.0 if seed % 2 == 0 else -1.0
     gap_y = side * float(rng.uniform(*GAP_Y))
     decoy_cy = -side * DECOY_ABS_CY
     # Randomised so no result is an artifact of a perfectly square approach.
@@ -128,8 +144,19 @@ def build(seed: int = 0, cell: float = CELL) -> BenchWorld:
     wall = band & ~gap
     H[wall] = WALL_HEIGHT
 
+    # Impassable perimeter. Without it the robot simply drove OFF the grid and around the end
+    # of the barrier on the flat ground that edge-clamped sampling implies -- reaching the goal
+    # without ever finding the gap, which would have made every policy look identical.
+    edge = (
+        (XX <= XLIM[0] + BORDER)
+        | (XX >= XLIM[1] - BORDER)
+        | (YY <= YLIM[0] + BORDER)
+        | (YY >= YLIM[1] - BORDER)
+    )
+    H[edge] = WALL_HEIGHT
+
     decoy = (np.abs(XX - DECOY_CX) <= DECOY_HALF_X) & (np.abs(YY - decoy_cy) <= DECOY_HALF_Y)
-    decoy &= ~band  # the decoy is terrain, not a hole in the barrier
+    decoy &= ~band & ~edge  # the decoy is terrain, not a hole in the barrier or wall
     bumps = DECOY_RELIEF * (
         np.sin(3.1 * XX + 1.7 * seed) * np.cos(2.7 * YY) + 0.6 * np.cos(5.3 * XX - 2.1 * YY)
     )
