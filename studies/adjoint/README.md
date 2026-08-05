@@ -77,20 +77,17 @@ flat 8.2e-4 / 4.2e-4, slope 8.7e-4 / 3.3e-4, curb **1.6e-2** / 2.2e-4, rock **2.
 A follow-up numerical experiment established the *cause*: if the contact is allowed to slide
 sub-cell instead of being restricted to cell centres, `∂env/∂δ` rises **smoothly** 0 → 1 over
 0–7.5 mm rather than stepping 0 → 1 at 3.6 mm. So the cliff is an artifact of quantizing the
-contact, and sub-cell refinement would remove most of it — while making the forward model
-*more* accurate (today's dilation systematically under-estimates the wheel rest height). What
-survives refinement is genuine ties: a wheel bridging two truly equal contacts, which is what
-happens right at a curb edge.
+contact.
 
-> Note this is why the max must be **refined, not smoothed**. A softmax envelope biases the
-> forward model (LSE ≥ max) and, to be smooth across a σ-sized perturbation, would have to
-> blur the terrain at the σ scale — i.e. build a model that cannot see the curb. Sub-cell
-> refinement has the opposite character: it improves accuracy and smooths as a side effect.
+> ⚠️ **This led to a recommendation that was later measured and refuted** — see *Sub-cell
+> refinement* below. The inference "the cliff is quantization, so de-quantizing fixes the
+> gradient" is wrong, and the same experiment contains the reason: a derivative that sweeps
+> its whole 0 → 1 range across 7.5 mm is not describing a σ-sized perturbation *however*
+> smooth it is. The obstacle is **curvature**, not non-differentiability. Kept here because
+> the hypothesis was reasonable and the refutation is the useful part.
 
 → **For Study B:** map σ of a few cm is far above this radius, so first-order propagation
-through the dilation is suspect for realistic uncertainty. B should compute FOSM **both ways**
-— today's frozen-cell-centre gradient and a sub-cell-refined one — against the same
-Monte-Carlo truth, so the size of the fix is measured rather than assumed.
+through the dilation is suspect for realistic uncertainty.
 
 **3. FINDING → FIXED, and the fix is measured.** `chassis_clearance` took a `min` over 18
 belly points that all share one body-frame z, so on level ground they tied *exactly* (18 of 18
@@ -283,11 +280,59 @@ decision on its own merits (2.9 ms/frame at B=8, after a 165× kernel optimisati
 **curvature-corrected (second-order) FOSM**, or the **sampling fallback** in high-σ cells.
 Study B's σ/slack criterion already says exactly where to switch between them.
 
+---
+
+# Second-order FOSM — the fix that works
+
+```
+.venv/bin/python -m studies.adjoint.curvature_eval    # ~2 min
+```
+
+The sub-cell result re-diagnosed the failure as curvature, and `SENSITIVITY_PLAN.md` §4 lists
+curvature-corrected FOSM as the remaining mitigation. For a cell perturbed by δ ~ N(0, σ²):
+
+```
+Var  = g² σ²  +  ½ c² σ⁴          E[J] − J₀ = ½ c σ²
+```
+
+Measured against the same per-cell Monte-Carlo truth, fraction of cell-σ pairs whose variance
+is wrong by more than 2× either way:
+
+| stratum | first order | second order |
+|---|---|---|
+| flat | 32% | **1%** |
+| slope | 50% | **1%** |
+| curb | 25% | 10% |
+| rock | 21% | 18% |
+| σ/slack < 1 | 0% | 0% |
+| σ/slack ≥ 10 | 58% | **12%** |
+| σ×3 | 70% | **6%** |
+| **overall** | **34.1%** | **3.2%** |
+
+And the bias first order cannot express at all: predicted ½cσ² correlates **r = 0.983** with
+the measured Monte-Carlo bias.
+
+**The two results compose into a method.** Second order removes ~90% of the failures, and it
+removes them exactly where the theory says it should — the smooth-but-curved cells. What
+remains is `curb` and `rock`: genuinely *tied* cells where the function has a real kink and no
+polynomial of any order helps. Study B's σ/slack criterion already flags precisely that set.
+So: **second-order FOSM everywhere, sampling fallback only where the validity radius says so.**
+
+**The ceiling caveat, and why it may be reachable.** `c` here is a central second difference
+at exactly the σ being predicted — a quadratic fitted over the interval it is asked about, at
+two extra forwards per cell. No runtime budget allows that one cell at a time. But per-rollout
+terrain means those two forwards are two *slices of one batched launch* — the same trick that
+made this whole study affordable. Rough costing at the real 0.1 m grid: ~1000 probed cells →
+B = 2000 → ~0.6 GB and a ~1–2 ms launch. It needs a **fused batched-terrain forward kernel**
+(only the per-step `step_kernel_bt` exists today). That is the difference between a paper
+result and a usable one, and it is the next thing to cost properly.
+
 ## Next
 
-1. **Second-order / curvature-corrected FOSM**, or accept the sampling fallback. The
-   diagnosis now says curvature, not non-differentiability, so this is the branch that
-   remains.
-2. A scene whose rollouts load exact-tie cells more heavily (only 32 probes had slack < 1 mm).
+1. **Cost the batched curvature probe** — fused batched-terrain forward kernel, memory at the
+   real grid, wall time inside a 100 ms tick. This is now the critical path.
+2. A scene whose rollouts load exact-tie cells more heavily (only 32 probes had slack < 1 mm),
+   to pin down the residual 10–18% where second order still fails.
 3. Study C (`SENSITIVITY_PLAN.md` §5) — one-shot attribution vs BPTT-style repeated descent.
-4. Consider the sub-cell forward on fidelity grounds alone, separately from all of the above.
+4. The sub-cell **forward** on fidelity grounds alone (44× envelope accuracy, bias removed),
+   entirely separately from the gradient question.
