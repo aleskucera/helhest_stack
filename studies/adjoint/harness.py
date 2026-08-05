@@ -39,6 +39,8 @@ from helhest.engine.envelope import wheel_offset_table
 from helhest.engine.step import init_state_kernel_bt
 from helhest.engine.step import step_kernel_bt
 
+from . import subcell
+
 # Five scalar functionals of one rollout, kept SEPARATE (not summed) so a failure is
 # attributable to a path rather than to "the loss". They share a single forward pass; only
 # the backward is repeated, once per term, with a one-hot cotangent.
@@ -172,6 +174,14 @@ class Harness:
 
         # The envelope-leaf levels run on the elevation buffer loaded with the EXACT envelope
         # the production dilation produces, so they test the same terrain the real path sees.
+        # Optional sub-cell contact refinement (studies/adjoint/subcell.py). Off by default so
+        # every earlier result is unaffected; `use_subcell = True` swaps BOTH the forward and
+        # the backward, which is required for a fair comparison against Monte-Carlo truth.
+        self.use_subcell = False
+        self._subcell = subcell.SubcellDilation(
+            self.sim, scene.cell, self.robot_params.wheel_radius
+        )
+
         self.sim.set_terrain(self._raw0)
         self.sim._contact()
         self.sim._gather()
@@ -191,7 +201,7 @@ class Harness:
     # --- forward / tape ------------------------------------------------------------------
     def _launches(self) -> None:
         sim = self.sim
-        sim._gather()
+        self._subcell.gather() if self.use_subcell else sim._gather()
         wp.launch(
             init_state_kernel_bt,
             self.batch_size,
@@ -239,7 +249,9 @@ class Harness:
         """One forward rollout; on `tape` if given. Mirrors `rollout_taped` except that the
         arg-max contact can be replaced by the identity."""
         sim = self.sim
-        if dilate:
+        if dilate and self.use_subcell:
+            self._subcell.contact()  # off-tape: discrete arg-max, then parabolic refinement
+        elif dilate:
             sim._contact()  # off-tape arg-max, recomputed for the CURRENT elevation
         else:
             sim._best_k.fill_(float(self._k_identity))

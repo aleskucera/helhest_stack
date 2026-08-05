@@ -242,11 +242,52 @@ benchmark in miniature, and the C4 claim demonstrated.
 - Not yet done: the sub-cell-refined gradient measured against the same MC truth, which is now
   the highest-value next experiment.
 
+---
+
+# Sub-cell refinement — measured, and rejected for gradients
+
+```
+.venv/bin/python -m studies.adjoint.subcell_eval    # ~70 s
+```
+
+Studies A and B both pointed at the same fix: the 3.6 mm validity radius is contact
+*quantization*, so let the contact slide sub-cell. `subcell.py` implements it (discrete
+arg-max to localise, then a local ±1 cell search at 1/8-cell steps over the bilinear lifted
+surface). `subcell_eval.py` measures it three ways before anyone touches the graph-captured
+tiled kernel.
+
+**FORWARD — a clear win.** Envelope error against a brute-force continuum reference drops
+**44×** overall (slope 31000×, rock 19700×), and the systematic bias goes from −0.172 mm to
+−0.004 mm. Today's dilation under-estimates the wheel rest height everywhere the true contact
+is not exactly on a cell centre. This stands on its own, independent of gradients.
+
+**GRADIENT — no.** Per-cell attribution does not improve (1 of 3 rollouts better, 2 worse),
+and the kinked-fraction cliff moves **in**, not out: flat goes from a cliff at ε = 1e-2 to one
+at 1e-3.
+
+**Why, which matters more than the answer.** Refinement reduces the *size* of each contact
+jump but raises their *frequency* — the maximiser is still quantized, now to 1/8 cell, so the
+bilinear weights step 8× more often in 8× smaller steps. Nothing became continuous. And the
+deeper reason the idea was wrong: Study A's follow-up showed that even with a **continuum**
+maximiser, `∂env/∂δ` sweeps its full 0 → 1 range over ~7.5 mm. A gradient that traverses its
+entire range inside one σ is not a differentiability problem — the function is smooth and
+strongly **curved**. First order assumes a *constant* gradient, and smoothing a function does
+not make it linear.
+
+→ **Do not** put sub-cell refinement in the hot path for gradient reasons. Measuring it cost
+~70 s against the week building it would have taken. The forward-fidelity win is a separate
+decision on its own merits (2.9 ms/frame at B=8, after a 165× kernel optimisation — load the
+4×4 terrain patch into a `mat44` once instead of re-reading 4 globals per candidate).
+
+→ For attribution, `SENSITIVITY_PLAN.md` §4's *other* mitigations are the live ones:
+**curvature-corrected (second-order) FOSM**, or the **sampling fallback** in high-σ cells.
+Study B's σ/slack criterion already says exactly where to switch between them.
+
 ## Next
 
-1. **Sub-cell contact refinement**, then re-run B2 against the same Monte-Carlo truth. Study
-   A's follow-up already showed `∂env/∂δ` becomes continuous once the contact may slide; B2
-   now says the resulting increase in slack is *the* quantity gating the method. Measure the
-   gain before building it into the tiled hot path.
+1. **Second-order / curvature-corrected FOSM**, or accept the sampling fallback. The
+   diagnosis now says curvature, not non-differentiability, so this is the branch that
+   remains.
 2. A scene whose rollouts load exact-tie cells more heavily (only 32 probes had slack < 1 mm).
 3. Study C (`SENSITIVITY_PLAN.md` §5) — one-shot attribution vs BPTT-style repeated descent.
+4. Consider the sub-cell forward on fidelity grounds alone, separately from all of the above.
