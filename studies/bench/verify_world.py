@@ -37,6 +37,7 @@ MOUNT = 0.4
 WHEEL_RADIUS = 0.35
 N_SEEDS = 12
 COMMIT_FRAC = 0.45  # the gap must stay hidden past this fraction of the approach
+LOOK_VANTAGE_X = 3.0  # [m] where gate 4 tests whether a look can reach the gap
 
 
 def scan(bw: W.BenchWorld, pose, fov: float, rng_m: float) -> np.ndarray:
@@ -115,7 +116,10 @@ def main() -> None:
             / max((corridor & (np.abs(XX - W.WALL_X) <= W.WALL_HALF_DEPTH)).sum(), 1)
         )
 
-        here = (bw.start[0], bw.start[1])
+        # From a vantage a little way along the approach, not from the start. The robot uses
+        # its looks while driving, and with a 9 m look range the gap is simply out of reach at
+        # frame 0 -- testing there measures the range, not the capability.
+        here = (LOOK_VANTAGE_X, 0.0)
         b_gap = W.bearing_to(bw, bw.gap_mask, here)
         b_decoy = W.bearing_to(bw, bw.decoy_mask, here)
         look_gap = scan(bw, (here[0], here[1], b_gap), W.LOOK_FOV, W.LOOK_RANGE)

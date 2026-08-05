@@ -61,7 +61,11 @@ GOAL = (12.0, 0.0)
 # --- sensing model ---------------------------------------------------------------------
 DEFAULT_RANGE = 3.5  # [m] free every frame: the ground you are about to drive on
 DEFAULT_FOV = 180.0
-LOOK_RANGE = 12.0  # [m] a dwell buys range
+# 9 m, not 12. At 12 m a LATERAL look from the route ran past the map edge, so the decoy
+# direction was scored on a truncated cone while the forward direction was not -- an artifact
+# that made the critical direction look more informative than it is. 9 m keeps both cones
+# inside the free space.
+LOOK_RANGE = 9.0  # [m] a dwell buys range
 LOOK_FOV = 40.0  # [deg] and costs field of view, so the bearing is a real choice
 
 # --- the barrier -------------------------------------------------------------------------
@@ -88,14 +92,23 @@ GAP_HALF_WIDTH = 1.5
 # three attempted fixes (moving it, flattening it, enlarging the map). Placing the decoy off to
 # the side at ~65 deg means its cone never reaches the wall within LOOK_RANGE.
 DECOY_CX = 3.0
-DECOY_ABS_CY = 6.5  # [m] always OPPOSITE the gap -- see build()
+# Near enough that the robot's DEFAULT sensing clips its near edge while driving past. That
+# matters: a context-predicted sigma can only mark the decoy as rough if some of its roughness
+# has actually been observed. At 6.5 m the whole region stayed unseen, no roughness was ever
+# measured, and the predicted sigma collapsed back to uniform -- leaving the entropy baseline
+# with nothing to be tempted by. Still 3.5x the wheel-envelope reach from the route.
+DECOY_ABS_CY = 5.0  # [m] always OPPOSITE the gap -- see build()
 DECOY_HALF_X = 2.5
 DECOY_HALF_Y = 2.5
 # Gentle relief, not rugged. It must read as genuinely uncertain terrain, but rough ground
 # SELF-OCCLUDES, which suppresses how much area a look actually reveals -- and an
 # entropy-directed sensor counts revealed area. With sharp relief the decoy stopped being
 # tempting at all and gate 6 failed, which would have quietly voided the whole comparison.
-DECOY_RELIEF = 0.12
+# Nearly flat. Roughness is incidental to the decoy's job -- what makes it tempting is being
+# a large UNOBSERVED region -- and rough ground self-occludes, which suppresses the area a look
+# reveals and so weakens the very baseline the decoy exists to tempt. Flat is the strongest
+# version of the temptation, and therefore the fairest test.
+DECOY_RELIEF = 0.04
 
 BORDER = 0.5  # [m] impassable perimeter -- see build()
 
@@ -206,3 +219,86 @@ def bearing_to(world: BenchWorld, mask: np.ndarray, frm: tuple[float, float]) ->
     """Mean bearing [rad] from a point to the cells of `mask` -- where a policy would aim."""
     XX, YY = cell_centres(world)
     return float(np.arctan2((YY[mask] - frm[1]).mean(), (XX[mask] - frm[0]).mean()))
+
+
+# =========================================================================================
+# VARIANT B: an OPAQUE decision-critical feature.
+#
+# Variant A (the gap) produced a clean negative result: entropy finds the gap immediately,
+# because an APERTURE is simultaneously the most decision-relevant and the most
+# information-rich thing to look at -- sight passes through it, so a gap-directed look reveals
+# the most area. Where the critical feature is a hole, the two objectives coincide by
+# construction and no amount of tuning separates them.
+#
+# So variant B makes the critical feature OPAQUE and SMALL: a walled corridor on the direct
+# route whose FLOOR is either drivable or blocked by a step, decided per seed. Looking at it
+# reveals almost no new area -- the corridor walls see to that -- so an entropy-directed sensor
+# has no reason to prefer it, while the plan drives straight through it and is maximally
+# sensitive to its height. The decoy stays a large open unobserved region off to the side.
+#
+# If attribution beats entropy anywhere, it is here; if it does not beat entropy here either,
+# that is a much stronger negative result than variant A alone.
+# =========================================================================================
+
+CORR_X = (6.6, 9.4)  # [m] the walled corridor on the direct route
+CORR_HALF_WIDTH = 1.3  # [m] narrow enough that its walls occlude a look into it
+CORR_WALL_H = 1.0
+STEP_X_B = 8.6  # [m] where the blocking step sits, at the FAR end of the corridor
+STEP_DEPTH_B = 0.6
+STEP_H_B = (0.55, 0.75)  # [m] impassable when present
+DETOUR_Y = 5.5  # [m] the way around, if the corridor turns out to be blocked
+
+
+def build_corridor(seed: int = 0, cell: float = CELL) -> BenchWorld:
+    """A walled corridor on the route that may or may not be blocked, plus the same decoy.
+
+    Half the seeds are blocked and half are clear (stratified, not sampled). A policy that
+    learns the corridor's state early can commit to the corridor or to the detour immediately;
+    one that does not must drive in, discover, and back out.
+    """
+    rng = np.random.default_rng(1000 + seed)
+    blocked = seed % 2 == 0
+    step_h = float(rng.uniform(*STEP_H_B))
+    side = 1.0 if (seed // 2) % 2 == 0 else -1.0  # which side the detour and decoy sit on
+    yaw0 = float(rng.uniform(-0.10, 0.10))
+
+    XX, YY = _grid(XLIM, YLIM, cell)
+    H = np.zeros_like(XX)
+
+    edge = (
+        (XX <= XLIM[0] + BORDER)
+        | (XX >= XLIM[1] - BORDER)
+        | (YY <= YLIM[0] + BORDER)
+        | (YY >= YLIM[1] - BORDER)
+    )
+
+    # A long barrier with ONE corridor through it, plus a detour opening far to `side`.
+    band = (XX >= CORR_X[0]) & (XX <= CORR_X[1])
+    inside = band & (np.abs(YY) <= CORR_HALF_WIDTH)
+    detour = band & (np.abs(YY - side * DETOUR_Y) <= 1.4)
+    H[band & ~inside & ~detour] = CORR_WALL_H
+
+    critical = (np.abs(XX - STEP_X_B) <= STEP_DEPTH_B / 2) & (np.abs(YY) <= CORR_HALF_WIDTH)
+    if blocked:
+        H[critical] = step_h
+
+    decoy_cy = -side * DECOY_ABS_CY
+    decoy = (np.abs(XX - DECOY_CX) <= DECOY_HALF_X) & (np.abs(YY - decoy_cy) <= DECOY_HALF_Y)
+    decoy &= ~band & ~edge
+    bumps = DECOY_RELIEF * (
+        np.sin(3.1 * XX + 1.7 * seed) * np.cos(2.7 * YY) + 0.6 * np.cos(5.3 * XX - 2.1 * YY)
+    )
+    H[decoy] += bumps[decoy]
+    H[edge] = WALL_HEIGHT
+
+    return BenchWorld(
+        scene=Heightmap(H, (XLIM[0], YLIM[0]), cell),
+        wall_mask=(H >= CORR_WALL_H - 1e-6) & ~edge,
+        gap_mask=critical,  # "the cells the decision rests on" -- here the corridor floor
+        decoy_mask=decoy,
+        gap_y=side * DETOUR_Y if blocked else 0.0,
+        approach_yaw=yaw0,
+        start=(START[0], START[1], yaw0),
+        goal=GOAL,
+        seed=seed,
+    )

@@ -146,10 +146,18 @@ def none(belief, pose, bw, route=None):
 
 
 def entropy(belief, pose, bw, route=None):
-    """Maximise expected revealed unknown area. Classic NBV."""
-    best, best_b = -1, None
+    """Maximise expected information gain, sum of sigma^2 over the cells a look would resolve.
+
+    The sigma-weighted form, not a raw cell count. Counting cells makes the objective nearly
+    direction-independent -- the cone has the same area whichever way it points -- so the
+    policy has no signal and tie-breaks arbitrarily, which is a straw man rather than a
+    baseline. Weighting by predicted uncertainty is both the standard formulation and the
+    stronger opponent: it concentrates on terrain the map expects to be complex.
+    """
+    w = belief.sigma() ** 2
+    best, best_b = -1.0, None
     for b in candidate_bearings(pose[2]):
-        gain = int(_visible(belief, bw, pose, b).sum())
+        gain = float(w[_visible(belief, bw, pose, b)].sum())
         if gain > best:
             best, best_b = gain, float(b)
     return best_b

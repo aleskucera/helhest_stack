@@ -68,9 +68,48 @@ class Belief:
     scene_y0: float
     cell: float
 
-    def sigma(self, unknown: float = 0.25, observed: float = 0.01) -> np.ndarray:
-        """Placeholder per-cell uncertainty. Unknown cells dominate, as they should."""
-        return np.where(self.known, observed, unknown)
+    def sigma(self, observed: float = 0.01, base: float = 0.12, gain: float = 1.4) -> np.ndarray:
+        """Per-cell uncertainty, predicted from CONTEXT rather than assumed uniform.
+
+        A uniform "unknown = 0.25" makes every unobserved cell identical, which leaves an
+        information-gain objective almost indifferent between directions: the look cone has the
+        same area whichever way it points, so an area-counting NBV has no signal and picks
+        essentially arbitrarily. That is not a fair baseline -- it is a baseline with nothing to
+        go on -- and beating it would say nothing.
+
+        Real uncertainty models (UNRealNet arXiv:2407.08720, the Neural-Processes elevation
+        model arXiv:2508.03890) predict HIGHER uncertainty over rough or complex terrain before
+        observing it, from context. Emulated here at block resolution: measure roughness where
+        the map IS observed, then carry it into neighbouring unobserved blocks. Rough
+        neighbourhoods therefore read as high-sigma while smooth ones read as low-sigma, which
+        is what gives an entropy-directed sensor a real preference to be wrong about.
+        """
+        block = max(int(round(2.0 / self.cell)), 1)
+        ny, nx = self.known.shape
+        by, bx = ny // block, nx // block
+        e = self.elev[: by * block, : bx * block].reshape(by, block, bx, block)
+        k = self.known[: by * block, : bx * block].reshape(by, block, bx, block)
+        seen = k.any(axis=(1, 3))
+        hi = np.where(k, e, -np.inf).max(axis=(1, 3))
+        lo = np.where(k, e, np.inf).min(axis=(1, 3))
+        rough = np.where(seen, np.nan_to_num(hi - lo, neginf=0.0, posinf=0.0), np.nan)
+        # carry observed roughness into neighbouring unobserved blocks
+        for _ in range(6):
+            filled = np.nan_to_num(rough, nan=0.0)
+            have = ~np.isnan(rough)
+            acc = np.zeros_like(filled)
+            cnt = np.zeros_like(filled)
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    acc += np.roll(np.roll(filled, dy, 0), dx, 1)
+                    cnt += np.roll(np.roll(have.astype(float), dy, 0), dx, 1)
+            grown = np.where(cnt > 0, acc / np.maximum(cnt, 1), 0.0)
+            rough = np.where(have, rough, np.where(cnt > 0, grown, np.nan))
+        rough = np.nan_to_num(rough, nan=0.0)
+        full = np.kron(rough, np.ones((block, block)))
+        pad = np.zeros((ny, nx))
+        pad[: full.shape[0], : full.shape[1]] = full
+        return np.where(self.known, observed, base + gain * pad)
 
 
 @dataclass
