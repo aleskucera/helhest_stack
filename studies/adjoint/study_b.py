@@ -263,7 +263,7 @@ def _summarise(b1: list[dict], b2: list[dict], ok: bool, notes: list[str]) -> No
     print(
         f"\n0. SELF-CHECK  {'PASS' if ok else 'FAIL'} -- at the smallest sigma the FOSM/MC ratio "
         f"is 1 to within {SELF_CHECK_TOL:.0%},\n   so the noise normalisation and the correlated "
-        f"FOSM formula are right and every\n   deviation below is the physics, not the harness."
+        "FOSM formula are right and every\n   deviation below is the physics, not the harness."
     )
     for n in notes:
         print("     - " + n)
@@ -271,14 +271,14 @@ def _summarise(b1: list[dict], b2: list[dict], ok: bool, notes: list[str]) -> No
     corr = [r for r in b1 if r["corr_len"] > 0]
     iid = [r for r in b1 if r["corr_len"] == 0.0]
     print(
-        f"\n1. i.i.d. PER-CELL NOISE IS NOT A VALID MODEL HERE. Median |bias| / sd is "
+        "\n1. i.i.d. PER-CELL NOISE IS NOT A VALID MODEL HERE. Median |bias| / sd is "
         f"{np.median([abs(r['bias_over_sd']) for r in iid]):.1f} sd\n"
-        f"   for independent cells against "
+        "   for independent cells against "
         f"{np.median([abs(r['bias_over_sd']) for r in corr]):.1f} sd at a 0.15 m correlation "
-        f"length.\n   The envelope is a MAX over ~37 cells, so zero-mean independent noise "
-        f"raises it\n   systematically -- a pure second-order effect that FOSM cannot see and "
-        f"that swamps\n   the variance it does predict. Correlated draws are the only "
-        f"meaningful column."
+        "length.\n   The envelope is a MAX over ~37 cells, so zero-mean independent noise "
+        "raises it\n   systematically -- a pure second-order effect that FOSM cannot see and "
+        "that swamps\n   the variance it does predict. Correlated draws are the only "
+        "meaningful column."
     )
     by_roll: dict[str, list] = {}
     for r in corr:
@@ -298,28 +298,28 @@ def _summarise(b1: list[dict], b2: list[dict], ok: bool, notes: list[str]) -> No
     mid = [r for r in b2 if 1.0 <= r["margin_mm"] < 3.0 and r["sigma_scale"] == 1.0]
     hi = [r for r in b2 if r["margin_mm"] >= 3.0 and r["sigma_scale"] == 1.0]
     print(
-        f"\n3. THE CONTACT-MARGIN FLAG DOES NOT PREDICT PER-CELL BREAKDOWN -- as measured, and\n"
-        f"   the measurement is UNDERPOWERED. At sigma x1 the median per-cell ratio is\n"
+        "\n3. THE CONTACT-MARGIN FLAG DOES NOT PREDICT PER-CELL BREAKDOWN -- as measured, and\n"
+        "   the measurement is UNDERPOWERED. At sigma x1 the median per-cell ratio is\n"
         f"   {np.median([r['ratio'] for r in low]):.2f} for margin < 1 mm (n={len(low)}), "
         f"{np.median([r['ratio'] for r in mid]):.2f} for 1-3 mm (n={len(mid)}), "
         f"{np.median([r['ratio'] for r in hi]):.2f} for >= 3 mm (n={len(hi)}).\n"
         f"   That ordering is backwards from the hypothesis, but n={len(low)} in the low bucket "
-        f"is far too\n   few to conclude anything: the probe cells are ranked by gradient "
-        f"magnitude, and the\n   near-tied cells sit at curb edges which this scene's rollouts "
-        f"barely load. The 1-3 mm\n   bucket is also confounded -- it is essentially the slope "
-        f"lane, whose margin is 1.35 mm\n   everywhere, so that column is a region effect wearing "
-        f"a margin label.\n"
-        f"   -> NEXT: sample probe cells stratified BY MARGIN rather than by gradient magnitude,\n"
-        f"      and add a rollout that drives the curb edge square-on. Until then the flag is\n"
-        f"      neither confirmed nor refuted."
+        "is far too\n   few to conclude anything: the probe cells are ranked by gradient "
+        "magnitude, and the\n   near-tied cells sit at curb edges which this scene's rollouts "
+        "barely load. The 1-3 mm\n   bucket is also confounded -- it is essentially the slope "
+        "lane, whose margin is 1.35 mm\n   everywhere, so that column is a region effect wearing "
+        "a margin label.\n"
+        "   -> NEXT: sample probe cells stratified BY MARGIN rather than by gradient magnitude,\n"
+        "      and add a rollout that drives the curb edge square-on. Until then the flag is\n"
+        "      neither confirmed nor refuted."
     )
     print(
-        f"\n4. PER-CELL AND GLOBAL ADEQUACY COME APART. slope-climb has the best GLOBAL ratio\n"
-        f"   (~1.0 across the whole sweep) and among the worst PER-CELL ratios (median 1.94,\n"
-        f"   p90 16 at sigma x1). Aggregate Var(J) can be accurate while individual cell\n"
-        f"   attributions are badly wrong, because the per-cell errors cancel in the sum.\n"
-        f"   This matters: the project's claim is ATTRIBUTION, not Var(J), so B2 is the\n"
-        f"   measurement that gates it and B1 alone would have been misleadingly reassuring."
+        "\n4. PER-CELL AND GLOBAL ADEQUACY COME APART. slope-climb has the best GLOBAL ratio\n"
+        "   (~1.0 across the whole sweep) and among the worst PER-CELL ratios (median 1.94,\n"
+        "   p90 16 at sigma x1). Aggregate Var(J) can be accurate while individual cell\n"
+        "   attributions are badly wrong, because the per-cell errors cancel in the sum.\n"
+        "   This matters: the project's claim is ATTRIBUTION, not Var(J), so B2 is the\n"
+        "   measurement that gates it and B1 alone would have been misleadingly reassuring."
     )
 
 
@@ -350,7 +350,6 @@ def main() -> None:
     b2 = run_b2(scene, sigma_np, margin, poses, omega, labels)
     _report_b2(b2)
     _summarise(b1, b2, ok, notes)
-    rows = b1
     np.savez_compressed(
         OUT_DIR / "study_b.npz",
         sigma=sigma_np,
