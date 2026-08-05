@@ -1,0 +1,36 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+ seed  gap y                none             entro             sigma              cvar             attri
+                 looks@gap/decoy   looks@gap/decoy   looks@gap/decoy   looks@gap/decoy   looks@gap/decoy
+Module helhest.engine.envelope 8494861 load on device 'cuda:0' took 0.91 ms  (cached)
+Module helhest.engine.step b170777 load on device 'cuda:0' took 6.00 ms  (cached)
+Module helhest.planning.costtogo f250786 load on device 'cuda:0' took 0.83 ms  (cached)
+Module helhest.planning.lattice_solver 4e28ec9 load on device 'cuda:0' took 0.61 ms  (cached)
+Module helhest.control.mppi a8801d8 load on device 'cuda:0' took 1.05 ms  (cached)
+    0    6.9         0/0               1/1               0/0               1/0               1/0        
+    1   -6.5         0/0               0/2               0/0               1/0               1/0        
+    2    5.8         0/0               1/1               0/0               0/0               0/0        
+    3   -5.3         0/0               0/2               0/0               0/0               0/0        
+    4    7.8         0/0               0/2               0/1               2/0               2/0        
+    5   -7.4         0/0               0/2               0/0               1/0               1/0        
+    6    6.6         0/0               1/1               0/0               1/0               1/0        
+    7   -6.9         0/0               0/2               0/0               1/0               1/0        
+
+policy         mean @gap  mean @decoy  median gap-found frame
+none                0.00         0.00                     149
+entropy             0.38         1.62                      74
+sigma               0.00         0.12                      62
+cvar                0.88         0.00                      59
+attribution         0.88         0.00                      59
+
+gates
+  [PASS] 1 entropy falls for the decoy   1.62 decoy looks vs 0.38 at the gap
+  [PASS] 2 attribution targets the gap   0.88 gap looks vs 0.00 at the decoy
+  [PASS] 3 attribution finds it earlier  median frame 59 vs 149 for the null baseline
+
+POLICIES BEHAVE AS ADVERTISED

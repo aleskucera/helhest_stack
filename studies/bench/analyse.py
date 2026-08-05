@@ -55,14 +55,25 @@ def load(variant: str) -> list[dict]:
 
 def analyse(variant: str) -> dict:
     rows = load(variant)
-    hard = np.array([r["seed"] % 2 == 0 for r in rows])
+    # The regime split is DESCRIPTIVE and post-hoc: seeds where the null baseline actually ran
+    # long. Splitting by seed parity (which side the gap is on) was the design intent, but at
+    # larger n it stops predicting difficulty -- the exact gap position and approach angle
+    # matter too, and some far-side seeds turn out easy. Labelling by the observed outcome is
+    # honest about what the two clusters ARE; it is not a selection rule for the headline
+    # numbers, which are computed over all seeds.
+    orc0 = np.array([r["oracle"]["time"] for r in rows], float)
+    nul0 = np.array([r["none"]["time"] for r in rows], float)
+    hard = nul0 > 1.5 * orc0
     t = {a: np.array([r[a]["time"] for r in rows], float) for a in ARMS}
     t["oracle"] = np.array([r["oracle"]["time"] for r in rows], float)
 
-    print(f"\n=== variant {variant}: {VARIANTS[variant]}  (n={len(rows)}) ===")
+    print(
+        f"\n=== variant {variant}: {VARIANTS[variant]}  (n={len(rows)}, "
+        f"{int(hard.sum())} hard / {int((~hard).sum())} easy) ==="
+    )
     print(
         f"{'policy':<13}{'mean':>7}{'median':>8}{'hard':>7}{'easy':>7}"
-        f"{'vs none':>9}{'headroom':>10}{'@crit':>7}{'@decoy':>8}"
+        f"{'vs none':>9}{'headroom':>10}{'@crit':>7}{'@decoy':>8}{'reach':>8}"
     )
     res = {}
     for a in (*ARMS, "oracle"):
@@ -75,7 +86,8 @@ def analyse(variant: str) -> dict:
             )
             crit = np.mean([r[a]["look_at_gap"] for r in rows])
             dec = np.mean([r[a]["look_at_decoy"] for r in rows])
-            extra += f"{crit:>7.2f}{dec:>8.2f}"
+            reach = sum(r[a]["reached"] for r in rows)
+            extra += f"{crit:>7.2f}{dec:>8.2f}{reach:>5}/{len(rows):<3}"
         print(
             f"{a:<13}{v.mean():>7.0f}{np.median(v):>8.0f}"
             f"{v[hard].mean():>7.0f}{v[~hard].mean():>7.0f}{extra}"

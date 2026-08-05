@@ -163,44 +163,70 @@ correct rather than a shortcut. Probing everything would cost 525 ms.
 
 ## 6. The §6 benchmark — decision-focused vs information-theoretic sensing
 
-`studies/bench/` · figure `studies/out/bench/benchmark.png`
+`studies/bench/` · figure `studies/out/bench/benchmark.png` · **n = 32 seeds per variant**
 
 Closed loop: plan on an accumulated, occluded, optimistically-inpainted belief; drive on
 ground truth. Once per 30 frames the robot may spend 8 frames aiming a long-range narrow-FOV
-sensor at a chosen bearing — the budget is **capped at 4 and identical for every policy**, so
+sensor at a chosen bearing. The budget is **capped at 4 and identical for every policy**, so
 the overhead cancels and only the aiming decision is compared.
 
-**Two variants, and the contrast between them is the result.**
+### The one claim that is statistically supported
 
-| variant | mean time to goal (n=12) | | | |
-|---|---|---|---|---|
-| | none | entropy | **attribution** | oracle |
-| **A** aperture — gap in a wall | 305 | 275 | **271** | 201 |
-| **B** opaque — corridor floor | 231 | **255** | **216** | 171 |
+**Attribution beats entropy** in variant A: 24/32 seeds, mean −22 frames, **sign test
+p = 0.007**. The behavioural mechanism is directly visible — entropy spends 1.66 of its 4 looks
+on the decoy and 0.47 on the critical cells; attribution spends 0.88 on the critical cells and
+**0.00** on the decoy.
 
-In **A** the two tie. A gap is simultaneously the most decision-relevant *and* the most
-information-rich thing to look at, because sight passes *through* an aperture — so "where can
-I see most" and "where does my plan depend" coincide by construction.
+| variant A (aperture), n=32 | mean | hard | easy | vs none | headroom | reached |
+|---|---|---|---|---|---|---|
+| none | 315 | 424 | 220 | — | 0% | 32/32 |
+| sigma | 394 | 530 | 273 | +78 | −68% | **26/32** |
+| entropy | 292 | 330 | 258 | −23 | 20% | 32/32 |
+| **attribution** | **270** | **258** | 281 | **−45** | **39%** | 32/32 |
+| oracle | 200 | 201 | 199 | | | |
 
-In **B**, where the critical feature is opaque and small, they diverge: entropy-directed
-sensing is **actively harmful** (+24 frames against never looking) while attribution-directed
-sensing helps (−16). The behavioural mechanism is visible directly — entropy spends 1.5 of its
-4 looks on the decoy and 0.4 on the critical cells; attribution spends 1.4 on the critical
-cells and **0.0** on the decoy.
+`sigma` — uncertainty-weighted *without* decision-weighting — is the worst arm and fails to
+reach the goal on 6/32 seeds. Weighting by uncertainty alone is worse than not looking.
 
-**Getting the baseline strong enough to be wrong took three corrections**, each of which would
-otherwise have produced a straw man: an area-counting NBV is nearly direction-*indifferent*
-(a fixed cone has the same area whichever way it points), so it was switched to σ-weighted
-information gain; σ had to be *predicted from context* (roughness measured where observed,
-carried into neighbouring unobserved blocks) rather than assumed uniform; and the decoy had to
-sit near enough for its roughness to be observable at all.
+### What did **not** survive going from n=12 to n=32
+
+At n = 12 variant B appeared to show the cleanest result: entropy actively harmful (+24 frames
+against never looking) while attribution helped (−16). **That did not reproduce.** At n = 32:
+
+| variant B (opaque), n=32 | mean | vs none | sign test vs none |
+|---|---|---|---|
+| none | 213 | — | — |
+| entropy | 242 | +30 | — |
+| **attribution** | **228** | **+16** | 5/32 wins, **p = 0.000 — significantly worse** |
+
+Attribution vs entropy in B is 11/25 wins, p = 0.69 — directionally right, not significant.
+The cause is visible in the regime split: only **5 of 32** seeds turned out hard (null baseline
+> 1.5× oracle), because the corridor's detour is cheap to find once discovered. Variant B is a
+weaker scenario than intended, and its n=12 result was small-sample noise. I am recording this
+rather than quietly keeping the n=12 numbers.
+
+### The honest summary
+
+1. **Attribution > entropy** — supported in A (p = 0.007), directionally consistent but not
+   significant in B.
+2. **Neither beats never-looking on a per-seed basis.** In A attribution's *mean* is 45 frames
+   better, but it wins on only 15/32 seeds: large wins where the default guesses wrong, small
+   losses everywhere else. In B it is significantly worse.
+3. That is a limitation of the harness, not of the idea: **the looks are spent
+   unconditionally.** Deciding *whether* to observe is `SENSITIVITY_PLAN.md`'s C5 and is not
+   implemented. A policy that skipped its budget when the resolvable variance was small would
+   keep the wins and drop the losses — but that is a prediction, not a result.
+4. Variant A's structural finding stands: where the critical feature is an **aperture**, sight
+   passes through it, so "where can I see most" and "where does my plan depend" partly
+   coincide — which is why entropy still recovers 20% of the headroom there.
 
 ## 7. What is **not** established
 
-- **Statistical power is the weakest part.** At n = 12 no paired sign test reaches
-  significance (p = 0.146–1.0) despite mean effects of 16–39 frames. The direction is
-  consistent with the hypothesis; the benchmark as run does **not** establish it. A 32-seed
-  run is in progress and this section will be updated with it.
+- **Only one benchmark claim is statistically supported** (attribution > entropy in variant A,
+  p = 0.007). Everything else is directional. Going from n = 12 to n = 32 overturned variant
+  B's apparent result, which is a warning about how little 12 closed-loop seeds establish.
+- **No policy beats never-looking per-seed**, because the look budget is spent
+  unconditionally. C5 (deciding *whether* to observe) is unimplemented and is the obvious gap.
 - **No real data.** Every number is synthetic, on one robot geometry and one grid resolution.
   σ is the placeholder the plan asked for, so absolute breakdown scales are not meaningful —
   only curve shapes and contrasts.

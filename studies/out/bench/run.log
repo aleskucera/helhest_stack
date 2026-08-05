@@ -1,0 +1,50 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+section-6 benchmark: 12 seeds x 5 policies + oracle
+Module helhest.engine.envelope 8494861 load on device 'cuda:0' took 1.02 ms  (cached)
+Module helhest.engine.step b170777 load on device 'cuda:0' took 6.90 ms  (cached)
+Module helhest.planning.costtogo f250786 load on device 'cuda:0' took 0.90 ms  (cached)
+Module helhest.planning.lattice_solver 4e28ec9 load on device 'cuda:0' took 0.69 ms  (cached)
+Module helhest.control.mppi a8801d8 load on device 'cuda:0' took 1.19 ms  (cached)
+  seed  0 gap_y +6.9 | oracle  203 | none  426 sigm  245 entr  263 cvar  244 attr  244
+  seed  1 gap_y -6.5 | oracle  199 | none  220 sigm  235 entr  252 cvar  235 attr  235
+  seed  2 gap_y +5.8 | oracle  191 | none  411 sigm  228 entr  241 cvar  226 attr  226
+  seed  3 gap_y -5.3 | oracle  179 | none  197 sigm  422 entr  353 cvar  316 attr  316
+  seed  4 gap_y +7.8 | oracle  222 | none  440 sigm  932* entr  339 cvar  292 attr  292
+  seed  5 gap_y -7.4 | oracle  210 | none  229 sigm  249 entr  262 cvar  325 attr  325
+  seed  6 gap_y +6.6 | oracle  200 | none  424 sigm  237 entr  258 cvar  237 attr  237
+  seed  7 gap_y -6.9 | oracle  202 | none  224 sigm  240 entr  254 cvar  316 attr  316
+  seed  8 gap_y +6.0 | oracle  193 | none  416 sigm  230 entr  312 cvar  228 attr  228
+  seed  9 gap_y -7.6 | oracle  211 | none  232 sigm  455 entr  264 cvar  350 attr  350
+  seed 10 gap_y +7.9 | oracle  221 | none  243 sigm  263 entr  274 cvar  262 attr  262
+  seed 11 gap_y -5.4 | oracle  181 | none  198 sigm  216 entr  230 cvar  216 attr  216
+
+oracle: reached 12/12, median time 201 frames
+
+policy         reached  median t  vs oracle  headroom rec  looks  @gap  @decoy  contacts
+none           12/12         238      1.18x           0%    0.0   0.0     0.0       0.0
+sigma          11/12         242      1.21x         -82%    4.0   0.0     0.1       0.0
+entropy        12/12         262      1.31x        -139%    4.0   0.5     1.6       0.0
+cvar           12/12         253      1.26x         -79%    4.0   0.8     0.0       0.0
+attribution    12/12         253      1.26x         -79%    4.0   0.8     0.0       0.0
+
+policy         hard: median t  easy: median t   (hard = gap on the far side)
+none                      420             222
+sigma                     241             244
+entropy                   268             258
+cvar                      240             316
+attribution               240             316
+oracle                    202             200
+
+paired vs attribution (per-seed time difference, negative = attribution faster)
+  vs none         median     +16 frames, attribution faster on 5/12 seeds
+  vs sigma        median      -1 frames, attribution faster on 7/12 seeds
+  vs entropy      median     -16 frames, attribution faster on 9/12 seeds
+  vs cvar         median      +0 frames, attribution faster on 0/12 seeds
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/results.json

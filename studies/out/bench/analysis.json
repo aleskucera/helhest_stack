@@ -1,0 +1,126 @@
+{
+  "gap": {
+    "none": {
+      "mean": 315.375,
+      "median": 239.0,
+      "hard_mean": 424.0,
+      "easy_mean": 219.52941176470588
+    },
+    "sigma": {
+      "mean": 393.5625,
+      "median": 246.0,
+      "hard_mean": 529.8666666666667,
+      "easy_mean": 273.29411764705884
+    },
+    "entropy": {
+      "mean": 291.90625,
+      "median": 263.5,
+      "hard_mean": 330.2,
+      "easy_mean": 258.11764705882354
+    },
+    "cvar": {
+      "mean": 270.40625,
+      "median": 256.5,
+      "hard_mean": 257.93333333333334,
+      "easy_mean": 281.4117647058824
+    },
+    "attribution": {
+      "mean": 270.40625,
+      "median": 256.5,
+      "hard_mean": 257.93333333333334,
+      "easy_mean": 281.4117647058824
+    },
+    "oracle": {
+      "mean": 200.21875,
+      "median": 200.0,
+      "hard_mean": 201.26666666666668,
+      "easy_mean": 199.2941176470588
+    },
+    "paired_vs_none": {
+      "mean_delta": -44.96875,
+      "wins": 15,
+      "n": 32,
+      "p": 0.860050065908581
+    },
+    "paired_vs_sigma": {
+      "mean_delta": -123.15625,
+      "wins": 18,
+      "n": 26,
+      "p": 0.07551869750022888
+    },
+    "paired_vs_entropy": {
+      "mean_delta": -21.5,
+      "wins": 24,
+      "n": 32,
+      "p": 0.0070003666914999485
+    },
+    "paired_vs_cvar": {
+      "mean_delta": 0.0,
+      "wins": 0,
+      "n": 0,
+      "p": 1.0
+    }
+  },
+  "corridor": {
+    "none": {
+      "mean": 212.8125,
+      "median": 179.5,
+      "hard_mean": 432.2,
+      "easy_mean": 172.1851851851852
+    },
+    "sigma": {
+      "mean": 267.78125,
+      "median": 199.5,
+      "hard_mean": 356.4,
+      "easy_mean": 251.37037037037038
+    },
+    "entropy": {
+      "mean": 242.375,
+      "median": 211.5,
+      "hard_mean": 274.8,
+      "easy_mean": 236.37037037037038
+    },
+    "cvar": {
+      "mean": 228.53125,
+      "median": 201.0,
+      "hard_mean": 286.2,
+      "easy_mean": 217.85185185185185
+    },
+    "attribution": {
+      "mean": 228.46875,
+      "median": 201.0,
+      "hard_mean": 286.2,
+      "easy_mean": 217.77777777777777
+    },
+    "oracle": {
+      "mean": 171.3125,
+      "median": 170.0,
+      "hard_mean": 210.6,
+      "easy_mean": 164.03703703703704
+    },
+    "paired_vs_none": {
+      "mean_delta": 15.65625,
+      "wins": 5,
+      "n": 32,
+      "p": 0.00011307420209050179
+    },
+    "paired_vs_sigma": {
+      "mean_delta": -39.3125,
+      "wins": 14,
+      "n": 20,
+      "p": 0.11531829833984375
+    },
+    "paired_vs_entropy": {
+      "mean_delta": -13.90625,
+      "wins": 11,
+      "n": 25,
+      "p": 0.6900379657745361
+    },
+    "paired_vs_cvar": {
+      "mean_delta": -0.0625,
+      "wins": 1,
+      "n": 1,
+      "p": 1.0
+    }
+  }
+}

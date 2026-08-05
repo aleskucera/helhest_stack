@@ -1,0 +1,28 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+ seed  gap y  oracle   null  excess  null m  orc m     reach
+Module helhest.engine.envelope 8494861 load on device 'cuda:0' took 1.01 ms  (cached)
+Module helhest.engine.step b170777 load on device 'cuda:0' took 6.69 ms  (cached)
+Module helhest.planning.costtogo f250786 load on device 'cuda:0' took 0.86 ms  (cached)
+Module helhest.planning.lattice_solver 4e28ec9 load on device 'cuda:0' took 0.63 ms  (cached)
+Module helhest.control.mppi a8801d8 load on device 'cuda:0' took 5.78 ms  (cached)
+    0   6.91     203    433     230    44.6   18.6 True/True
+    1  -6.54     199    220      21    19.6   17.8 True/True
+    2   5.78     191    413     222    42.5   17.0 True/True
+    3  -5.26     179    197      18    17.1   15.8 True/True
+    4   7.83     222    449     227    46.5   20.1 True/True
+    5  -7.42     210    229      19    20.8   19.0 True/True
+    6   6.61     200    433     233    44.3   18.1 True/True
+    7  -6.88     202    224      22    20.0   18.2 True/True
+
+median oracle 201 frames | null 321 | headroom 122 = 57% of oracle
+reached: oracle 8/8, null 8/8
+seeds with >50% excess: 50%  (the null baseline is BIMODAL: it either guesses the
+  search direction right and nearly matches the oracle, or wastes ~220 frames)
+
+[PASS] Phase-2 gate: both always reach AND >=1/3 of seeds leave >50% headroom
