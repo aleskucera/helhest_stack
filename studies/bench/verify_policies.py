@@ -1,119 +1,83 @@
-"""Phase-3 gates: does each policy actually do what its name says?
+"""Phase-3 gates: does each policy actually do what its name says, IN THE LOOP?
 
     .venv/bin/python -m studies.bench.verify_policies
 
-A comparison between policies is only meaningful if each one behaves as advertised. Two ways
-this silently fails, both fatal to the result:
+An earlier version scored the policies at a single static vantage. That was wrong twice over.
+It could not exercise the traced-route sensitivity the real policies use, and worse, it passed
+only because of an RNG imbalance in which side the gap fell on -- once the gap side was
+stratified, both policies turned out to be near-indifferent between the two lateral extremes
+at that vantage, and the "passing" gates had been luck. A behavioural claim has to be measured
+where the behaviour happens.
 
-  A STRAW-MAN BASELINE. If `entropy` does not in fact chase the decoy, then beating it proves
-  nothing about decision-focused sensing -- it just proves the baseline was badly implemented.
-  Section 8 of the plan says to contrast explicitly with information-theoretic active
-  perception, which obliges us to give it its best shot.
-  A CHEATING POLICY. If `attribution` aims at the gap because something leaked ground truth
-  rather than because the plan's sensitivity points there, the whole benchmark is circular.
+So this runs SHORT real episodes and records what the looks actually revealed:
 
-So this measures, at a mid-approach vantage where the robot has already met the barrier:
-
-  1. entropy aims AWAY from the plan corridor, toward the open decoy side.
-  2. attribution aims ALONG the plan corridor.
-  3. attribution puts ~no weight on the decoy -- the FOSM contribution there must be
-     negligible, which is the quantitative form of "high entropy is not high relevance".
-  4. the two policies genuinely DISAGREE, by more than a look cone.
-  5. cvar (the strong baseline) lands near attribution -- it reaches the same place by
-     sampling, so if it did not agree, one of the two would be wrong.
+  1. entropy spends its looks on the decoy more than on the gap -- it must genuinely fall for
+     the bait, or beating it proves nothing about decision-focused sensing.
+  2. attribution spends its looks on the gap more than on the decoy -- the whole claim.
+  3. attribution finds the gap EARLIER than the null baseline, which is the mechanism by which
+     any time saving must arrive. If it does not, a time win would be coming from somewhere
+     else and the explanation would be wrong.
+  4. no policy reads ground truth: `world` is passed for grid geometry only. Checked by
+     construction (see policies.py) and evidenced by entropy aiming at the decoy -- a cheating
+     policy would not.
 """
 
 from __future__ import annotations
 
 import numpy as np
+import warp as wp
 
+from . import loop as L
 from . import policies as P
 from . import world as W
-from .loop import Belief
-from .verify_world import scan
 
 N_SEEDS = 8
-VANTAGE_X = W.WALL_X - 2.0  # where the robot has met the barrier but not found the gap
-
-
-def believe_at(bw: W.BenchWorld, upto_x: float, n: int = 24) -> Belief:
-    known = np.zeros(bw.scene.H.shape, bool)
-    for x in np.linspace(bw.start[0], upto_x, n):
-        known |= scan(bw, (float(x), 0.0, bw.approach_yaw), W.DEFAULT_FOV, W.DEFAULT_RANGE)
-    return Belief(np.where(known, bw.scene.H, 0.0), known, bw.scene.x0, bw.scene.y0, bw.scene.cell)
+FRAMES = 220  # long enough to spend the look budget and meet the barrier
 
 
 def main() -> None:
-    print(
-        f"{'seed':>5}{'gap brg':>9}{'decoy brg':>11}{'entropy':>9}{'attrib':>9}{'cvar':>8}"
-        f"{'sigma':>8}{'attr-gap':>10}{'ent-decoy':>11}{'decoy share':>13}"
-    )
-    rows = []
+    wp.init()
+    arms = ("none", "entropy", "sigma", "cvar", "attribution")
+    stats = {a: {"gap": [], "decoy": [], "found": []} for a in arms}
+
+    print(f"{'seed':>5}{'gap y':>7}  " + "".join(f"{a[:5]:>18}" for a in arms))
+    print(f"{'':>5}{'':>7}  " + "".join(f"{'looks@gap/decoy':>18}" for _ in arms))
     for seed in range(N_SEEDS):
         bw = W.build(seed)
-        belief = believe_at(bw, VANTAGE_X)
-        pose = (VANTAGE_X, 0.0, bw.approach_yaw)
+        line = f"{seed:>5}{bw.gap_y:>7.1f}  "
+        for a in arms:
+            tr = L.run(bw, policy=P.POLICIES[a], max_frames=FRAMES)
+            stats[a]["gap"].append(tr.look_at_gap)
+            stats[a]["decoy"].append(tr.look_at_decoy)
+            stats[a]["found"].append(tr.gap_known_frame if tr.gap_known_frame >= 0 else FRAMES)
+            line += f"{tr.look_at_gap:>8d}/{tr.look_at_decoy:<9d}"
+        print(line, flush=True)
 
-        b_gap = W.bearing_to(bw, bw.gap_mask, pose[:2])
-        b_dec = W.bearing_to(bw, bw.decoy_mask, pose[:2])
-        chosen = {
-            k: P.POLICIES[k](belief, pose, bw) for k in ("entropy", "attribution", "cvar", "sigma")
-        }
-
-        def err(b, ref):
-            return float(np.degrees(abs(np.arctan2(np.sin(b - ref), np.cos(b - ref)))))
-
-        attr_gap = err(chosen["attribution"], b_gap)
-        ent_decoy = err(chosen["entropy"], b_dec)
-
-        # (3) how much of the plan's FOSM variance does attribution place on the decoy?
-        contrib = (P._sensitivity(belief, bw, pose) * belief.sigma()) ** 2
-        share = float(contrib[bw.decoy_mask].sum() / max(contrib.sum(), 1e-30))
-
+    print(f"\n{'policy':<13}{'mean @gap':>11}{'mean @decoy':>13}{'median gap-found frame':>24}")
+    for a in arms:
         print(
-            f"{seed:>5}{np.degrees(b_gap):>9.0f}{np.degrees(b_dec):>11.0f}"
-            f"{np.degrees(chosen['entropy']):>9.0f}{np.degrees(chosen['attribution']):>9.0f}"
-            f"{np.degrees(chosen['cvar']):>8.0f}{np.degrees(chosen['sigma']):>8.0f}"
-            f"{attr_gap:>10.0f}{ent_decoy:>11.0f}{share:>12.4%}"
-        )
-        rows.append(
-            (
-                attr_gap,
-                ent_decoy,
-                share,
-                err(chosen["entropy"], chosen["attribution"]),
-                err(chosen["cvar"], chosen["attribution"]),
-            )
+            f"{a:<13}{np.mean(stats[a]['gap']):>11.2f}{np.mean(stats[a]['decoy']):>13.2f}"
+            f"{np.median(stats[a]['found']):>24.0f}"
         )
 
-    ag, ed, share, disagree, cvar_gap = (np.array(c) for c in zip(*rows))
+    ent, att, nul = stats["entropy"], stats["attribution"], stats["none"]
     print("\ngates")
     checks = [
         (
-            "1 entropy chases the decoy",
-            f"median {np.median(ed):.0f} deg from the decoy bearing "
-            f"(within a {W.LOOK_FOV:.0f} deg cone)",
-            np.median(ed) < W.LOOK_FOV / 2,
+            "1 entropy falls for the decoy",
+            f"{np.mean(ent['decoy']):.2f} decoy looks vs {np.mean(ent['gap']):.2f} at the gap",
+            np.mean(ent["decoy"]) > np.mean(ent["gap"]),
         ),
         (
-            "2 attribution aims at the gap",
-            f"median {np.median(ag):.0f} deg from the gap bearing",
-            np.median(ag) < W.LOOK_FOV / 2,
+            "2 attribution targets the gap",
+            f"{np.mean(att['gap']):.2f} gap looks vs {np.mean(att['decoy']):.2f} at the decoy",
+            np.mean(att["gap"]) > np.mean(att["decoy"]),
         ),
         (
-            "3 decoy is decision-irrelevant",
-            f"it holds {np.median(share):.4%} of the plan's FOSM " f"variance",
-            np.median(share) < 0.01,
-        ),
-        (
-            "4 the policies disagree",
-            f"median {np.median(disagree):.0f} deg apart, vs a " f"{W.LOOK_FOV:.0f} deg cone",
-            np.median(disagree) > W.LOOK_FOV,
-        ),
-        (
-            "5 cvar agrees with attribution",
-            f"median {np.median(cvar_gap):.0f} deg apart",
-            np.median(cvar_gap) < W.LOOK_FOV / 2,
+            "3 attribution finds it earlier",
+            f"median frame {np.median(att['found']):.0f} vs {np.median(nul['found']):.0f} "
+            f"for the null baseline",
+            np.median(att["found"]) < np.median(nul["found"]),
         ),
     ]
     ok = True

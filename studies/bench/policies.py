@@ -72,6 +72,28 @@ def _grid_xy(belief, bw):
     return np.meshgrid(xs, ys)
 
 
+def _route_distance(belief, bw, route) -> np.ndarray:
+    """Distance from every cell to the planner's intended route, and arclength along it."""
+    XX, YY = _grid_xy(belief, bw)
+    best = np.full(XX.shape, np.inf)
+    along = np.zeros(XX.shape)
+    acc = 0.0
+    for i in range(len(route) - 1):
+        ax, ay = route[i]
+        bx, by = route[i + 1]
+        dx, dy = bx - ax, by - ay
+        seg2 = dx * dx + dy * dy
+        if seg2 < 1e-12:
+            continue
+        t = np.clip(((XX - ax) * dx + (YY - ay) * dy) / seg2, 0.0, 1.0)
+        d = np.hypot(XX - (ax + t * dx), YY - (ay + t * dy))
+        closer = d < best
+        best = np.where(closer, d, best)
+        along = np.where(closer, acc + t * np.sqrt(seg2), along)
+        acc += float(np.sqrt(seg2))
+    return best, along
+
+
 def _plan_corridor(belief, bw, pose) -> np.ndarray:
     """The strip of ground the robot's intended route occupies.
 
@@ -90,7 +112,7 @@ def _plan_corridor(belief, bw, pose) -> np.ndarray:
     return (t > 0) & (t < PLAN_LOOKAHEAD) & (perp < CORRIDOR)
 
 
-def _sensitivity(belief, bw, pose) -> np.ndarray:
+def _sensitivity(belief, bw, pose, route=None) -> np.ndarray:
     """|dJ/dh| proxy: how much the plan's cost responds to each cell's height.
 
     Study A established the true adjoint and Study B established when it is trustworthy, but
@@ -101,15 +123,17 @@ def _sensitivity(belief, bw, pose) -> np.ndarray:
     touch, decaying with distance from the wheels' line, and zero elsewhere -- in particular
     exactly zero on the decoy, which is what separates it from entropy.
     """
-    XX, YY = _grid_xy(belief, bw)
-    gx, gy = bw.goal
-    dx, dy = gx - pose[0], gy - pose[1]
-    n = float(np.hypot(dx, dy)) or 1.0
-    dx, dy = dx / n, dy / n
-    t = (XX - pose[0]) * dx + (YY - pose[1]) * dy
-    perp = np.abs((XX - pose[0]) * dy - (YY - pose[1]) * dx)
-    # lateral falloff over the wheel-envelope reach; nearer ground matters more because the
-    # plan commits to it sooner
+    if route is None or len(route) < 2:
+        # No route yet (first frame): fall back to the straight line toward the goal.
+        XX, YY = _grid_xy(belief, bw)
+        gx, gy = bw.goal
+        dx, dy = gx - pose[0], gy - pose[1]
+        n = float(np.hypot(dx, dy)) or 1.0
+        dx, dy = dx / n, dy / n
+        perp = np.abs((XX - pose[0]) * dy - (YY - pose[1]) * dx)
+        t = (XX - pose[0]) * dx + (YY - pose[1]) * dy
+    else:
+        perp, t = _route_distance(belief, bw, route)
     lateral = np.exp(-0.5 * (perp / W.ENVELOPE_REACH) ** 2)
     ahead = (t > 0) & (t < PLAN_LOOKAHEAD)
     along = np.clip(1.0 - t / PLAN_LOOKAHEAD, 0.0, 1.0)
@@ -117,11 +141,11 @@ def _sensitivity(belief, bw, pose) -> np.ndarray:
 
 
 # --- the policies ------------------------------------------------------------------------
-def none(belief, pose, bw):
+def none(belief, pose, bw, route=None):
     return None
 
 
-def entropy(belief, pose, bw):
+def entropy(belief, pose, bw, route=None):
     """Maximise expected revealed unknown area. Classic NBV."""
     best, best_b = -1, None
     for b in candidate_bearings(pose[2]):
@@ -131,7 +155,7 @@ def entropy(belief, pose, bw):
     return best_b
 
 
-def sigma(belief, pose, bw):
+def sigma(belief, pose, bw, route=None):
     """Maximise revealed uncertainty INSIDE the plan corridor -- uncertainty-aware only."""
     sig = belief.sigma()
     corridor = _plan_corridor(belief, bw, pose)
@@ -144,9 +168,9 @@ def sigma(belief, pose, bw):
     return best_b
 
 
-def attribution(belief, pose, bw):
+def attribution(belief, pose, bw, route=None):
     """Maximise the FOSM variance a look would resolve: sum (dJ/dh * sigma)^2."""
-    contrib = (_sensitivity(belief, bw, pose) * belief.sigma()) ** 2
+    contrib = (_sensitivity(belief, bw, pose, route) * belief.sigma()) ** 2
     best, best_b = -1.0, None
     for b in candidate_bearings(pose[2]):
         gain = float(contrib[_visible(belief, bw, pose, b)].sum())
@@ -155,7 +179,7 @@ def attribution(belief, pose, bw):
     return best_b
 
 
-def cvar(belief, pose, bw, rng=None):
+def cvar(belief, pose, bw, route=None, rng=None):
     """Sample maps consistent with the belief; look where the plan's cost SPREAD is largest.
 
     The strong baseline. It reaches the same place as `attribution` without a derivative, by
@@ -164,7 +188,7 @@ def cvar(belief, pose, bw, rng=None):
     """
     rng = rng or np.random.default_rng(0)
     sig = belief.sigma()
-    sens = _sensitivity(belief, bw, pose)
+    sens = _sensitivity(belief, bw, pose, route)
     # Per-cell spread of the plan's cost across sampled maps. With a linear cost the sample
     # spread converges to |dJ/dh| * sigma, so this is the sampling route to the same quantity.
     acc = np.zeros_like(sig)

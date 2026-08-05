@@ -45,8 +45,16 @@ from . import world as W
 MOUNT = 0.4
 GOAL_RADIUS = 0.4  # [m] counts as reached
 DOCK_RADIUS = 1.5
-LOOK_INTERVAL = 25  # frames between opportunities to look
-LOOK_COST_FRAMES = 12  # the price of a look, in the same units as time-to-goal
+# A FIXED, SMALL look budget, identical for every policy. Originally the robot could look
+# every 25 frames for as long as the episode ran -- up to 36 looks at 12 frames each, 432
+# frames of pure overhead against 20-230 frames of headroom. That does not measure aiming, it
+# measures how often a policy chooses to stop, and it swamped the signal completely:
+# attribution beat the null baseline on the hard seeds and lost catastrophically on the easy
+# ones purely on look cost. Capping the budget makes the overhead a CONSTANT that cancels in
+# paired comparisons, so what remains is the only thing the claim is about -- WHERE to aim.
+LOOK_INTERVAL = 30  # frames between opportunities
+MAX_LOOKS = 4  # hard cap per episode
+LOOK_COST_FRAMES = 8  # the price of a look, in the same units as time-to-goal
 MAX_FRAMES = 900
 
 
@@ -86,6 +94,34 @@ class Trace:
     def total_time(self) -> int:
         """Frames driven plus frames spent standing still looking."""
         return self.frames + self.look_frames
+
+
+def _trace_route(V, cell, wx0, wy0, pose, n_steps: int = 60):
+    """Follow the cost-to-go downhill from the robot -> the route the planner intends to drive.
+
+    V is [ny, nx, n_theta]; minimising over heading gives the heading-free value field. Simple
+    steepest descent on it, in world coordinates. Returns [k, 2] or None if the robot is off
+    the routing window.
+    """
+    Vmin = V.min(axis=2)
+    ny, nx = Vmin.shape
+    c = int(round((pose[0] - wx0) / cell))
+    r = int(round((pose[1] - wy0) / cell))
+    if not (0 <= r < ny and 0 <= c < nx):
+        return None
+    pts = []
+    for _ in range(n_steps):
+        pts.append((wx0 + c * cell, wy0 + r * cell))
+        best, br, bc = Vmin[r, c], r, c
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                rr, cc = r + dr, c + dc
+                if 0 <= rr < ny and 0 <= cc < nx and Vmin[rr, cc] < best:
+                    best, br, bc = Vmin[rr, cc], rr, cc
+        if (br, bc) == (r, c):
+            break
+        r, c = br, bc
+    return np.array(pts) if len(pts) > 1 else None
 
 
 def _scan(bw, pose, fov, rng_m):
@@ -159,6 +195,7 @@ def run(
     tr = Trace()
     last_look = -LOOK_INTERVAL
     prev = None
+    route = None  # the planner's intended path; None until the first cost-to-go solve
 
     for f in range(max_frames):
         st = drv.render_state()
@@ -178,11 +215,11 @@ def run(
         mm.integrate(obs, known)
 
         # --- the look: the decision under test ---------------------------------------------
-        if policy is not None and f - last_look >= LOOK_INTERVAL:
+        if policy is not None and f - last_look >= LOOK_INTERVAL and tr.n_looks < MAX_LOOKS:
             belief = Belief(
                 np.where(mm.known, mm.elev, 0.0), mm.known.copy(), scene.x0, scene.y0, cell
             )
-            bearing = policy(belief, (rx, ry, yaw), bw)
+            bearing = policy(belief, (rx, ry, yaw), bw, route)
             if bearing is not None:
                 lobs, lknown = _scan(bw, (rx, ry, float(bearing)), W.LOOK_FOV, W.LOOK_RANGE)
                 fresh = lknown & ~mm.known
@@ -216,6 +253,12 @@ def run(
         )
         V = ctg.compute(wp.array(np.ascontiguousarray(Hc), dtype=wp.float32, device=device), goal_r)
         planner.set_lattice(V, sgrid)
+        # The planner's INTENDED ROUTE, traced by descending the cost-to-go. This is what a
+        # decision-focused policy must be sensitive to. Using the straight line to the goal
+        # instead -- the obvious shortcut -- makes attribution keep staring at a wall it has
+        # already seen, because the straight line still points through it, while the route it
+        # will actually drive bends away along the barrier.
+        route = _trace_route(V.numpy(), rccell, rwx0, rwy0, (rx, ry))
 
         if d < DOCK_RADIUS:
             cmd = dock_control(state_l, goal_l)

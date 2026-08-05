@@ -115,6 +115,25 @@ def report(rows: list[dict]) -> dict:
             "times": t.tolist(),
         }
 
+    # BY REGIME. The scenario is bimodal by construction: with the gap on the far side the
+    # null baseline searches the wrong way first and loses ~225 frames; on the near side it
+    # guesses right and there is almost nothing to recover. Pooling the two hides the only
+    # interesting structure -- sensing pays exactly when the default would have guessed wrong,
+    # and costs its budget when it would have guessed right. A single median would average a
+    # real win against a real loss and report neither.
+    hard = np.array([r["seed"] % 2 == 0 for r in rows])
+    print(
+        f"\n{'policy':<13}{'hard: median t':>16}{'easy: median t':>16}   (hard = gap on the far side)"
+    )
+    for arm in ARMS:
+        t = np.array([r[arm]["time"] for r in rows], float)
+        print(f"{arm:<13}{np.median(t[hard]):>16.0f}{np.median(t[~hard]):>16.0f}")
+        summary[arm]["median_hard"] = float(np.median(t[hard]))
+        summary[arm]["median_easy"] = float(np.median(t[~hard]))
+    summary["oracle_hard"] = float(np.median(orc[hard]))
+    summary["oracle_easy"] = float(np.median(orc[~hard]))
+    print(f"{'oracle':<13}{np.median(orc[hard]):>16.0f}{np.median(orc[~hard]):>16.0f}")
+
     # Paired comparison: attribution against each other arm, seed by seed.
     print("\npaired vs attribution (per-seed time difference, negative = attribution faster)")
     a = np.array([r["attribution"]["time"] for r in rows], float)
