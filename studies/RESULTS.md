@@ -116,6 +116,29 @@ contributes exactly zero from the dilation. Against the true curvature it is 0.4
 (slope), 3.0% (curb), 35% (rock) — about two orders too small nearly everywhere. Rock is the
 cross-check: it is the one region with genuine geometric terrain curvature.
 
+## 4b. Does the criterion transfer?  **Yes — but the 3.6 mm figure does not**
+
+`studies/adjoint/generalise.py`
+
+Re-run at the real perception resolution (0.10 m) and on fractal 1/f terrain with ~12 cm RMS
+relief, i.e. a completely different spectrum from the study scene's analytic primitives.
+
+| cell | flat-ground prediction | measured slack | inside radius: bad | outside: bad |
+|---|---|---|---|---|
+| 0.05 m | 3.6 mm | **16.5 mm** | 1% | 14% |
+| 0.10 m | 14.6 mm | **10.4 mm** | 0% | 15% |
+
+**The criterion transfers**: inside the radius attribution stays accurate (median ratio 1.00
+and 0.97), outside it degrades — on terrain the criterion was never tuned against.
+
+**The radius does not follow the formula.** On broadband terrain the contact is decided by the
+ground's *own* relief, not by the spherical cap's step between neighbouring offsets. So
+`R − √(R²−cell²)` is a **flat-ground special case**, and at fine resolutions a pessimistic
+one — rough ground determines its contact *more* decisively than flat ground, which is the
+opposite of the intuition the 3.6 mm figure invites. This corrects the reach of §1's finding 1
+without changing the practical conclusion: at 10–17 mm, centimetre-scale σ is still outside
+the radius, so second order is still needed.
+
 ## 5. Does it fit in a control tick?  **Yes**
 
 `studies/adjoint/local_contact_bench.py`
