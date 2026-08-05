@@ -45,6 +45,32 @@ PLAN_LOOKAHEAD = 9.0  # [m] how far along the intended route a policy reasons ab
 CORRIDOR = 1.2  # [m] half-width of the corridor a plan is assumed to occupy
 CVAR_SAMPLES = 12
 
+# C5: DECIDE WHETHER TO OBSERVE, not only where. Every policy skips its look when the best
+# available bearing would resolve less than this fraction of its OWN objective's total. The
+# benchmark showed every arm losing to never-looking on the many seeds that did not need a
+# look, purely because the budget was spent unconditionally -- which measures the budget, not
+# the policy.
+#
+# Applied with ONE fraction to ALL arms, each against its own total, so no arm is given a
+# tuned advantage. The value is chosen a priori rather than swept: resolving a quarter of the
+# quantity you care about is a reasonable bar for spending 8 frames of a ~200-frame episode.
+# It has NOT been swept, so its robustness is unestablished.
+LOOK_THRESHOLD = 0.25
+
+
+def _best_bearing(belief, bw, pose, weight):
+    """Bearing maximising `weight` over the cells a look would resolve, or None if the best
+    available look would resolve less than LOOK_THRESHOLD of `weight`'s total."""
+    total = float(weight.sum())
+    best, best_b = -1.0, None
+    for b in candidate_bearings(pose[2]):
+        gain = float(weight[_visible(belief, bw, pose, b)].sum())
+        if gain > best:
+            best, best_b = gain, float(b)
+    if total <= 0.0 or best < LOOK_THRESHOLD * total:
+        return None
+    return best_b
+
 
 def candidate_bearings(yaw: float) -> np.ndarray:
     return yaw + np.linspace(-BEARING_SPAN / 2, BEARING_SPAN / 2, N_BEARINGS)
@@ -154,37 +180,20 @@ def entropy(belief, pose, bw, route=None):
     baseline. Weighting by predicted uncertainty is both the standard formulation and the
     stronger opponent: it concentrates on terrain the map expects to be complex.
     """
-    w = belief.sigma() ** 2
-    best, best_b = -1.0, None
-    for b in candidate_bearings(pose[2]):
-        gain = float(w[_visible(belief, bw, pose, b)].sum())
-        if gain > best:
-            best, best_b = gain, float(b)
-    return best_b
+    return _best_bearing(belief, bw, pose, belief.sigma() ** 2)
 
 
 def sigma(belief, pose, bw, route=None):
     """Maximise revealed uncertainty INSIDE the plan corridor -- uncertainty-aware only."""
-    sig = belief.sigma()
     corridor = _plan_corridor(belief, bw, pose)
-    weight = np.where(corridor, sig**2, 0.0)
-    best, best_b = -1.0, None
-    for b in candidate_bearings(pose[2]):
-        gain = float(weight[_visible(belief, bw, pose, b)].sum())
-        if gain > best:
-            best, best_b = gain, float(b)
-    return best_b
+    return _best_bearing(belief, bw, pose, np.where(corridor, belief.sigma() ** 2, 0.0))
 
 
 def attribution(belief, pose, bw, route=None):
     """Maximise the FOSM variance a look would resolve: sum (dJ/dh * sigma)^2."""
-    contrib = (_sensitivity(belief, bw, pose, route) * belief.sigma()) ** 2
-    best, best_b = -1.0, None
-    for b in candidate_bearings(pose[2]):
-        gain = float(contrib[_visible(belief, bw, pose, b)].sum())
-        if gain > best:
-            best, best_b = gain, float(b)
-    return best_b
+    return _best_bearing(
+        belief, bw, pose, (_sensitivity(belief, bw, pose, route) * belief.sigma()) ** 2
+    )
 
 
 def cvar(belief, pose, bw, route=None, rng=None):
@@ -203,13 +212,7 @@ def cvar(belief, pose, bw, route=None, rng=None):
     for _ in range(CVAR_SAMPLES):
         draw = rng.normal(0.0, 1.0, size=sig.shape) * sig
         acc += (sens * draw) ** 2
-    contrib = acc / CVAR_SAMPLES
-    best, best_b = -1.0, None
-    for b in candidate_bearings(pose[2]):
-        gain = float(contrib[_visible(belief, bw, pose, b)].sum())
-        if gain > best:
-            best, best_b = gain, float(b)
-    return best_b
+    return _best_bearing(belief, bw, pose, acc / CVAR_SAMPLES)
 
 
 POLICIES = {
