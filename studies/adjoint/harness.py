@@ -39,18 +39,29 @@ from helhest.engine.envelope import wheel_offset_table
 from helhest.engine.step import init_state_kernel_bt
 from helhest.engine.step import step_kernel_bt
 
-# Four scalar functionals of one rollout, kept SEPARATE (not summed) so a failure is
+# Five scalar functionals of one rollout, kept SEPARATE (not summed) so a failure is
 # attributable to a path rather than to "the loss". They share a single forward pass; only
 # the backward is repeated, once per term, with a one-hot cotangent.
-TERM_NAMES = ("settle0", "settle", "pose", "clear")
+TERM_NAMES = ("settle0", "settle", "pose", "clear", "clear_soft")
 N_TERMS = len(TERM_NAMES)
 TERM_DOC = {
     "settle0": "w . (z, pitch, roll) of the INIT settle only -- ONE settle, no chaining",
     "settle": "sum over t>=1 of w . (z, pitch, roll) -- the settle chain through the rollout",
     "pose": "w . final (x, y, yaw) -- the step_predict / BPTT path",
-    "clear": "sum of belly clearance -- reads RAW elevation, bypassing the dilation",
+    "clear": "sum of MIN belly clearance -- the tied min, kept to show the defect",
+    "clear_soft": "sum of the tie-free belly-margin violation -- the fix, measured against it",
 }
-# All four are LINEAR functionals. A quadratic tilt cost (pitch^2 + roll^2) is more
+# `clear` and `clear_soft` are the same physical quantity aggregated two ways, reported side by
+# side so the fix for Study A finding 3 is a measurement rather than an assertion.
+#
+# The hinge in `clear_soft` is only active when the belly is within clear_margin of the ground,
+# and the belly sits 0.25 m above the contact plane while the tallest scene obstacle is 0.20 m
+# -- so at the production margin of 0.05 m the term would be identically zero and untestable.
+# Raising it to 0.30 m puts EVERY bottom-face point in violation by a similar amount, which is
+# the maximal-tie case: precisely the configuration that breaks the min. It affects nothing
+# else -- clear_margin never enters the settle, the twist, or any other output.
+STUDY_CLEAR_MARGIN = 0.30
+# The first three are LINEAR functionals. A quadratic tilt cost (pitch^2 + roll^2) is more
 # plan-like but its gradient vanishes identically wherever pitch = roll = 0, i.e. over the
 # whole flat lane -- it would leave the flat region with nothing to test. The plan-realistic
 # cost belongs in Study B; Study A wants functionals that never degenerate.
@@ -67,7 +78,8 @@ POSE_WYAW = 0.3
 def _terms_kernel(
     controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] (x, y, yaw)
     derived: wp.array2d(dtype=wp.vec3),  # [T+1, B] (z, pitch, roll)
-    clearance: wp.array2d(dtype=wp.float32),  # [T, B]
+    clearance: wp.array2d(dtype=wp.float32),  # [T, B] min belly clearance
+    clear_soft: wp.array2d(dtype=wp.float32),  # [T, B] tie-free margin violation
     n_steps: int,
     terms: wp.array2d(dtype=wp.float32),  # [N_TERMS, B] -- zeroed before launch
 ):
@@ -76,13 +88,13 @@ def _terms_kernel(
 
     The `float(0.0)` wrappers are required by Warp to declare a mutable local inside a
     dynamic loop -- a bare `0.0` is a compile-time constant and fails to build. ruff's
-    RUF046 will strip them if allowed to; keep the noqa.
+    UP018 will strip them if allowed to; keep the noqa.
     """
     b = wp.tid()
     d0 = derived[0, b]
     wp.atomic_add(terms, 0, b, DERIV_WZ * d0[0] + DERIV_WPITCH * d0[1] + DERIV_WROLL * d0[2])
 
-    settle = float(0.0)  # noqa: RUF046
+    settle = float(0.0)  # noqa: UP018
     for t in range(1, n_steps + 1):
         d = derived[t, b]
         settle += DERIV_WZ * d[0] + DERIV_WPITCH * d[1] + DERIV_WROLL * d[2]
@@ -91,10 +103,13 @@ def _terms_kernel(
     p = controlled[n_steps, b]
     wp.atomic_add(terms, 2, b, POSE_WX * p[0] + POSE_WY * p[1] + POSE_WYAW * p[2])
 
-    clear = float(0.0)  # noqa: RUF046
+    clear = float(0.0)  # noqa: UP018
+    soft = float(0.0)  # noqa: UP018
     for t in range(n_steps):
         clear += clearance[t, b]
+        soft += clear_soft[t, b]
     wp.atomic_add(terms, 3, b, clear)
+    wp.atomic_add(terms, 4, b, soft)
 
 
 @wp.kernel
@@ -130,7 +145,7 @@ class Harness:
         # h and the forward map carries small step discontinuities that FD reads as noise.
         solver = SolverParams(dt=dt, newton_iters=newton_iters, atol=0.0)
         grid = GridParams(nx, ny, scene.cell, scene.origin_x, scene.origin_y)
-        self.robot_params = RobotParams()
+        self.robot_params = RobotParams(clear_margin=STUDY_CLEAR_MARGIN)
         self.sim = DifferentiableSimulator(
             self.robot_params, solver, grid, self.batch_size, self.n_steps, device
         )
@@ -207,6 +222,7 @@ class Harness:
                     sim.loads[t],
                     sim.turning[t],
                     sim.clearance[t],
+                    sim.clear_soft[t],
                     sim.residual[t],
                 ],
                 device=self.device,
@@ -214,7 +230,7 @@ class Harness:
         wp.launch(
             _terms_kernel,
             self.batch_size,
-            inputs=[sim.controlled, sim.derived, sim.clearance, self.n_steps],
+            inputs=[sim.controlled, sim.derived, sim.clearance, sim.clear_soft, self.n_steps],
             outputs=[self.terms],
             device=self.device,
         )
@@ -312,6 +328,8 @@ class Harness:
             "loads": loads,
             "stability_margin": loads.min(axis=2) / weight,  # [T, B]
             "residual": self.sim.residual.numpy(),  # [T, B]
+            # winner - runner-up of the dilation arg-max: Study B's linearisation-validity flag
+            "contact_margin": self.sim.contact_margin.numpy()[0],  # [ny, nx], shared terrain
             "derived": self.sim.derived.numpy(),  # [T+1, B, 3]
             "controlled": self.sim.controlled.numpy(),
         }

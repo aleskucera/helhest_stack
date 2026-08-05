@@ -104,6 +104,9 @@ class BaseSimulator:
             self.loads = wp.zeros((T, B), dtype=wp.vec3f, requires_grad=rg)
             self.turning = wp.zeros((T, B), dtype=wp.vec2f, requires_grad=rg)
             self.clearance = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
+            # Tie-free belly-margin violation; `clearance` (a min over tied points) gates,
+            # `clear_soft` differentiates -- see step.chassis_clearance.
+            self.clear_soft = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             self.residual = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             self.current_wheel_omega = wp.zeros((T + 1, B), dtype=wp.vec3f)
             self.target_wheel_omega = wp.zeros((T, B), dtype=wp.vec3f, requires_grad=control_grad)
@@ -203,6 +206,7 @@ class ForwardSimulator(BaseSimulator):
                 self.loads,
                 self.turning,
                 self.clearance,
+                self.clear_soft,
                 self.residual,
             ],
             device=self.device,
@@ -310,6 +314,9 @@ class DifferentiableSimulator(BaseSimulator):
             self.envelope = wp.zeros((batch_size, ny, nx), dtype=wp.float32, requires_grad=True)
             self.friction = wp.zeros((batch_size, ny, nx), dtype=wp.float32, requires_grad=True)
             self._best_k = wp.zeros((batch_size, ny, nx), dtype=wp.float32)  # contact offset
+            # winner - runner-up of the dilation arg-max: how far the terrain must move for the
+            # contact to flip, i.e. the radius in which the FROZEN-arg-max gradient is exact.
+            self.contact_margin = wp.zeros((batch_size, ny, nx), dtype=wp.float32)
             self._elev_pad = wp.zeros((batch_size, pny, pnx), dtype=wp.float32)
             self._off_dy = wp.array(dy, dtype=wp.int32)
             self._off_dx = wp.array(dx, dtype=wp.int32)
@@ -331,7 +338,14 @@ class DifferentiableSimulator(BaseSimulator):
         wp.launch_tiled(
             self._tiled_contact,
             dim=(self.batch_size, self._n_tiles[0], self._n_tiles[1]),
-            inputs=[self._elev_pad, self._off_dy, self._off_dx, self._off_cap, self._best_k],
+            inputs=[
+                self._elev_pad,
+                self._off_dy,
+                self._off_dx,
+                self._off_cap,
+                self._best_k,
+                self.contact_margin,
+            ],
             block_dim=128,
             device=self.device,
         )
@@ -420,6 +434,7 @@ class DifferentiableSimulator(BaseSimulator):
                         self.loads[t],
                         self.turning[t],
                         self.clearance[t],
+                        self.clear_soft[t],
                         self.residual[t],
                     ],
                     device=self.device,

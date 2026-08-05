@@ -409,16 +409,33 @@ def normal_loads(
 def chassis_clearance(
     elevation: wp.array2d(dtype=wp.float32), grid: Grid, robot: Robot, R: wp.mat33, p: wp.vec3
 ):
-    """Min signed clearance of the chassis bottom-face points above RAW terrain.
+    """Belly clearance above RAW terrain, as vec2(min, soft). One loop, both quantities.
 
-    Negative == high-centered (belly penetrates). `elevation` is the raw heightmap.
+    [0] `min`  -- smallest signed clearance over the bottom-face sample points. Negative ==
+                  high-centered. The feasibility gate (costtogo blocks below clear_margin).
+    [1] `soft` -- Sum_i max(clear_margin - c_i, 0): the TOTAL depth by which the belly
+                  violates its margin.
+
+    Both exist because `min` cannot be differentiated usefully here: every bottom-face point
+    shares one body-frame z (see RobotParams._chassis_pts), so on level ground their
+    clearances tie EXACTLY and `min` is an n_chassis-way tie. d(min)/dh then hands the whole
+    gradient to one arbitrarily chosen point and reports a hard zero at every other -- measured
+    in studies/adjoint (Study A, finding 3) as a 0.5 regression slope against finite
+    differences plus false zeros at 0.8 of the gradient scale. `soft` has no such tie: each
+    point close to the ground contributes in proportion to how close it is, and the only kink
+    left is a single point crossing the margin. It also separates one spike under the belly
+    from the belly resting on a whole shelf, which `min` cannot.
+
+    Gate on `min`; differentiate `soft`.
     """
     cmin = float(1.0e9)
+    soft = float(0.0)
     for i in range(robot.n_chassis):
         w = p + R * robot.chassis_pts[i]
         c = w[2] - sample_field(elevation, grid, w[0], w[1])
         cmin = wp.min(cmin, c)
-    return cmin
+        soft += wp.max(robot.clear_margin - c, 0.0)
+    return wp.vec2(cmin, soft)
 
 
 # ----------------------------------------------------------------------------
@@ -491,6 +508,7 @@ def step_finalize(
     derived_next: wp.array(dtype=wp.vec3),
     loads_out: wp.array(dtype=wp.vec3),
     clear_out: wp.array(dtype=float),
+    clear_soft_out: wp.array(dtype=float),
     resid_out: wp.array(dtype=float),
 ):
     """Write the NEW state + diagnostics at tid from the predicted pose and its settled tilt."""
@@ -502,7 +520,9 @@ def step_finalize(
     Rn = euler_zyx(yawn, settled[1], settled[2])
     pn = wp.vec3(xn, yn, settled[0])
     loads_out[tid] = normal_loads(env_i, grid, robot, Rn, pn)
-    clear_out[tid] = chassis_clearance(elev_i, grid, robot, Rn, pn)
+    cc = chassis_clearance(elev_i, grid, robot, Rn, pn)
+    clear_out[tid] = cc[0]
+    clear_soft_out[tid] = cc[1]
     cres = clearances(env_i, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
     resid_out[tid] = wp.max(wp.max(wp.abs(cres[0]), wp.abs(cres[1])), wp.abs(cres[2]))
 
@@ -563,7 +583,8 @@ def step_kernel(
     derived_next: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) NEW state -> written
     loads_out: wp.array(dtype=wp.vec3),  # [B] N_i of the NEW state
     turn_out: wp.array(dtype=wp.vec2),  # [B] (alpha, x_icr) used this step
-    clear_out: wp.array(dtype=float),  # [B] belly clearance of the NEW state
+    clear_out: wp.array(dtype=float),  # [B] min belly clearance of the NEW state (gate)
+    clear_soft_out: wp.array(dtype=float),  # [B] tie-free belly margin violation (differentiate)
     resid_out: wp.array(dtype=float),  # [B] settle residual (max|c|) of the NEW state
 ):
     tid = wp.tid()
@@ -597,6 +618,7 @@ def step_kernel(
         derived_next,
         loads_out,
         clear_out,
+        clear_soft_out,
         resid_out,
     )
 
@@ -619,6 +641,7 @@ def step_kernel_bt(
     loads_out: wp.array(dtype=wp.vec3),
     turn_out: wp.array(dtype=wp.vec2),
     clear_out: wp.array(dtype=float),
+    clear_soft_out: wp.array(dtype=float),
     resid_out: wp.array(dtype=float),
 ):
     """Batched-terrain step: rollout tid steps on its own slices; settle uses the full 3D array."""
@@ -653,6 +676,7 @@ def step_kernel_bt(
         derived_next,
         loads_out,
         clear_out,
+        clear_soft_out,
         resid_out,
     )
 
@@ -676,7 +700,8 @@ def rollout_kernel(
     current_wheel_omega_out: wp.array2d(dtype=wp.vec3),  # [T+1, B] realized omega after lag
     loads_out: wp.array2d(dtype=wp.vec3),  # [T, B]
     turn_out: wp.array2d(dtype=wp.vec2),  # [T, B]
-    clear_out: wp.array2d(dtype=float),  # [T, B]
+    clear_out: wp.array2d(dtype=float),  # [T, B] min belly clearance (gate)
+    clear_soft_out: wp.array2d(dtype=float),  # [T, B] tie-free belly margin violation
     resid_out: wp.array2d(dtype=float),  # [T, B]
 ):
     """FORWARD-ONLY whole-rollout fusion: one thread per rollout walks all n_steps steps,
@@ -741,7 +766,9 @@ def rollout_kernel(
         pn = wp.vec3(xn, yn, settled[0])
         loads_out[t, b] = normal_loads(envelope, grid, robot, Rn, pn)
         turn_out[t, b] = wp.vec2(alpha, x_icr)
-        clear_out[t, b] = chassis_clearance(elevation, grid, robot, Rn, pn)
+        cc = chassis_clearance(elevation, grid, robot, Rn, pn)
+        clear_out[t, b] = cc[0]
+        clear_soft_out[t, b] = cc[1]
         cres = clearances(envelope, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
         resid_out[t, b] = wp.max(wp.max(wp.abs(cres[0]), wp.abs(cres[1])), wp.abs(cres[2]))
 

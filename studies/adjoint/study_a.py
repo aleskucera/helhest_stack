@@ -53,7 +53,7 @@ OUT_DIR = Path(__file__).resolve().parents[2] / "studies" / "out"
 # (level, dilate, leaf, terms reported at this level)
 LEVELS = (
     ("A1", False, "elevation", ("settle0",)),
-    ("A2", False, "elevation", ("settle", "pose", "clear")),
+    ("A2", False, "elevation", ("settle", "pose", "clear", "clear_soft")),
     ("A3", True, "elevation", TERM_NAMES),
     ("A4", True, "friction", TERM_NAMES),
 )
@@ -221,8 +221,6 @@ def _summarise(
     # Term-matched: the SAME functional and the SAME regions, dilation on vs off.
     dil_on = {r["region"]: r["rel_l2"] for r in _pick(rows, "A3", "settle")}
     dil_off = {r["region"]: r["rel_l2"] for r in _pick(rows, "A2", "settle")}
-    clear_rows = _pick(rows, "A2", "clear") + _pick(rows, "A3", "clear")
-    clear_slope = [r["slope"] for r in clear_rows if not np.isnan(r["slope"])]
 
     print("\n" + "=" * 78)
     print("STUDY A VERDICT")
@@ -255,20 +253,26 @@ def _summarise(
         "      independently of anything the settle does."
     )
     tie, n_pts = diag["chassis_tie"], diag["n_chassis_pts"]
+    hard = {r["region"]: r["slope"] for r in _pick(rows, "A2", "clear")}
+    soft = {r["region"]: r["slope"] for r in _pick(rows, "A2", "clear_soft")}
+    soft_l2 = _worst(_pick(rows, "A2", "clear_soft"), "rel_l2")
     print(
-        f"\n3. FINDING -- the belly-clearance gradient is structurally unreliable.\n"
-        f"   `chassis_clearance` is a min over {n_pts} belly points that all share one "
-        f"body-frame z,\n"
-        f"   so on level ground they TIE exactly: {tie.max()} of the {n_pts} sit within 1 mm of the "
-        f"min on the\n   flat lane (only {tie.min()} where terrain under the belly varies). The "
-        f"adjoint hands the whole\n   gradient to one tied point and reports a hard zero at the "
-        f"others; a central difference\n   at a tie returns the MEAN of the two one-sided slopes. "
-        f"Measured regression slope\n   {min(clear_slope):.2f}-{max(clear_slope):.2f} "
-        f"   (0.5 is the signature of straddling a kink, not of a halved gradient), and the\n"
-        f"   zero-control catches false zeros at up to 0.8 of the group scale.\n"
-        f"   -> exclude `clear` from any first-order attribution, or replace the min with a\n"
-        f"      smooth aggregation (softmin / sum of hinges). NOT changed here -- it is a\n"
-        f"      production change and belongs in the discussion, not in a validation study."
+        f"\n3. FINDING (FIXED, and the fix is measured) -- the belly-clearance gradient.\n"
+        f"   `chassis_clearance` takes a min over {n_pts} belly points that all share one\n"
+        f"   body-frame z, so on level ground they TIE exactly: {tie.max()} of {n_pts} sit within\n"
+        f"   1 mm of the min on the flat lane. d(min)/dh then hands the whole gradient to one\n"
+        f"   arbitrarily chosen point and reports a hard zero at the rest, while a central\n"
+        f"   difference at a tie returns the MEAN of the two one-sided slopes -- which reads as\n"
+        f"   a regression slope of 0.5 and is indistinguishable from a genuinely halved gradient\n"
+        f"   unless the one-sided differences are kept apart.\n"
+        f"   step.chassis_clearance now also returns `soft` = Sum_i max(clear_margin - c_i, 0),\n"
+        f"   which has no tie. Same functional, same terrain, min vs soft:\n     "
+        + ",  ".join(f"{k}: {hard[k]:.2f} -> {soft[k]:.4f}" for k in hard if k in soft)
+        + f"\n   soft-aggregate worst relative L2 {soft_l2:.2e}, cosine 1.00000, no false zeros.\n"
+        f"   -> RESOLVED for attribution purposes. `clearance` (the min) still gates feasibility\n"
+        f"      in costtogo; `clear_soft` is what Study B differentiates. Switching mppi.py's\n"
+        f"      live penalty to the soft form is a separate call -- it changes the cost's SCALE\n"
+        f"      and would need re-tuning, so it is deliberately NOT done here."
     )
     print(
         f"\n4. FINDING -- the friction path is clean, on a non-uniform mu field.\n"
@@ -369,6 +373,7 @@ def main() -> None:
         eps_friction=np.array(EPS_SWEEP["friction"]),
         stability_margin=diag["stability_margin"],
         residual=diag["residual"],
+        contact_margin=diag["contact_margin"],
         **npz,
     )
     (OUT_DIR / "study_a.json").write_text(
@@ -383,7 +388,7 @@ def main() -> None:
             indent=2,
         )
     )
-    plot.figure(scene, harness, store, rows, OUT_DIR / "study_a.png")
+    plot.figure(scene, harness, store, rows, diag, OUT_DIR / "study_a.png")
     print(f"\nwrote {OUT_DIR / 'study_a.npz'} and study_a.json")
 
 

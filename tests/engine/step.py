@@ -70,6 +70,7 @@ def rollout_device(
     loads = wp.zeros((T, 1), dtype=wp.vec3, device=device)
     turn = wp.zeros((T, 1), dtype=wp.vec2, device=device)
     clear = wp.zeros((T, 1), dtype=float, device=device)
+    clear_soft = wp.zeros((T, 1), dtype=float, device=device)
     resid = wp.zeros((T, 1), dtype=float, device=device)
 
     wp.launch(
@@ -102,6 +103,7 @@ def rollout_device(
                 loads[t],
                 turn[t],
                 clear[t],
+                clear_soft[t],
                 resid[t],
             ],
             device=device,
@@ -170,7 +172,7 @@ def _loads_probe(
     R = euler_zyx(yaw, u[1], u[2])
     p = wp.vec3(x, y, u[0])
     loads[tid] = normal_loads(Henv, g, robot, R, p)
-    clearance[tid] = chassis_clearance(Hraw, g, robot, R, p)
+    clearance[tid] = chassis_clearance(Hraw, g, robot, R, p)[0]
 
 
 def _build_test(device="cpu", iters=12):
@@ -316,6 +318,7 @@ def selftest_rollout_kernel():
             wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
+            wp.zeros((T, B), dtype=float, device="cpu"),
         ]
 
     fused = buffers()
@@ -358,6 +361,7 @@ def selftest_rollout_kernel():
                 perstep[4][t],
                 perstep[5][t],
                 perstep[6][t],
+                perstep[7][t],
             ],
             device="cpu",
         )
@@ -431,6 +435,7 @@ def selftest_motor_lag():
                 loads[t],
                 turn[t],
                 clear[t],
+                clear_soft[t],
                 resid[t],
             ],
             device="cpu",

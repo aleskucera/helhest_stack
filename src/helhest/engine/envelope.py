@@ -12,6 +12,14 @@ adjoint scatters to the arg-max (contact) cell. Implementations:
     (off-tape: a shared-memory tiled arg-max picking the offset `best_k`; needs an edge-padded input
     via `pad_edge`) + `gather_bt` (on-tape: envelope = elevation[contact] + cap, whose cheap scatter
     adjoint IS the analytical gradient -- no autodiff through the convolution).
+
+The batched contact also emits a `margin` = winner - runner-up. Freezing the arg-max makes the
+gradient exact ONLY while the arg-max cannot move, and `margin` is exactly how far the terrain
+would have to move for it to flip -- i.e. the radius within which d(envelope)/d(elevation) is
+the true derivative. Study A measured that radius controlling the breakdown (it is
+`R - sqrt(R^2 - cell^2)` = 3.6 mm on flat ground at 0.05 m cells, far below realistic map
+sigma), so `margin` is the linearisation-validity flag for anything propagating uncertainty
+through this dilation. Diagnostic only: it never enters the envelope or any gradient.
 """
 
 import math
@@ -122,11 +130,30 @@ def _maxf(a: wp.float32, b: wp.float32):
 
 
 @wp.func
+def _subf(a: wp.float32, b: wp.float32):
+    return a - b
+
+
+@wp.func
 def _sel_k(lift: wp.float32, acc: wp.float32, bk: wp.float32, kf: wp.float32):
     """Index update: if this offset's lifted value beats the running max, take its index k."""
     if lift > acc:
         return kf
     return bk
+
+
+@wp.func
+def _sel_second(lift: wp.float32, acc: wp.float32, sec: wp.float32):
+    """Runner-up update -- call BEFORE `acc` absorbs `lift`, so `acc` is still the old leader.
+
+    Tracks the SECOND-largest lifted value so the contact can report how close the decision
+    was. This is a pure diagnostic: it never enters the envelope or any gradient.
+    """
+    if lift > acc:
+        return acc  # the old leader is demoted to runner-up
+    if lift > sec:
+        return lift
+    return sec
 
 
 @wp.kernel
@@ -159,6 +186,7 @@ def make_tiled_contact(env_radius: int, tile: int = 16):
         off_dx: wp.array(dtype=wp.int32),
         off_cap: wp.array(dtype=wp.float32),
         best_k: wp.array3d(dtype=wp.float32),  # [B, ny, nx] arg-max offset index
+        margin: wp.array3d(dtype=wp.float32),  # [B, ny, nx] winner - runner-up [m]
     ):
         b, ti, tj = wp.tid()
         halo = wp.tile_load(
@@ -169,14 +197,21 @@ def make_tiled_contact(env_radius: int, tile: int = 16):
             bounds_check=True,
         )
         acc = wp.tile_full((T, T), -1.0e9, dtype=wp.float32, storage="register")
+        sec = wp.tile_full((T, T), -1.0e9, dtype=wp.float32, storage="register")
         bk = wp.tile_full((T, T), 0.0, dtype=wp.float32, storage="register")
         for k in range(off_dy.shape[0]):
             win = wp.tile_view(halo, offset=(R + off_dy[k], R + off_dx[k]), shape=(T, T))
             capt = wp.tile_full((T, T), off_cap[k], dtype=wp.float32, storage="register")
             lifted = wp.tile_map(_addf, win, capt)
             kt = wp.tile_full((T, T), float(k), dtype=wp.float32, storage="register")
-            bk = wp.tile_map(_sel_k, lifted, acc, bk, kt)  # update index BEFORE acc (uses old max)
+            # both the index and the runner-up must be updated BEFORE acc absorbs `lifted`,
+            # because both compare against the OLD running max
+            bk = wp.tile_map(_sel_k, lifted, acc, bk, kt)
+            sec = wp.tile_map(_sel_second, lifted, acc, sec)
             acc = wp.tile_map(_maxf, acc, lifted)
         wp.tile_store(best_k[b], bk, offset=(ti * T, tj * T), bounds_check=True)
+        wp.tile_store(
+            margin[b], wp.tile_map(_subf, acc, sec), offset=(ti * T, tj * T), bounds_check=True
+        )
 
     return contact_tiled
