@@ -288,6 +288,63 @@ Consequences for reading §6: attribution > entropy (p = 0.007) stands and is if
 *understated*, since it won while handicapped by this loop. "Beats entropy but not abstention"
 should be read as a property of **single-plan** attribution specifically.
 
+### 6e. Why the benchmark cannot be won as posed — the method's actual scope
+
+Trying to build the experiment where attribution beats *both* entropy and abstention produced
+the most useful result of the benchmark effort, and it is a scoping result.
+
+**Per-cell Gaussian σ cannot represent a routing alternative.** Disagreement-based attribution
+needs candidate plans that differ. Traced elite routes from one cost-to-go field do not differ
+(0.54 m spread at any softmin temperature — a distance-like field has an essentially unique
+geodesic). Sampling maps from the belief and re-planning on each gives the alternatives in
+principle, but measured:
+
+| σ over unobserved cells | routes traced | path spread |
+|---|---|---|
+| 0.12 m | 8 | 0.55 m — all straight |
+| 0.30 m | **1** | — |
+| 0.50 / 0.80 m | **none** | — |
+
+At small σ no sampled map ever contains the 0.8 m barrier, so every sampled plan goes straight
+and there is nothing to disagree about. At obstacle-scale σ the sampled maps are **rubble
+everywhere** and no route exists at all. A wall is a coherent 10 m object; smoothed per-cell
+noise is gravel. Optimistic inpainting compounds it: under "unknown = flat = passable" the
+planner is not uncertain, it is confidently wrong.
+
+> **Scope.** `∂J/∂h · σ` attribution is well-posed for **cost-shaping** uncertainty — ride
+> roughness, tilt, clearance margin — where the route is fixed and the cost wobbles. It is
+> **not** well-posed for **feasibility/topology** uncertainty — is there a way through — where
+> the plan itself changes and a per-cell Gaussian cannot express the alternatives.
+
+Variants A and B are both topology tasks. **The benchmark was built for a question the method
+is structurally unsuited to**, which explains the confirmatory loop (§6d), entropy's strong
+showing, and the failure to beat abstention.
+
+### 6f. The matched benchmark, attempted and not delivered
+
+`world.build_lanes` — two open channels, one rough beyond the point of commitment: a pure cost
+decision, which is what the method is for. It does **not** yet work, and the blocker is not the
+scenario:
+
+**With the full map, the oracle chose the ROUGH channel** (372 frames) while the ignorant
+baseline took the smooth one (165). Perfect information made it worse. The cost-to-go
+max-pools terrain at 0.24 m and the MPPI horizon is ~2.5 m, so **neither selects routes on
+terrain roughness** — "which of two open routes is cheaper" is not a decision this planner
+makes sharply.
+
+That is a property of the planner's cost, not of the scenario, and tuning the scenario around
+it would manufacture a result rather than measure one. Making the matched benchmark work
+requires making route selection genuinely roughness-sensitive first — a change to
+`costtogo.py`'s traversability cost, deliberately not made here.
+
+**What would be needed for the experiment to be winnable**, stated so the next attempt does
+not rediscover it:
+1. a planner whose route choice is sensitive to the terrain property being sensed;
+2. a belief that can represent the alternatives — for topology that means object-level or
+   occupancy uncertainty, not per-cell height σ;
+3. headroom (oracle vs abstention) larger than the look budget — 20 frames against a 32-frame
+   budget cannot pay, whatever the policy does.
+
 ## 7. What is **not** established
 
 - **Only one benchmark claim is statistically supported** (attribution > entropy in variant A,

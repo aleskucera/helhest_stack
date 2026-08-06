@@ -179,11 +179,11 @@ def _sensitivity(belief, bw, pose, route=None) -> np.ndarray:
 
 
 # --- the policies ------------------------------------------------------------------------
-def none(belief, pose, bw, route=None):
+def none(belief, pose, bw, route=None, routes=None):
     return None
 
 
-def entropy(belief, pose, bw, route=None):
+def entropy(belief, pose, bw, route=None, routes=None):
     """Maximise expected information gain, sum of sigma^2 over the cells a look would resolve.
 
     The sigma-weighted form, not a raw cell count. Counting cells makes the objective nearly
@@ -195,20 +195,20 @@ def entropy(belief, pose, bw, route=None):
     return _best_bearing(belief, bw, pose, belief.sigma() ** 2)
 
 
-def sigma(belief, pose, bw, route=None):
+def sigma(belief, pose, bw, route=None, routes=None):
     """Maximise revealed uncertainty INSIDE the plan corridor -- uncertainty-aware only."""
     corridor = _plan_corridor(belief, bw, pose)
     return _best_bearing(belief, bw, pose, np.where(corridor, belief.sigma() ** 2, 0.0))
 
 
-def attribution(belief, pose, bw, route=None):
+def attribution(belief, pose, bw, route=None, routes=None):
     """Maximise the FOSM variance a look would resolve: sum (dJ/dh * sigma)^2."""
     return _best_bearing(
         belief, bw, pose, (_sensitivity(belief, bw, pose, route) * belief.sigma()) ** 2
     )
 
 
-def cvar(belief, pose, bw, route=None, rng=None):
+def cvar(belief, pose, bw, route=None, routes=None, rng=None):
     """Sample maps consistent with the belief; look where the plan's cost SPREAD is largest.
 
     The strong baseline. It reaches the same place as `attribution` without a derivative, by
@@ -227,10 +227,43 @@ def cvar(belief, pose, bw, route=None, rng=None):
     return _best_bearing(belief, bw, pose, acc / CVAR_SAMPLES)
 
 
+def disagreement(belief, pose, bw, route=None, routes=None):
+    """OURS, corrected: look where the near-optimal routes DISAGREE.
+
+    Single-plan attribution is confirmatory (see diagnose_confirmatory.py): it aims along the
+    route the planner has already chosen, which tends to confirm that choice rather than test
+    it, and in a routing problem the informative look is at the alternative the plan REJECTED.
+    dJ/dh for one committed plan cannot see that cell -- its sensitivity there is low BECAUSE
+    the plan avoids it.
+
+    SENSITIVITY_PLAN.md section 1 specifies attribution over the elite SET's cost variance, and
+    that is what fixes it. Weight each cell by the VARIANCE ACROSS ROUTES of its per-route
+    sensitivity, times sigma^2:
+
+        contrib(i) = Var_k[ s_k(i) ] * sigma(i)^2
+
+    A cell every candidate route crosses has zero variance -- observing it cannot change which
+    route wins, however sensitive the chosen plan is to it. A cell no route crosses (the decoy)
+    is zero too. Only cells that SEPARATE the alternatives score, which is what "could this
+    observation change the decision" means in this setting.
+
+    Falls back to single-plan attribution when the elite set has collapsed to one route -- then
+    there is no disagreement to resolve and the chosen plan is the only thing to test.
+    """
+    if not routes or len(routes) < 2:
+        return attribution(belief, pose, bw, route)
+    stack = np.stack([_sensitivity(belief, bw, pose, r) for r in routes])
+    contrib = stack.var(axis=0) * belief.sigma() ** 2
+    if float(contrib.sum()) <= 0.0:
+        return attribution(belief, pose, bw, route)
+    return _best_bearing(belief, bw, pose, contrib)
+
+
 POLICIES = {
     "none": none,
     "sigma": sigma,
     "entropy": entropy,
     "attribution": attribution,
     "cvar": cvar,
+    "disagreement": disagreement,
 }

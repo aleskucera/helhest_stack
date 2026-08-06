@@ -302,3 +302,90 @@ def build_corridor(seed: int = 0, cell: float = CELL) -> BenchWorld:
         goal=GOAL,
         seed=seed,
     )
+
+
+# =========================================================================================
+# VARIANT C: a COST decision, not a TOPOLOGY decision.
+#
+# Variants A and B both ask "is there a way through", which is a question about FEASIBILITY.
+# That turned out to be the wrong question for this method, and the reason is structural:
+# attribution weights cells by (dJ/dh * sigma)^2, and a per-cell Gaussian sigma cannot
+# represent "there might be a wall here". Measured directly (see RESULTS.md section 6e): at
+# sigma = 0.12 m sampled maps never contain a barrier and every sampled plan goes straight; at
+# 0.3-0.8 m they contain rubble everywhere and NO route exists at all. A wall is a coherent
+# 10 m object; smoothed per-cell noise is gravel.
+#
+# So variant C asks a question sigma CAN answer. Two routes around a central block, BOTH open,
+# so the topology is never in doubt. One of them crosses rough ground that makes it slow and
+# tilted; which one is randomised and hidden beyond default sensing range. The decision is
+# purely "which open route is cheaper", and that is exactly what dJ/dh * sigma measures.
+#
+# The decoy is unchanged in role: a large unobserved region off both routes.
+# =========================================================================================
+
+# Two PARALLEL CHANNELS separated by a long wall, so the robot must COMMIT to one before it
+# can see what is in it. An earlier layout put the rough patch beside a short block: the robot
+# could see the lane entrance as it arrived at the fork, so the oracle saved only ~20 frames --
+# less than the 32-frame look budget, leaving nothing for sensing to win. Commitment is what
+# creates the stakes: enter the wrong channel and you either push through slowly or reverse out.
+CHANNEL_X = (5.0, 12.0)  # [m] length of the divided section
+DIVIDER_HALF_Y = 1.2  # central wall
+OUTER_Y = 4.0  # outer walls run from here to the map edge -- the channels are the ONLY way
+ROUGH_X = (8.0, 11.5)  # rough section, BEYOND default sensing range from the fork
+ROUGH_AMPLITUDE = 0.38  # [m] passable but slow and tilted -- NOT a barrier
+ROUGH_WAVELENGTH = 0.6  # short wavelength is what actually costs time
+LANE_MID_Y = 2.6
+
+
+def build_lanes(seed: int = 0, cell: float = CELL) -> BenchWorld:
+    """Two open channels; one is rough beyond the point of commitment."""
+    rng = np.random.default_rng(2000 + seed)
+    rough_side = 1.0 if seed % 2 == 0 else -1.0  # stratified, as elsewhere
+    yaw0 = float(rng.uniform(-0.08, 0.08))
+
+    XX, YY = _grid(XLIM, YLIM, cell)
+    H = np.zeros_like(XX)
+    edge = (
+        (XX <= XLIM[0] + BORDER)
+        | (XX >= XLIM[1] - BORDER)
+        | (YY <= YLIM[0] + BORDER)
+        | (YY >= YLIM[1] - BORDER)
+    )
+
+    span = (XX >= CHANNEL_X[0]) & (XX <= CHANNEL_X[1])
+    H[span & (np.abs(YY) <= DIVIDER_HALF_Y)] = WALL_HEIGHT
+    # To the map edge. Bounded outer walls let the robot bypass the whole structure through
+    # open ground beyond them, so the choice was never forced -- the null baseline went around
+    # in 165 frames while the omniscient one entered a channel and took 372.
+    H[span & (np.abs(YY) >= OUTER_Y)] = WALL_HEIGHT
+
+    rough = (
+        (XX >= ROUGH_X[0])
+        & (XX <= ROUGH_X[1])
+        & (np.abs(YY - rough_side * LANE_MID_Y) <= DIVIDER_HALF_Y)
+    )
+    ripple = (
+        ROUGH_AMPLITUDE
+        * np.sin(2 * np.pi * XX / ROUGH_WAVELENGTH)
+        * np.cos(2 * np.pi * YY / (1.6 * ROUGH_WAVELENGTH))
+    )
+    H[rough] += ripple[rough]
+
+    decoy_cy = -rough_side * (OUTER_Y + 2.6)
+    decoy = (np.abs(XX - DECOY_CX) <= DECOY_HALF_X) & (np.abs(YY - decoy_cy) <= DECOY_HALF_Y)
+    decoy &= ~span & ~edge
+    bumps = DECOY_RELIEF * np.sin(3.1 * XX + 1.7 * seed) * np.cos(2.7 * YY)
+    H[decoy] += bumps[decoy]
+    H[edge] = WALL_HEIGHT
+
+    return BenchWorld(
+        scene=Heightmap(H, (XLIM[0], YLIM[0]), cell),
+        wall_mask=span & (np.abs(YY) <= DIVIDER_HALF_Y),
+        gap_mask=rough,  # "the cells the decision rests on" -- the rough channel
+        decoy_mask=decoy,
+        gap_y=-rough_side * LANE_MID_Y,  # the GOOD channel
+        approach_yaw=yaw0,
+        start=(START[0], START[1], yaw0),
+        goal=GOAL,
+        seed=seed,
+    )

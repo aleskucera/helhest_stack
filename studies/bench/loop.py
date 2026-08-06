@@ -163,6 +163,68 @@ def _trace_route(V, cell, wx0, wy0, pose, n_steps: int = 60):
     return np.array(pts) if len(pts) > 1 else None
 
 
+class _MapView:
+    """Duck-typed stand-in for MultiScanMap so `crop_window` can crop a SAMPLED map."""
+
+    def __init__(self, elev, known):
+        self.elev = elev
+        self.known = known
+
+
+def _make_route_sampler(scene, ctg, rww, rwh, kr, rcny, rcnx, rccell, goal, device, n=6):
+    """Returns `sample_routes(mm, pose, sigma, seed) -> list of world-frame paths`.
+
+    THE ELITE SET, done properly. Tracing several descents of ONE cost-to-go field does not
+    work: the field is distance-like, its descent path is essentially a unique geodesic, and
+    stochastic descent produced 0.54 m of spread at any temperature. Worse, the belief inpaints
+    unknown ground as flat and therefore PASSABLE, so under that belief the planner is not
+    uncertain at all -- it is confidently wrong, and there is no disagreement to detect.
+
+    So the alternatives have to come from the UNCERTAINTY: draw maps consistent with the belief
+    (mean + sigma noise over the unknown cells), re-solve the cost-to-go on each, and trace the
+    route it implies. Where those routes diverge is where the map genuinely has not yet decided
+    the plan -- which is the quantity a decision-focused sensor should be maximising.
+    """
+
+    def sample_routes(mm, pose, sigma, seed):
+        rx, ry = pose[0], pose[1]
+        rng = np.random.default_rng(seed)
+        out = []
+        for i in range(n):
+            draw = mm.elev.copy()
+            unknown = ~mm.known
+            if unknown.any():
+                # smooth, correlated draw: unknown ground is wrong in patches, not per cell
+                z = rng.normal(size=draw.shape).astype(np.float32)
+                for _ in range(3):
+                    z = 0.25 * (
+                        np.roll(z, 1, 0) + np.roll(z, -1, 0) + np.roll(z, 1, 1) + np.roll(z, -1, 1)
+                    )
+                z *= 1.0 / (z.std() + 1e-9)
+                draw[unknown] = (sigma * z)[unknown]
+            view = _MapView(draw, np.ones_like(mm.known))
+            relev, _, wx0, wy0 = crop_window(view, scene, rx, ry, rww, rwh, cell_of(scene))
+            Hc = (
+                relev[: rcny * kr, : rcnx * kr].reshape(rcny, kr, rcnx, kr).max(axis=(1, 3))
+                if kr > 1
+                else relev
+            )
+            V = ctg.compute(
+                wp.array(np.ascontiguousarray(Hc), dtype=wp.float32, device=device),
+                (goal[0] - wx0, goal[1] - wy0),
+            )
+            r = _trace_route(V.numpy(), rccell, wx0, wy0, (rx, ry))
+            if r is not None:
+                out.append(r)
+        return out
+
+    return sample_routes
+
+
+def cell_of(scene):
+    return scene.cell
+
+
 def _scan(bw, pose, fov, rng_m):
     return lidar_scan(
         bw.scene.H,
@@ -227,6 +289,7 @@ def run(
         rcnx, rcny, rccell, (ww // 2 - rww // 2) * cell, (wh // 2 - rwh // 2) * cell
     ).build()
 
+    sample_routes = _make_route_sampler(scene, ctg, rww, rwh, kr, rcny, rcnx, rccell, goal, device)
     mm = MultiScanMap(scene.ny, scene.nx)
     if omniscient:
         mm.elev[:] = scene.H
@@ -235,6 +298,7 @@ def run(
     last_look = -LOOK_INTERVAL
     prev = None
     route = None  # the planner's intended path; None until the first cost-to-go solve
+    routes = []  # near-optimal alternatives (the elite set)
 
     for f in range(max_frames):
         st = drv.render_state()
@@ -258,7 +322,8 @@ def run(
             belief = Belief(
                 np.where(mm.known, mm.elev, 0.0), mm.known.copy(), scene.x0, scene.y0, cell
             )
-            bearing = policy(belief, (rx, ry, yaw), bw, route)
+            routes = sample_routes(mm, (rx, ry), belief.sigma(), seed=1000 + f)
+            bearing = policy(belief, (rx, ry, yaw), bw, route, routes)
             if bearing is not None:
                 lobs, lknown = _scan(bw, (rx, ry, float(bearing)), W.LOOK_FOV, W.LOOK_RANGE)
                 fresh = lknown & ~mm.known

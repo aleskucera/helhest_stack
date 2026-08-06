@@ -33,7 +33,7 @@ from . import policies as P
 from . import world as W
 
 OUT = Path(__file__).resolve().parents[2] / "studies" / "out" / "bench"
-ARMS = ("none", "sigma", "entropy", "cvar", "attribution")
+ARMS = ("none", "sigma", "entropy", "cvar", "attribution", "disagreement")
 
 
 def run_all(n_seeds: int, max_frames: int, variant: str = "gap") -> list[dict]:
