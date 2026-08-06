@@ -60,6 +60,7 @@ from ..adjoint.generalise import fractal_terrain
 from ..adjoint.harness import Harness
 from ..adjoint.harness import TERM_NAMES
 from ..adjoint.scene import Scene
+from . import noise as noise_mod
 
 OUT = Path(__file__).resolve().parents[2] / "studies" / "out" / "bench"
 
@@ -69,11 +70,6 @@ N_PLANS = 16
 N_GROUPS = 4  # `hybrid` only: distinct paths
 N_PER_GROUP = N_PLANS // N_GROUPS  # speed profiles riding each path
 T_STEPS = 40
-OBSERVED_RADIUS = 1.5  # [m] the robot has seen only this much
-SIGMA_FLOOR = 0.02  # [m] residual uncertainty even over smooth unobserved ground
-SIGMA_ROUGH_GAIN = 0.9  # sigma rises with local relief: rough ground is less certain
-SIGMA_CAP = 0.25
-SIGMA_OBSERVED = 0.005
 BUDGETS = (25, 100, 400)  # cells a policy may reveal (of ~7500 unobserved)
 COST_TERMS = {"settle": 1.0, "clear_soft": 1.0}
 
@@ -113,17 +109,6 @@ def kendall_tau(a: np.ndarray, b: np.ndarray) -> float:
                 disc += 1
     total = conc + disc
     return (conc - disc) / total if total else 0.0
-
-
-def _local_relief(h: np.ndarray, rad: int = 2) -> np.ndarray:
-    """Max-minus-min over a (2*rad+1)^2 window -- the roughness sigma is predicted from."""
-    lo = np.full_like(h, np.inf)
-    hi = np.full_like(h, -np.inf)
-    for dy in range(-rad, rad + 1):
-        for dx in range(-rad, rad + 1):
-            s = np.roll(np.roll(h, dy, 0), dx, 1)
-            lo, hi = np.minimum(lo, s), np.maximum(hi, s)
-    return hi - lo
 
 
 def _plans_fan(rng: np.random.Generator) -> np.ndarray:
@@ -213,7 +198,7 @@ PLAN_GROUPS = {
 }
 
 
-def build_case(seed: int, family: str = "fan"):
+def build_case(seed: int, family: str = "fan", noise: str = "clean"):
     """Ground truth, the belief, sigma, and K candidate plans reaching into the unknown.
 
     The Scene is built on the BELIEF, not on the truth. `Harness.adjoint` resets the terrain to
@@ -229,15 +214,9 @@ def build_case(seed: int, family: str = "fan"):
     xs = x0 + (np.arange(nx) + 0.5) * CELL
     ys = y0 + (np.arange(ny) + 0.5) * CELL
     XX, YY = np.meshgrid(xs, ys)
-    observed = np.hypot(XX, YY) <= OBSERVED_RADIUS
-
-    # sigma is a property of the GROUND, not of the plans: residual elevation uncertainty is
-    # larger over rough terrain (steeper incidence, more within-cell variation) and near zero
-    # where the robot has already looked. Deliberately NOT a function of range or of bearing,
-    # so nothing about the geometry of "where the plans go" leaks into the entropy baseline.
-    rough = _local_relief(truth)
-    sigma = np.clip(SIGMA_FLOOR + SIGMA_ROUGH_GAIN * rough, SIGMA_FLOOR, SIGMA_CAP)
-    sigma = np.where(observed, SIGMA_OBSERVED, sigma)
+    # `belief` is what the robot thinks; `measured` is what a reveal actually hands over, which
+    # is the TRUTH only under `noise="clean"`. sigma is consistent with what was injected.
+    belief, measured, observed, sigma, _ = noise_mod.build_belief(truth, XX, YY, CELL, seed, noise)
     mu = np.clip(0.6 + 0.1 * np.sin(XX) * np.cos(YY), 0.3, 0.9)
 
     # The plan family is fixed by construction, not drawn per seed, so no plan set can be
@@ -245,9 +224,8 @@ def build_case(seed: int, family: str = "fan"):
     omega = PLAN_FAMILIES[family](rng)
     poses = np.tile(np.array([0.0, 0.0, 0.0], np.float32), (N_PLANS, 1))
 
-    belief = np.where(observed, truth, 0.0)  # optimistic flat inpaint of the unobserved
     scene = Scene(belief, mu, np.zeros(truth.shape, np.int8), CELL, x0, y0)
-    return scene, truth.astype(np.float32), observed, sigma, poses, omega, (XX, YY)
+    return scene, truth.astype(np.float32), measured, observed, sigma, poses, omega, (XX, YY)
 
 
 def _cost(terms: np.ndarray) -> np.ndarray:
@@ -390,7 +368,7 @@ def p_magnitude_pooled(ctx):
 
 def p_oracle(ctx):
     """Ceiling, not a policy: knows the ACTUAL belief error, so it needs no sigma at all."""
-    err = np.abs(ctx["truth"] - ctx["belief"])
+    err = np.abs(ctx["measured"] - ctx["belief"])
     return ctx["grad"].var(axis=0) * err**2
 
 
@@ -411,9 +389,9 @@ POLICIES = {
 NOT_A_POLICY = ("oracle",)
 
 
-def run_seed(seed: int, family: str = "fan") -> dict:
+def run_seed(seed: int, family: str = "fan", noise: str = "clean") -> dict:
     groups = PLAN_GROUPS[family]
-    scene, truth, observed, sigma, poses, omega, grid = build_case(seed, family)
+    scene, truth, measured, observed, sigma, poses, omega, grid = build_case(seed, family, noise)
     harness = Harness(scene, poses, omega, device="cuda")
     belief = scene.elevation.astype(np.float32)
 
@@ -440,6 +418,7 @@ def run_seed(seed: int, family: str = "fan") -> dict:
         "believed": j_bel,
         "dist": dist,
         "truth": truth,
+        "measured": measured,
         "belief": belief,
         "env_cells": harness.sim.env_radius / CELL,
         "rng": rng,
@@ -472,7 +451,10 @@ def run_seed(seed: int, family: str = "fan") -> dict:
         for m in BUDGETS:
             revealed = np.zeros(n_cells, bool)
             revealed[order[:m]] = True
-            updated = np.where(observed | revealed.reshape(sigma.shape), truth, 0.0)
+            # a reveal hands over the MEASUREMENT. Under a sensor or pose error that is not
+            # the truth, so sensing no longer converges on perfect knowledge -- which is the
+            # single biggest way section 7's clean setup flattered every policy at once.
+            updated = np.where(observed | revealed.reshape(sigma.shape), measured, 0.0)
             j_new = _evaluate(harness, updated.astype(np.float32))
             denv = np.abs(harness.sim.envelope.numpy()[0] - env_bel)
             rec[str(m)] = {
@@ -646,21 +628,23 @@ def figure(rows: list[dict], path: Path) -> None:
     plt.close(fig)
 
 
-def main(n_seeds: int = 200, family: str = "fan") -> None:
+def main(n_seeds: int = 200, family: str = "fan", noise: str = "clean") -> None:
     wp.init()
     OUT.mkdir(parents=True, exist_ok=True)
     print(f"plan family: {family} -- {PLAN_FAMILIES[family].__doc__.splitlines()[0]}")
+    print(f"noise: {noise}")
     rows = []
     for seed in range(n_seeds):
-        rows.append(run_seed(seed, family))
+        rows.append(run_seed(seed, family, noise))
         if (seed + 1) % 50 == 0:
             print(f"  {seed + 1}/{n_seeds} seeds", flush=True)
     summary = report(rows)
-    figure(rows, OUT / f"ranking_{family}.png")
-    (OUT / f"ranking_{family}.json").write_text(
-        json.dumps({"family": family, "rows": rows, "summary": summary}, indent=2)
+    tag = family if noise == "clean" else f"{family}_{noise}"
+    figure(rows, OUT / f"ranking_{tag}.png")
+    (OUT / f"ranking_{tag}.json").write_text(
+        json.dumps({"family": family, "noise": noise, "rows": rows, "summary": summary}, indent=2)
     )
-    print(f"\nwrote {OUT / f'ranking_{family}.json'} and ranking_{family}.png")
+    print(f"\nwrote {OUT / f'ranking_{tag}.json'} and ranking_{tag}.png")
 
 
 if __name__ == "__main__":
@@ -669,5 +653,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--seeds", type=int, default=200)
     ap.add_argument("--family", choices=tuple(PLAN_FAMILIES), default="fan")
+    ap.add_argument("--noise", choices=noise_mod.SOURCES, default="clean")
     a = ap.parse_args()
-    main(a.seeds, a.family)
+    main(a.seeds, a.family, a.noise)

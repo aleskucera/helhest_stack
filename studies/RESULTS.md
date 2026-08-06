@@ -14,8 +14,11 @@ derivative: "reveal what you are about to drive over" is as good as the adjoint 
 sensing budgets and is only overtaken at large ones. Varying how much the candidate plans
 overlap locates where an adjoint is actually required (7b) -- and a matched test finds the
 second-order correction of section 4 does NOT improve the decision, by either available
-route (7c). The closed-loop benchmark (§6) is weaker
-and its statistical power is the weakest part of the whole study; it is stated as such.
+route (7c). Injecting all three real map-error sources -- sensor, occlusion and pose --
+leaves the sigma-is-not-relevance claim intact but ERASES the adjoint's edge over a plain
+distance transform, because pose error halves what any sensing could achieve and no
+cell-selection strategy can recover it (7d). The closed-loop benchmark (§6) is the weakest
+part of the study and is stated as such.
 
 ---
 
@@ -526,6 +529,82 @@ second-order attribution into the planner is not made by these results. §4 and 
 measured — the correction *is* more accurate and *does* fit in a tick — but accuracy in the
 variance was the wrong thing to optimise if the decision is what matters.
 
+### 7d. Does any of this survive realistic map error?  **The entropy result yes, the geometry result no**
+
+`studies/bench/noise.py` · `verify_noise.py` (gates) · `compare_noise.py` · `hybrid`, n = 200/arm.
+
+Everything up to here ran on a belief corrupted by **one** source, modelled crudely: a disc of
+"observed" inside which the map was exactly right, and reveals that handed over ground truth —
+a perfect sensor with perfect localisation. All three real sources are now injected with the
+structure they actually have, each gated before use:
+
+- **occlusion** — 2.5-D ray-cast line of sight, so ridges cast *shadows* a disc cannot. Gated:
+  flat ground 100% visible, a wall hides 100% behind it and 0% in front.
+- **sensor** — correlated (0.15 m length) and range-growing. Gated: injected std matches
+  configured to 1.05×, autocorrelation 0.89 at one cell, 2.67× larger error far than near.
+- **localisation** — the whole patch written into the map at a wrong pose. Gated by *exact
+  reconstruction*: the entire 8100-cell error field is reproduced from three numbers to 1e-8.
+
+Reveals now hand over the **measurement**, not the truth — so sensing no longer converges on
+perfect knowledge, which is the single biggest way the earlier setup flattered every policy.
+
+**Building the model produced a result before any policy ran.** The textbook per-cell marginal
+of a pose error is first order, `|∇h|·d`. It is *invalid at realistic pose error*: a 2° heading
+error over a 6 m lever arm displaces the map by ~2.2 cells while this terrain decorrelates in
+~1 (autocorrelation 0.63 at one cell), so the displaced map is nearly **independent** of the
+truth rather than a perturbation of it — a three-parameter first-order fit explains only
+**R² = 0.23** of the field it generates. That is Study B's lesson (first order runs out before
+realistic magnitudes) reappearing for *pose* rather than map noise.
+
+**The ceiling moves, and pose error is what moves it.** Oracle τ@400 — the best *any* policy
+could do:
+
+| arm | oracle @400 | what changed |
+|---|---|---|
+| clean | 0.911 | — |
+| + sensor noise | 0.802 | reveals are now noisy |
+| + ray-cast shadows | **0.940** | *rises*: the ray cast observes 19.5% vs the disc's 7.9% |
+| + pose error | **0.601** | **halved** |
+| all three | 0.565 | |
+
+Pose error is the binding constraint, and it is **irreducible by sensing**: revealing more cells
+just delivers more measurements carrying the same three wrong numbers. No cell-selection
+strategy, however clever, recovers it.
+
+**Result 1 — decision-focused beats information-theoretic: SURVIVES EVERYTHING.**
+`disagreement − entropy` at 400 cells:
+
+| clean | sensor | occlusion | localisation | all |
+|---|---|---|---|---|
+| +0.735 (200/200) | +0.667 (200/200) | +0.520 (200/200) | +0.509 (185/200) | **+0.391 (174/197)** |
+
+Every one at p < 1e-29. This is the study's headline claim and it is robust to all three sources
+together.
+
+**Result 2 — the adjoint beating a distance transform: DOES NOT SURVIVE.**
+`disagreement − swath` at 400 cells:
+
+| clean | sensor | occlusion | localisation | all |
+|---|---|---|---|---|
+| +0.183 (p=9e-30) | +0.156 (p=2e-23) | +0.086 (p=1e-28) | +0.079 (p=2e-09) | **+0.016 (p=0.10)** |
+
+Under all three together the edge is **gone**. The within-group component — where geometry is
+blind by construction — tells the same story: +0.201 clean, +0.028 under all noise (p = 0.11).
+Normalised against the moving ceiling, geometry captures 91% of the achievable gain under full
+noise against the adjoint's 95%, so there is very little left to win.
+
+**One source helps the adjoint rather than hurting it.** Realistic occlusion is the only arm
+where the adjoint beats geometry at *every* budget, including 25 cells (+0.086, p = 6e-18) where
+it loses in every other configuration. Shadows make the observed set geometrically complicated,
+so "look along the path" stops being a good proxy for "look where it matters."
+
+**What this changes.** The scientific claim (σ ≠ relevance) is now well supported under
+realistic error. The engineering claim (compute the adjoint rather than a distance transform)
+is not: at realistic pose error the two tie, and the dominant loss is an error neither can fix.
+The highest-value next step is therefore **not** better cell selection — it is reducing or
+modelling the pose error, e.g. propagating `∂J/∂h` through `∂h/∂pose` to get a 3-DoF
+sensitivity, which is the same adjoint applied where the actual variance is.
+
 ## 8. What is **not** established
 
 - **Only one benchmark claim is statistically supported** (attribution > entropy in variant A,
@@ -573,6 +652,10 @@ variance was the wrong thing to optimise if the decision is what matters.
 .venv/bin/python -m studies.bench.second_order --seeds 50 --family hybrid   # ~7 min
 .venv/bin/python -m studies.bench.second_order --validate-bias 100 --seeds 100 \
     --seed-offset 100 --family hybrid                                       # held-out
+.venv/bin/python -m studies.bench.verify_noise      # gates; must pass before 7d is believed
+for n in clean sensor localisation occlusion all; do \
+    .venv/bin/python -m studies.bench.ranking --family hybrid --noise $n --seeds 200; done
+.venv/bin/python -m studies.bench.compare_noise
 ```
 
 Production changes made by this work are confined to `engine/step.py`,
