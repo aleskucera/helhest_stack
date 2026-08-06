@@ -4,7 +4,8 @@ Written 2026-08-07 (evening of the first results). This is the contribution skel
 intended SECOND paper (the learning paper; companion to the characterisation/workshop paper
 in WORKSHOP_DRAFT.md + CLAIMS.md). Stated as it would be at submission, evidence status
 marked. Reviewers: attack this document. Two experiments are IN FLIGHT tonight and marked
-[PENDING]: the inert-fill mechanism check and the observability/relevance overlap pilot.
+both now COMPLETE and folded in below (inert-fill: partial confirm; observability: ~75%
+of decision-relevant mass unconstrained by driving).
 
 ## Working title
 
@@ -30,7 +31,8 @@ correlation, direction, and relevance structure the decision depends on, and no 
 risk machinery reconstructs it. We ground the result in a certainty-equivalence argument
 (for max-form contact costs the decision-optimal imputation differs from the conditional
 mean), quantify which terrain directions trajectory-self-supervision can and cannot
-constrain [PENDING pilot], and propose a falsifiable field-evaluation ladder — prospective
+constrain (median 75% of decision-relevant terrain mass — 95% among unobserved cells — is
+unconstrained by the driven trajectory), and propose a falsifiable field-evaluation ladder — prospective
 contact verification, payload-change falsification, and randomized paired trials — for a
 learning paradigm whose usual evaluation cannot distinguish a terrain estimate from an
 equivalence class of them.
@@ -53,9 +55,12 @@ equivalence class of them.
   decision-irrelevant cells (two independent stratifications; corr(extra error, adjoint
   support) = -0.095, CI excluding 0). (b) Bias is DOWNWARD (-0.22 m unobserved), contra the
   pre-registered pessimism guess — recorded as a miss. (c) Inert-fill hypothesis (low fill
-  pushes the envelope arg-max onto observed cells; "decide on what you know"): [PENDING
-  tonight, incl. a shift-control separating lowness from shape and a per-seed
-  mechanism-to-regret correlation]. (d) Cross-plan-family transfer holds marginally
+  pushes the envelope arg-max onto observed cells; "decide on what you know"): PARTIALLY
+  CONFIRMED (dfl_inert.json). Unobserved cells carry 21.7% of adjoint-support mass under
+  decision-fill vs 44.1% (mse) and 52.8% (zero-fill); shift control near-dispositive —
+  undoing only the bias (+0.207 m) drives the share to 68.2%, above every baseline: the
+  LOWNESS itself creates the inertness. Not confirmed: per-seed inertness-drop does not
+  predict per-seed regret (r=-0.11, n.s.) — population-level mechanism, claim at that grain. (d) Cross-plan-family transfer holds marginally
   (hybrid-trained, fan-evaluated: p=0.047, 25/37 non-tied) — terrain-shaped, not
   plan-specific (the fill provably never sees plans; only the loss does), but weaker
   off-family.
@@ -64,7 +69,15 @@ equivalence class of them.
   E[J]-J(mean) ~ +1.4). To write: one toy proposition (regret-optimal imputation deviates
   from the conditional mean wherever the contact arg-max is uncertain) + softmin surrogate
   consistency. Plus the identifiability analysis: trajectory-observable subspace (dtau/dh
-  Gramian) vs decision-relevant subspace (dJ/dh) — claim only the overlap [PENDING pilot].
+  Gramian) vs decision-relevant subspace (dJ/dh): DONE as a pilot (observability.json,
+  n=40, sanity-gated — 99.2% of observability mass within wheel-reach of the track).
+  Median 75% [p10 68, p90 88] of decision-relevant mass sits on cells the driven
+  trajectory's outputs are structurally blind to (exact-zero gradient), rising to ~95%
+  among unobserved cells — even though the relevant cells sit only ~0.5 m from the track:
+  the contact arg-max reads a narrow band, and proximity is not observability. Consequence
+  for the program: trajectory-fitting (MonoForce-style) CANNOT supply the labels planning
+  needs; hindsight labels must come from later SENSING (the map), not from contact — this
+  redirects weakness #7's label source and quantifies the user's ground-truth objection.
   Status: argument sketched, nothing proven yet.
 - **C5: evaluation methodology for self-supervised terrain learning.** The falsifiable
   ladder: (i) observability/relevance overlap in sim; (ii) prospective contact verification
