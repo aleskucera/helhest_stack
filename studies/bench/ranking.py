@@ -198,7 +198,7 @@ PLAN_GROUPS = {
 }
 
 
-def build_case(seed: int, family: str = "fan", noise: str = "clean"):
+def build_case(seed: int, family: str = "fan", noise: str = "clean", flat_sigma: bool = False):
     """Ground truth, the belief, sigma, and K candidate plans reaching into the unknown.
 
     The Scene is built on the BELIEF, not on the truth. `Harness.adjoint` resets the terrain to
@@ -216,7 +216,9 @@ def build_case(seed: int, family: str = "fan", noise: str = "clean"):
     XX, YY = np.meshgrid(xs, ys)
     # `belief` is what the robot thinks; `measured` is what a reveal actually hands over, which
     # is the TRUTH only under `noise="clean"`. sigma is consistent with what was injected.
-    belief, measured, observed, sigma, _ = noise_mod.build_belief(truth, XX, YY, CELL, seed, noise)
+    belief, measured, observed, sigma, _ = noise_mod.build_belief(
+        truth, XX, YY, CELL, seed, noise, flat_sigma
+    )
     mu = np.clip(0.6 + 0.1 * np.sin(XX) * np.cos(YY), 0.3, 0.9)
 
     # The plan family is fixed by construction, not drawn per seed, so no plan set can be
@@ -389,9 +391,13 @@ POLICIES = {
 NOT_A_POLICY = ("oracle",)
 
 
-def run_seed(seed: int, family: str = "fan", noise: str = "clean") -> dict:
+def run_seed(
+    seed: int, family: str = "fan", noise: str = "clean", flat_sigma: bool = False
+) -> dict:
     groups = PLAN_GROUPS[family]
-    scene, truth, measured, observed, sigma, poses, omega, grid = build_case(seed, family, noise)
+    scene, truth, measured, observed, sigma, poses, omega, grid = build_case(
+        seed, family, noise, flat_sigma
+    )
     harness = Harness(scene, poses, omega, device="cuda")
     belief = scene.elevation.astype(np.float32)
 
@@ -628,18 +634,21 @@ def figure(rows: list[dict], path: Path) -> None:
     plt.close(fig)
 
 
-def main(n_seeds: int = 200, family: str = "fan", noise: str = "clean") -> None:
+def main(
+    n_seeds: int = 200, family: str = "fan", noise: str = "clean", flat_sigma: bool = False
+) -> None:
     wp.init()
     OUT.mkdir(parents=True, exist_ok=True)
     print(f"plan family: {family} -- {PLAN_FAMILIES[family].__doc__.splitlines()[0]}")
     print(f"noise: {noise}")
     rows = []
     for seed in range(n_seeds):
-        rows.append(run_seed(seed, family, noise))
+        rows.append(run_seed(seed, family, noise, flat_sigma))
         if (seed + 1) % 50 == 0:
             print(f"  {seed + 1}/{n_seeds} seeds", flush=True)
     summary = report(rows)
     tag = family if noise == "clean" else f"{family}_{noise}"
+    tag += "_flatsigma" if flat_sigma else ""
     figure(rows, OUT / f"ranking_{tag}.png")
     (OUT / f"ranking_{tag}.json").write_text(
         json.dumps({"family": family, "noise": noise, "rows": rows, "summary": summary}, indent=2)
@@ -654,5 +663,10 @@ if __name__ == "__main__":
     ap.add_argument("--seeds", type=int, default=200)
     ap.add_argument("--family", choices=tuple(PLAN_FAMILIES), default="fan")
     ap.add_argument("--noise", choices=noise_mod.SOURCES, default="clean")
+    ap.add_argument(
+        "--flat-sigma",
+        action="store_true",
+        help="uniform sigma over unobserved cells: removes the truth-derived roughness leak",
+    )
     a = ap.parse_args()
-    main(a.seeds, a.family, a.noise)
+    main(a.seeds, a.family, a.noise, a.flat_sigma)

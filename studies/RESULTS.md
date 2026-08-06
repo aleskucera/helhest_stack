@@ -605,6 +605,47 @@ The highest-value next step is therefore **not** better cell selection — it is
 modelling the pose error, e.g. propagating `∂J/∂h` through `∂h/∂pose` to get a 3-DoF
 sensitivity, which is the same adjoint applied where the actual variance is.
 
+### 7e. The σ leak, and whether anything depends on it
+
+Over **unobserved** cells σ is derived from `_local_relief(truth)` — the roughness of ground the
+robot has not seen. That is a genuine leak and it deserves to be stated plainly rather than in a
+caveat list.
+
+**Why it is there.** With a uniform σ, every unobserved cell scores identically under entropy,
+so its "choice" degenerates to the tie-break order — a straw man, not a baseline. In the first
+run that version of entropy scored *below* random. The roughness-driven σ gives entropy a real
+and sensible target.
+
+**Which way it cuts.** Towards the baseline. Entropy is *nothing but* σ, so the leak is the only
+information it has; the adjoint score uses σ only as a weight on a gradient term that dominates
+it. So the leak inflates the thing being beaten.
+
+**It is already controlled for twice over.**
+
+1. `random` **is** entropy-with-uniform-σ, exactly — equal scores, random tie-break, a uniform
+   draw over unobserved cells. Both versions are therefore in every table already. Measured,
+   entropy beats random by +0.004 to +0.032 τ, non-significant in 13 of 15 arm×budget tests.
+2. A `--flat-sigma` arm removes the leak for **every** policy at once (n = 200, @400 cells):
+
+| | entropy | random | swath | disagreement | oracle |
+|---|---|---|---|---|---|
+| clean, σ from truth | +0.088 | +0.056 | +0.639 | +0.822 | +0.911 |
+| clean, **flat σ** | +0.072 | +0.056 | +0.639 | **+0.818** | +0.911 |
+| all noise, σ from truth | +0.147 | +0.128 | +0.522 | +0.538 | +0.565 |
+| all noise, **flat σ** | +0.141 | +0.128 | +0.522 | **+0.537** | +0.565 |
+
+Nothing moves. With the leak removed the headline is unchanged — `disagreement − entropy` =
++0.746 clean (199/200, p = 3e-58) and +0.397 under full noise (174/199, p = 1e-28) — and so is
+the negative result, `disagreement − swath` = +0.179 clean but +0.015 under full noise. Entropy
+without the leak is statistically indistinguishable from random (p = 0.52 and 0.42).
+
+**A process note, because it nearly went the other way.** The first `--flat-sigma` run returned
+numbers *bit-identical* to the leaked run, including entropy — which under a flat σ must collapse
+onto random. The flag was being silently dropped: `black` had reformatted the `build_belief`
+call onto one line, so the edit threading the argument through never matched. Had the leak
+genuinely made no difference, that no-op would have been indistinguishable from the real result
+it was supposed to test.
+
 ## 8. What is **not** established
 
 - **Only one benchmark claim is statistically supported** (attribution > entropy in variant A,
@@ -656,6 +697,8 @@ sensitivity, which is the same adjoint applied where the actual variance is.
 for n in clean sensor localisation occlusion all; do \
     .venv/bin/python -m studies.bench.ranking --family hybrid --noise $n --seeds 200; done
 .venv/bin/python -m studies.bench.compare_noise
+.venv/bin/python -m studies.bench.ranking --family hybrid --noise all --flat-sigma --seeds 200
+.venv/bin/python -m studies.bench.illustrate --seed 7    # what each policy looks at
 ```
 
 Production changes made by this work are confined to `engine/step.py`,

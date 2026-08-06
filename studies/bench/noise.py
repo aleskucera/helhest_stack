@@ -141,6 +141,7 @@ def build_belief(
     cell: float,
     seed: int,
     source: str,
+    flat_sigma: bool = False,
 ):
     """Return (belief, measured, observed, sigma) for one noise configuration.
 
@@ -185,10 +186,17 @@ def build_belief(
     belief = np.where(observed, measured, 0.0)
 
     # --- what the policies are told ----------------------------------------------------
-    # Unobserved cells: the roughness-driven placeholder of section 7. Observed cells: the
-    # quadrature sum of the sources actually injected there.
-    rough = _local_relief(truth)
-    sigma = np.clip(SIGMA_UNOBS_FLOOR + SIGMA_UNOBS_GAIN * rough, SIGMA_UNOBS_FLOOR, SIGMA_CAP)
+    # Unobserved cells. The roughness-driven form is derived from the TRUTH, which the robot
+    # has not seen there -- a deliberate leak, and one that favours the entropy baseline, since
+    # entropy is nothing BUT sigma. It exists because a uniform sigma leaves entropy with no
+    # preference at all among unobserved cells, which is a straw man rather than a baseline.
+    # `flat_sigma` removes the leak for every policy at once, so the comparison can be repeated
+    # with nobody holding information the robot could not have.
+    if flat_sigma:
+        sigma = np.full_like(truth, SIGMA_UNOBS_FLOOR + SIGMA_UNOBS_GAIN * 0.25)
+    else:
+        rough = _local_relief(truth)
+        sigma = np.clip(SIGMA_UNOBS_FLOOR + SIGMA_UNOBS_GAIN * rough, SIGMA_UNOBS_FLOOR, SIGMA_CAP)
     # The first-order term |grad h| * displacement is only valid while the shift is small
     # against the terrain's own correlation length. It is NOT, at these magnitudes -- a 2 deg
     # yaw error over a 6 m lever arm displaces the map by ~2 cells while the terrain decorrelates
