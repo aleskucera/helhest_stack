@@ -177,7 +177,18 @@ Caveat: regret is measured against the risk-NEUTRAL truth (argmin of true cost),
 structurally disfavors risk-averse choice rules; with a catastrophe-shaped cost the CVaR
 arms would deserve a rematch. THIS is the follow-up paper (CoRL-shaped, MonoForce
 lineage — supervisor-aligned): capacity ladder, pessimism-mechanism analysis, sigma-head
-variant, plan-family transfer, then hindsight self-supervision on real bags. Caveats:
+variant, plan-family transfer, then hindsight self-supervision on real bags. Mechanism + transfer follow-ups (dfl_mechanism.json): the extra height error of the
+decision-trained model is SHAPED, not noise — ~5x larger in decision-IRRELEVANT cells than
+relevant ones (two independent stratifications agree; corr(extra error, adjoint support)
+= -0.095, CI excludes 0): it economizes its error budget where no decision gradient reaches.
+One pre-registration miss, recorded: the bias is DOWNWARD (fills low), not the predicted
+pessimistic-upward. Leading revised hypothesis (UNVERIFIED): a low fill makes unknown cells
+inert in the envelope max — the argmax lands on observed cells, so plans get ranked on what
+is actually known ("decide on what you know" imputation, not pessimism). Testable: argmax
+occupancy of unobserved cells under decision-fill vs MSE-fill — Phase B item. Plan-family
+transfer HOLDS but marginally (hybrid-trained, fan-evaluated: p=0.047, wins 25/37 non-tied;
+the fill provably never saw plans — only the loss did — so the caution is terrain-shaped,
+though weaker off-family). Caveats:
 linear 6-feature model (capacity confound unresolved), one cost, synthetic.
 
 ## Venue and sequencing (significance referee; endorsed)
