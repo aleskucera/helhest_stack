@@ -381,9 +381,18 @@ Before sensing: τ = +0.035, top-1 correct 11 %. The belief's ranking is essenti
 +0.146 at 100 cells (150/199 seeds, p = 4×10⁻¹³) and +0.633 at 400 (**200/200 seeds**,
 p = 1×10⁻⁶⁰). This is the §6 claim, now at n = 200 instead of n = 32 and with the real adjoint.
 
-**2. Entropy is statistically indistinguishable from random** (p = 0.28 at 400 cells) and does
-not improve with budget at all. σ here is a property of the ground (roughness-driven), so
-entropy targets genuinely uncertain cells — they are simply not the cells that decide anything.
+**2. Entropy delivers no measurable value over not sensing at all.** Paired against each seed's
+own no-sensing τ, `random` is indistinguishable from doing nothing at every budget (p ≥ 0.12)
+and `entropy` likewise (−0.020 at 400 cells, p = 0.015 — not a claim worth making across 12
+comparisons), while `swath` gains +0.521 and `disagreement` +0.613 from the same budget. The
+mechanism is simple rather than interesting: their cells land ~2.0 m off the nearest plan, where
+the adjoint is *exactly* zero, so revealing them cannot move any plan's cost. The more
+interesting explanation — that partial sensing actively hurts by breaking the common-mode
+cancellation of the inpaint bias — was tested and **not supported** (correlation between how
+close entropy's cells fell to a plan and its Δτ is −0.03).
+
+σ here is a property of the ground (roughness-driven), so entropy targets genuinely uncertain
+cells — they are simply not the cells that decide anything.
 Panel (c) is the whole story: entropy and random reveal cells at 4.9 m mean range and 2.0 m off
 the nearest plan; every task-aware policy sits at ~2.2 m range and ~0.05 m off-plan.
 
