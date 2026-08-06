@@ -62,9 +62,12 @@ LOC_SIGMA_YAW = np.radians(2.0)  # [rad] heading error
 SENSOR_HEIGHT = 0.55  # [m] lidar above the ground plane
 MAX_RANGE = 6.0  # [m] beyond this nothing is observed
 RAY_STEPS = 48
-SIGMA_UNOBS_FLOOR = 0.02
-SIGMA_UNOBS_GAIN = 0.9
-SIGMA_CAP = 0.30
+SIGMA_UNOBS_FRONTIER = 0.02  # [m] baseline uncertainty right at the edge of what was observed
+SIGMA_UNOBS_KD = 0.05  # [m per m] growth with distance to the nearest observed cell (dominant term)
+SIGMA_UNOBS_KR = 0.2  # [m per m] growth with local relief (roughness), secondary term
+SIGMA_UNOBS_CEIL = 0.35  # [m] soft ceiling the tanh saturates toward -- never reached exactly
+# [m] uniform fallback for --flat-sigma: a mid-field magnitude, deliberately structureless
+SIGMA_UNOBS_FLAT = 0.245
 
 SOURCES = ("clean", "sensor", "localisation", "occlusion", "all")
 
@@ -186,17 +189,20 @@ def build_belief(
     belief = np.where(observed, measured, 0.0)
 
     # --- what the policies are told ----------------------------------------------------
-    # Unobserved cells. The roughness-driven form is derived from the TRUTH, which the robot
-    # has not seen there -- a deliberate leak, and one that favours the entropy baseline, since
-    # entropy is nothing BUT sigma. It exists because a uniform sigma leaves entropy with no
-    # preference at all among unobserved cells, which is a straw man rather than a baseline.
-    # `flat_sigma` removes the leak for every policy at once, so the comparison can be repeated
-    # with nobody holding information the robot could not have.
+    # Unobserved cells. Distance-to-nearest-observed-cell is the physically sensible DOMINANT
+    # term -- a real mapper is least sure about what it has never come near -- plus a secondary,
+    # truth-derived roughness term (a deliberate leak: it favours the entropy baseline, since
+    # entropy is nothing BUT sigma; `flat_sigma` removes it for every policy at once). Both are
+    # summed and passed through a soft tanh saturation toward SIGMA_UNOBS_CEIL rather than a hard
+    # clip: a hard clip put ~63-65% of unobserved cells EXACTLY at the cap, so entropy's top-M
+    # choice there was really the random tie-break, not a discrimination the baseline earned.
     if flat_sigma:
-        sigma = np.full_like(truth, SIGMA_UNOBS_FLOOR + SIGMA_UNOBS_GAIN * 0.25)
+        sigma = np.full_like(truth, SIGMA_UNOBS_FLAT)
     else:
+        dist_unobs = _distance_to_observed(observed, cell)
         rough = _local_relief(truth)
-        sigma = np.clip(SIGMA_UNOBS_FLOOR + SIGMA_UNOBS_GAIN * rough, SIGMA_UNOBS_FLOOR, SIGMA_CAP)
+        raw = SIGMA_UNOBS_FRONTIER + SIGMA_UNOBS_KD * dist_unobs + SIGMA_UNOBS_KR * rough
+        sigma = SIGMA_UNOBS_CEIL * np.tanh(raw / SIGMA_UNOBS_CEIL)
     # The first-order term |grad h| * displacement is only valid while the shift is small
     # against the terrain's own correlation length. It is NOT, at these magnitudes -- a 2 deg
     # yaw error over a 6 m lever arm displaces the map by ~2 cells while the terrain decorrelates
@@ -230,6 +236,46 @@ def _local_std(h: np.ndarray, rad: int = 3) -> np.ndarray:
         for dx in range(-rad, rad + 1)
     )
     return np.sqrt(np.maximum(s2 / n - (s1 / n) ** 2, 0.0))
+
+
+_DT_INF = 1e20
+
+
+def _dt1d(f: np.ndarray) -> np.ndarray:
+    """Exact 1-D squared distance transform (Felzenszwalb & Huttenlocher lower envelope of
+    parabolas). `f[i]` is 0 at a source and `_DT_INF` elsewhere; no scipy in this venv."""
+    n = len(f)
+    d = np.zeros(n)
+    v = np.zeros(n, dtype=int)
+    z = np.zeros(n + 1)
+    k = 0
+    v[0] = 0
+    z[0], z[1] = -_DT_INF, _DT_INF
+    for q in range(1, n):
+        s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k])
+        while s <= z[k]:
+            k -= 1
+            s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k])
+        k += 1
+        v[k] = q
+        z[k], z[k + 1] = s, _DT_INF
+    k = 0
+    for q in range(n):
+        while z[k + 1] < q:
+            k += 1
+        d[q] = (q - v[k]) ** 2 + f[v[k]]
+    return d
+
+
+def _distance_to_observed(observed: np.ndarray, cell: float) -> np.ndarray:
+    """[m] distance from every cell to the nearest True cell in `observed` (0 where observed)."""
+    ny, nx = observed.shape
+    f = np.where(observed, 0.0, _DT_INF)
+    for c in range(nx):
+        f[:, c] = _dt1d(f[:, c])
+    for r in range(ny):
+        f[r, :] = _dt1d(f[r, :])
+    return np.sqrt(f) * cell
 
 
 def _local_relief(h: np.ndarray, rad: int = 2) -> np.ndarray:

@@ -302,6 +302,22 @@ def p_swath_var(ctx):
     return _proximity(ctx["dist"]).var(axis=0)
 
 
+def p_corridor_sigma(ctx):
+    """Corridor mask x uncertainty, no derivative: the strongest fair baseline (P2).
+
+    max_k proximity(dist_k) * sigma^2 -- task-region-masked entropy. In the motion-coupled
+    study this TIED or BEAT the adjoint on holdout, so the free-look claim has to answer to it
+    too, not just to the derivative-blind `entropy` and `swath`.
+    """
+    return _proximity(ctx["dist"]).max(axis=0) * ctx["sigma"] ** 2
+
+
+def p_corridor_mi(ctx):
+    """Corridor mask x mutual-information-shaped uncertainty, no derivative: same mask as
+    `p_corridor_sigma`, but log-saturating in sigma rather than quadratic."""
+    return _proximity(ctx["dist"]).max(axis=0) * 0.5 * np.log1p(ctx["sigma"] ** 2 / 0.05**2)
+
+
 def p_attribution(ctx):
     """Single-plan: sensitivity of the currently-BEST believed plan. sum_i (dJ/dh_i * sigma_i)^2.
 
@@ -380,6 +396,8 @@ POLICIES = {
     "swath": p_swath,
     "swath_best": p_swath_best,
     "swath_var": p_swath_var,
+    "corridor_sigma": p_corridor_sigma,
+    "corridor_mi": p_corridor_mi,
     "attribution": p_attribution,
     "magnitude": p_magnitude,
     "margin": p_margin,
@@ -547,6 +565,8 @@ def report(rows: list[dict]) -> dict:
     paired("entropy")
     paired("swath")
     paired("swath_var")
+    paired("corridor_sigma")
+    paired("corridor_mi")
     return summary
 
 
