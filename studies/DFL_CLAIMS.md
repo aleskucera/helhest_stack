@@ -45,6 +45,16 @@ equivalence class of them.
   run. Gradient chain through the settle verified to 5e-13; training stable (2 clips/400).
   Status: DONE at linear-model scale, synthetic. The capacity ladder is the acknowledged
   decisive next test.
+  LIVE-ELITE UPDATE (dfl_elites.json, n=80, both fixed-candidate and fill-in-the-loop
+  levels): on the real MPPI's low-diversity elite sets the decision-vs-MSE edge shrinks to
+  a non-significant trend (+14% of the gap, p=0.74 / p=0.31; 56% of seeds tie — both fills
+  pick the same elite), while decision-vs-zero-fill stays decisive (p=4e-8). Same structural
+  wall the sensing claim hit (CLAIMS.md C1 live-elite note): candidate-set diversity is the
+  moderator of every edge-over-strong-baseline in this project. Scope accordingly: at the
+  within-corridor elite level, any reasonable fill suffices; the untested level where fill
+  quality should matter most on THIS stack is the ROUTE choice (lattice/cost-to-go corridor
+  selection — where the real phantom-plateau incident lived). Route-level evaluation is now
+  the priority experiment, ahead of the capacity ladder in importance for the field claim.
 - **C2: the factorization result.** MSE map + STEP penalty (0.638) and MSE map + correlated
   CVaR@0.9, M=128 (1.131) both fail to recover decision-plain (0.269), p<=0.0012; CVaR
   hurts even its own base map (p=3e-4). Composition (decision map + CVaR) adds nothing
