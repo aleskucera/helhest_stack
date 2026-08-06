@@ -27,8 +27,12 @@ MAGNITUDE is not, at realistic sigma -- the adjoint FD-checks to 2.3% at 1 mm an
 while sigma is 2-30 cm. Soft contact gradients (7h), the derivative of the EXPECTED envelope,
 help measurably (p = 0.019) but only slightly. Testing them also corrected 7g's attribution:
 what inverts a risk score is summing over CELLS rather than over TIME (a 0.229 swing), not
-gradient weighting (neutral, p = 0.43). The closed-loop benchmark (§6) is the weakest part of the study and is
-stated as such.
+gradient weighting (neutral, p = 0.43) -- confirmed paired in 7i (domain -0.270, p = 4e-08;
+weighting -0.000, p = 1.00). Second-order FOSM does NOT rescue the risk estimate either
+(7i, p = 0.13, calibration degrading 0.85 -> 2.38). Every analytic route lands between
+tau = -0.19 and -0.13 while a free per-timestep sigma sum lands at +0.14, so the transferable
+result is an aggregation rule -- sum risk over TIME, not over CELLS. The closed-loop benchmark
+(§6) is the weakest part of the study and is stated as such.
 
 ---
 
@@ -838,6 +842,50 @@ but it has not been measured to the standard the rest of this section holds.
 reason than stated: what makes the adjoint useful is *where* it is nonzero, and what ruins a
 per-cell risk score is *summing over that support*, not weighting within it.
 
+### 7i. Second-order FOSM as a risk estimator — **no**. And the domain test, now paired
+
+`studies/bench/order2.py`, n = 40, both questions in one run so every comparison is
+within-seed paired.
+
+| score | aggregation | τ vs true risk |
+|---|---|---|
+| `time_sigma` — Σ over **timesteps** of footprint σ | time | **+0.140** |
+| `cell_sigma` — Σ over **cells** of σ on the support | cell | −0.129 |
+| `fosm1_full` — first-order FOSM | cell | −0.130 |
+| `fosm1_short` — first order, shortlist only | cell | −0.135 |
+| `fosm2_short` — **second order**, same shortlist | cell | −0.190 |
+| `soft` — soft contact gradient at τ = σ | cell | −0.129 |
+
+**Q2 — the aggregation domain is the driver. Confirmed, paired.** `cell_sigma − time_sigma` =
+**−0.270, 3/39 seeds, p = 3.6×10⁻⁸**. And gradient weighting at a fixed per-cell domain is
+**exactly neutral**: `fosm1_full − cell_sigma` = −0.000, 20/40, **p = 1.00**. §7h's correction
+stands, now on the paired evidence it was missing. Summing a per-cell quantity over the swept
+support is what inverts a risk score; the gradient has nothing to do with it.
+
+**Q1 — second order does not rescue the risk estimate.** `fosm2_short − fosm1_short` = −0.054,
+13/36, p = 0.13 — directionally *worse*, not significantly. And the calibration **degrades**:
+est/true risk 0.85 first-order against **2.38** second-order. §4's variance improvement
+(34.1% → 3.2% of badly-wrong per-cell estimates) does not carry through to the aggregate risk of
+a plan.
+
+**A tempting number that is not a result.** The arm including the second-order bias term,
+`fosm2_bias`, scores **+0.239** and beats first order by +0.374 (31/40, **p = 6.8×10⁻⁴**) — the
+best gradient-based score measured anywhere in this study. It is reported here only to be
+discarded, because the quantity underneath it is demonstrably broken: the curvature-predicted
+`E[J] − J(belief)` is **−130.9** against a measured **+2.158** — wrong sign, and sixty times too
+large. It is the §7c pathology again (per-cell second-order terms summed as if independent
+through a max), now severe enough to invert. A broken estimator that happens to rank well is an
+accidental proxy, not a bias correction, and reporting the τ without the −130.9 would be
+indefensible. A valid bias estimator would have to come first.
+
+**Where this leaves analytic propagation.** Across §7f, §7g, §7h and §7i, every analytic
+route — first-order FOSM, correlated FOSM, soft contact gradients, second-order FOSM — lands
+between τ = −0.19 and −0.13 against the Monte-Carlo truth, while a per-timestep σ sum costing
+nothing lands at +0.14. The adjoint's magnitude does not become usable for risk by softening it,
+by adding curvature, or by changing the norm. **The one robust, transferable finding is the
+aggregation rule: sum risk over time, not over cells** — a per-cell sum grows with the area a
+plan sweeps, which is not what a plan's risk depends on.
+
 ## 8. What is **not** established
 
 - **Only one benchmark claim is statistically supported** (attribution > entropy in variant A,
@@ -894,6 +942,7 @@ for n in clean sensor localisation occlusion all; do \
 .venv/bin/python -m studies.bench.risk --seeds 150 --family hybrid --noise all   # ~45 min
 .venv/bin/python -m studies.bench.softgrad --gate     # must pass before 7h is believed
 .venv/bin/python -m studies.bench.softgrad --seeds 80 --family hybrid --noise all
+.venv/bin/python -m studies.bench.order2 --seeds 40 --family hybrid --noise all   # ~25 min
 ```
 
 Production changes made by this work are confined to `engine/step.py`,
