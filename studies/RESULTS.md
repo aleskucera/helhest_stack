@@ -23,10 +23,11 @@ the adjoint does not win there either (7f): adding a risk term clearly helps (p 
 first-order FOSM is twice as over-conservative as a per-timestep Gaussian heuristic and makes
 no better decisions than it. Pulling that apart gives the study's unifying result (7g): the
 adjoint's SUPPORT -- which cells a plan can respond to -- is correct and useful, but its
-MAGNITUDE is not, at realistic sigma. Gradient-weighting a per-cell sigma actually INVERTS the
-risk ordering (p = 6e-11), while the adjoint itself FD-checks to 2.3% at 1 mm and 32% at 1 cm.
-That one distinction explains why sensing works, why it only ties a distance transform, and why
-risk estimation fails. The closed-loop benchmark (§6) is the weakest part of the study and is
+MAGNITUDE is not, at realistic sigma -- the adjoint FD-checks to 2.3% at 1 mm and 32% at 1 cm,
+while sigma is 2-30 cm. Soft contact gradients (7h), the derivative of the EXPECTED envelope,
+help measurably (p = 0.019) but only slightly. Testing them also corrected 7g's attribution:
+what inverts a risk score is summing over CELLS rather than over TIME (a 0.229 swing), not
+gradient weighting (neutral, p = 0.43). The closed-loop benchmark (§6) is the weakest part of the study and is
 stated as such.
 
 ---
@@ -734,6 +735,16 @@ against the MC truth (units therefore cancel):
 | `weighted_L2` = √(Σ_i (g_iσ_i)²) | −0.158 |
 | `fosm` (correlated) | −0.094 |
 
+> ### ⚠ CORRECTION — this 2×2 was itself confounded, see §7h
+>
+> The "unweighted" rows sum over **timesteps** (`sig_t.sum(axis=0)`, T+1 terms) while the
+> "weighted" rows sum over **cells** (`(g·σ).sum(axis=1)`, ~8100 terms). So varying "weighting"
+> also changed the **aggregation domain**, and the p = 6×10⁻¹¹ below cannot be attributed to
+> the gradient. §7h supplies the missing cell — unweighted *per-cell* — and finds the domain is
+> the whole effect while gradient weighting is neutral (p = 0.43). This is the same confounding
+> error this section was written to expose, made one section later. The measurements stand; the
+> attribution below does not.
+
 **Weighting by the gradient does not merely fail to help — it inverts the ordering.** At fixed
 norm: L1 −0.280 (18/100, p = 6×10⁻¹¹), L2 −0.258 (19/98, p = 7×10⁻¹⁰). The norm is nearly
 irrelevant by comparison (−0.001, p = 0.34 unweighted; +0.021, p = 0.010 weighted).
@@ -775,6 +786,57 @@ arm. That number is **not interpretable**: `Σ_t σ_t` has units of metres×time
 its scale is accidental and only its ordering is meaningful. FOSM's 2.04 is a genuine cost-unit
 over-prediction and stands. The two should not have appeared in one column. The decision-quality
 comparison in §7f is also a statistical **tie** (p = 0.19), not a loss.
+
+### 7h. Soft contact gradients — a real effect, and it corrects §7g's attribution
+
+`studies/bench/softgrad.py`, n = 80. The proposal: the hard adjoint routes the whole gradient to
+the one cell that *currently* wins the contact arg-max, but under uncertainty the winner is not
+that cell — so spread the gradient over cells that are *almost* touching.
+
+This is not a smoothing hack, it is the right derivative. What a risk estimate needs is
+`∂E[max]/∂h`, and that derivative **is** `P(q is the arg-max)` — a soft distribution collapsing
+to one-hot only as σ → 0. A softmax over the offset table with temperature τ is exactly that,
+so **τ is set by σ rather than tuned**.
+
+**Only the envelope-mediated term may be softened**, and that is a correctness requirement, not
+a modelling choice: the wheels reach the map through `env = max_d(·)` and so have an arg-max;
+the belly does not — `chassis_clearance` samples the raw heightmap by bilinear interpolation.
+Measured: a one-hot re-contraction of `dJ/denv` reproduces the hard adjoint **exactly** for
+`settle` (relative error 0.0000) and fails for `clear_soft` (1.87). Gate: at τ → 0 the soft
+gradient collapses onto the engine's arg-max, and the per-plan risk score agrees to 2.4%.
+
+| risk score | aggregation | τ vs true risk |
+|---|---|---|
+| `Σ_t σ_t` (from §7f) | per **timestep** | **+0.101** |
+| σ summed over the gradient's support | per **cell** | −0.128 |
+| hard adjoint, `√Σ(g σ)²` | per **cell** | −0.150 |
+| soft, τ = 0.25σ … 4σ | per **cell** | −0.145 |
+
+**Softening helps, and the effect is real but small**: +0.006 τ against the hard adjoint,
+43/66 seeds, **p = 0.019** at τ = 0.25σ, and flat across the whole 0.25σ–4σ range. It does not
+undo the inversion — every per-cell score stays at ≈ −0.145.
+
+**And it exposes the real driver.** With the missing 2×2 cell finally measured — unweighted,
+*per-cell* — the two effects separate:
+
+- **Gradient weighting, at fixed per-cell domain:** −0.022, 44/80, **p = 0.43 — neutral.**
+- **Aggregation domain:** per-timestep +0.101 against per-cell −0.128, a swing of **0.229**.
+
+So §7g's headline was wrong: the inversion is **not** caused by gradient weighting. It is caused
+by summing over **cells** rather than over **time**. A per-cell sum accumulates with the *area*
+a plan sweeps, and swept area anti-correlates with true risk here; a per-timestep sum has a
+fixed T terms whatever the plan. This is the same area-overcounting pathology measured in §7c
+(the correction growing linearly, 21 → 303, with cells summed) arriving by a third route.
+
+**Caveat on the evidence.** The weighting comparison is a clean paired within-run test. The
+domain comparison is **across runs** (n = 100 vs n = 80), because no single run contains both
+unweighted-per-timestep and unweighted-per-cell. A paired domain test is the obvious next run
+and is not yet done — the 0.229 swing is large enough that it is very unlikely to be an artifact,
+but it has not been measured to the standard the rest of this section holds.
+
+**What survives of §7g.** The `support vs magnitude` reading still holds, but for a different
+reason than stated: what makes the adjoint useful is *where* it is nonzero, and what ruins a
+per-cell risk score is *summing over that support*, not weighting within it.
 
 ## 8. What is **not** established
 
@@ -830,6 +892,8 @@ for n in clean sensor localisation occlusion all; do \
 .venv/bin/python -m studies.bench.ranking --family hybrid --noise all --flat-sigma --seeds 200
 .venv/bin/python -m studies.bench.illustrate --seed 7    # what each policy looks at
 .venv/bin/python -m studies.bench.risk --seeds 150 --family hybrid --noise all   # ~45 min
+.venv/bin/python -m studies.bench.softgrad --gate     # must pass before 7h is believed
+.venv/bin/python -m studies.bench.softgrad --seeds 80 --family hybrid --noise all
 ```
 
 Production changes made by this work are confined to `engine/step.py`,
