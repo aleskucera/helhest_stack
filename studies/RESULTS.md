@@ -212,13 +212,43 @@ rather than quietly keeping the n=12 numbers.
 2. **Neither beats never-looking on a per-seed basis.** In A attribution's *mean* is 45 frames
    better, but it wins on only 15/32 seeds: large wins where the default guesses wrong, small
    losses everywhere else. In B it is significantly worse.
-3. That is a limitation of the harness, not of the idea: **the looks are spent
-   unconditionally.** Deciding *whether* to observe is `SENSITIVITY_PLAN.md`'s C5 and is not
-   implemented. A policy that skipped its budget when the resolvable variance was small would
-   keep the wins and drop the losses — but that is a prediction, not a result.
+3. The looks are spent **unconditionally**. I predicted that deciding *whether* to observe
+   (C5) would keep the wins and drop the losses. **It did not — see §6c.**
 4. Variant A's structural finding stands: where the critical feature is an **aperture**, sight
    passes through it, so "where can I see most" and "where does my plan depend" partly
    coincide — which is why entropy still recovers 20% of the headroom there.
+
+### 6c. C5 — deciding whether to look. Implemented, measured, rejected
+
+`studies/bench/compare_c5.py` · gated runs preserved as `results_*_c5.json`
+
+Each policy skips its look when the best bearing would resolve less than 25% of its *own*
+objective's total — one threshold, every arm, against its own total, chosen a priori and not
+swept. Both variants re-run at n = 32.
+
+| variant A | mean before | mean after | looks before | looks after |
+|---|---|---|---|---|
+| entropy | 292 | **326** (+34) | 4.00 | 1.84 |
+| attribution | 270 | 273 (+3) | 4.00 | **4.00** |
+| sigma | 394 | 303 (−91) | 4.00 | 4.00 |
+
+**It does not work, and the reason is instructive.** The gate **never binds for attribution** —
+its objective is concentrated exactly where a route-directed look resolves it, so the
+resolvable fraction is always high. It binds far too aggressively for entropy, whose objective
+is diffuse, cutting its looks by more than half and making it 34 frames *worse*. And it
+weakened the one supported result: attribution vs entropy fell from 24/32 (p = 0.007) to
+20/32 (p = 0.215).
+
+**What this says about C5.** "What fraction of my objective could this resolve" is *not* value
+of information. VoI asks whether the observation would **change the decision** — a different
+and harder quantity than how much variance it removes. A cell can carry most of the plan's
+predicted variance and still be worth nothing to observe if every outcome leads to the same
+route. Implementing C5 properly means estimating the decision change, not the variance change.
+
+The ungated results are therefore the primary ones; `LOOK_THRESHOLD` is set to 0 and the gated
+run is kept for the record. **This is the third of my own proposed fixes that measurement
+refuted** (sub-cell refinement, the analytic Hessian, and now this), which is the methodology
+working rather than failing.
 
 ## 7. What is **not** established
 

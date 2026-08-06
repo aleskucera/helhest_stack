@@ -55,7 +55,19 @@ CVAR_SAMPLES = 12
 # tuned advantage. The value is chosen a priori rather than swept: resolving a quarter of the
 # quantity you care about is a reasonable bar for spending 8 frames of a ~200-frame episode.
 # It has NOT been swept, so its robustness is unestablished.
-LOOK_THRESHOLD = 0.25
+# MEASURED AND REJECTED as a default -- see studies/bench/compare_c5.py and RESULTS.md section
+# 6c. At 0.25 the gate NEVER BINDS for attribution (its objective is concentrated exactly where
+# a route-directed look resolves it, so the resolvable fraction is always high) and binds far
+# too aggressively for entropy, whose objective is diffuse: entropy's looks fell 4.0 -> 1.8 and
+# its mean time got 34 frames WORSE. It also weakened the one supported result, attribution vs
+# entropy, from 24/32 (p=0.007) to 20/32 (p=0.215).
+#
+# The lesson is about what C5 actually requires: "what fraction of my objective could this
+# resolve" is NOT value of information. VoI asks whether the observation would CHANGE THE
+# DECISION, which is a different and harder quantity than how much variance it removes.
+# Set to 0.0 (no gating) so the ungated behaviour is the default; the gated run is preserved
+# in results_*_c5.json.
+LOOK_THRESHOLD = 0.0
 
 
 def _best_bearing(belief, bw, pose, weight):

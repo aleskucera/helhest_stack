@@ -1,0 +1,70 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+section-6 benchmark [gap]: 32 seeds x 5 policies + oracle
+Module helhest.engine.envelope 8494861 load on device 'cuda:0' took 0.94 ms  (cached)
+Module helhest.engine.step b170777 load on device 'cuda:0' took 5.97 ms  (cached)
+Module helhest.planning.costtogo f250786 load on device 'cuda:0' took 0.83 ms  (cached)
+Module helhest.planning.lattice_solver 4e28ec9 load on device 'cuda:0' took 0.68 ms  (cached)
+Module helhest.control.mppi a8801d8 load on device 'cuda:0' took 1.05 ms  (cached)
+  seed  0 gap_y +6.9 | oracle  203 | none  426 sigm  245 entr  445 cvar  244 attr  244
+  seed  1 gap_y -6.5 | oracle  199 | none  220 sigm  238 entr  226 cvar  235 attr  235
+  seed  2 gap_y +5.8 | oracle  191 | none  411 sigm  228 entr  258 cvar  227 attr  227
+  seed  3 gap_y -5.3 | oracle  179 | none  197 sigm  422 entr  205 cvar  318 attr  318
+  seed  4 gap_y +7.8 | oracle  222 | none  440 sigm  459 entr  448 cvar  292 attr  292
+  seed  5 gap_y -7.4 | oracle  210 | none  229 sigm  250 entr  246 cvar  325 attr  325
+  seed  6 gap_y +6.6 | oracle  200 | none  424 sigm  239 entr  277 cvar  237 attr  237
+  seed  7 gap_y -6.9 | oracle  202 | none  224 sigm  243 entr  246 cvar  316 attr  316
+  seed  8 gap_y +6.0 | oracle  193 | none  416 sigm  231 entr  434 cvar  229 attr  229
+  seed  9 gap_y -7.6 | oracle  211 | none  232 sigm  453 entr  483 cvar  351 attr  351
+  seed 10 gap_y +7.9 | oracle  221 | none  243 sigm  262 entr  488 cvar  261 attr  261
+  seed 11 gap_y -5.4 | oracle  181 | none  198 sigm  215 entr  206 cvar  217 attr  217
+  seed 12 gap_y +5.8 | oracle  190 | none  413 sigm  227 entr  429 cvar  226 attr  226
+  seed 13 gap_y -7.6 | oracle  213 | none  235 sigm  253 entr  248 cvar  326 attr  326
+  seed 14 gap_y +7.5 | oracle  214 | none  436 sigm  254 entr  282 cvar  253 attr  253
+  seed 15 gap_y -7.1 | oracle  206 | none  225 sigm  246 entr  249 cvar  320 attr  320
+  seed 16 gap_y +6.7 | oracle  200 | none  425 sigm  448 entr  278 cvar  273 attr  273
+  seed 17 gap_y -7.5 | oracle  209 | none  438 sigm  454 entr  246 cvar  444 attr  444
+  seed 18 gap_y +6.2 | oracle  195 | none  420 sigm  437 entr  434 cvar  266 attr  266
+  seed 19 gap_y -6.3 | oracle  195 | none  214 sigm  232 entr  222 cvar  230 attr  230
+  seed 20 gap_y +5.8 | oracle  192 | none  412 sigm  432 entr  420 cvar  258 attr  258
+  seed 21 gap_y -7.3 | oracle  208 | none  229 sigm  246 entr  237 cvar  322 attr  322
+  seed 22 gap_y +6.1 | oracle  195 | none  215 sigm  234 entr  234 cvar  232 attr  232
+  seed 23 gap_y -7.1 | oracle  203 | none  226 sigm  243 entr  248 cvar  320 attr  320
+  seed 24 gap_y +6.0 | oracle  193 | none  413 sigm  230 entr  252 cvar  230 attr  230
+  seed 25 gap_y -5.5 | oracle  182 | none  200 sigm  220 entr  418 cvar  219 attr  219
+  seed 26 gap_y +6.5 | oracle  199 | none  225 sigm  237 entr  438 cvar  235 attr  235
+  seed 27 gap_y -7.1 | oracle  205 | none  224 sigm  448 entr  476 cvar  344 attr  344
+  seed 28 gap_y +7.6 | oracle  214 | none  437 sigm  459 entr  454 cvar  283 attr  283
+  seed 29 gap_y -5.2 | oracle  179 | none  196 sigm  213 entr  204 cvar  214 attr  214
+  seed 30 gap_y +5.7 | oracle  190 | none  410 sigm  432 entr  256 cvar  254 attr  254
+  seed 31 gap_y -7.7 | oracle  213 | none  439 sigm  253 entr  457 cvar  250 attr  250
+
+oracle: reached 32/32, median time 200 frames
+
+policy         reached  median t  vs oracle  headroom rec  looks  @gap  @decoy  contacts
+none           32/32         239      1.20x           0%    0.0   0.0     0.0       0.0
+sigma          32/32         246      1.23x         -60%    4.0   0.0     0.0       0.0
+entropy        32/32         268      1.34x         -33%    1.8   0.2     0.0       0.0
+cvar           32/32         256      1.28x         -55%    4.0   0.7     0.0       0.0
+attribution    32/32         256      1.28x         -55%    4.0   0.7     0.0       0.0
+
+policy         hard: median t  easy: median t   (hard = gap on the far side)
+none                      414             224
+sigma                     250             246
+entropy                   424             246
+cvar                      248             319
+attribution               248             319
+oracle                    197             204
+
+paired vs attribution (per-seed time difference, negative = attribution faster)
+  vs none         median     +12 frames, attribution faster on 14/32 seeds
+  vs sigma        median      -2 frames, attribution faster on 23/32 seeds
+  vs entropy      median     -26 frames, attribution faster on 20/32 seeds
+  vs cvar         median      +0 frames, attribution faster on 0/32 seeds
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/results_gap.json
