@@ -26,6 +26,25 @@ marked. Reviewers: attack this document. Two experiments are IN FLIGHT tonight a
 both now COMPLETE and folded in below (inert-fill: partial confirm; observability: ~75%
 of decision-relevant mass unconstrained by driving).
 
+> **SETTLING VERDICT (2026-08-07, dfl_capacity.json + dfl_settle.json).** The capacity
+> ladder killed the softmin decision loss (diverges to 7m-RMSE degenerate fills, regret
+> worse than zero-fill) and crowned cost-space as the survivor (rung-2: 0.257 vs MSE 0.582,
+> p=0.003; beats the tuned one-parameter distance baseline p=0.024, which now recovers 58%
+> of the gap vs 83% at linear scale -- a real but modest learning residual). But the
+> settling tests close the deployment question NEGATIVELY for this stack: on real MPPI
+> elites the cost-space edge is n.s. at the choice level (p=0.088, 38/80 ties) and
+> REVERSES significantly at the generation level (planner planning ON the cost-space fill:
+> MSE better, p=0.0097) -- the task-shaped map's worse absolute geometry corrupts
+> CostToGo/lattice candidate generation. NEW INSIGHT, arguably the thread's most
+> publishable sentence: THE PLANNING MAP HAS TWO CONSUMERS with different needs --
+> candidate GENERATION wants geometric fidelity, candidate CHOICE wants decision shaping --
+> and optimizing the single map for choice harms generation. Also standing: MSE is flat in
+> capacity (0.60 -> 0.58 despite patch inputs; conditional-mean fills are the problem, not
+> estimation error) -- the irreducible-ambiguity theory confirmed. The DFL thread as a
+> METHOD paper is dead on this stack; its findings (dual-consumer, capacity-flatness,
+> softmin degeneracy, observability gap, discover-then-compress x4) fold into the
+> characterisation program.
+
 ## Working title
 
 **Learning Planning Maps: Decision-Focused Training of Terrain Perception Through
