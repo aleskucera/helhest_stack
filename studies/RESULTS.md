@@ -213,7 +213,8 @@ rather than quietly keeping the n=12 numbers.
    better, but it wins on only 15/32 seeds: large wins where the default guesses wrong, small
    losses everywhere else. In B it is significantly worse.
 3. The looks are spent **unconditionally**. I predicted that deciding *whether* to observe
-   (C5) would keep the wins and drop the losses. **It did not — see §6c.**
+   (C5) would keep the wins and drop the losses. **It did not — see §6c.** The actual cause is
+   §6d: single-plan attribution is confirmatory, and no gating rule repairs that.
 4. Variant A's structural finding stands: where the critical feature is an **aperture**, sight
    passes through it, so "where can I see most" and "where does my plan depend" partly
    coincide — which is why entropy still recovers 20% of the headroom there.
@@ -249,6 +250,43 @@ The ungated results are therefore the primary ones; `LOOK_THRESHOLD` is set to 0
 run is kept for the record. **This is the third of my own proposed fixes that measurement
 refuted** (sub-cell refinement, the analytic Hessian, and now this), which is the methodology
 working rather than failing.
+
+### 6d. Why no policy beats abstention — the confirmatory loop
+
+`studies/bench/diagnose_confirmatory.py`
+
+Attribution loses ~61 frames on easy seeds against a look budget of only 32, and the extra 30
+come from **driving 2.5 m further**. Looking makes the route worse, not merely slower. On 9 of
+17 easy seeds it finds the gap *later* than doing nothing (seed 27: frame 160 vs 75).
+
+On seed 27 the gap is at bearing **−42°** from the start. Attribution's four looks go
+**[−3°, +13°, +63°, −86°]** — the first three straight ahead or at the opposite side. The robot
+drives to y = **+4.7 m**, the wrong way.
+
+**The mechanism.** Attribution aims along the *current plan's* route, computed on a belief
+where unknown = flat = passable. Look 1 reveals the wall on that route → the cost-to-go
+reroutes toward the nearest apparently-free edge, which is merely the boundary of what has been
+observed, an artifact of sensing rather than of the world → attribution aims along the *new*
+route, confirming more wall on the side it just committed to → repeat. The policy chases its
+own commitment. The null baseline, never looking, sweeps broadly with its 180° short-range
+sensing and stumbles onto the gap.
+
+> **Naive decision-focused sensing is confirmatory, not exploratory.** It looks where the plan
+> already goes, which tends to *confirm* the plan's assumptions rather than test them. In a
+> routing problem the informative look is at the alternative the plan **rejected** — precisely
+> where sensitivity is low under the current plan. `∂J/∂h` for a single committed plan cannot
+> see it, by construction.
+
+**This is an implementation error, not a flaw in the idea.** `SENSITIVITY_PLAN.md` §1 specifies
+attribution over *"the elite **set**'s cost variance"* — plural. Attributing over one committed
+plan is what produces the loop. The fix follows directly: attribute over the elite set and look
+where the plans **disagree**. A cell every candidate route agrees about is worthless to observe
+however sensitive the chosen plan is to it; a cell that separates the top routes is worth
+everything. **Untested** — it is the highest-value open experiment.
+
+Consequences for reading §6: attribution > entropy (p = 0.007) stands and is if anything
+*understated*, since it won while handicapped by this loop. "Beats entropy but not abstention"
+should be read as a property of **single-plan** attribution specifically.
 
 ## 7. What is **not** established
 
