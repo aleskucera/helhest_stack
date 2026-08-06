@@ -1,5 +1,24 @@
 # DFL paper claims draft — for adversarial review
 
+> **REVIEW BANNER (2026-08-07, methods red-team + live-elite check): the claims below are
+> now known to overstate.** (1) A ONE-PARAMETER baseline — MSE weights + a tuned coefficient
+> on the distance-to-observed feature ("fill lower the farther from data") — recovers 83%
+> of the decision-training gap (regret 0.325 vs 0.269) and is statistically
+> indistinguishable from it (p=0.18). The "shaped error / planning map" mechanism is largely
+> a distance artifact (relevant cells sit 3.8x closer to observed ground, definitionally).
+> (2) decision vs cost_space: p=0.099, n.s. (3) On real MPPI elites the decision-vs-MSE edge
+> is n.s. (p=0.31-0.74; 56% ties); only decision-vs-zero-fill survives (p=4e-8). (4) The C2
+> factorization claim has a live alternative explanation (sigma miscalibrated for the MSE
+> model's actual residuals) pending a calibrated-sigma rerun. (5) "Virgin" seeds are virgin
+> w.r.t. weights only; design choices were shaped on overlapping seed ranges. (6)
+> "Pre-registered" = pilot-informed same-session; describe it as such. Rev-2 of this
+> document will restructure around what survives: decision-training as a DISCOVERY procedure
+> whose learned solution compresses to a shippable heuristic — the same
+> discover-then-compress pattern as the sensing result (support -> corridor mask) and the
+> risk result (CVaR -> bracket). Required experiments before any submission: distance-shift
+> baseline in every table; distance-matched stratification; calibrated-sigma ablation rerun;
+> clean seed block (5000+); route-level (lattice corridor) evaluation.
+
 Written 2026-08-07 (evening of the first results). This is the contribution skeleton of the
 intended SECOND paper (the learning paper; companion to the characterisation/workshop paper
 in WORKSHOP_DRAFT.md + CLAIMS.md). Stated as it would be at submission, evidence status
