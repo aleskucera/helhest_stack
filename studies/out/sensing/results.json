@@ -1,0 +1,1309 @@
+{
+  "rows": [
+    {
+      "seed": 0,
+      "tau_before": 0.36666666666666664,
+      "policies": {
+        "random": {
+          "tau": 0.31666666666666665,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1109,
+          "gain": 1561.079680849009,
+          "vp": 18
+        },
+        "entropy": {
+          "tau": 0.31666666666666665,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1109,
+          "gain": 255.65869244231166,
+          "vp": 18
+        },
+        "entropy_mi": {
+          "tau": 0.31666666666666665,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1109,
+          "gain": 5413.088296750904,
+          "vp": 18
+        },
+        "swath_var": {
+          "tau": 0.3,
+          "regret": 0.4412059783935547,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1237,
+          "gain": 34.71969223022461,
+          "vp": 19
+        },
+        "swath_sigma": {
+          "tau": 0.31666666666666665,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1109,
+          "gain": 29.43581557452825,
+          "vp": 18
+        },
+        "corridor_mi": {
+          "tau": 0.31666666666666665,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1109,
+          "gain": 611.7879896467294,
+          "vp": 18
+        },
+        "disagreement": {
+          "tau": 0.31666666666666665,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1109,
+          "gain": 8.181118180587134,
+          "vp": 18
+        },
+        "none": {
+          "tau": 0.36666666666666664,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.4666666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 1.070997495541975,
+          "n_revealed": 658,
+          "gain": 0.4666666666666667,
+          "vp": 9
+        }
+      }
+    },
+    {
+      "seed": 1,
+      "tau_before": -0.1,
+      "policies": {
+        "random": {
+          "tau": 0.26666666666666666,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1204,
+          "gain": 1191.6358393171674,
+          "vp": 20
+        },
+        "entropy": {
+          "tau": 0.26666666666666666,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1204,
+          "gain": 196.4937163342335,
+          "vp": 20
+        },
+        "entropy_mi": {
+          "tau": 0.26666666666666666,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1204,
+          "gain": 4159.543040472645,
+          "vp": 20
+        },
+        "swath_var": {
+          "tau": 0.26666666666666666,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1204,
+          "gain": 49.358665466308594,
+          "vp": 20
+        },
+        "swath_sigma": {
+          "tau": 0.55,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839534,
+          "n_revealed": 774,
+          "gain": 35.89872904099546,
+          "vp": 15
+        },
+        "corridor_mi": {
+          "tau": 0.55,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839534,
+          "n_revealed": 774,
+          "gain": 754.3364597427744,
+          "vp": 15
+        },
+        "disagreement": {
+          "tau": 0.55,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839534,
+          "n_revealed": 774,
+          "gain": 24.36953291883458,
+          "vp": 15
+        },
+        "none": {
+          "tau": -0.1,
+          "regret": 0.7529373168945312,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.5666666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 804,
+          "gain": 0.5666666666666667,
+          "vp": 18
+        }
+      }
+    },
+    {
+      "seed": 2,
+      "tau_before": 0.18333333333333332,
+      "policies": {
+        "random": {
+          "tau": 0.23333333333333334,
+          "regret": 3.3389854431152344,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1262,
+          "gain": 1656.704784441487,
+          "vp": 16
+        },
+        "entropy": {
+          "tau": 0.23333333333333334,
+          "regret": 3.3389854431152344,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1262,
+          "gain": 257.04417905453863,
+          "vp": 16
+        },
+        "entropy_mi": {
+          "tau": 0.23333333333333334,
+          "regret": 3.3389854431152344,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1262,
+          "gain": 5699.141093451199,
+          "vp": 16
+        },
+        "swath_var": {
+          "tau": 0.11666666666666667,
+          "regret": 3.3389854431152344,
+          "top1": false,
+          "time_cost": 2.2141994991083953,
+          "n_revealed": 954,
+          "gain": 26.180185317993164,
+          "vp": 17
+        },
+        "swath_sigma": {
+          "tau": 0.23333333333333334,
+          "regret": 3.3389854431152344,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1262,
+          "gain": 21.631650537345664,
+          "vp": 16
+        },
+        "corridor_mi": {
+          "tau": 0.5,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1075,
+          "gain": 476.6896230009025,
+          "vp": 18
+        },
+        "disagreement": {
+          "tau": 0.5,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1075,
+          "gain": 10.866071665037225,
+          "vp": 18
+        },
+        "none": {
+          "tau": 0.18333333333333332,
+          "regret": 3.3389854431152344,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.5166666666666667,
+          "regret": 1.2679977416992188,
+          "top1": false,
+          "time_cost": 0.642598497325185,
+          "n_revealed": 917,
+          "gain": 0.5166666666666667,
+          "vp": 21
+        }
+      }
+    },
+    {
+      "seed": 3,
+      "tau_before": -0.23333333333333334,
+      "policies": {
+        "random": {
+          "tau": 0.1,
+          "regret": 1.1573104858398438,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1038,
+          "gain": 1627.3509859829405,
+          "vp": 19
+        },
+        "entropy": {
+          "tau": 0.1,
+          "regret": 1.1573104858398438,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1038,
+          "gain": 279.536793645325,
+          "vp": 19
+        },
+        "entropy_mi": {
+          "tau": 0.1,
+          "regret": 1.1573104858398438,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1038,
+          "gain": 5820.346801119678,
+          "vp": 19
+        },
+        "swath_var": {
+          "tau": 0.13333333333333333,
+          "regret": 1.1573104858398438,
+          "top1": false,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1257,
+          "gain": 42.91229248046875,
+          "vp": 20
+        },
+        "swath_sigma": {
+          "tau": 0.05,
+          "regret": 1.1573104858398438,
+          "top1": false,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1071,
+          "gain": 34.95918316452403,
+          "vp": 18
+        },
+        "corridor_mi": {
+          "tau": 0.05,
+          "regret": 1.1573104858398438,
+          "top1": false,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1071,
+          "gain": 734.6014144633451,
+          "vp": 18
+        },
+        "disagreement": {
+          "tau": 0.05,
+          "regret": 1.1573104858398438,
+          "top1": false,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1071,
+          "gain": 43.891687061823504,
+          "vp": 18
+        },
+        "none": {
+          "tau": -0.23333333333333334,
+          "regret": 1.1573104858398438,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.13333333333333333,
+          "regret": 1.1573104858398438,
+          "top1": false,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1257,
+          "gain": 0.13333333333333333,
+          "vp": 20
+        }
+      }
+    },
+    {
+      "seed": 4,
+      "tau_before": 0.6166666666666667,
+      "policies": {
+        "random": {
+          "tau": 0.4666666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1045,
+          "gain": 1397.6214605524392,
+          "vp": 20
+        },
+        "entropy": {
+          "tau": 0.4666666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1045,
+          "gain": 229.52953721035254,
+          "vp": 20
+        },
+        "entropy_mi": {
+          "tau": 0.4666666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1045,
+          "gain": 4901.868072601688,
+          "vp": 20
+        },
+        "swath_var": {
+          "tau": 0.5166666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 965,
+          "gain": 38.21089553833008,
+          "vp": 19
+        },
+        "swath_sigma": {
+          "tau": 0.5166666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839534,
+          "n_revealed": 1070,
+          "gain": 29.523231784822585,
+          "vp": 15
+        },
+        "corridor_mi": {
+          "tau": 0.5166666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839534,
+          "n_revealed": 1070,
+          "gain": 637.6678196730654,
+          "vp": 15
+        },
+        "disagreement": {
+          "tau": 0.5166666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839534,
+          "n_revealed": 1070,
+          "gain": 30.850461456920648,
+          "vp": 15
+        },
+        "none": {
+          "tau": 0.6166666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.7166666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 1.4993964937587645,
+          "n_revealed": 521,
+          "gain": 0.7166666666666667,
+          "vp": 27
+        }
+      }
+    },
+    {
+      "seed": 5,
+      "tau_before": -0.35,
+      "policies": {
+        "random": {
+          "tau": 0.3,
+          "regret": 1.8680572509765625,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1634,
+          "gain": 1953.0456948903502,
+          "vp": 16
+        },
+        "entropy": {
+          "tau": 0.3,
+          "regret": 1.8680572509765625,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1634,
+          "gain": 316.13661233860597,
+          "vp": 16
+        },
+        "entropy_mi": {
+          "tau": 0.3,
+          "regret": 1.8680572509765625,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1634,
+          "gain": 6807.69000884691,
+          "vp": 16
+        },
+        "swath_var": {
+          "tau": 0.3,
+          "regret": 1.8680572509765625,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1634,
+          "gain": 54.334373474121094,
+          "vp": 16
+        },
+        "swath_sigma": {
+          "tau": -0.03333333333333333,
+          "regret": 7.364540100097656,
+          "top1": false,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1376,
+          "gain": 42.136053672522976,
+          "vp": 18
+        },
+        "corridor_mi": {
+          "tau": -0.03333333333333333,
+          "regret": 7.364540100097656,
+          "top1": false,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1376,
+          "gain": 898.8705288687718,
+          "vp": 18
+        },
+        "disagreement": {
+          "tau": 0.3,
+          "regret": 1.8680572509765625,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1634,
+          "gain": 54.66861142283959,
+          "vp": 16
+        },
+        "none": {
+          "tau": -0.35,
+          "regret": 5.430631637573242,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.3,
+          "regret": 1.8680572509765625,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1634,
+          "gain": 0.3,
+          "vp": 16
+        }
+      }
+    },
+    {
+      "seed": 6,
+      "tau_before": 0.11666666666666667,
+      "policies": {
+        "random": {
+          "tau": 0.35,
+          "regret": 1.2348766326904297,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 990,
+          "gain": 1965.7787419723609,
+          "vp": 19
+        },
+        "entropy": {
+          "tau": 0.35,
+          "regret": 1.2348766326904297,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 990,
+          "gain": 324.9583178517548,
+          "vp": 19
+        },
+        "entropy_mi": {
+          "tau": 0.35,
+          "regret": 1.2348766326904297,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 990,
+          "gain": 6892.634818417202,
+          "vp": 19
+        },
+        "swath_var": {
+          "tau": 0.4166666666666667,
+          "regret": 1.2348766326904297,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1220,
+          "gain": 55.744327545166016,
+          "vp": 16
+        },
+        "swath_sigma": {
+          "tau": 0.35,
+          "regret": 1.2348766326904297,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 990,
+          "gain": 39.03723618209676,
+          "vp": 19
+        },
+        "corridor_mi": {
+          "tau": 0.35,
+          "regret": 1.2348766326904297,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 990,
+          "gain": 834.0398430616381,
+          "vp": 19
+        },
+        "disagreement": {
+          "tau": 0.4166666666666667,
+          "regret": 1.2348766326904297,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1220,
+          "gain": 51.947024523667494,
+          "vp": 16
+        },
+        "none": {
+          "tau": 0.11666666666666667,
+          "regret": 1.2348766326904297,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.4666666666666667,
+          "regret": 1.2348766326904297,
+          "top1": false,
+          "time_cost": 1.642598497325185,
+          "n_revealed": 1092,
+          "gain": 0.4666666666666667,
+          "vp": 22
+        }
+      }
+    },
+    {
+      "seed": 7,
+      "tau_before": 0.65,
+      "policies": {
+        "random": {
+          "tau": 0.7,
+          "regret": 0.0118255615234375,
+          "top1": false,
+          "time_cost": 2.2141994991083953,
+          "n_revealed": 1081,
+          "gain": 1470.9652942967546,
+          "vp": 17
+        },
+        "entropy": {
+          "tau": 0.7,
+          "regret": 0.0118255615234375,
+          "top1": false,
+          "time_cost": 2.2141994991083953,
+          "n_revealed": 1081,
+          "gain": 247.59369918102408,
+          "vp": 17
+        },
+        "entropy_mi": {
+          "tau": 0.7,
+          "regret": 0.0118255615234375,
+          "top1": false,
+          "time_cost": 2.2141994991083953,
+          "n_revealed": 1081,
+          "gain": 5211.591100800306,
+          "vp": 17
+        },
+        "swath_var": {
+          "tau": 0.7,
+          "regret": 0.0118255615234375,
+          "top1": false,
+          "time_cost": 2.2141994991083953,
+          "n_revealed": 1081,
+          "gain": 34.0544548034668,
+          "vp": 17
+        },
+        "swath_sigma": {
+          "tau": 0.7,
+          "regret": 0.0118255615234375,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 482,
+          "gain": 25.626201612532242,
+          "vp": 19
+        },
+        "corridor_mi": {
+          "tau": 0.7,
+          "regret": 0.0118255615234375,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 482,
+          "gain": 531.3807661891999,
+          "vp": 19
+        },
+        "disagreement": {
+          "tau": 0.7166666666666667,
+          "regret": 0.0118255615234375,
+          "top1": false,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1002,
+          "gain": 6.565635202632601,
+          "vp": 18
+        },
+        "none": {
+          "tau": 0.65,
+          "regret": 0.113861083984375,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.8,
+          "regret": 0.113861083984375,
+          "top1": false,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 852,
+          "gain": 0.8,
+          "vp": 20
+        }
+      }
+    },
+    {
+      "seed": 8,
+      "tau_before": -0.26666666666666666,
+      "policies": {
+        "random": {
+          "tau": 0.65,
+          "regret": 0.47249603271484375,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1537,
+          "gain": 1954.507046423656,
+          "vp": 16
+        },
+        "entropy": {
+          "tau": 0.65,
+          "regret": 0.47249603271484375,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1537,
+          "gain": 329.47728931952753,
+          "vp": 16
+        },
+        "entropy_mi": {
+          "tau": 0.65,
+          "regret": 0.47249603271484375,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1537,
+          "gain": 6895.9083332259615,
+          "vp": 16
+        },
+        "swath_var": {
+          "tau": 0.65,
+          "regret": 0.47249603271484375,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1537,
+          "gain": 58.99224853515625,
+          "vp": 16
+        },
+        "swath_sigma": {
+          "tau": 0.65,
+          "regret": 0.47249603271484375,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1537,
+          "gain": 44.18556393765812,
+          "vp": 16
+        },
+        "corridor_mi": {
+          "tau": 0.65,
+          "regret": 0.47249603271484375,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1537,
+          "gain": 923.8127712637265,
+          "vp": 16
+        },
+        "disagreement": {
+          "tau": 0.65,
+          "regret": 0.47249603271484375,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1537,
+          "gain": 38.20388582730352,
+          "vp": 16
+        },
+        "none": {
+          "tau": -0.26666666666666666,
+          "regret": 2.140748977661133,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.65,
+          "regret": 0.47249603271484375,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1537,
+          "gain": 0.65,
+          "vp": 16
+        }
+      }
+    },
+    {
+      "seed": 9,
+      "tau_before": 0.38333333333333336,
+      "policies": {
+        "random": {
+          "tau": 0.43333333333333335,
+          "regret": 0.5149974822998047,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1166,
+          "gain": 1511.405565580562,
+          "vp": 19
+        },
+        "entropy": {
+          "tau": 0.36666666666666664,
+          "regret": 0.6010360717773438,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 952,
+          "gain": 260.144164621016,
+          "vp": 16
+        },
+        "entropy_mi": {
+          "tau": 0.36666666666666664,
+          "regret": 0.6010360717773438,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 952,
+          "gain": 5400.133713246012,
+          "vp": 16
+        },
+        "swath_var": {
+          "tau": 0.43333333333333335,
+          "regret": 0.5149974822998047,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1166,
+          "gain": 42.53889465332031,
+          "vp": 19
+        },
+        "swath_sigma": {
+          "tau": 0.43333333333333335,
+          "regret": 0.5149974822998047,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1166,
+          "gain": 32.77475788970633,
+          "vp": 19
+        },
+        "corridor_mi": {
+          "tau": 0.43333333333333335,
+          "regret": 0.5149974822998047,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1166,
+          "gain": 676.3597073498416,
+          "vp": 19
+        },
+        "disagreement": {
+          "tau": 0.43333333333333335,
+          "regret": 0.5149974822998047,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1166,
+          "gain": 25.67379386957247,
+          "vp": 19
+        },
+        "none": {
+          "tau": 0.38333333333333336,
+          "regret": 0.5149974822998047,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.5833333333333334,
+          "regret": 0.5149974822998047,
+          "top1": false,
+          "time_cost": 2.642598497325185,
+          "n_revealed": 785,
+          "gain": 0.5833333333333334,
+          "vp": 14
+        }
+      }
+    },
+    {
+      "seed": 10,
+      "tau_before": -0.15,
+      "policies": {
+        "random": {
+          "tau": 0.03333333333333333,
+          "regret": 2.7343616485595703,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1303,
+          "gain": 1862.8652256265786,
+          "vp": 19
+        },
+        "entropy": {
+          "tau": 0.03333333333333333,
+          "regret": 2.7343616485595703,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1303,
+          "gain": 311.55068845780374,
+          "vp": 19
+        },
+        "entropy_mi": {
+          "tau": 0.03333333333333333,
+          "regret": 2.7343616485595703,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1303,
+          "gain": 6561.115275701859,
+          "vp": 19
+        },
+        "swath_var": {
+          "tau": 0.03333333333333333,
+          "regret": 2.7343616485595703,
+          "top1": false,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 1303,
+          "gain": 50.547889709472656,
+          "vp": 19
+        },
+        "swath_sigma": {
+          "tau": 0.25,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839534,
+          "n_revealed": 1227,
+          "gain": 40.21478117695572,
+          "vp": 15
+        },
+        "corridor_mi": {
+          "tau": 0.2833333333333333,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1272,
+          "gain": 858.8041497590474,
+          "vp": 18
+        },
+        "disagreement": {
+          "tau": 0.25,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839534,
+          "n_revealed": 1227,
+          "gain": 59.110971441889426,
+          "vp": 15
+        },
+        "none": {
+          "tau": -0.15,
+          "regret": 1.940469741821289,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.5666666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 1.070997495541975,
+          "n_revealed": 702,
+          "gain": 0.5666666666666667,
+          "vp": 9
+        }
+      }
+    },
+    {
+      "seed": 11,
+      "tau_before": -0.26666666666666666,
+      "policies": {
+        "random": {
+          "tau": 0.21666666666666667,
+          "regret": 1.2723217010498047,
+          "top1": false,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1216,
+          "gain": 1519.2027445910385,
+          "vp": 18
+        },
+        "entropy": {
+          "tau": 0.21666666666666667,
+          "regret": 1.2723217010498047,
+          "top1": false,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1216,
+          "gain": 253.53728943689765,
+          "vp": 18
+        },
+        "entropy_mi": {
+          "tau": 0.21666666666666667,
+          "regret": 1.2723217010498047,
+          "top1": false,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1216,
+          "gain": 5380.305079364076,
+          "vp": 18
+        },
+        "swath_var": {
+          "tau": 0.0,
+          "regret": 1.2723217010498047,
+          "top1": false,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 1102,
+          "gain": 36.51661682128906,
+          "vp": 16
+        },
+        "swath_sigma": {
+          "tau": 0.21666666666666667,
+          "regret": 1.2723217010498047,
+          "top1": false,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1216,
+          "gain": 32.0741338161349,
+          "vp": 18
+        },
+        "corridor_mi": {
+          "tau": 0.21666666666666667,
+          "regret": 1.2723217010498047,
+          "top1": false,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1216,
+          "gain": 680.0976261780083,
+          "vp": 18
+        },
+        "disagreement": {
+          "tau": 0.21666666666666667,
+          "regret": 1.2723217010498047,
+          "top1": false,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1216,
+          "gain": 44.0136261348902,
+          "vp": 18
+        },
+        "none": {
+          "tau": -0.26666666666666666,
+          "regret": 4.222404479980469,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.5166666666666667,
+          "regret": 1.2723217010498047,
+          "top1": false,
+          "time_cost": 2.0709974955419748,
+          "n_revealed": 755,
+          "gain": 0.5166666666666667,
+          "vp": 10
+        }
+      }
+    },
+    {
+      "seed": 12,
+      "tau_before": -0.08333333333333333,
+      "policies": {
+        "random": {
+          "tau": 0.15,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 610,
+          "gain": 1675.1866332130462,
+          "vp": 16
+        },
+        "entropy": {
+          "tau": 0.15,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 610,
+          "gain": 283.424116288775,
+          "vp": 16
+        },
+        "entropy_mi": {
+          "tau": 0.15,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 610,
+          "gain": 5959.7150451220305,
+          "vp": 16
+        },
+        "swath_var": {
+          "tau": 0.15,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 1.2141994991083953,
+          "n_revealed": 610,
+          "gain": 37.35517120361328,
+          "vp": 16
+        },
+        "swath_sigma": {
+          "tau": 0.06666666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839534,
+          "n_revealed": 963,
+          "gain": 32.20174625822271,
+          "vp": 15
+        },
+        "corridor_mi": {
+          "tau": 0.06666666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839534,
+          "n_revealed": 963,
+          "gain": 674.2425717775077,
+          "vp": 15
+        },
+        "disagreement": {
+          "tau": 0.06666666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839534,
+          "n_revealed": 963,
+          "gain": 45.78980244713961,
+          "vp": 15
+        },
+        "none": {
+          "tau": -0.08333333333333333,
+          "regret": 4.428754806518555,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.21666666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 1.2141994991083949,
+          "n_revealed": 837,
+          "gain": 0.21666666666666667,
+          "vp": 19
+        }
+      }
+    },
+    {
+      "seed": 13,
+      "tau_before": -0.43333333333333335,
+      "policies": {
+        "random": {
+          "tau": 0.6,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1356,
+          "gain": 1810.5539804518874,
+          "vp": 18
+        },
+        "entropy": {
+          "tau": 0.6,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1356,
+          "gain": 303.9480556446946,
+          "vp": 18
+        },
+        "entropy_mi": {
+          "tau": 0.6,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1356,
+          "gain": 6459.063897016188,
+          "vp": 18
+        },
+        "swath_var": {
+          "tau": 0.6,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1356,
+          "gain": 50.70931625366211,
+          "vp": 18
+        },
+        "swath_sigma": {
+          "tau": 0.6,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1356,
+          "gain": 43.62505536903312,
+          "vp": 18
+        },
+        "corridor_mi": {
+          "tau": 0.6,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1356,
+          "gain": 917.7988883915965,
+          "vp": 18
+        },
+        "disagreement": {
+          "tau": 0.6,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.21419949910839486,
+          "n_revealed": 1356,
+          "gain": 47.00890583566499,
+          "vp": 18
+        },
+        "none": {
+          "tau": -0.43333333333333335,
+          "regret": 8.247241973876953,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.6166666666666667,
+          "regret": 0.0,
+          "top1": true,
+          "time_cost": 0.642598497325185,
+          "n_revealed": 1296,
+          "gain": 0.6166666666666667,
+          "vp": 21
+        }
+      }
+    },
+    {
+      "seed": 14,
+      "tau_before": -0.3333333333333333,
+      "policies": {
+        "random": {
+          "tau": 0.2,
+          "regret": 2.482847213745117,
+          "top1": false,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1155,
+          "gain": 1505.0730683985698,
+          "vp": 20
+        },
+        "entropy": {
+          "tau": 0.2,
+          "regret": 2.482847213745117,
+          "top1": false,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1155,
+          "gain": 240.889708891827,
+          "vp": 20
+        },
+        "entropy_mi": {
+          "tau": 0.2,
+          "regret": 2.482847213745117,
+          "top1": false,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1155,
+          "gain": 5223.790865726897,
+          "vp": 20
+        },
+        "swath_var": {
+          "tau": 0.2,
+          "regret": 2.482847213745117,
+          "top1": false,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1155,
+          "gain": 32.8277473449707,
+          "vp": 20
+        },
+        "swath_sigma": {
+          "tau": 0.2,
+          "regret": 2.482847213745117,
+          "top1": false,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1155,
+          "gain": 21.149732362207317,
+          "vp": 20
+        },
+        "corridor_mi": {
+          "tau": 0.2,
+          "regret": 2.482847213745117,
+          "top1": false,
+          "time_cost": 2.214199499108395,
+          "n_revealed": 1155,
+          "gain": 458.07733191629666,
+          "vp": 20
+        },
+        "disagreement": {
+          "tau": -0.05,
+          "regret": 2.482847213745117,
+          "top1": false,
+          "time_cost": 0.21419949910839534,
+          "n_revealed": 804,
+          "gain": 19.314870203561192,
+          "vp": 15
+        },
+        "none": {
+          "tau": -0.3333333333333333,
+          "regret": 2.482847213745117,
+          "top1": false,
+          "time_cost": 0.0,
+          "n_revealed": 0,
+          "gain": 0.0,
+          "vp": -1
+        },
+        "oracle": {
+          "tau": 0.3,
+          "regret": 0.39710044860839844,
+          "top1": false,
+          "time_cost": 2.2141994991083953,
+          "n_revealed": 955,
+          "gain": 0.3,
+          "vp": 17
+        }
+      }
+    }
+  ]
+}
