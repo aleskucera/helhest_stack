@@ -182,7 +182,11 @@ class Harness:
             self.sim, scene.cell, self.robot_params.wheel_radius
         )
 
+        # Friction must be loaded here, not only in `_reset_terrain`: a caller that drives the
+        # terrain itself and then calls `forward` would otherwise roll out on mu = 0 and get a
+        # NaN pose out of the traction solve, with the settle still looking plausible.
         self.sim.set_terrain(self._raw0)
+        wp.copy(self.sim.friction, self._fric0)
         self.sim._contact()
         self.sim._gather()
         with wp.ScopedDevice(self.device):

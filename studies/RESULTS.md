@@ -7,9 +7,12 @@ against it, including the parts that came out against the plan.
 **One-line summary.** The IFT adjoint through the quasi-static settle is correct. First-order
 attribution is *not* adequate at realistic map uncertainty, and the reason is curvature rather
 than non-differentiability — a second-order correction fixes 90% of it, at a cost that fits in
-a control tick. In closed loop, decision-focused sensing beats information-theoretic sensing
-when the decision-critical feature is opaque, and ties with it when that feature is an
-aperture. Statistical power is the weakest part and is stated as such.
+a control tick. Decision-focused sensing beats information-theoretic sensing convincingly —
+in open-loop plan ranking at n = 200, entropy is indistinguishable from random while the
+adjoint recovers the true ranking (§7). But most of that margin is *task-awareness*, not the
+derivative: "reveal what you are about to drive over" is as good as the adjoint at small
+sensing budgets and is only overtaken at large ones. The closed-loop benchmark (§6) is weaker
+and its statistical power is the weakest part of the whole study; it is stated as such.
 
 ---
 
@@ -345,7 +348,89 @@ not rediscover it:
 3. headroom (oracle vs abstention) larger than the look budget — 20 frames against a 32-frame
    budget cannot pay, whatever the policy does.
 
-## 7. What is **not** established
+## 7. The open-loop ranking experiment — the claim tested without a closed loop
+
+`studies/bench/ranking.py`, n = 200 seeds, ~90 s. Figure: `studies/out/bench/ranking.png`.
+
+§6 could not settle C4's claim because the closed loop entangled it with route selection, look
+budgets, commitment dynamics, and the confirmatory bug of §6d. So the claim is posed directly,
+as the thing a sampling planner actually does with a cost — **ranking**:
+
+random fractal terrain (12 cm RMS, 0.1 m cells); the robot has observed only a 1.5 m disc and
+inpaints the rest optimistically flat; 16 candidate plans fan out into the unknown. Each policy
+reveals M cells; the plans are re-ranked on the updated belief and scored by **Kendall τ against
+the ranking on ground truth**, plus top-1 accuracy and the true regret of the plan a planner
+would pick. Gradients are the **real taped adjoint** from `DifferentiableSimulator` — the
+engine's own derivative is on trial, not the geometric proxy §7's caveat list flags for §6.
+
+Before sensing: τ = +0.035, top-1 correct 11 %. The belief's ranking is essentially uninformative.
+
+| policy | what it knows | τ@100 | τ@400 | top-1@400 | regret@400 |
+|---|---|---|---|---|---|
+| random | nothing | +0.025 | +0.040 | 12 % | 2.53 |
+| entropy | σ only | +0.017 | +0.015 | 12 % | 2.43 |
+| swath_best | geometry of the incumbent plan | +0.093 | +0.330 | 36 % | 0.93 |
+| attribution | ∂J/∂h of the incumbent plan | +0.095 | +0.142 | 16 % | 1.85 |
+| swath | geometry of the whole plan set | **+0.197** | +0.556 | 45 % | 0.57 |
+| disagreement | Var_k(∂J_k/∂h)·σ² over the set | +0.163 | **+0.648** | 56 % | 0.38 |
+| *oracle* | *the actual belief error* | *+0.397* | *+0.847* | *74 %* | *0.13* |
+
+### What this establishes
+
+**1. Decision-focused beats information-theoretic, decisively.** `disagreement` − `entropy`:
++0.146 at 100 cells (150/199 seeds, p = 4×10⁻¹³) and +0.633 at 400 (**200/200 seeds**,
+p = 1×10⁻⁶⁰). This is the §6 claim, now at n = 200 instead of n = 32 and with the real adjoint.
+
+**2. Entropy is statistically indistinguishable from random** (p = 0.28 at 400 cells) and does
+not improve with budget at all. σ here is a property of the ground (roughness-driven), so
+entropy targets genuinely uncertain cells — they are simply not the cells that decide anything.
+Panel (c) is the whole story: entropy and random reveal cells at 4.9 m mean range and 2.0 m off
+the nearest plan; every task-aware policy sits at ~2.2 m range and ~0.05 m off-plan.
+
+**3. But most of that win is *task-awareness*, not the derivative.** Purely geometric
+"reveal what you are about to drive over" (`swath`) also crushes entropy (+0.180 at 100 cells,
+p = 2×10⁻²⁰) — and at 100 cells it **beats** the adjoint (`disagreement` − `swath` = −0.034,
+p = 0.027). The adjoint only overtakes geometry once the budget covers the corridor:
++0.092 at 400 cells (131/193, p = 8×10⁻⁷) against `swath`, +0.141 (p = 5×10⁻¹⁶) against
+`swath_var`. **The honest claim is a crossover, not a dominance.**
+
+**4. Single-plan attribution — the form §6 deployed — is the weak version, and the deficit is
+not coverage.** Matched against its own geometric shadow (`swath_best`: the same corridor, no
+derivative), it ties at 25 and 100 cells and then **loses badly** at 400: −0.187, 26/196 seeds,
+p = 4×10⁻²⁷. It saturates at τ 0.142 while every plan-set score climbs past 0.6. This is §6d's
+confirmatory loop showing up in open loop, and it is the concrete lesson: **attribution must be
+computed over the candidate set, not the incumbent plan.**
+
+**5. Discriminativeness adds nothing over raw sensitivity.** `disagreement` (variance across
+plans) and `magnitude` (Σ|∂J_k/∂h|) are indistinguishable at every budget (p = 0.51 at 100 and
+400). The elegant "only cells that can reorder the plans matter" argument is not what is doing
+the work — having *any* per-plan gradient is.
+
+### What was ruled out along the way
+
+- **An oracle leak.** `Harness.adjoint` resets the terrain to the *scene's* elevation; building
+  the scene on ground truth silently differentiated at the answer. Fixed by building the scene
+  on the belief. It was worth roughly a third of the effect — `disagreement`@400 fell 0.823 → 0.648.
+- **A rigged entropy baseline.** With a binary σ, entropy has no preference among unobserved
+  cells and its "choice" is the argsort's tie order — it scored *below* random. Fixed with a
+  spatially structured σ and a random tie-break applied to every policy.
+- **The "inert reveals" hypothesis.** Since the envelope is a max over a spherical cap,
+  revealing one gradient-hot cell among unrevealed neighbours might change nothing. Measured
+  directly (`rch`: envelope cells moved per cell revealed) and **refuted** — `random` has the
+  *highest* reach (7.8) and the *worst* τ. Cap-pooling the score, which the hypothesis implies,
+  made things worse (0.163 → 0.104 at 100 cells).
+- **`Harness.forward` on uninitialised friction.** Any caller that drove the terrain itself and
+  called `forward` rolled out on μ = 0 and got a NaN pose with a plausible-looking settle. Only
+  `_reset_terrain` loaded friction; it is now loaded at construction.
+
+### What it does not establish
+
+It is open-loop: no commitment, no re-planning, no cost of looking. A policy that ranks a fixed
+plan set well need not drive better — §6 is the evidence that the gap is real. The plan set is a
+fixed fan rather than an MPPI elite set, the cost is `settle + clear_soft` rather than the live
+planner cost, and the terrain is still synthetic with a placeholder σ.
+
+## 8. What is **not** established
 
 - **Only one benchmark claim is statistically supported** (attribution > entropy in variant A,
   p = 0.007). Everything else is directional. Going from n = 12 to n = 32 overturned variant
@@ -361,11 +446,17 @@ not rediscover it:
 - **The sensitivity used in the loop is a geometric proxy**, not a taped adjoint per candidate
   bearing. It has the adjoint's defining property (support only where the committed plan can
   physically touch, zero on the decoy) but the loop does not exercise the engine's own gradient.
+  §7 closes this for the *open-loop* claim only — and finds that a geometric proxy is in fact
+  competitive with the real adjoint below 400 revealed cells, so the §6 loop's use of a proxy
+  is now known to be a smaller compromise than it looked, and its results correspondingly less
+  attributable to the adjoint.
+- **Ranking is not driving.** §7's win is over a fixed plan set with no commitment, no
+  re-planning and no cost of looking. §6 is the standing evidence that this gap is real.
 - **Study C (C8) not started**, and the ProTerrain methods comparison (§3) has not been done.
 - The second-order curvature is finite-difference-derived at the exact σ — deliberately the
   *ceiling*. §5 shows it is affordable, but affordability is not the same as implemented.
 
-## 8. Reproducing
+## 9. Reproducing
 
 ```
 .venv/bin/python -m studies.adjoint.study_a           # ~1 min
@@ -379,6 +470,7 @@ not rediscover it:
 .venv/bin/python -m studies.bench.run_bench --seeds 32 --variant gap
 .venv/bin/python -m studies.bench.run_bench --seeds 32 --variant corridor
 .venv/bin/python -m studies.bench.analyse
+.venv/bin/python -m studies.bench.ranking       # open-loop ranking, n=200, ~90 s
 ```
 
 Production changes made by this work are confined to `engine/step.py`,
