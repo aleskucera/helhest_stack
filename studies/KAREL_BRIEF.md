@@ -50,6 +50,19 @@ right plan), with hindsight self-supervision (later observations label earlier i
 Caveats: linear 6-feature model on synthetic worlds — capacity ladder, sigma-head variant,
 plan-family transfer, and real-bag hindsight training are the Phase-B list.
 
+**On the ground-truth problem of trajectory-self-supervision** (the honest objection to the
+whole MonoForce-style program: terrain->motion is many-to-one, so trajectory-fitting
+validates an equivalence class, not the terrain). Proposed falsifiable evaluation ladder for
+finding 3: (i) observability/relevance overlap analysis in sim — the trajectory Jacobian
+gives the subspace driving constrains, the decision adjoint gives the subspace planning
+needs; measure the overlap, claim only the identifiable part (pilot running); (ii)
+prospective contact verification — predict supporting height BEFORE contact, verify from
+wheel kinematics AT contact (prediction and verification as separate events); (iii) a small
+mowed-plot gold set (scan vegetated, mow, scan bare — the latent measured directly); (iv)
+cross-embodiment falsification via a known payload change (real terrain must predict the
+new motion through the same physics; a fudge won't); (v) randomized paired field trials for
+the decision claim (the counterfactual problem answered clinically, not cleverly).
+
 ## The asks
 
 1. **Workshop paper** (`WORKSHOP_DRAFT.md`, complete): co-authorship posture, venue pick
