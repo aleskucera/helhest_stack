@@ -1,5 +1,10 @@
 # Adjoint map-cell sensitivity for decision-focused sensing — results
 
+> **Read `FINDINGS.md` first.** It states every result once, in its final corrected form,
+> organised by what we believe rather than by the order it was found. This document is the
+> detailed record: it keeps the derivation history and the in-place correction banners, so
+> where the two differ, `FINDINGS.md` is current.
+
 Everything here is reproducible from this repo. Each claim names the script that produces it.
 Read `SENSITIVITY_PLAN.md` first for the framing; this document reports what was measured
 against it, including the parts that came out against the plan.
