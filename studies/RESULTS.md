@@ -21,8 +21,13 @@ cell-selection strategy can recover it (7d). Tested on the OTHER use of the same
 estimating a plan's risk for a CVaR cost, against Monte-Carlo truth and the STEP baseline --
 the adjoint does not win there either (7f): adding a risk term clearly helps (p = 3e-04), but
 first-order FOSM is twice as over-conservative as a per-timestep Gaussian heuristic and makes
-no better decisions than it. The closed-loop benchmark (§6) is the weakest part of the study
-and is stated as such.
+no better decisions than it. Pulling that apart gives the study's unifying result (7g): the
+adjoint's SUPPORT -- which cells a plan can respond to -- is correct and useful, but its
+MAGNITUDE is not, at realistic sigma. Gradient-weighting a per-cell sigma actually INVERTS the
+risk ordering (p = 6e-11), while the adjoint itself FD-checks to 2.3% at 1 mm and 32% at 1 cm.
+That one distinction explains why sensing works, why it only ties a distance transform, and why
+risk estimation fails. The closed-loop benchmark (§6) is the weakest part of the study and is
+stated as such.
 
 ---
 
@@ -712,6 +717,64 @@ over the patch — **cannot rank the plans at all**: measured spread of `Σ_t σ
 plans is **0.008** with a max against 1.267 with an RMS. A saturating σ field pins the max to the
 cap under every footprint of every plan. Anyone building a per-cell risk cost on a map with
 capped/unknown-cell σ should aggregate with an RMS or a mean, not a max.
+
+### 7g. **The gradient's support is informative; its magnitude is not.** The unifying result
+
+`studies/bench/risk.py`, n = 100. This began as a check of the objection that FOSM *must* beat a
+path-σ surrogate, "because it is the same thing multiplied by gradients, so we know where it
+actually hurts." That objection confounds two changes at once — the **weighting** and the
+**norm** — so both were varied independently, scored by the ordering each induces over plans
+against the MC truth (units therefore cancel):
+
+| surrogate | τ vs true risk |
+|---|---|
+| `unweighted_L1` = Σ_t σ_t | **+0.101** |
+| `unweighted_L2` = √(Σ_t σ_t²) | +0.099 |
+| `weighted_L1` = Σ_i \|g_i\|σ_i | **−0.179** |
+| `weighted_L2` = √(Σ_i (g_iσ_i)²) | −0.158 |
+| `fosm` (correlated) | −0.094 |
+
+**Weighting by the gradient does not merely fail to help — it inverts the ordering.** At fixed
+norm: L1 −0.280 (18/100, p = 6×10⁻¹¹), L2 −0.258 (19/98, p = 7×10⁻¹⁰). The norm is nearly
+irrelevant by comparison (−0.001, p = 0.34 unweighted; +0.021, p = 0.010 weighted).
+
+**It is not a bug.** Finite differences against the adjoint on this exact belief, at the
+highest-\|g\| cells: worst relative error **2.3% at ε = 1 mm**. The gradient is right. At
+**ε = 1 cm the same check is 32% off**, and σ here is 2–30 cm. So the adjoint is exactly correct
+and exactly useless at the scale the uncertainty actually lives at — Study B's validity radius,
+now demonstrated on the decision itself rather than on a variance ratio.
+
+**Why it inverts, rather than merely degrading.** Two compounding reasons:
+
+1. The gradient is evaluated on the **belief**, which is flat wherever unobserved. On a flat
+   plateau the contact arg-max is near-degenerate, so the gradient there is small and largely
+   arbitrary — it reports what *would* matter if the ground were flat, in exactly the region
+   where we have no idea whether it is.
+2. Measured consequence: mean \|g\| is **0.0812 on observed cells against 0.0164 on unobserved**
+   — 5× larger where σ is smallest. The product `g·σ` therefore concentrates its weight where
+   the map is already known and starves the region that carries the uncertainty.
+
+**The unifying reading of the whole study.** The adjoint's *support* — which cells a plan's cost
+can respond to at all — is correct and useful. Its *magnitude* — how much — is not, at realistic
+σ. That single distinction explains results that otherwise look contradictory:
+
+- **§7 sensing works** (`disagreement` beats entropy 200/200) because choosing *where to look*
+  only needs the support: nonzero where a wheel can touch, zero elsewhere.
+- **§7 sensing ties geometry** because a distance transform recovers that same support almost
+  perfectly, for free, without any derivative.
+- **§7f risk estimation fails** because a risk *magnitude* needs the gradient's value, and the
+  value is wrong by 2× at realistic σ.
+
+It also makes a falsifiable prediction for anything built on this next: **any use of the adjoint
+that depends only on where it is nonzero will work, and will be matched by geometry; any use
+that depends on how big it is will fail until the σ-scale problem is solved.** Second-order FOSM
+(§4) is the one candidate fix that targets exactly this, and it is the one experiment left.
+
+**A reporting correction to §7f.** The `est/true risk` column there listed 1.28 for the path-σ
+arm. That number is **not interpretable**: `Σ_t σ_t` has units of metres×timesteps, not cost, so
+its scale is accidental and only its ordering is meaningful. FOSM's 2.04 is a genuine cost-unit
+over-prediction and stands. The two should not have appeared in one column. The decision-quality
+comparison in §7f is also a statistical **tie** (p = 0.19), not a loss.
 
 ## 8. What is **not** established
 

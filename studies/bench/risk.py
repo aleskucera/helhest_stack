@@ -209,6 +209,23 @@ def run_seed(seed: int, family: str, noise: str) -> dict:
         samples[:, k] = _cost(hd.forward(dilate=True))
     del hd
 
+    # --- the 2x2 that unconfounds WEIGHTING from NORM --------------------------------
+    # The path-sigma surrogate and FOSM differ in two ways at once: whether sigma is weighted
+    # by the cost's sensitivity, and whether the aggregation is an L1 sum or an L2 norm. Varying
+    # them independently says which one is doing the work. Scored on the ORDERING they induce
+    # over plans (Kendall tau against the MC truth), so their arbitrary units cancel.
+    sig_flat = sigma.ravel()
+    g_abs = np.abs(grad).reshape(N_PLANS, -1)
+    surro = {
+        "unweighted_L1": sig_t.sum(axis=0),
+        "unweighted_L2": np.sqrt((sig_t**2).sum(axis=0)),
+        "weighted_L1": (g_abs * sig_flat).sum(axis=1),
+        "weighted_L2": np.sqrt(((g_abs * sig_flat) ** 2).sum(axis=1)),
+        "fosm_corr": np.sqrt(
+            [max(fosm_variance(grad[k], sigma, CELL, CORR_LEN), 0.0) for k in range(N_PLANS)]
+        ),
+    }
+
     mc_mean = samples.mean(axis=0)
     mc_cvar = empirical_cvar(samples, ALPHA)
     best = int(np.argmin(mc_cvar))
@@ -234,6 +251,12 @@ def run_seed(seed: int, family: str, noise: str) -> dict:
             rec["cvar_ratio"] = float(np.mean((v - j_bel) / np.maximum(mc_cvar - j_bel, 1e-6)))
         out["arms"][name] = rec
     out["arms"]["mc"] = {"regret": 0.0, "tau": 1.0, "picked_best": True}
+    # Rank each surrogate against the TRUE risk (MC CVaR minus the belief cost), i.e. against
+    # the quantity a risk term is supposed to be proportional to.
+    true_risk = mc_cvar - j_bel
+    out["surrogates"] = {
+        k: {"tau": kendall_tau(v, true_risk), "spread": float(np.ptp(v))} for k, v in surro.items()
+    }
     return out
 
 
@@ -272,6 +295,24 @@ def report(rows: list[dict]) -> None:
         rt = np.mean([r["arms"][a]["cvar_ratio"] for r in rows])
         print(f"{a:<12}{e:>9.3f}{rt:>15.2f}")
     print("  (est/true risk = 1.0 is perfect; >1 over-conservative, <1 over-confident)")
+
+    print("\nDOES GRADIENT WEIGHTING HELP?  2x2 over {weighted, unweighted} x {L1, L2}")
+    print("Kendall tau of each surrogate against the TRUE risk (MC CVaR - J(belief)),")
+    print("scored on ORDERING so the arbitrary units of each surrogate cancel.\n")
+    keys = ("unweighted_L1", "unweighted_L2", "weighted_L1", "weighted_L2", "fosm_corr")
+    print(f"{'surrogate':<16}{'tau vs true risk':>18}")
+    for k in keys:
+        print(f"{k:<16}{np.mean([r['surrogates'][k]['tau'] for r in rows]):>+18.3f}")
+    print("\npaired: does weighting help at a FIXED norm?")
+    for w, u in (("weighted_L1", "unweighted_L1"), ("weighted_L2", "unweighted_L2")):
+        d = np.array([r["surrogates"][w]["tau"] - r["surrogates"][u]["tau"] for r in rows])
+        k, wn, p = sign_test(d)
+        print(f"  {w:<14} - {u:<16} {d.mean():>+7.3f}   better on {wn:>3}/{k:<3}   p={p:.2e}")
+    print("paired: does the norm matter at FIXED weighting?")
+    for a, b in (("unweighted_L2", "unweighted_L1"), ("weighted_L2", "weighted_L1")):
+        d = np.array([r["surrogates"][a]["tau"] - r["surrogates"][b]["tau"] for r in rows])
+        k, wn, p = sign_test(d)
+        print(f"  {a:<14} - {b:<16} {d.mean():>+7.3f}   better on {wn:>3}/{k:<3}   p={p:.2e}")
 
     print("\npaired per seed, regret difference (negative = first arm better)")
     for a, b in (("fosm", "step"), ("fosm", "sum_sigma"), ("fosm", "none"), ("step", "none")):
