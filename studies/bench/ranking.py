@@ -66,6 +66,8 @@ OUT = Path(__file__).resolve().parents[2] / "studies" / "out" / "bench"
 CELL = 0.10  # the real perception resolution (docs/performance.md)
 EXTENT = (9.0, 9.0)  # [m] terrain patch
 N_PLANS = 16
+N_GROUPS = 4  # `hybrid` only: distinct paths
+N_PER_GROUP = N_PLANS // N_GROUPS  # speed profiles riding each path
 T_STEPS = 40
 OBSERVED_RADIUS = 1.5  # [m] the robot has seen only this much
 SIGMA_FLOOR = 0.02  # [m] residual uncertainty even over smooth unobserved ground
@@ -84,6 +86,18 @@ def sign_test(d: np.ndarray) -> tuple[int, int, float]:
         return 0, 0, 1.0
     tail = sum(comb(n, i) for i in range(min(k, n - k) + 1))
     return n, k, min(1.0, 2.0 * tail / 2**n)
+
+
+def tau_within(a: np.ndarray, b: np.ndarray, groups: np.ndarray) -> float:
+    """Mean Kendall tau computed separately inside each group of path-identical plans.
+
+    Plans in one group cross exactly the same cells, so every geometric policy makes the same
+    reveals for all of them and can only reorder them by accident. This is the component of the
+    decision that requires a derivative, isolated from the part geometry can do.
+    """
+    taus = [kendall_tau(a[groups == g], b[groups == g]) for g in np.unique(groups)]
+    taus = [t for t, g in zip(taus, np.unique(groups)) if (groups == g).sum() > 1]
+    return float(np.mean(taus)) if taus else float("nan")
 
 
 def kendall_tau(a: np.ndarray, b: np.ndarray) -> float:
@@ -112,8 +126,95 @@ def _local_relief(h: np.ndarray, rad: int = 2) -> np.ndarray:
     return hi - lo
 
 
-def build_case(seed: int):
-    """Ground truth, the belief, sigma, and K candidate plans fanning into the unknown.
+def _plans_fan(rng: np.random.Generator) -> np.ndarray:
+    """SPATIALLY SEPARATED: a fan of constant-curvature drives. Each plan has its own corridor.
+
+    Here "which plan wins" and "which cells does it cross" are nearly the same question, so a
+    distance transform can answer it without any derivative. This is the easy case for geometry
+    and, as it turns out, the hard case for justifying an adjoint.
+    """
+    turns = np.linspace(-0.55, 0.55, N_PLANS)
+    speeds = 2.6 + 0.5 * rng.standard_normal(N_PLANS)
+    omega = np.zeros((T_STEPS, N_PLANS, 3), np.float32)
+    for k, (t, v) in enumerate(zip(turns, speeds)):
+        omega[:, k, 0] = v - t
+        omega[:, k, 1] = v + t
+        omega[:, k, 2] = v
+    return omega
+
+
+def _plans_speed(rng: np.random.Generator) -> np.ndarray:
+    """SPATIALLY CONFOUNDED: one path, sixteen speed profiles. Same cells, different loading.
+
+    For a differential drive the PATH is set by the ratio of the wheel speeds, not their
+    magnitude -- scaling both wheels by a common factor s(t) retraces the identical curve and
+    only changes the timing along it. So a fixed turn ratio plus profiles s_k(t) that share a
+    mean gives sixteen plans with the same path, the same endpoint and the same cells crossed,
+    differing only in where along the path the robot is slow and where it is fast.
+
+    That is the case the adjoint exists for. `swath` sees sixteen identical corridors and cannot
+    rank them even in principle; `swath_var` sees ~zero variance everywhere and degenerates to
+    its random tie-break. Only a derivative knows that the same cell carries a different WEIGHT
+    for a plan that dwells on it than for one that crosses it quickly.
+
+    (The wheel-lag model means the realised paths are not bit-identical; `coverage_spread` in
+    the output measures the residual, so "same cells" is reported rather than assumed.)
+    """
+    curve = 0.12  # constant wL:wR ratio -> one circular arc, shared by every plan
+    v0 = 2.6
+    amp = 0.55
+    phase = 2.0 * np.pi * np.arange(N_PLANS) / N_PLANS
+    tt = 2.0 * np.pi * np.arange(T_STEPS) / T_STEPS
+    # A whole number of periods, so every profile sums to exactly v0*T: equal arc length, and
+    # therefore the same endpoint, not merely the same shape.
+    s = v0 * (1.0 + amp * np.cos(tt[:, None] + phase[None, :]))  # [T, K]
+    omega = np.empty((T_STEPS, N_PLANS, 3), np.float32)
+    omega[:, :, 0] = s * (1.0 - curve)
+    omega[:, :, 1] = s * (1.0 + curve)
+    omega[:, :, 2] = s
+    return omega
+
+
+def _plans_hybrid(rng: np.random.Generator) -> np.ndarray:
+    """PARTIALLY CONFOUNDED: 4 paths x 4 speed profiles. The case that actually discriminates.
+
+    `speed` turned out to be the WRONG test: when every plan shares one path, the decision-
+    relevant terrain is a single narrow corridor, so "reveal the corridor" is trivially optimal
+    and geometry reaches tau = 1.0. Confounding made the problem easier for geometry, not harder.
+
+    What is needed is confounding *within* a broad area, so the budget still bites. Four paths
+    fan out as in `fan`; four speed profiles ride each path. Geometry can rank ACROSS the four
+    groups -- they occupy different corridors -- but is structurally incapable of ranking WITHIN
+    a group, because those four plans cross exactly the same cells and any purely geometric
+    score assigns them identical selections. The adjoint has no such blind spot.
+
+    `tau_within` isolates precisely that part of the ordering.
+    """
+    curves = np.linspace(-0.2, 0.2, N_GROUPS)  # multiplicative, so the path is fixed per group
+    phase = 2.0 * np.pi * np.arange(N_PER_GROUP) / N_PER_GROUP
+    tt = 2.0 * np.pi * np.arange(T_STEPS) / T_STEPS
+    omega = np.empty((T_STEPS, N_PLANS, 3), np.float32)
+    for g, c in enumerate(curves):
+        for j in range(N_PER_GROUP):
+            s = 2.6 * (1.0 + 0.55 * np.cos(tt + phase[j]))
+            k = g * N_PER_GROUP + j
+            omega[:, k, 0] = s * (1.0 - c)
+            omega[:, k, 1] = s * (1.0 + c)
+            omega[:, k, 2] = s
+    return omega
+
+
+PLAN_FAMILIES = {"fan": _plans_fan, "speed": _plans_speed, "hybrid": _plans_hybrid}
+# Which plans share a path exactly, and are therefore indistinguishable to any geometric score.
+PLAN_GROUPS = {
+    "fan": np.arange(N_PLANS),  # every plan its own corridor
+    "speed": np.zeros(N_PLANS, int),  # one shared corridor
+    "hybrid": np.repeat(np.arange(N_GROUPS), N_PER_GROUP),
+}
+
+
+def build_case(seed: int, family: str = "fan"):
+    """Ground truth, the belief, sigma, and K candidate plans reaching into the unknown.
 
     The Scene is built on the BELIEF, not on the truth. `Harness.adjoint` resets the terrain to
     the scene's own elevation before recording, so a scene built on ground truth would hand
@@ -139,15 +240,9 @@ def build_case(seed: int):
     sigma = np.where(observed, SIGMA_OBSERVED, sigma)
     mu = np.clip(0.6 + 0.1 * np.sin(XX) * np.cos(YY), 0.3, 0.9)
 
-    # K plans: a fan of constant-curvature drives with mild speed variation. Fixed by
-    # construction, so no plan set can be tuned to favour a policy.
-    turns = np.linspace(-0.55, 0.55, N_PLANS)
-    speeds = 2.6 + 0.5 * rng.standard_normal(N_PLANS)
-    omega = np.zeros((T_STEPS, N_PLANS, 3), np.float32)
-    for k, (t, v) in enumerate(zip(turns, speeds)):
-        omega[:, k, 0] = v - t
-        omega[:, k, 1] = v + t
-        omega[:, k, 2] = v
+    # The plan family is fixed by construction, not drawn per seed, so no plan set can be
+    # tuned to favour a policy.
+    omega = PLAN_FAMILIES[family](rng)
     poses = np.tile(np.array([0.0, 0.0, 0.0], np.float32), (N_PLANS, 1))
 
     belief = np.where(observed, truth, 0.0)  # optimistic flat inpaint of the unobserved
@@ -316,8 +411,9 @@ POLICIES = {
 NOT_A_POLICY = ("oracle",)
 
 
-def run_seed(seed: int) -> dict:
-    scene, truth, observed, sigma, poses, omega, grid = build_case(seed)
+def run_seed(seed: int, family: str = "fan") -> dict:
+    groups = PLAN_GROUPS[family]
+    scene, truth, observed, sigma, poses, omega, grid = build_case(seed, family)
     harness = Harness(scene, poses, omega, device="cuda")
     belief = scene.elevation.astype(np.float32)
 
@@ -327,6 +423,7 @@ def run_seed(seed: int) -> dict:
     grads, _ = harness.adjoint(dilate=True, leaf="elevation")
     grad = sum(w * grads[TERM_NAMES.index(k)] for k, w in COST_TERMS.items())  # [K, ny, nx]
     dist = _plan_distance(harness, grid)
+    traj_end = harness.sim.controlled.numpy()[-1, :, :2]
 
     j_bel = _evaluate(harness, belief)
     # `_rollout` re-derives the contact, so the envelope buffer is now the BELIEF's envelope.
@@ -347,11 +444,19 @@ def run_seed(seed: int) -> dict:
         "env_cells": harness.sim.env_radius / CELL,
         "rng": rng,
     }
+    # How spatially SEPARATE the plans actually are, so "same cells" is measured not assumed:
+    # the mean across cells of the spread, over plans, of each plan's geometric influence. This
+    # is exactly the quantity `swath_var` scores on, so a near-zero value means the geometric
+    # discriminator has nothing to work with -- by construction, not by tuning.
+    prox = _proximity(dist)
     out = {
         "seed": seed,
         "tau_before": kendall_tau(j_bel, j_true),
         "top1_before": bool(np.argmin(j_bel) == np.argmin(j_true)),
         "spread_true": float(j_true.max() - j_true.min()),
+        "coverage_spread": float(prox.std(axis=0).mean()),
+        "tau_within_before": tau_within(j_bel, j_true, groups),
+        "path_spread": float(np.linalg.norm(traj_end - traj_end.mean(0), axis=1).mean()),
         "policies": {},
     }
     n_cells = sigma.size
@@ -372,6 +477,7 @@ def run_seed(seed: int) -> dict:
             denv = np.abs(harness.sim.envelope.numpy()[0] - env_bel)
             rec[str(m)] = {
                 "tau": kendall_tau(j_new, j_true),
+                "tau_within": tau_within(j_new, j_true, groups),
                 "top1": bool(np.argmin(j_new) == np.argmin(j_true)),
                 "regret": float(j_true[int(np.argmin(j_new))] - j_true.min()),
                 # envelope cells moved per cell revealed: the reveal's actual reach into the cost
@@ -391,8 +497,14 @@ def report(rows: list[dict]) -> dict:
     tb = np.mean([r["tau_before"] for r in rows])
     t1b = np.mean([r["top1_before"] for r in rows])
     rb = np.mean([r["spread_true"] for r in rows])
+    cs = np.mean([r["coverage_spread"] for r in rows])
+    ps = np.mean([r["path_spread"] for r in rows])
     print(f"\nbefore sensing:  Kendall tau {tb:+.3f}   top-1 correct {t1b:.0%}   (n={n})")
-    print(f"true cost spread across the {N_PLANS} plans: {rb:.2f} mean\n")
+    print(f"true cost spread across the {N_PLANS} plans: {rb:.2f} mean")
+    print(
+        f"plan separation: endpoints {ps:.2f} m apart, coverage spread {cs:.4f}"
+        "  (low = geometry cannot discriminate)\n"
+    )
     print("tau  = agreement of the post-sensing ranking with the truth (1 = perfect)")
     print("top1 = the believed-best plan really is the best")
     print("reg  = true excess cost of the plan a planner would pick (0 = optimal)")
@@ -534,19 +646,28 @@ def figure(rows: list[dict], path: Path) -> None:
     plt.close(fig)
 
 
-def main(n_seeds: int = 200) -> None:
+def main(n_seeds: int = 200, family: str = "fan") -> None:
     wp.init()
     OUT.mkdir(parents=True, exist_ok=True)
+    print(f"plan family: {family} -- {PLAN_FAMILIES[family].__doc__.splitlines()[0]}")
     rows = []
     for seed in range(n_seeds):
-        rows.append(run_seed(seed))
+        rows.append(run_seed(seed, family))
         if (seed + 1) % 50 == 0:
             print(f"  {seed + 1}/{n_seeds} seeds", flush=True)
     summary = report(rows)
-    figure(rows, OUT / "ranking.png")
-    (OUT / "ranking.json").write_text(json.dumps({"rows": rows, "summary": summary}, indent=2))
-    print(f"\nwrote {OUT / 'ranking.json'} and ranking.png")
+    figure(rows, OUT / f"ranking_{family}.png")
+    (OUT / f"ranking_{family}.json").write_text(
+        json.dumps({"family": family, "rows": rows, "summary": summary}, indent=2)
+    )
+    print(f"\nwrote {OUT / f'ranking_{family}.json'} and ranking_{family}.png")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--seeds", type=int, default=200)
+    ap.add_argument("--family", choices=tuple(PLAN_FAMILIES), default="fan")
+    a = ap.parse_args()
+    main(a.seeds, a.family)

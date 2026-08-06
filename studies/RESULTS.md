@@ -11,7 +11,10 @@ a control tick. Decision-focused sensing beats information-theoretic sensing con
 in open-loop plan ranking at n = 200, entropy is indistinguishable from random while the
 adjoint recovers the true ranking (§7). But most of that margin is *task-awareness*, not the
 derivative: "reveal what you are about to drive over" is as good as the adjoint at small
-sensing budgets and is only overtaken at large ones. The closed-loop benchmark (§6) is weaker
+sensing budgets and is only overtaken at large ones. Varying how much the candidate plans
+overlap locates where an adjoint is actually required (7b) -- and a matched test finds the
+second-order correction of section 4 does NOT improve the decision, by either available
+route (7c). The closed-loop benchmark (§6) is weaker
 and its statistical power is the weakest part of the whole study; it is stated as such.
 
 ---
@@ -439,6 +442,90 @@ plan set well need not drive better — §6 is the evidence that the gap is real
 fixed fan rather than an MPPI elite set, the cost is `settle + clear_soft` rather than the live
 planner cost, and the terrain is still synthetic with a placeholder σ.
 
+### 7b. When is an adjoint actually needed?  **Only when plans overlap but do not coincide**
+
+`studies/bench/ranking.py --family {fan,hybrid,speed}` · `compare_families.py` · n = 200 each.
+
+§7's headline weakness was scenario design, not method: a fan of arcs makes *"which plan wins"*
+and *"which cells does it cross"* nearly the same question, so a distance transform answers it
+without a derivative. Three plan families now vary **only** how much the plans' coverage
+overlaps, holding terrain, σ, budgets, policies and seeds fixed.
+
+| family | plans | endpoints apart | coverage spread | τ@400 adjoint | τ@400 geometry | **adjoint − geometry** |
+|---|---|---|---|---|---|---|
+| `fan` | 16 separate corridors | 1.130 m | 0.0390 | 0.648 | 0.556 | **+0.092** |
+| `hybrid` | 4 paths × 4 speed profiles | 1.069 m | 0.0346 | 0.819 | 0.639 | **+0.180** |
+| `speed` | 1 shared path, 16 profiles | 0.001 m | 0.0002 | 0.931 | **1.000** | **−0.069** |
+
+All three differences pass a sign test at p < 0.01. The construction is verified rather than
+asserted: `speed`'s plans finish 1 mm apart and its coverage spread is 200× smaller than
+`fan`'s, because scaling both wheels by a common factor retraces the identical path.
+
+**The relationship is not monotonic, and the endpoint is the interesting part.** Confounding the
+plans *completely* makes the problem **easier** for geometry, not harder: when all 16 candidates
+share one path the decision-relevant terrain collapses to a single narrow corridor, 400 cells
+covers all of it, and `swath` reaches **τ = 1.000** — perfect. This was the opposite of my
+prediction and it is a clean scope statement: *if your candidates all follow one path, do not
+compute an adjoint; sense the corridor.*
+
+The adjoint pays in the middle case, where candidates span a broad area **and** overlap within
+it — which is exactly the MPPI elite-set regime. `hybrid` doubles the advantage over `fan`.
+
+**The sharpest result is the within-group ordering.** In `hybrid`, four plans share each path
+exactly, so every geometric score makes identical reveals for all four and cannot rank them by
+construction. On that component alone, at 400 cells:
+
+| | τ within groups |
+|---|---|
+| no sensing | +0.133 |
+| entropy | +0.185 |
+| swath (geometry) | +0.672 |
+| **disagreement (adjoint)** | **+0.869** |
+| *oracle* | *+0.935* |
+
+`disagreement − swath` = **+0.198, better on 161/185 seeds, p = 4×10⁻²⁶**, and the adjoint
+recovers 92% of the oracle's within-group ordering.
+
+**The budget crossover survives everywhere.** Geometry still wins at 25 and 100 cells in both
+`fan` (−0.006, −0.034) and `hybrid` (−0.031, −0.072). Attribution's value is *efficiency inside
+the relevant region*, and it only shows once the budget is large enough to have to prioritise
+within that region rather than merely find it.
+
+### 7c. Does the second-order correction improve the DECISION?  **No — by either route**
+
+`studies/bench/second_order.py`, `hybrid` family. §4 showed second-order FOSM cuts badly-wrong
+variance estimates 34.1% → 3.2%; §5 showed it fits in a control tick. Neither shows it makes a
+better *decision*, which is the only thing a planner can use. Curvature can enter two ways, and
+both were tested.
+
+**Route 1 — bias correction, requiring no sensing at all.** `E[J_k] − J_k(belief) = ½ Σᵢ c_ki σᵢ²`
+is *per-plan*, so unlike a common offset it moves the ranking. Measured (n = 50): τ +0.121 →
++0.056, p = 0.57. No effect — and one number gave the reason away: **the correction spreads the
+plans by 303 against a true cost spread of 6.5.**
+
+Chasing that spread reproduced a Study B result exactly. The correction's magnitude grows
+**linearly** in the number of cells summed (21 → 34 → 77 → 226 → 303 for 10 → 600 cells), which
+is the signature of adding per-cell effects as if independent — through a morphological *max*,
+where they do not add. Study B's "i.i.d. per-cell map noise is not a valid model here" was about
+the same structure.
+
+A truncation sweep on seeds 0–19 showed an interior optimum (τ +0.087 → +0.161 at 100 cells).
+**It did not survive.** Fixing that truncation in advance and evaluating once on disjoint seeds
+100–199: τ +0.129 → **+0.029** (worse, 38/99, p = 0.027), τ within groups +0.169 → **−0.047**
+(worse, 34/95, p = 0.007). The optimum was overfitting to the 20 seeds it was found on.
+
+**Route 2 — cell selection.** Replacing `Var_k(g)σ²` with `Var_k(g)σ² + ½Var_k(c)σ⁴`, both arms
+choosing from the same shortlist so the curvature term is the *only* difference: τ@100 0.250 →
+0.178 (p = 0.021, worse), τ@400 0.793 → 0.730 (p = 0.079). It steers the budget toward
+high-curvature cells, which are the tied and kinked ones Study B's σ/slack criterion already
+flags as where the linearisation fails.
+
+**The conclusion is a caveat on §4 and §5, and it is worth stating plainly:** being more
+accurate about `Var(J)` did not translate into a better decision here, so the case for putting
+second-order attribution into the planner is not made by these results. §4 and §5 stand as
+measured — the correction *is* more accurate and *does* fit in a tick — but accuracy in the
+variance was the wrong thing to optimise if the decision is what matters.
+
 ## 8. What is **not** established
 
 - **Only one benchmark claim is statistically supported** (attribution > entropy in variant A,
@@ -479,7 +566,13 @@ planner cost, and the terrain is still synthetic with a placeholder σ.
 .venv/bin/python -m studies.bench.run_bench --seeds 32 --variant gap
 .venv/bin/python -m studies.bench.run_bench --seeds 32 --variant corridor
 .venv/bin/python -m studies.bench.analyse
-.venv/bin/python -m studies.bench.ranking       # open-loop ranking, n=200, ~90 s
+.venv/bin/python -m studies.bench.ranking --family fan     --seeds 200   # ~90 s each
+.venv/bin/python -m studies.bench.ranking --family hybrid  --seeds 200
+.venv/bin/python -m studies.bench.ranking --family speed   --seeds 200
+.venv/bin/python -m studies.bench.compare_families
+.venv/bin/python -m studies.bench.second_order --seeds 50 --family hybrid   # ~7 min
+.venv/bin/python -m studies.bench.second_order --validate-bias 100 --seeds 100 \
+    --seed-offset 100 --family hybrid                                       # held-out
 ```
 
 Production changes made by this work are confined to `engine/step.py`,
