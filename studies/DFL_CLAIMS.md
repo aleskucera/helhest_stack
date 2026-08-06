@@ -22,7 +22,7 @@ on its completed map, backpropagated through a differentiable quasi-static conta
 halves plan-choice regret relative to an identically-structured MSE-trained model (0.27 vs
 0.60, p=0.006, 80 pre-registered held-out seeds), while producing a 3x WORSE height map.
 The model learns a planning map, not a mean map: its extra error concentrates ~5x in
-decision-irrelevant cells, and and its systematic low bias in unobserved regions halves the contact-support
+decision-irrelevant cells, and its systematic low bias in unobserved regions halves the contact-support
 mass resting on unknown cells (21.7% vs 44.1%; restoring the bias alone reverses it) —
 ranking candidate plans on what is actually known. The standard alternative — a likelihood-trained map plus risk-aware
 planning (per-step Gaussian CVaR, or CVaR over correlated map samples) — does not recover
