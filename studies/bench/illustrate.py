@@ -62,7 +62,7 @@ def build(seed: int, family: str, noise: str, budget: int):
         "truth": truth,
         "measured": measured,
         "belief": belief,
-        "env_cells": harness.sim.env_radius / 0.10,
+        "env_cells": float(harness.sim.env_radius),  # already in cells
         "rng": rng,
     }
     picks, scores = {}, {}

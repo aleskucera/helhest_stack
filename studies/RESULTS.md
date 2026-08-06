@@ -17,8 +17,12 @@ second-order correction of section 4 does NOT improve the decision, by either av
 route (7c). Injecting all three real map-error sources -- sensor, occlusion and pose --
 leaves the sigma-is-not-relevance claim intact but ERASES the adjoint's edge over a plain
 distance transform, because pose error halves what any sensing could achieve and no
-cell-selection strategy can recover it (7d). The closed-loop benchmark (§6) is the weakest
-part of the study and is stated as such.
+cell-selection strategy can recover it (7d). Tested on the OTHER use of the same machinery --
+estimating a plan's risk for a CVaR cost, against Monte-Carlo truth and the STEP baseline --
+the adjoint does not win there either (7f): adding a risk term clearly helps (p = 3e-04), but
+first-order FOSM is twice as over-conservative as a per-timestep Gaussian heuristic and makes
+no better decisions than it. The closed-loop benchmark (§6) is the weakest part of the study
+and is stated as such.
 
 ---
 
@@ -429,11 +433,27 @@ the work — having *any* per-plan gradient is.
 - **A rigged entropy baseline.** With a binary σ, entropy has no preference among unobserved
   cells and its "choice" is the argsort's tie order — it scored *below* random. Fixed with a
   spatially structured σ and a random tie-break applied to every policy.
-- **The "inert reveals" hypothesis.** Since the envelope is a max over a spherical cap,
-  revealing one gradient-hot cell among unrevealed neighbours might change nothing. Measured
-  directly (`rch`: envelope cells moved per cell revealed) and **refuted** — `random` has the
-  *highest* reach (7.8) and the *worst* τ. Cap-pooling the score, which the hypothesis implies,
-  made things worse (0.163 → 0.104 at 100 cells).
+- **The "inert reveals" hypothesis** — *partly* supported, after a correction. Since the
+  envelope is a max over a spherical cap, revealing one gradient-hot cell among unrevealed
+  neighbours might change nothing. The `rch` diagnostic (envelope cells moved per cell revealed)
+  does **not** support it: `random` has the *highest* reach (7.8) and the *worst* τ, so what
+  matters is moving the *right* envelope cells, not more of them.
+
+  **Correction.** This was first reported as fully refuted, on the grounds that cap-pooling the
+  score made things worse. That run was invalid: `sim.env_radius` is already in **cells**
+  (`ceil(wheel_radius / cell_size)`), and the code divided it by the cell size again, pooling
+  over a 35-cell radius instead of 3.5. At the correct radius the conclusion **reverses at small
+  budgets** — pooling helps exactly where the hypothesis says it should, when the budget is too
+  small to cover a cell's neighbourhood:
+
+  | | @25 | @100 | @400 |
+  |---|---|---|---|
+  | `magn_pooled − magnitude` | **+0.057** (p=0.014) | +0.002 (p=0.83) | −0.061 (p=2e-11) |
+  | `disag_pooled − disagreement` | +0.029 (p=0.072) | −0.034 (p=0.14) | −0.057 (p=6e-11) |
+
+  So the honest statement is a crossover, not a refutation: pooling to the contact support helps
+  at small budgets and hurts at large ones, where the budget already covers the neighbourhood and
+  pooling only blurs the score. Nothing else in §7 used `env_cells`, so no other number moves.
 - **`Harness.forward` on uninitialised friction.** Any caller that drove the terrain itself and
   called `forward` rolled out on μ = 0 and got a NaN pose with a plausible-looking settle. Only
   `_reset_terrain` loaded friction; it is now loaded at construction.
@@ -646,6 +666,53 @@ call onto one line, so the edit threading the argument through never matched. Ha
 genuinely made no difference, that no-op would have been indistinguishable from the real result
 it was supposed to test.
 
+### 7f. Risk estimation against the field's actual baseline — **the adjoint does not win here either**
+
+`studies/bench/risk.py`, `hybrid` plans, full noise, **n = 150**, 256 terrain draws per seed.
+
+§7's sensing framing left the adjoint tied with a distance transform, so this tests the other —
+and more standard — use of the same machinery: **estimating a plan's risk** for a risk-aware
+cost, which is what every uncertainty-aware off-road planner actually needs. The question's
+virtue is that **Monte-Carlo is simultaneously the strongest baseline and the ground truth**:
+draw terrain from the belief, roll every plan out on each draw, and the empirical CVaR *is* the
+answer — no linearisation, no independence assumption, the envelope's max handled exactly.
+
+Arms, all `J(belief) + κ·risk` with `κ = φ(Φ⁻¹(α))/(1−α) = 1.755` at α = 0.9, so only the risk
+estimator differs. Common random numbers across plans, so plan differences are paired.
+
+| estimator | regret | picked best | τ vs truth | est/true risk |
+|---|---|---|---|---|
+| `none` — mean map, no risk term | 4.874 | 4% | +0.041 | — |
+| `sum_sigma` — σ over the swept area | 4.167 | 9% | +0.066 | — |
+| **`step`** — Gaussian CVaR (Fan et al., RSS 2021) | **4.002** | 10% | +0.077 | **1.28** |
+| **`fosm`** — ours, adjoint variance | 4.363 | 9% | +0.089 | **2.04** |
+| *`mc`* — 4096 rollouts/seed | *0* | *100%* | *1.000* | *1.00* |
+
+**What holds.** Adding a risk term helps: `step − none` = −0.872 regret, 36/47 non-tied seeds,
+**p = 3.5×10⁻⁴**. And the Jensen bias is real and first-order — `E[J] − J(belief) = +1.36`, so a
+mean-map planner is systematically optimistic before any risk term is considered.
+
+**What does not.** **Our FOSM does not beat STEP.** It is slightly *worse* (+0.362 regret,
+35/83, p = 0.19 — not significant in either direction), and its risk *values* are twice as
+over-conservative as STEP's (ratio 2.04 vs 1.28). It does not significantly beat the no-risk
+baseline either (p = 0.46). This is consistent with Study B rather than surprising: first-order
+FOSM was measured there at ratio 1.7–2.6 for σ/slack ≫ 1, which is the regime realistic σ sits
+in. The cost argument (one backward pass against 4096 rollouts) does not rescue it, because a
+far cheaper per-timestep heuristic already does better.
+
+**An n = 40 → n = 150 reversal, recorded because it nearly became the result.** At n = 40 the
+ordering was `fosm` 3.741 < `step` 4.315 — ours winning. At n = 150 it is `step` 4.002 <
+`fosm` 4.363. The n = 40 advantage was noise. This is the same failure that overturned variant
+B in §6, and it is the second time in this study that a promising small-n result has not
+survived; anything here below n ≈ 150 should be treated as unreported.
+
+**One new positive finding, about the baselines rather than about us.** Aggregating σ under the
+contact patch with a **max** — the physically tempting choice, since the settle height *is* a max
+over the patch — **cannot rank the plans at all**: measured spread of `Σ_t σ_t` across the 16
+plans is **0.008** with a max against 1.267 with an RMS. A saturating σ field pins the max to the
+cap under every footprint of every plan. Anyone building a per-cell risk cost on a map with
+capped/unknown-cell σ should aggregate with an RMS or a mean, not a max.
+
 ## 8. What is **not** established
 
 - **Only one benchmark claim is statistically supported** (attribution > entropy in variant A,
@@ -699,6 +766,7 @@ for n in clean sensor localisation occlusion all; do \
 .venv/bin/python -m studies.bench.compare_noise
 .venv/bin/python -m studies.bench.ranking --family hybrid --noise all --flat-sigma --seeds 200
 .venv/bin/python -m studies.bench.illustrate --seed 7    # what each policy looks at
+.venv/bin/python -m studies.bench.risk --seeds 150 --family hybrid --noise all   # ~45 min
 ```
 
 Production changes made by this work are confined to `engine/step.py`,

@@ -426,7 +426,8 @@ def run_seed(
         "truth": truth,
         "measured": measured,
         "belief": belief,
-        "env_cells": harness.sim.env_radius / CELL,
+        # env_radius is already in CELLS (ceil(wheel_radius / cell_size)), not metres.
+        "env_cells": float(harness.sim.env_radius),
         "rng": rng,
     }
     # How spatially SEPARATE the plans actually are, so "same cells" is measured not assumed:
