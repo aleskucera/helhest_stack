@@ -129,6 +129,23 @@ def analyse(bag: Path) -> None:
     print(f"  fraction of samples within 5% of each wheel's peak: {near_max.round(2)} %")
     print("  (a plateau there would BE the envelope; without one these are lower bounds)")
 
+    # torque vs speed: the measurable stand-in for a datasheet's torque-speed curve. A drive that
+    # is running out of voltage droops at high omega, and a scalar torque limit would then be
+    # wrong at cruise even if it is right at standstill.
+    speed = np.abs(vel[:, :2]).ravel()  # front wheels only; the rear is a follower
+    front = torque[:, :2].ravel()
+    print(f"  {'|omega| [rad/s]':>16} {'n':>7} {'p50':>7} {'p99':>7} {'max':>7}  [Nm]")
+    edges = [0.0, 0.5, 1.5, 2.5, 3.5, 4.5, 8.0]
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        m = (speed >= lo) & (speed < hi)
+        if m.sum() < 50:
+            continue
+        a = front[m]
+        print(
+            f"  {lo:6.1f} - {hi:5.1f} {m.sum():7d} {np.percentile(a, 50):7.1f} "
+            f"{np.percentile(a, 99):7.1f} {a.max():7.1f}"
+        )
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

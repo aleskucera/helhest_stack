@@ -164,6 +164,12 @@ rolling resistance is excluded (~37 Nm total, measured) and the demand is split 
 while the bags put ~2.5x more through each front wheel than the rear. Neither closes a 0.86-vs-0.6
 gap.
 
+A scalar limit is empirically adequate over the whole operating range: binning the front-wheel
+torque by wheel speed shows NO droop -- p99 goes 87 Nm below 0.5 rad/s to 119-129 Nm at 3-4.5
+rad/s, and 121 Nm at 5-5.9 rad/s. A drive running out of voltage would fall off at high omega and
+a single `motor_torque_limit` would then be wrong at cruise even if right at standstill; that does
+not happen here (and note the fastest wheel seen, 5.86 rad/s, corroborates omega_max ~ 5.3).
+
 Caveats worth keeping: bags before 2026-07-14 give a NEGATIVE correlation (the IMU was remounted)
 and bags before 2026-07-27 have the `/cmd_joints` units bug, which corrupts the odometry
 estimator specifically. The script prints both correlations so a bad era is obvious.
