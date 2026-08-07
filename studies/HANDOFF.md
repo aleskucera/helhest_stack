@@ -90,11 +90,22 @@ Literature: verified via OpenAlex full citation scan — Clark 1961 has ZERO rob
 closest prior art Fankhauser RA-L'18 (supplies the Gaussian field, no max propagation) and
 STEP (same risk quantity, by sampling). CAVEAT: Ono/JPL chance-constrained rover line was
 NOT searchable that session (no IEEE/Scholar access) — must be checked before claiming.
-IN FLIGHT at handoff: `clark_full.py --seeds 100` robustness sweeps (fan/sensor,
-hybrid/clean) -> final clark_full.json; and `bench/clark_grad.py` [PRE-REG] testing whether
-the CLARK gradient (derivative of E[J], smooth by construction) is valid at cm scale
-(<10% at 1cm vs hard adjoint's 32%) — if it passes, per-cell attribution/sensing reopens
-on sound footing. Check studies/out/bench/{clark_full,clark_grad}.json for their verdicts.
+FINAL VERDICTS (landed before handoff close):
+ROBUSTNESS (clark_full.json): Clark is the only estimator never-bad across all three
+regimes — hybrid/all 0.042 (best by far), fan/sensor 0.085 (near-best while FOSM COLLAPSES
+to 0.583, clark beats it p=4e-11), hybrid/clean 0.129 (competitive; fosm best there, n.s.).
+Beats the bracket significantly in ALL THREE regimes (p=0.0013/0.021/0.017) — the only
+method to do so. vs STEP: decisive on hybrid/all only (n.s. elsewhere). The robustness
+story is CONSISTENCY: FOSM swings best-to-catastrophic by regime; Clark stays calibrated.
+GRADIENT VALIDITY (clark_grad.json, [PRE-REG]): FAILED for magnitudes — criteria (i) and
+(ii) missed (median rel err 48% at 1cm, 75% at sigma; bar was 10%/25%). Even Clark's own
+FUNCTION difference has ~56% error on single-cell cm perturbations: a one-cell change moves
+E[J] by ~0.01% of J, below the recursion's approximation floor. So the per-cell MAGNITUDE
+program is closed at ALL THREE levels tested (hard adjoint, bundled adjoint, analytically
+smoothed adjoint) — Clark is a PLAN-level instrument (E, Var, ranking), not a cell-level
+one. Partial positives, underpowered: attribution ranking tau 0.94 vs hard's 0.80 (n=1
+seed — needs replication before any claim) and the catch-22 improves (38% of gradient mass
+on unobserved cells vs hard's 15%).
 
 ## 4. DFL thread (decision-focused perception training) — method dead here, insights stand
 
