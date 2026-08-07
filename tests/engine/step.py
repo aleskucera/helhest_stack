@@ -331,7 +331,8 @@ def selftest_rollout_kernel():
     wp.launch(
         rollout_kernel,
         B,
-        inputs=[T, te, tr, tm, g, robot, sp, pose0, init_oa, omega],
+        # rollout_kernel takes the yaw-binned envelope STACK; the spherical wheel is one slice
+        inputs=[T, te.reshape((1,) + te.shape), tr, tm, g, robot, sp, pose0, init_oa, omega],
         outputs=fused,
         device="cpu",
     )

@@ -43,6 +43,8 @@ wp.set_module_options({"optimization_level": 2})
 # contact would otherwise report an enormous ratio while transmitting almost nothing.
 _GRIP_FLOOR_FRAC = wp.constant(1.0e-3)
 
+_TWO_PI = wp.constant(2.0 * float(np.pi))
+
 
 # --- settle/integration numerics: host params + the device-side `Solver` struct ---
 @wp.struct
@@ -539,6 +541,27 @@ def chassis_clearance(
     return cmin
 
 
+@wp.func
+def yaw_bin(yaw: float, n_yaw: int) -> int:
+    """Index of the yaw-binned envelope slice nearest to heading `yaw` (wrapped into [0, n_yaw)).
+
+    The spherical wheel envelope is yaw-invariant, so the stack is a single slice and this is a
+    constant 0 -- the default path never touches the float math below. A CYLINDER wheel
+    (RobotParams.wheel_width) is not yaw-invariant and gets one dilated slice per bin.
+
+    COUPLED CONSTRAINT (IMPROVEMENTS.md section 7): with a yaw-dependent envelope, `psi_dot * dt`
+    must stay inside one bin or the rollout aliases across slices. At 32 bins (11.25 deg) and
+    dt = 0.1 s that holds up to psi_dot ~ 2 rad/s, which spin-in-place reaches at roughly
+    omega_max = 4.5 rad/s. omega_max is not recorded anywhere in this repo; if it is near
+    8 rad/s the cylinder and a finer step have to land together. Not solved here -- documented.
+    """
+    if n_yaw == 1:
+        return 0
+    bins = float(n_yaw)
+    k = int(wp.floor(yaw / (_TWO_PI / bins) + 0.5))
+    return ((k % n_yaw) + n_yaw) % n_yaw
+
+
 # ----------------------------------------------------------------------------
 # forward step + rollout
 # ----------------------------------------------------------------------------
@@ -829,7 +852,7 @@ def step_kernel_bt(
 @wp.kernel
 def rollout_kernel(
     n_steps: int,
-    envelope: wp.array2d(dtype=wp.float32),
+    envelope: wp.array3d(dtype=wp.float32),  # [n_yaw, ny, nx] wheel envelope per yaw bin
     elevation: wp.array2d(dtype=wp.float32),
     friction: wp.array2d(dtype=wp.float32),
     grid: Grid,
@@ -858,14 +881,19 @@ def rollout_kernel(
     path keeps the per-step step_kernel (the register carry is NOT auto-diffable --
     backprop needs the intermediate states this kernel overwrites).
 
+    `envelope` is the yaw-binned stack; with the default spherical wheel it is one slice and
+    `yaw_bin` is a constant 0, so this reads exactly the grid the 2D kernels read.
+
     MUST stay bit-identical to init_state_kernel + n_steps*step_kernel (guarded by
     tests/engine/step.selftest_rollout_kernel). Edit the physics in both.
     """
     b = wp.tid()
+    n_yaw = envelope.shape[0]
     # init_state: settle the start pose -> row 0
     pc = start_pose[b]
-    z0 = sample_field(envelope, grid, pc[0], pc[1]) + robot.wheel_radius
-    tc = settle(envelope, grid, robot, solver, pc, wp.vec3(z0, 0.0, 0.0))
+    env_0 = envelope[yaw_bin(pc[2], n_yaw)]
+    z0 = sample_field(env_0, grid, pc[0], pc[1]) + robot.wheel_radius
+    tc = settle(env_0, grid, robot, solver, pc, wp.vec3(z0, 0.0, 0.0))
     current = init_current_wheel_omega[b]  # initial lagged omega carried in registers
     controlled[0, b] = pc
     derived[0, b] = tc
@@ -877,15 +905,16 @@ def rollout_kernel(
         yaw = pc[2]
         R = euler_zyx(yaw, tc[1], tc[2])
         p = wp.vec3(x, y, tc[0])
+        env_c = envelope[yaw_bin(yaw, n_yaw)]  # envelope slice of the CURRENT heading
 
-        loads = normal_loads(envelope, grid, robot, R, p)  # per-wheel normal load N_i
+        loads = normal_loads(env_c, grid, robot, R, p)  # per-wheel normal load N_i
         total_grip = float(0.0)  # Sum_i grip_i
         grip_x = float(0.0)  # Sum_i grip_i * wheel_x  (x_icr = grip_x / total_grip)
         for i in range(wp.static(3)):
             st_i = wp.static(i)
             wheel_pos = robot.wheel_pos[st_i]
             wheel_center = p + R * wheel_pos
-            n = sample_normal(envelope, grid, wheel_center[0], wheel_center[1])
+            n = sample_normal(env_c, grid, wheel_center[0], wheel_center[1])
             ct = wheel_center - robot.wheel_radius * n  # contact point
             grip = sample_field(friction, grid, ct[0], ct[1]) * loads[st_i]  # grip_i = mu_i * N_i
             total_grip += grip
@@ -906,23 +935,24 @@ def rollout_kernel(
         yawn = yaw + wz * solver.dt
 
         pose_next = wp.vec3(xn, yn, yawn)
-        settled = settle(envelope, grid, robot, solver, pose_next, tc)
+        env_n = envelope[yaw_bin(yawn, n_yaw)]  # envelope slice of the NEW heading
+        settled = settle(env_n, grid, robot, solver, pose_next, tc)
         controlled[t + 1, b] = pose_next
         derived[t + 1, b] = settled
 
         Rn = euler_zyx(yawn, settled[1], settled[2])
         pn = wp.vec3(xn, yn, settled[0])
-        loads = normal_loads(envelope, grid, robot, Rn, pn)
+        loads = normal_loads(env_n, grid, robot, Rn, pn)
         loads_out[t, b] = loads
         stability_out[t, b] = stability_margin(robot, loads)
-        grip_n = contact_grip(envelope, friction, grid, robot, Rn, pn, loads)
+        grip_n = contact_grip(env_n, friction, grid, robot, Rn, pn, loads)
         saturation_out[t, b] = friction_saturation(
             robot, loads, grip_n, settled[1], settled[2], vx, wz
         )
         stall_out[t, b] = torque_saturation(robot, settled[1])
         turn_out[t, b] = wp.vec2(alpha, x_icr)
         clear_out[t, b] = chassis_clearance(elevation, grid, robot, Rn, pn)
-        cres = clearances(envelope, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
+        cres = clearances(env_n, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
         resid_out[t, b] = wp.max(wp.max(wp.abs(cres[0]), wp.abs(cres[1])), wp.abs(cres[2]))
 
         pc = pose_next  # carry state in registers (no global round-trip)

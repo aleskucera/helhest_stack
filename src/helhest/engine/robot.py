@@ -57,6 +57,11 @@ class Robot:
 @dataclass(frozen=True)
 class RobotParams:  # host-side robot knobs — what you nudge
     wheel_radius: float = 0.35
+    # TODO(hardware): MEASURE THIS. Wheel WIDTH [m] (IMPROVEMENTS.md open question 4). None keeps
+    # the spherical wheel envelope, which reaches a full wheel_radius sideways and so lifts the
+    # robot over rocks it would really straddle. A float switches ForwardSimulator to the
+    # yaw-binned cylinder envelope; 0.2 (a 0.1 m half-width) is the assumed order of magnitude.
+    wheel_width: float | None = None
     half_track: float = 0.365
     rear_offset: float = 0.75
     gravity: float = 9.81
@@ -64,8 +69,8 @@ class RobotParams:  # host-side robot knobs — what you nudge
     com: tuple = (float(DEFAULT_COM[0]), 0.0, 0.0)  # full vec3, independent of mass
     chassis_nx: int = 3
     chassis_ny: int = 3
-    # TODO(hardware): MEASURE THIS. Per-wheel continuous torque envelope at the wheel [Nm], the
-    # open question in IMPROVEMENTS.md section 10. inf = the certificate never fires, which is the
+    # TODO(hardware): MEASURE THIS. Per-wheel continuous torque envelope at the wheel [Nm]
+    # (IMPROVEMENTS.md open question 2). inf = the certificate never fires, which is the
     # pre-certificate behaviour; the engine cannot stall until a real number lands here. For scale,
     # holding a 15 deg grade needs ~31.5 Nm per wheel on this robot.
     motor_torque_limit: float = float("inf")

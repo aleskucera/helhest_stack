@@ -24,7 +24,9 @@ import warp as wp
 from warp import Device
 
 from .envelope import _contact_kernel
+from .envelope import _contact_table_kernel
 from .envelope import _gather_kernel
+from .envelope import cylinder_offset_table
 from .envelope import gather_bt
 from .envelope import make_tiled_contact
 from .envelope import pad_edge
@@ -37,6 +39,11 @@ from .step import step_kernel_bt
 from .terrain import GridParams
 
 DILATE_TILE = 16  # output tile size for the batched tiled dilation (DifferentiableSimulator)
+# Yaw bins for the CYLINDER wheel envelope (RobotParams.wheel_width). The bin must not shift the
+# contact by more than a cell: R * dpsi <= cell -> dpsi <= 0.1/0.35 = 0.29 rad = 16 deg, so >= 22
+# bins over the circle; 32 rounds that up. Costs n_yaw x the envelope grid (1.6 MB at the real
+# 0.1 m cell) and n_yaw dilations per perception frame, nothing per rollout.
+YAW_BINS = 32
 
 
 @wp.kernel
@@ -169,18 +176,59 @@ class ForwardSimulator(BaseSimulator):
         device: Device | str | None = None,
     ):
         super().__init__(robot_params, solver_params, grid_params, batch_size, n_steps, device)
+        self.wheel_width = robot_params.wheel_width
+        n_yaw = 1 if self.wheel_width is None else YAW_BINS
         with wp.ScopedDevice(self.device):
             self.elevation = wp.zeros((self.cells_y, self.cells_x), dtype=wp.float32)
-            self.envelope = wp.zeros((self.cells_y, self.cells_x), dtype=wp.float32)
+            self.envelope_stack = wp.zeros((n_yaw, self.cells_y, self.cells_x), dtype=wp.float32)
             self.friction = wp.zeros((self.cells_y, self.cells_x), dtype=wp.float32)
             self._contact_iy = wp.zeros((self.cells_y, self.cells_x), dtype=wp.int32)
             self._contact_ix = wp.zeros((self.cells_y, self.cells_x), dtype=wp.int32)
             self._cap = wp.zeros((self.cells_y, self.cells_x), dtype=wp.float32)
+        # `envelope` stays the 2D grid it always was -- slice 0 of the stack, which for the
+        # spherical wheel IS the whole envelope and for the cylinder is the yaw = 0 bin.
+        self.envelope = self.envelope_stack[0]
+        self._yaw_offsets: list[tuple[wp.array, wp.array, wp.array]] = []
+        if self.wheel_width is not None:
+            for k in range(n_yaw):
+                dy, dx, cap = cylinder_offset_table(
+                    self.cell_size,
+                    self.wheel_radius,
+                    0.5 * self.wheel_width,
+                    k * 2.0 * np.pi / n_yaw,
+                )
+                self._yaw_offsets.append(
+                    (
+                        wp.array(dy, dtype=wp.int32, device=self.device),
+                        wp.array(dx, dtype=wp.int32, device=self.device),
+                        wp.array(cap, dtype=wp.float32, device=self.device),
+                    )
+                )
         self._alloc_rollout_buffers(requires_grad=False, control_grad=False)
 
     def set_terrain(self, elevation: wp.array) -> None:
+        """Copy in the raw elevation and rebuild the wheel envelope (one slice per yaw bin)."""
         wp.copy(self.elevation, elevation)
-        self._dilate(self.elevation, self._contact_iy, self._contact_ix, self._cap, self.envelope)
+        if self.wheel_width is None:
+            self._dilate(
+                self.elevation, self._contact_iy, self._contact_ix, self._cap, self.envelope
+            )
+            return
+        for k, (off_dy, off_dx, off_cap) in enumerate(self._yaw_offsets):
+            wp.launch(
+                _contact_table_kernel,
+                dim=self.elevation.shape,
+                inputs=[self.elevation, off_dy, off_dx, off_cap],
+                outputs=[self._contact_iy, self._contact_ix, self._cap],
+                device=self.device,
+            )
+            wp.launch(
+                _gather_kernel,
+                dim=self.elevation.shape,
+                inputs=[self.elevation, self._contact_iy, self._contact_ix, self._cap],
+                outputs=[self.envelope_stack[k]],
+                device=self.device,
+            )
 
     def rollout_launch(self) -> None:
         """Launch the whole rollout (init + T steps) in ONE fused kernel; NO host I/O.
@@ -193,7 +241,7 @@ class ForwardSimulator(BaseSimulator):
             self.batch_size,
             inputs=[
                 self.n_steps,
-                self.envelope,
+                self.envelope_stack,
                 self.elevation,
                 self.friction,
                 self.grid,
@@ -301,6 +349,12 @@ class DifferentiableSimulator(BaseSimulator):
             raise RuntimeError(
                 "DifferentiableSimulator is CUDA-only: the tiled arg-max contact needs GPU shared "
                 "memory. Build it with device='cuda'."
+            )
+        if robot_params.wheel_width is not None:
+            raise NotImplementedError(
+                "wheel_width (the yaw-binned cylinder envelope) is implemented for "
+                "ForwardSimulator only: the taped path would need a [B, n_yaw, ny, nx] stack and "
+                "a yaw index through the custom-grad settle. Use wheel_width=None here."
             )
 
         self.tape: wp.Tape | None = None
