@@ -120,6 +120,11 @@ class BaseSimulator:
             self.saturation = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             # Required drive torque / RobotParams.motor_torque_limit (inf by default -> all zero).
             self.stall = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
+            # Body twist (vx, vy, yaw_rate) carried between steps; only read/written by the
+            # momentum traction model, but grad-tracked like the other state so enabling it in
+            # the taped path does not silently break gradients.
+            self.twist = wp.zeros((T + 1, B), dtype=wp.vec3f, requires_grad=rg)
+            self.init_twist = wp.zeros(B, dtype=wp.vec3f)  # like init_current_wheel_omega
             self.current_wheel_omega = wp.zeros((T + 1, B), dtype=wp.vec3f)
             self.target_wheel_omega = wp.zeros((T, B), dtype=wp.vec3f, requires_grad=control_grad)
             self.start_pose = wp.zeros(B, dtype=wp.vec3f, requires_grad=control_grad)
@@ -256,6 +261,7 @@ class ForwardSimulator(BaseSimulator):
                 self.init_current_wheel_omega,
                 self.target_wheel_omega,
                 self.command_history,
+                self.init_twist,
             ],
             outputs=[
                 self.controlled,
@@ -268,6 +274,7 @@ class ForwardSimulator(BaseSimulator):
                 self.stability,
                 self.saturation,
                 self.stall,
+                self.twist,
             ],
             device=self.device,
         )
@@ -482,6 +489,7 @@ class DifferentiableSimulator(BaseSimulator):
                         self.current_wheel_omega[t],
                         self.controlled[t],
                         self.derived[t],
+                        self.twist[t],
                     ],
                     outputs=[
                         self.current_wheel_omega[t + 1],
@@ -494,6 +502,7 @@ class DifferentiableSimulator(BaseSimulator):
                         self.stability[t],
                         self.saturation[t],
                         self.stall[t],
+                        self.twist[t + 1],
                     ],
                     device=self.device,
                 )

@@ -22,6 +22,27 @@ _MASSES = np.array(
 )
 DEFAULT_MASS = float(_MASSES[:, 3].sum())  # 106.2 kg
 DEFAULT_COM = (_MASSES[:, :3] * _MASSES[:, 3:4]).sum(0) / DEFAULT_MASS  # x≈-0.198
+# Own yaw inertia of each body about its OWN centre: the two chassis boxes as uniform slabs
+# m(a^2+b^2)/12 at 0.48x0.56 and 0.48x0.24, and each wheel as a cylinder about a vertical axis
+# (the transverse inertia, m(3r^2+h^2)/12 = 0.173 for r=0.35, h=0.10, m=5.5).
+_OWN_YAW_INERTIA = np.array(
+    [
+        78.8375 * (0.48**2 + 0.56**2) / 12.0,
+        10.8625 * (0.48**2 + 0.24**2) / 12.0,
+        0.173021,
+        0.173021,
+        0.173021,
+    ]
+)
+# I_zz about the CoM: each body's own inertia plus its parallel-axis term. ~10.1 kg m^2. Derived
+# from the same table the mass and CoM come from, so it cannot drift away from them.
+DEFAULT_YAW_INERTIA = float(
+    (
+        _OWN_YAW_INERTIA
+        + _MASSES[:, 3]
+        * ((_MASSES[:, 0] - DEFAULT_COM[0]) ** 2 + (_MASSES[:, 1] - DEFAULT_COM[1]) ** 2)
+    ).sum()
+)
 
 
 @wp.struct
@@ -40,6 +61,7 @@ class Robot:
     half_track: wp.float32
     com: wp.vec3
     mass: wp.float32
+    yaw_inertia: wp.float32  # [kg m^2] about the CoM; only the momentum traction model reads it
     gravity: wp.float32
     motor_torque_limit: wp.float32  # [Nm] per wheel at the wheel; inf = no torque limit
     # --- planning capabilities (mirror of the RobotParams fields; the dynamics kernels don't read
@@ -68,6 +90,7 @@ class RobotParams:  # host-side robot knobs — what you nudge
     rear_offset: float = 0.75
     gravity: float = 9.81
     mass: float = DEFAULT_MASS
+    yaw_inertia: float = DEFAULT_YAW_INERTIA  # [kg m^2] derived from the mass table, not measured
     com: tuple = (float(DEFAULT_COM[0]), 0.0, 0.0)  # full vec3, independent of mass
     chassis_nx: int = 3
     chassis_ny: int = 3
@@ -110,6 +133,7 @@ class RobotParams:  # host-side robot knobs — what you nudge
         r.half_track = self.half_track
         r.com = wp.vec3(*self.com)
         r.mass = self.mass
+        r.yaw_inertia = self.yaw_inertia
         r.gravity = self.gravity
         r.motor_torque_limit = self.motor_torque_limit
         r.min_turn_radius = self.min_turn_radius

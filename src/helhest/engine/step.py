@@ -72,6 +72,7 @@ class Solver:
     shear_lk: wp.float32  # contact length / shear modulus; <= 0 = legacy kinematic traction
     contact_patch: wp.float32  # contact patch radius [m], torsional term of the shear model
     shear_iters: wp.int32  # Newton iterations for the shear twist solve
+    inertia_gain: wp.float32  # 1/dt when body momentum is on, 0 = quasi-static
 
 
 @dataclass
@@ -107,6 +108,14 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     shear_lk: float = 0.0
     contact_patch: float = 0.075
     shear_iters: int = 6
+    # Body momentum, IMPLICITLY integrated inside the same twist solve (requires shear_lk > 0).
+    # Explicit integration is not an option here: the shear curve makes the contacts stiff, with
+    # time constants near 20 ms in translation and 8 ms in yaw, so an explicit step would force
+    # dt ~ 5 ms and a 20x longer horizon -- the wall IMPROVEMENTS.md section 9(a) warns about.
+    # Implicit Euler is unconditionally stable on this dissipative system and costs three extra
+    # terms in a residual that is already being evaluated. False keeps the quasi-static solve,
+    # which stays the reference case the numpy oracle in tests/engine/traction.py validates.
+    body_momentum: bool = False
 
     def build(self) -> Solver:
         s = Solver()
@@ -121,6 +130,7 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
         s.shear_lk = self.shear_lk
         s.contact_patch = self.contact_patch
         s.shear_iters = self.shear_iters
+        s.inertia_gain = (1.0 / self.dt) if self.body_momentum else 0.0
         return s
 
 
@@ -681,6 +691,8 @@ def _shear_residual(
     shear_lk: float,  # contact length / shear deformation modulus, L/K
     patch: float,  # contact patch radius [m], for the torsional term
     gravity_tangential: wp.vec2,  # body-frame in-plane weight component
+    previous: wp.vec3,  # last step's twist; unused when inertia_gain is 0
+    inertia_gain: float,  # 1/dt for implicit momentum, 0 for the quasi-static solve
 ) -> wp.vec3:
     """Net (Fx, Fy, Mz) on the body for a candidate twist. Zero at equilibrium.
 
@@ -731,6 +743,12 @@ def _shear_residual(
     # a steady turn is not equilibrium: the body accelerates centripetally (a = omega x v)
     total_x -= robot.mass * (-lateral * yaw_rate)
     total_y -= robot.mass * (forward * yaw_rate)
+    # implicit body momentum: the unknown twist is the one at the END of the step, so a backward
+    # difference against the previous twist appears in the residual. inertia_gain = 0 removes it
+    # and recovers the massless quasi-static balance exactly.
+    total_x -= robot.mass * inertia_gain * (forward - previous[0])
+    total_y -= robot.mass * inertia_gain * (lateral - previous[1])
+    total_mz -= robot.yaw_inertia * inertia_gain * (yaw_rate - previous[2])
     return wp.vec3(total_x, total_y, total_mz)
 
 
@@ -742,6 +760,7 @@ def shear_twist(
     loads: wp.vec3,
     om: wp.vec3,
     gravity_tangential: wp.vec2,
+    previous: wp.vec3,
     guess: wp.vec3,
 ) -> wp.vec3:
     """Solve the 3x3 force/moment balance for the body twist (vx, vy, yaw_rate).
@@ -754,7 +773,16 @@ def shear_twist(
     twist = guess
     for _ in range(solver.shear_iters):
         residual = _shear_residual(
-            robot, mu, loads, om, twist, solver.shear_lk, solver.contact_patch, gravity_tangential
+            robot,
+            mu,
+            loads,
+            om,
+            twist,
+            solver.shear_lk,
+            solver.contact_patch,
+            gravity_tangential,
+            previous,
+            solver.inertia_gain,
         )
         jac = wp.mat33()
         for k in range(wp.static(3)):
@@ -770,6 +798,8 @@ def shear_twist(
                 solver.shear_lk,
                 solver.contact_patch,
                 gravity_tangential,
+                previous,
+                solver.inertia_gain,
             )
             jac[0, st_k] = (shifted[0] - residual[0]) / _SHEAR_FD_STEP
             jac[1, st_k] = (shifted[1] - residual[1]) / _SHEAR_FD_STEP
@@ -801,6 +831,8 @@ def shear_twist(
                     solver.shear_lk,
                     solver.contact_patch,
                     gravity_tangential,
+                    previous,
+                    solver.inertia_gain,
                 )
             )
             if trial_norm < best_norm:
@@ -821,6 +853,7 @@ def traction_twist(
     tilt: wp.vec2,  # (pitch, roll) of the current pose
     alpha: float,  # legacy turn resistance, computed by the caller
     x_icr: float,  # legacy grip-weighted ICR offset, computed by the caller
+    previous: wp.vec3,  # last step's twist; only read when body momentum is on
 ) -> wp.vec3:
     """Body twist (vx, vy, yaw_rate) from the wheel speeds, by whichever traction model is on.
 
@@ -837,8 +870,12 @@ def traction_twist(
     weight = robot.mass * robot.gravity
     cos_pitch = wp.cos(tilt[0])
     gravity_tangential = wp.vec2(weight * wp.sin(tilt[0]), -weight * cos_pitch * wp.sin(tilt[1]))
+    # under momentum the previous twist is much the better warm start -- the body cannot have
+    # moved far in one step, which is the entire point of carrying it
     guess = wp.vec3(kinematic[0], 0.0, kinematic[1] * 0.5)
-    return shear_twist(robot, solver, mu, loads, om, gravity_tangential, guess)
+    if solver.inertia_gain > 0.0:
+        guess = previous
+    return shear_twist(robot, solver, mu, loads, om, gravity_tangential, previous, guess)
 
 
 @wp.func
@@ -851,8 +888,10 @@ def step_predict(
     om: wp.vec3,  # (wL, wR, w_rear) this step
     pc: wp.vec3,  # (x, y, yaw) current state
     tc: wp.vec3,  # (z, pitch, roll) current state
+    prev_twist: wp.vec3,  # body twist entering this step (only read under body momentum)
     tid: int,
     turn_out: wp.array(dtype=wp.vec2),  # [B] (alpha, x_icr) -> written at tid
+    twist_out: wp.array(dtype=wp.vec3),  # [B] solved (vx, vy, yaw_rate) -> written at tid
 ) -> wp.vec4:
     """Grip-weighted ICR + turn resistance from the CURRENT pose, then Euler integrate. Write
     turn_out[tid]=(alpha, x_icr); return the predicted (pre-settle) pose and alpha as
@@ -883,7 +922,10 @@ def step_predict(
     x_icr = grip_x / total_grip  # grip-weighted ICR offset
     alpha = 1.0 + solver.k_turn * total_grip / (robot.gravity * robot.mass)  # turn resistance
 
-    twist = traction_twist(robot, solver, mu, loads, om, wp.vec2(tc[1], tc[2]), alpha, x_icr)
+    twist = traction_twist(
+        robot, solver, mu, loads, om, wp.vec2(tc[1], tc[2]), alpha, x_icr, prev_twist
+    )
+    twist_out[tid] = twist
     vx = twist[0]
     vy = twist[1]
     wz = twist[2]
@@ -992,6 +1034,7 @@ def step_kernel(
     current_wheel_omega_in: wp.array(dtype=wp.vec3),  # [B] lagged omega entering this step
     controlled: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) current state
     derived: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) current state
+    twist_in: wp.array(dtype=wp.vec3),  # [B] body twist entering this step
     current_wheel_omega_out: wp.array(dtype=wp.vec3),  # [B] lagged omega after this step -> written
     controlled_next: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) settled NEW state -> written
     derived_next: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) NEW state -> written
@@ -1002,6 +1045,7 @@ def step_kernel(
     stability_out: wp.array(dtype=float),  # [B] min N_i / (m g) of the NEW state
     saturation_out: wp.array(dtype=float),  # [B] friction demand / budget of the NEW state
     stall_out: wp.array(dtype=float),  # [B] required torque / motor limit of the NEW state
+    twist_out: wp.array(dtype=wp.vec3),  # [B] solved body twist -> written (momentum state)
 ):
     tid = wp.tid()
     tc = derived[tid]
@@ -1018,8 +1062,10 @@ def step_kernel(
         omega,
         controlled[tid],
         tc,
+        twist_in[tid],
         tid,
         turn_out,
+        twist_out,
     )
     pose_next = wp.vec3(pred[0], pred[1], pred[2])
     settled = settle(envelope, grid, robot, solver, pose_next, tc)
@@ -1057,6 +1103,7 @@ def step_kernel_bt(
     current_wheel_omega_in: wp.array(dtype=wp.vec3),  # [B] lagged omega entering this step
     controlled: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) current state
     derived: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) current state
+    twist_in: wp.array(dtype=wp.vec3),  # [B] body twist entering this step
     current_wheel_omega_out: wp.array(dtype=wp.vec3),  # [B] lagged omega after this step -> written
     controlled_next: wp.array(dtype=wp.vec3),  # [B] -> written
     derived_next: wp.array(dtype=wp.vec3),
@@ -1067,6 +1114,7 @@ def step_kernel_bt(
     stability_out: wp.array(dtype=float),
     saturation_out: wp.array(dtype=float),
     stall_out: wp.array(dtype=float),
+    twist_out: wp.array(dtype=wp.vec3),
 ):
     """Batched-terrain step: rollout tid steps on its own slices; settle uses the full 3D array."""
     tid = wp.tid()
@@ -1084,8 +1132,10 @@ def step_kernel_bt(
         omega,
         controlled[tid],
         tc,
+        twist_in[tid],
         tid,
         turn_out,
+        twist_out,
     )
     pose_next = wp.vec3(pred[0], pred[1], pred[2])
     settled = settle_bt(envelope, tid, grid, robot, solver, pose_next, tc)
@@ -1126,6 +1176,7 @@ def rollout_kernel(
     ),  # [B] initial lagged omega (e.g. encoder reading)
     target_wheel_omega: wp.array2d(dtype=wp.vec3),  # [T, B] commanded (wL, wR, w_rear)
     command_history: wp.array2d(dtype=wp.vec3),  # [>=1, B] commands already in flight, oldest first
+    init_twist: wp.array(dtype=wp.vec3),  # [B] body twist at rollout start (momentum only)
     controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] (x, y, yaw)
     derived: wp.array2d(dtype=wp.vec3),  # [T+1, B] (z, pitch, roll)
     current_wheel_omega_out: wp.array2d(dtype=wp.vec3),  # [T+1, B] realized omega after lag
@@ -1136,6 +1187,7 @@ def rollout_kernel(
     stability_out: wp.array2d(dtype=float),  # [T, B] min N_i / (m g)
     saturation_out: wp.array2d(dtype=float),  # [T, B] friction demand / budget
     stall_out: wp.array2d(dtype=float),  # [T, B] required torque / motor limit
+    twist_out: wp.array2d(dtype=wp.vec3),  # [T+1, B] solved body twist (momentum state)
 ):
     """FORWARD-ONLY whole-rollout fusion: one thread per rollout walks all n_steps steps,
     carrying the state (pc, tc, current) in registers instead of round-tripping it through
@@ -1165,6 +1217,8 @@ def rollout_kernel(
     z0 = sample_field(env_0, grid, pc[0], pc[1]) + robot.wheel_radius
     tc = settle(env_0, grid, robot, solver, pc, wp.vec3(z0, 0.0, 0.0))
     current = init_current_wheel_omega[b]  # initial lagged omega carried in registers
+    twist_state = init_twist[b]  # body twist carried in registers alongside it
+    twist_out[0, b] = twist_state
     controlled[0, b] = pc
     derived[0, b] = tc
     current_wheel_omega_out[0, b] = current
@@ -1205,8 +1259,10 @@ def rollout_kernel(
         alpha = 1.0 + solver.k_turn * total_grip / (robot.gravity * robot.mass)  # turn resistance
 
         twist = traction_twist(
-            robot, solver, mu, loads, current, wp.vec2(tc[1], tc[2]), alpha, x_icr
+            robot, solver, mu, loads, current, wp.vec2(tc[1], tc[2]), alpha, x_icr, twist_state
         )
+        twist_state = twist
+        twist_out[t + 1, b] = twist
         vx = twist[0]
         vy = twist[1]
         wz = twist[2]

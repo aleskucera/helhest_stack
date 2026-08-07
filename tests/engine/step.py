@@ -74,6 +74,7 @@ def rollout_device(
     stability = wp.zeros((T, 1), dtype=float, device=device)
     saturation = wp.zeros((T, 1), dtype=float, device=device)
     stall = wp.zeros((T, 1), dtype=float, device=device)
+    twist = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
 
     wp.launch(
         init_state_kernel,
@@ -97,6 +98,7 @@ def rollout_device(
                 current_wheel_omega[t],
                 controlled[t],
                 derived[t],
+                twist[t],
             ],
             outputs=[
                 current_wheel_omega[t + 1],
@@ -109,6 +111,7 @@ def rollout_device(
                 stability[t],
                 saturation[t],
                 stall[t],
+                twist[t + 1],
             ],
             device=device,
         )
@@ -325,6 +328,7 @@ def selftest_rollout_kernel():
             wp.zeros((T, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
+            wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
         ]
 
     fused = buffers()
@@ -345,6 +349,7 @@ def selftest_rollout_kernel():
             init_oa,
             omega,
             wp.zeros((1, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros(B, dtype=wp.vec3, device="cpu"),
         ],
         outputs=fused,
         device="cpu",
@@ -372,6 +377,7 @@ def selftest_rollout_kernel():
                 perstep[2][t],
                 perstep[0][t],
                 perstep[1][t],
+                perstep[10][t],
             ],
             outputs=[
                 perstep[2][t + 1],
@@ -384,6 +390,7 @@ def selftest_rollout_kernel():
                 perstep[7][t],
                 perstep[8][t],
                 perstep[9][t],
+                perstep[10][t + 1],
             ],
             device="cpu",
         )
@@ -429,6 +436,7 @@ def selftest_motor_lag():
     stability = wp.zeros((T, 1), dtype=float, device="cpu")
     saturation = wp.zeros((T, 1), dtype=float, device="cpu")
     stall = wp.zeros((T, 1), dtype=float, device="cpu")
+    twist = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
 
     wp.launch(
         init_state_kernel,
@@ -452,6 +460,7 @@ def selftest_motor_lag():
                 current_wheel_omega[t],
                 controlled[t],
                 derived[t],
+                twist[t],
             ],
             outputs=[
                 current_wheel_omega[t + 1],
@@ -464,6 +473,7 @@ def selftest_motor_lag():
                 stability[t],
                 saturation[t],
                 stall[t],
+                twist[t + 1],
             ],
             device="cpu",
         )
