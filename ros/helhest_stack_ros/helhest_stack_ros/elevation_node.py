@@ -250,6 +250,7 @@ class ElevationNode(Node):
         self._last_diff_out: float | None = (
             None  # last commanded (wR-wL), paired with the yaw it caused
         )
+        self._last_turn_adapt_time: float | None = None  # clock of the last turn_boost EMA update
         self._goal_reached = (
             False  # latched at the goal -> idle (no planning) until the goal changes
         )
@@ -1649,15 +1650,14 @@ class ElevationNode(Node):
         if self.plan_command_rate > 0.0 and from_plan and not holding:
             # Hand the whole plan to the command timer and let it walk. Stops, docks and holds are
             # NOT handed over: those are single commands, not trajectories, and must go out now.
-            # The adaptive turn_boost stays on the PLAN cadence -- turn_adapt's EMA uses a fixed
-            # per-call coefficient, so running it at the command rate would quietly shorten its
-            # time constant by the ratio of the two rates.
+            # The adaptive turn_boost stays on the PLAN cadence: it pairs a commanded differential
+            # with the yaw that differential produced, and that pairing is per-plan.
             if (
                 self._turn_adapt is not None
                 and self._imu_buffer
                 and self._last_diff_out is not None
             ):
-                self._turn_adapt.update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
+                self._turn_adapt_update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
             self._last_diff_out = float(self._prev_cmd[2] - self._prev_cmd[0])
             self._drive_plan = (
                 self.planner.nominal().copy(),
@@ -1696,7 +1696,7 @@ class ElevationNode(Node):
         # produced (this frame's gyro) and slow-update the boost -- only while genuinely turning.
         if self._turn_adapt is not None and self._imu_buffer:
             if self._last_diff_out is not None:
-                self._turn_adapt.update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
+                self._turn_adapt_update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
             self._last_diff_out = float(
                 cmd[2] - cmd[0]
             )  # condition_command [L, rear, R] -> (wR - wL)
@@ -1768,6 +1768,27 @@ class ElevationNode(Node):
             return expected
         now = float(self.get_clock().now().nanoseconds) * 1e-9
         return float(np.clip(now - self._last_cmd_time, 0.25 * expected, 2.0 * expected))
+
+    def _turn_adapt_update(self, diff_cmd: float, yaw_meas: float) -> None:
+        """Feed the adaptive turn_boost, timed by the ACTUAL interval between updates.
+
+        `tau_s` is a wall-clock time constant, so handing the EMA a nominal period that does not
+        match the real update rate scales the constant by the ratio. This runs at the PLAN rate,
+        ~69 ms on Odin rather than the nominal dynamics.DT of 0.1, which would otherwise make the
+        loop ~31% faster than its parameter says.
+
+        Clamped to [0.25x, 4x] of nominal. Unlike the command rate limiter, a long gap here is
+        legitimately worth a bigger blend -- more time really has passed -- so the upper bound is
+        loose and only guards against a stalled-frame outlier.
+        """
+        assert self._turn_adapt is not None
+        now = float(self.get_clock().now().nanoseconds) * 1e-9
+        dt = None
+        if self._last_turn_adapt_time is not None:
+            gap = now - self._last_turn_adapt_time
+            dt = float(np.clip(gap, 0.25 * dynamics.DT, 4.0 * dynamics.DT))
+        self._last_turn_adapt_time = now
+        self._turn_adapt.update(diff_cmd, yaw_meas, dt=dt)
 
     def _publish_cmd(self, cmd: np.ndarray) -> None:
         """Publish the conditioned [left, rear, right] wheel command to /cmd_joints.
