@@ -629,11 +629,12 @@ class ElevationNode(Node):
         # worsens saturation at it. Keep at 1.0 now that plan_wmax leaves turning headroom; the fixed-2.0
         # story in docs/turn_differential_hotfix.md is superseded.
         # Transport delay [s] between publishing /cmd_joints and the wheels acting on it. MEASURED
-        # at 189-249 ms (scripts/fit_actuator_lag.py); the rollout then plans against commands that
-        # land ~2 ticks late instead of instantly. 0.0 = off. Turning this on changes what the
-        # planner expects of its own commands, so any existing plan_turn_boost tuning -- which has
-        # been compensating for the delay as well as the turn gain -- must be re-checked.
-        d("plan_command_delay", 0.0)
+        # at 149-199 ms (scripts/fit_actuator_lag.py); the rollout then plans against commands that
+        # land ~2 ticks late instead of instantly. 0.0 = off. Note this makes the planner turn
+        # SOONER, not more: it no longer expects a command to bite instantly. If plan_turn_boost is
+        # ever raised above 1.0 to compensate for under-turning, re-check it after changing this --
+        # the two corrections overlap.
+        d("plan_command_delay", dynamics.COMMAND_DELAY)
         d("plan_turn_boost", 1.0)
         # OPTIONAL: self-tune plan_turn_boost online from gyro feedback (control/turn_adapt.py) so the
         # realized yaw matches the plan across terrains + the drivetrain defect -- makes the fixed
