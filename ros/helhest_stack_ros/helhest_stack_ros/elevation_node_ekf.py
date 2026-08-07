@@ -300,6 +300,7 @@ class ElevationNode(Node):
         self._prev_cmd = np.zeros(
             3, np.float32
         )  # last published /cmd_joints [L, rear, R] (slew ref)
+        self._last_cmd_time: float | None = None  # clock of the last /cmd_joints publish
         self._d_hist: deque[float] = deque(
             maxlen=15
         )  # recent robot->goal distances (progress check)
@@ -312,6 +313,7 @@ class ElevationNode(Node):
         self._last_diff_out: float | None = (
             None  # last commanded (wR-wL), paired with the yaw it caused
         )
+        self._last_turn_adapt_time: float | None = None  # clock of the last turn_boost EMA update
         self._goal_reached = (
             False  # latched at the goal -> idle (no planning) until the goal changes
         )
@@ -1695,7 +1697,7 @@ class ElevationNode(Node):
                     self._prev_cmd,
                     max_omega=self.plan_max_omega,
                     max_slew=self.plan_max_slew,
-                    dt=dynamics.DT,
+                    dt=self._command_dt(dynamics.DT),
                     turn_boost=self.plan_turn_boost,
                 )
                 self._prev_cmd = cmd
@@ -1802,7 +1804,7 @@ class ElevationNode(Node):
             self._prev_cmd,
             max_omega=self.plan_max_omega,
             max_slew=self.plan_max_slew,
-            dt=dynamics.DT,
+            dt=self._command_dt(dynamics.DT),
             turn_boost=turn_boost,
             goal_dist=d,
             brake_dist=self.plan_goal_brake_dist,
@@ -1821,10 +1823,48 @@ class ElevationNode(Node):
         # produced (this frame's gyro) and slow-update the boost -- only while genuinely turning.
         if self._turn_adapt is not None and self._imu_buffer:
             if self._last_diff_out is not None:
-                self._turn_adapt.update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
+                self._turn_adapt_update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
             self._last_diff_out = float(
                 cmd[2] - cmd[0]
             )  # condition_command [L, rear, R] -> (wR - wL)
+
+    def _turn_adapt_update(self, diff_cmd: float, yaw_meas: float) -> None:
+        """Feed the adaptive turn_boost, timed by the ACTUAL interval between updates.
+
+        `tau_s` is a wall-clock time constant, so handing the EMA a nominal period that does not
+        match the real update rate scales the constant by the ratio. This runs at the PLAN rate,
+        ~69 ms on Odin rather than the nominal dynamics.DT of 0.1, which would otherwise make the
+        loop ~31% faster than its parameter says.
+
+        Clamped to [0.25x, 4x] of nominal. Unlike the command rate limiter, a long gap here is
+        legitimately worth a bigger blend -- more time really has passed -- so the upper bound is
+        loose and only guards against a stalled-frame outlier.
+        """
+        assert self._turn_adapt is not None
+        now = float(self.get_clock().now().nanoseconds) * 1e-9
+        dt = None
+        if self._last_turn_adapt_time is not None:
+            gap = now - self._last_turn_adapt_time
+            dt = float(np.clip(gap, 0.25 * dynamics.DT, 4.0 * dynamics.DT))
+        self._last_turn_adapt_time = now
+        self._turn_adapt.update(diff_cmd, yaw_meas, dt=dt)
+
+    def _command_dt(self, expected: float) -> float:
+        """Seconds since the last /cmd_joints publish, for the rate limiter.
+
+        `condition_command` sizes its slew and decel caps as rate * dt, so handing it a NOMINAL
+        period that does not match the real publish interval scales every cap by the ratio. On
+        Odin the cloud arrives every ~69 ms while dynamics.DT is 0.1, which made every limit ~45%
+        looser than its parameter said -- plan_max_slew 2.0 was really acting as 2.9 rad/s^2.
+
+        Clamped to [0.25x, 2x] of `expected`. A long gap is not a licence to jump: after a stalled
+        frame the command should still ramp over the next few ticks rather than stepping by
+        whatever the elapsed time would allow.
+        """
+        if self._last_cmd_time is None:
+            return expected
+        now = float(self.get_clock().now().nanoseconds) * 1e-9
+        return float(np.clip(now - self._last_cmd_time, 0.25 * expected, 2.0 * expected))
 
     def _publish_cmd(self, cmd: np.ndarray) -> None:
         """Publish the conditioned [left, rear, right] wheel velocities to /cmd_joints.
@@ -1838,6 +1878,7 @@ class ElevationNode(Node):
         m.name = list(JOINT_NAMES)
         m.velocity = [float(v) for v in cmd]
         self.pub_cmd.publish(m)
+        self._last_cmd_time = float(self.get_clock().now().nanoseconds) * 1e-9
 
     def _publish_path(self, xy: np.ndarray, z: float, stamp) -> None:
         path = Path()
