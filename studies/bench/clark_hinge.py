@@ -94,6 +94,58 @@ on N_DRAWS perturbed maps), scoring the frozen and coupled models side by side a
 
 If Gate H fails, the paper scopes Clark to the settle cost and reports this module as the
 measured reason -- the same honesty rule clark_full.py already followed.
+
+===============================================================================================
+RUN LOG AND VERDICT (2026-08-07, in the order it happened -- nothing here is retrofitted)
+===============================================================================================
+
+RUN 1, design cases (rng_offset=1, the same 12 as gate1b), cross_scope="same_t" as inherited
+from clark_full.py -- `clark_hinge.json`:
+    (i)  E-ratio 0.785 [PASS]   ... the 2.20x overshoot is gone
+    (ii) |err|/mc_sd 0.900 [PASS] ... down from 5.47
+    (iii) sd-ratio 0.426 [FAIL] ... now UNDER-dispersed by ~2.3x
+    (iv) corr 0.916 [FAIL]
+    -> GATE FAILED.
+
+DIAGNOSIS AND THE ONE REVISION. clark_full.py's (f) restricted the hinge-hinge cross covariance
+to same-timestep pairs because the unrestricted version inflated variance ~9x. That restriction
+was calibrated against the FROZEN model, whose per-node variances were themselves inflated (no
+pose cancellation): the restriction was compensating for approximation (e), not for a defect in
+(f). With (e) repaired, the compensation becomes a deficit -- a rollout's clear_soft is a sum of
+hundreds of positively-correlated hinges and dropping every cross-timestep pair removes most of
+Var(sum). Revision: `cross_scope` becomes explicit, and "all" (one global Phi-weighted quadratic
+form over the whole rollout, which is also CHEAPER -- one quadratic form instead of T) is the
+default. This is a structural re-decision of a declared approximation, not a tuned constant.
+
+RUN 2, SAME design cases, cross_scope="all" -- `clark_hinge_design_all.json`:
+    sd-ratio 0.426 -> 0.791 [PASS]; E-ratio and corr unchanged (the cross term enters Var of the
+    SUM, not the per-node moments that set E). (iv) still 0.916 [FAIL].
+
+RUN 3, VIRGIN cases (rng_offset=7, 12 fresh (seed, plan) pairs never looked at), cross_scope
+="all", criteria untouched -- `clark_hinge_virgin.json`. THE REPORTABLE RESULT:
+    (i)   E-ratio        0.775  [PASS]   (frozen 2.225)
+    (ii)  |err|/mc_sd    1.077  [PASS]   (frozen 5.913)
+    (iii) sd-ratio       0.825  [PASS]
+    (iv)  corr           0.915  [FAIL vs the 0.93 bar]
+    -> GATE H FAILS ON CRITERION (iv), LITERALLY AND AS PRE-REGISTERED.
+
+WHAT (iv)'s FAILURE DOES AND DOES NOT MEAN -- stated plainly because the bar was mine and it was
+badly specified. (iv) existed to test "the fix must not trade bias for ranking", operationalized
+as beating the frozen model's design-set correlation of 0.931. On the VIRGIN cases the frozen
+model's own correlation is 0.905, i.e. BELOW the coupled model's 0.915: the comparator the bar
+was pegged to does not replicate, because a Pearson correlation over n=12 has a 95% CI of about
+[0.72, 0.98] -- the bar was set inside its own noise. The intent behind (iv) is therefore MET
+(no ranking degradation; the coupled model is if anything better on virgin data, and its E-ratio
+scatter is 3x tighter: sd 0.061 vs 0.166). The letter of (iv) is not. Both statements belong in
+the paper; the bar is NOT retroactively relaxed.
+
+RESIDUAL, DECLARED: a stable ~22% E undershoot with a ~0.83 sd-ratio. One mechanism explains
+both, and it is the next declared approximation in line rather than a defect in this fix: the
+rollout TRAJECTORY (and with it each belly point's world xy) is frozen at the belief path, so
+the true MC's path-level spread -- different terrain visited under different draws -- is absent
+from the model's per-node variance, and E[max(X,0)] is increasing in that variance. Repairing it
+means making the trajectory itself a random variable, which is a different problem from
+propagating a map through a contact max.
 """
 
 from __future__ import annotations
@@ -131,6 +183,11 @@ from .risk import N_DRAWS
 from helhest.engine import RobotParams
 from helhest.engine.envelope import wheel_offset_table
 
+# Which hinge-hinge pairs approximation (f)'s Phi-weighted cross covariance covers. clark_full.py
+# fixed this at same-timestep-only, a choice calibrated against the FROZEN-pose model; see the
+# revision log in the module docstring for why it has to be re-decided once (e) is fixed.
+CROSS_SCOPE = "all"
+
 
 def belly_pose_weights(rp: RobotParams, chassis_pts: np.ndarray) -> np.ndarray:
     """d(w_z_i) / d(env_L, env_R, env_rear) for every belly point: [n_p, 3].
@@ -147,7 +204,7 @@ def belly_pose_weights(rp: RobotParams, chassis_pts: np.ndarray) -> np.ndarray:
 def coupled_cost_plan_moments(
     belief: np.ndarray, sigma: np.ndarray, controlled: np.ndarray, derived: np.ndarray,
     rp: RobotParams, chassis_pts: np.ndarray, clear_margin: float, x0: float, y0: float,
-    cell: float, corr_table: np.ndarray,
+    cell: float, corr_table: np.ndarray, cross_scope: str = CROSS_SCOPE,
 ) -> dict:
     """E[J], Var[J] for J = settle + clear_soft with the chassis height treated as a Clark node
     correlated with the ground under the belly. Signature is deliberately identical to
@@ -239,19 +296,27 @@ def coupled_cost_plan_moments(
     # (f) with the node part carried through: Y_t = v_t . U - b_t . N_t.
     v_sum = np.zeros(u.shape[0])
     b_all = np.zeros(3 * n_t)
-    cross_hinge = 0.0
+    per_t_var = 0.0
     for t in range(n_t):
         v_t = np.zeros(u.shape[0])
         np.add.at(v_t, hinge_u_idx_r[t].ravel(), (phi_r[t][:, None] * hinge_w_r[t]).ravel())
         b_t = phi_r[t] @ a  # [3]
         c_un_t = cov_to_u_final_env[nodes_t[:, t]]  # [3, |U|]
         c_nn_t = cross_env[np.ix_(nodes_t[:, t], nodes_t[:, t])]
-        var_y = float(v_t @ cov_u @ v_t) - 2.0 * float(b_t @ (c_un_t @ v_t)) + float(
+        per_t_var += float(v_t @ cov_u @ v_t) - 2.0 * float(b_t @ (c_un_t @ v_t)) + float(
             b_t @ c_nn_t @ b_t
         )
-        cross_hinge += var_y - float((phi_r[t] ** 2 * var_x[t]).sum())
         v_sum += v_t
         b_all[nodes_t[:, t]] = b_t
+    if cross_scope == "same_t":
+        var_y_total = per_t_var
+    else:  # "all": one global quadratic form -- Y = v_sum . U - b_all . N, all pairs included
+        var_y_total = (
+            float(v_sum @ cov_u @ v_sum)
+            - 2.0 * float(b_all @ (cov_to_u_final_env @ v_sum))
+            + float(b_all @ cross_env @ b_all)
+        )
+    cross_hinge = var_y_total - float((phi_r**2 * var_x).sum())
 
     e_clear = float(e_hinge.sum())
     var_clear = max(float(var_hinge_r.sum() + cross_hinge), 0.0)
@@ -280,14 +345,16 @@ def coupled_cost_plan_moments(
 
 
 # --- GATE H: the like-for-like rematch of clark_full.py's Gate 1b -------------------------------
-def gateH_trajectory_vs_mc(device: str, n_cases: int = 12) -> dict:
+def gateH_trajectory_vs_mc(
+    device: str, n_cases: int = 12, cross_scope: str = CROSS_SCOPE, rng_offset: int = 1
+) -> dict:
     """The SAME (seed, plan) cases as `clark_full.gate1b_trajectory_vs_mc` (same RNG stream), the
     same true end-to-end MC, scoring frozen and coupled side by side. Criteria pre-registered in
     the module docstring."""
     rp = RobotParams()
     chassis_pts = rp._chassis_pts()
     corr_table = rho1_table(CORR_LEN, CELL)
-    rng = np.random.default_rng(RNG_SEED + 1)  # matches gate1b exactly
+    rng = np.random.default_rng(RNG_SEED + rng_offset)  # offset 1 == gate1b's own cases
     seeds = rng.integers(0, 40, n_cases)
     plans = rng.integers(0, N_PLANS, n_cases)
     rows = []
@@ -303,7 +370,7 @@ def gateH_trajectory_vs_mc(device: str, n_cases: int = 12) -> dict:
 
         mo = coupled_cost_plan_moments(
             belief, sigma, controlled[:, plan, :], derived[:, plan, :], rp, chassis_pts,
-            CLEAR_MARGIN, scene.origin_x, scene.origin_y, CELL, corr_table,
+            CLEAR_MARGIN, scene.origin_x, scene.origin_y, CELL, corr_table, cross_scope,
         )
 
         # true end-to-end MC, byte-identical protocol to gate1b (same seed offset 800_000 + case)
@@ -348,6 +415,8 @@ def gateH_trajectory_vs_mc(device: str, n_cases: int = 12) -> dict:
         "iv_corr_ge_0.93": bool(corr >= 0.93),
     }
     return {
+        "cross_scope": cross_scope,
+        "rng_offset": rng_offset,
         "rows": rows,
         "median_e_ratio": med_e,
         "median_sd_ratio": med_sd,
@@ -403,14 +472,24 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--cases", type=int, default=12)
+    ap.add_argument("--cross-scope", default=CROSS_SCOPE, choices=("same_t", "all"))
+    ap.add_argument("--rng-offset", type=int, default=1, help="1 = gate1b's cases; 7 = virgin")
+    ap.add_argument("--tag", default="", help="suffix for the output json")
     ap.add_argument("--stage2", action="store_true")
     ap.add_argument("--seeds", type=int, default=100)
     args = ap.parse_args()
     wp.init()
 
-    out: dict = {"gateH": gateH_trajectory_vs_mc(args.device, args.cases)}
+    out: dict = {
+        "gateH": gateH_trajectory_vs_mc(
+            args.device, args.cases, args.cross_scope, args.rng_offset
+        )
+    }
     g = out["gateH"]
-    print("=== GATE H: pose-coupled hinge vs true end-to-end MC ===")
+    print(
+        f"=== GATE H: pose-coupled hinge vs true end-to-end MC "
+        f"(cross_scope={args.cross_scope}, rng_offset={args.rng_offset}) ==="
+    )
     print(f"  E-ratio      coupled {g['median_e_ratio']:.3f}   frozen {g['frozen_median_e_ratio']:.3f}")
     print(f"  |err|/mc_sd  coupled {g['median_err_over_mcsd']:.3f}   frozen {g['frozen_median_err_over_mcsd']:.3f}")
     print(f"  sd-ratio     coupled {g['median_sd_ratio']:.3f}")
@@ -432,7 +511,7 @@ def main() -> None:
                 print(f"  {k}: p={v['p']:.2e}, mean regret diff {v['mean_regret_diff']:+.4f}")
             print(f"  STAGE 2: {'PASSED' if s['passed'] else 'FAILED'}")
 
-    path = OUT / "clark_hinge.json"
+    path = OUT / f"clark_hinge{args.tag}.json"
     path.write_text(json.dumps(out, indent=1))
     print(f"\nwrote {path}")
 
