@@ -141,7 +141,7 @@ Reusable scripts, all in `scripts/`.
 | rolling resistance | 0.09 × weight | the same fit's offset |
 | turn gain α | **2.20** measured wheels, 3.06 commanded | `fit_turn_gain.py`, two IMUs agree to 1% |
 | drivetrain realisation | 0.60–0.70 of the commanded differential | the ratio of those two |
-| command delay | 149–199 ms | `fit_actuator_lag.py` |
+| actuator response | **τ = 0.17–0.20 s**, dead time 0–50 ms | `fit_actuator_lag.py`, joint fit |
 | friction saturation, real terrain | ≤ 0.69 at μ=0.2, ≤ 0.23 at μ=0.6 | `saturation_from_bags.py` |
 | L/K | 8–15 (pre-rolling-resistance) | `fit_traction.py`, quasi-static samples only |
 
