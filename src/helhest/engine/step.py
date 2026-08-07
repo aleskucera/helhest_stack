@@ -39,6 +39,10 @@ from .terrain import sample_normal
 # pin this module to it. CPU is unaffected (defaults to -O2).
 wp.set_module_options({"optimization_level": 2})
 
+# Certificate denominators are floored at this fraction of the robot's weight: a near-unloaded
+# contact would otherwise report an enormous ratio while transmitting almost nothing.
+_GRIP_FLOOR_FRAC = wp.constant(1.0e-3)
+
 
 # --- settle/integration numerics: host params + the device-side `Solver` struct ---
 @wp.struct
@@ -432,6 +436,76 @@ def stability_margin(robot: Robot, loads: wp.vec3) -> float:
 
 
 @wp.func
+def contact_grip(
+    envelope: wp.array2d(dtype=wp.float32),
+    friction: wp.array2d(dtype=wp.float32),
+    grid: Grid,
+    robot: Robot,
+    R: wp.mat33,
+    p: wp.vec3,
+    loads: wp.vec3,
+) -> float:
+    """Coulomb budget Sum_i mu_i N_i of the three contacts at the pose (R, p).
+
+    `loads` are that pose's normal loads; mu is sampled at each contact point, exactly as in
+    `step_predict`'s turning solve (same wheel centers, same normal offset).
+    """
+    total = float(0.0)
+    for i in range(wp.static(3)):
+        st_i = wp.static(i)
+        wheel_center = p + R * robot.wheel_pos[st_i]
+        n = sample_normal(envelope, grid, wheel_center[0], wheel_center[1])
+        ct = wheel_center - robot.wheel_radius * n  # contact point
+        total += sample_field(friction, grid, ct[0], ct[1]) * loads[st_i]
+    return total
+
+
+@wp.func
+def friction_saturation(
+    robot: Robot,
+    loads: wp.vec3,
+    grip: float,
+    pitch: float,
+    roll: float,
+    forward_speed: float,
+    yaw_rate: float,
+) -> float:
+    """Tangential demand / Coulomb budget at this pose: > 1 means the twist is unachievable.
+
+    Demand is the friction force the contacts must supply to hold the quasi-static twist,
+    combined through the friction ellipse:
+
+        demand_long = m g sin(pitch)                              (gravity along the slope)
+        demand_lat  = m v psi_dot + m g cos(pitch) sin(roll)      (centripetal + cross-slope)
+
+    Budget is `mu_bar * m g cos(pitch) cos(roll)`, where mu_bar = Sum_i mu_i N_i / Sum_i N_i is
+    the load-weighted friction coefficient. The budget is deliberately rebuilt from the weight
+    rather than taken as `Sum_i mu_i N_i` directly: `normal_loads` is a normal-only balance, so
+    its loads sum to m g / (cos pitch cos roll) instead of the true m g cos(tilt) (see
+    `stability_margin`). Using them raw would make the certificate cross 1.0 at
+    sin(theta) cos(theta) = mu, which peaks at 0.5 -- so it could never fire at all on mu > 0.5
+    terrain. Only the load RATIOS are taken from the solve, and that bias cancels in mu_bar.
+
+    Both denominators are floored at 1e-3 of the robot's weight: an unloaded contact otherwise
+    reports enormous saturation while transmitting nothing.
+
+    Quasi-static, so there is no `m a` term (no body-velocity state; IMPROVEMENTS.md section 5).
+    """
+    weight = robot.mass * robot.gravity
+    floor = _GRIP_FLOOR_FRAC * weight
+    cp = wp.cos(pitch)
+    cr = wp.cos(roll)
+    load_sum = loads[0] + loads[1] + loads[2]
+    mu_bar = grip / wp.max(load_sum, floor)
+    budget = mu_bar * weight * cp * cr
+
+    demand_long = weight * wp.sin(pitch)
+    demand_lat = robot.mass * forward_speed * yaw_rate + weight * cp * wp.sin(roll)
+    demand = wp.sqrt(demand_long * demand_long + demand_lat * demand_lat)
+    return demand / wp.max(budget, floor)
+
+
+@wp.func
 def chassis_clearance(
     elevation: wp.array2d(dtype=wp.float32), grid: Grid, robot: Robot, R: wp.mat33, p: wp.vec3
 ):
@@ -461,6 +535,19 @@ def chassis_clearance(
 
 
 @wp.func
+def body_twist(robot: Robot, om: wp.vec3, alpha: float) -> wp.vec2:
+    """Body-frame (forward speed, yaw rate) from the wheel speeds and the turn resistance alpha.
+
+    Differential drive on the front pair; `alpha` (from the grip solve) widens the effective
+    track, so it damps yaw only. The ONE place this mapping lives -- the integration in
+    `step_predict` and the certificates in `step_finalize` must not drift apart.
+    """
+    vx = robot.wheel_radius * (om[0] + om[1]) / 2.0
+    wz = robot.wheel_radius * (om[1] - om[0]) / (2.0 * robot.half_track * alpha)
+    return wp.vec2(vx, wz)
+
+
+@wp.func
 def step_predict(
     env_i: wp.array2d(dtype=wp.float32),
     fric_i: wp.array2d(dtype=wp.float32),
@@ -472,9 +559,12 @@ def step_predict(
     tc: wp.vec3,  # (z, pitch, roll) current state
     tid: int,
     turn_out: wp.array(dtype=wp.vec2),  # [B] (alpha, x_icr) -> written at tid
-) -> wp.vec3:
+) -> wp.vec4:
     """Grip-weighted ICR + turn resistance from the CURRENT pose, then Euler integrate. Write
-    turn_out[tid]=(alpha, x_icr); return the predicted (pre-settle) pose (xn, yn, yawn)."""
+    turn_out[tid]=(alpha, x_icr); return the predicted (pre-settle) pose and alpha as
+    (xn, yn, yawn, alpha) -- `step_finalize` needs alpha to rebuild the twist, and returning it
+    beats re-reading the output array inside the kernel (that would put a read-after-write on a
+    grad-tracked buffer in the taped path)."""
     x = pc[0]
     y = pc[1]
     yaw = pc[2]
@@ -496,22 +586,26 @@ def step_predict(
     x_icr = grip_x / total_grip  # grip-weighted ICR offset
     alpha = 1.0 + solver.k_turn * total_grip / (robot.gravity * robot.mass)  # turn resistance
 
-    vx = robot.wheel_radius * (om[0] + om[1]) / 2.0
-    wz = robot.wheel_radius * (om[1] - om[0]) / (2.0 * robot.half_track * alpha)
+    twist = body_twist(robot, om, alpha)
+    vx = twist[0]
+    wz = twist[1]
     vy = -x_icr * wz
     vw = R * wp.vec3(vx, vy, 0.0)
     turn_out[tid] = wp.vec2(alpha, x_icr)
-    return wp.vec3(x + vw[0] * solver.dt, y + vw[1] * solver.dt, yaw + wz * solver.dt)
+    return wp.vec4(x + vw[0] * solver.dt, y + vw[1] * solver.dt, yaw + wz * solver.dt, alpha)
 
 
 @wp.func
 def step_finalize(
     env_i: wp.array2d(dtype=wp.float32),
     elev_i: wp.array2d(dtype=wp.float32),
+    fric_i: wp.array2d(dtype=wp.float32),
     grid: Grid,
     robot: Robot,
     pose_next: wp.vec3,  # predicted (xn, yn, yawn)
     settled: wp.vec3,  # settled (z, pitch, roll) of the new pose
+    om: wp.vec3,  # (wL, wR, w_rear) realized this step
+    alpha: float,  # turn resistance used this step (from step_predict)
     tid: int,
     controlled_next: wp.array(dtype=wp.vec3),  # [B] -> written at tid
     derived_next: wp.array(dtype=wp.vec3),
@@ -519,6 +613,7 @@ def step_finalize(
     clear_out: wp.array(dtype=float),
     resid_out: wp.array(dtype=float),
     stability_out: wp.array(dtype=float),
+    saturation_out: wp.array(dtype=float),
 ):
     """Write the NEW state + diagnostics at tid from the predicted pose and its settled tilt."""
     controlled_next[tid] = pose_next
@@ -531,6 +626,11 @@ def step_finalize(
     loads = normal_loads(env_i, grid, robot, Rn, pn)
     loads_out[tid] = loads
     stability_out[tid] = stability_margin(robot, loads)
+    grip = contact_grip(env_i, fric_i, grid, robot, Rn, pn, loads)
+    twist = body_twist(robot, om, alpha)
+    saturation_out[tid] = friction_saturation(
+        robot, loads, grip, settled[1], settled[2], twist[0], twist[1]
+    )
     clear_out[tid] = chassis_clearance(elev_i, grid, robot, Rn, pn)
     cres = clearances(env_i, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
     resid_out[tid] = wp.max(wp.max(wp.abs(cres[0]), wp.abs(cres[1])), wp.abs(cres[2]))
@@ -595,6 +695,7 @@ def step_kernel(
     clear_out: wp.array(dtype=float),  # [B] belly clearance of the NEW state
     resid_out: wp.array(dtype=float),  # [B] settle residual (max|c|) of the NEW state
     stability_out: wp.array(dtype=float),  # [B] min N_i / (m g) of the NEW state
+    saturation_out: wp.array(dtype=float),  # [B] friction demand / budget of the NEW state
 ):
     tid = wp.tid()
     tc = derived[tid]
@@ -602,7 +703,7 @@ def step_kernel(
         current_wheel_omega_in[tid], target_wheel_omega[tid], solver.dt, solver.tau_motor
     )
     current_wheel_omega_out[tid] = omega
-    pose_next = step_predict(
+    pred = step_predict(
         envelope,
         friction,
         grid,
@@ -614,14 +715,18 @@ def step_kernel(
         tid,
         turn_out,
     )
+    pose_next = wp.vec3(pred[0], pred[1], pred[2])
     settled = settle(envelope, grid, robot, solver, pose_next, tc)
     step_finalize(
         envelope,
         elevation,
+        friction,
         grid,
         robot,
         pose_next,
         settled,
+        omega,
+        pred[3],
         tid,
         controlled_next,
         derived_next,
@@ -629,6 +734,7 @@ def step_kernel(
         clear_out,
         resid_out,
         stability_out,
+        saturation_out,
     )
 
 
@@ -652,6 +758,7 @@ def step_kernel_bt(
     clear_out: wp.array(dtype=float),
     resid_out: wp.array(dtype=float),
     stability_out: wp.array(dtype=float),
+    saturation_out: wp.array(dtype=float),
 ):
     """Batched-terrain step: rollout tid steps on its own slices; settle uses the full 3D array."""
     tid = wp.tid()
@@ -660,7 +767,7 @@ def step_kernel_bt(
         current_wheel_omega_in[tid], target_wheel_omega[tid], solver.dt, solver.tau_motor
     )
     current_wheel_omega_out[tid] = omega
-    pose_next = step_predict(
+    pred = step_predict(
         envelope[tid],
         friction[tid],
         grid,
@@ -672,14 +779,18 @@ def step_kernel_bt(
         tid,
         turn_out,
     )
+    pose_next = wp.vec3(pred[0], pred[1], pred[2])
     settled = settle_bt(envelope, tid, grid, robot, solver, pose_next, tc)
     step_finalize(
         envelope[tid],
         elevation[tid],
+        friction[tid],
         grid,
         robot,
         pose_next,
         settled,
+        omega,
+        pred[3],
         tid,
         controlled_next,
         derived_next,
@@ -687,6 +798,7 @@ def step_kernel_bt(
         clear_out,
         resid_out,
         stability_out,
+        saturation_out,
     )
 
 
@@ -712,6 +824,7 @@ def rollout_kernel(
     clear_out: wp.array2d(dtype=float),  # [T, B]
     resid_out: wp.array2d(dtype=float),  # [T, B]
     stability_out: wp.array2d(dtype=float),  # [T, B] min N_i / (m g)
+    saturation_out: wp.array2d(dtype=float),  # [T, B] friction demand / budget
 ):
     """FORWARD-ONLY whole-rollout fusion: one thread per rollout walks all n_steps steps,
     carrying the state (pc, tc, current) in registers instead of round-tripping it through
@@ -758,8 +871,9 @@ def rollout_kernel(
         # Apply lag first (update-then-use): tau_motor=0 gives current = target_wheel_omega[t] exactly.
         current = motor_lag_step(current, target_wheel_omega[t, b], solver.dt, solver.tau_motor)
         current_wheel_omega_out[t + 1, b] = current
-        vx = robot.wheel_radius * (current[0] + current[1]) / 2.0
-        wz = robot.wheel_radius * (current[1] - current[0]) / (2.0 * robot.half_track * alpha)
+        twist = body_twist(robot, current, alpha)
+        vx = twist[0]
+        wz = twist[1]
         vy = -x_icr * wz
         vw = R * wp.vec3(vx, vy, 0.0)
         xn = x + vw[0] * solver.dt
@@ -776,6 +890,10 @@ def rollout_kernel(
         loads = normal_loads(envelope, grid, robot, Rn, pn)
         loads_out[t, b] = loads
         stability_out[t, b] = stability_margin(robot, loads)
+        grip_n = contact_grip(envelope, friction, grid, robot, Rn, pn, loads)
+        saturation_out[t, b] = friction_saturation(
+            robot, loads, grip_n, settled[1], settled[2], vx, wz
+        )
         turn_out[t, b] = wp.vec2(alpha, x_icr)
         clear_out[t, b] = chassis_clearance(elevation, grid, robot, Rn, pn)
         cres = clearances(envelope, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])

@@ -108,6 +108,8 @@ class BaseSimulator:
             # Static tip-over margin min_i(N_i) / (m g) -- see step.stability_margin for what it
             # does and does not detect on this robot.
             self.stability = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
+            # Tangential friction demand / Coulomb budget -- see step.friction_saturation.
+            self.saturation = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             self.current_wheel_omega = wp.zeros((T + 1, B), dtype=wp.vec3f)
             self.target_wheel_omega = wp.zeros((T, B), dtype=wp.vec3f, requires_grad=control_grad)
             self.start_pose = wp.zeros(B, dtype=wp.vec3f, requires_grad=control_grad)
@@ -208,6 +210,7 @@ class ForwardSimulator(BaseSimulator):
                 self.clearance,
                 self.residual,
                 self.stability,
+                self.saturation,
             ],
             device=self.device,
         )
@@ -426,6 +429,7 @@ class DifferentiableSimulator(BaseSimulator):
                         self.clearance[t],
                         self.residual[t],
                         self.stability[t],
+                        self.saturation[t],
                     ],
                     device=self.device,
                 )

@@ -72,6 +72,7 @@ def rollout_device(
     clear = wp.zeros((T, 1), dtype=float, device=device)
     resid = wp.zeros((T, 1), dtype=float, device=device)
     stability = wp.zeros((T, 1), dtype=float, device=device)
+    saturation = wp.zeros((T, 1), dtype=float, device=device)
 
     wp.launch(
         init_state_kernel,
@@ -105,6 +106,7 @@ def rollout_device(
                 clear[t],
                 resid[t],
                 stability[t],
+                saturation[t],
             ],
             device=device,
         )
@@ -319,6 +321,7 @@ def selftest_rollout_kernel():
             wp.zeros((T, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
+            wp.zeros((T, B), dtype=float, device="cpu"),
         ]
 
     fused = buffers()
@@ -362,6 +365,7 @@ def selftest_rollout_kernel():
                 perstep[5][t],
                 perstep[6][t],
                 perstep[7][t],
+                perstep[8][t],
             ],
             device="cpu",
         )
@@ -405,6 +409,7 @@ def selftest_motor_lag():
     clear = wp.zeros((T, 1), dtype=float, device="cpu")
     resid = wp.zeros((T, 1), dtype=float, device="cpu")
     stability = wp.zeros((T, 1), dtype=float, device="cpu")
+    saturation = wp.zeros((T, 1), dtype=float, device="cpu")
 
     wp.launch(
         init_state_kernel,
@@ -438,6 +443,7 @@ def selftest_motor_lag():
                 clear[t],
                 resid[t],
                 stability[t],
+                saturation[t],
             ],
             device="cpu",
         )

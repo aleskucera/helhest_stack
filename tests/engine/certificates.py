@@ -36,7 +36,7 @@ def _plane(pitch_deg: float = 0.0, roll_deg: float = 0.0) -> np.ndarray:
 
 
 class _Static:
-    """One-step rollout of a stationary robot (wheels commanded to zero) on a given terrain."""
+    """One-step rollout on a given terrain, wheels stationary unless `omega` says otherwise."""
 
     def __init__(self, robot_params: RobotParams | None = None, mu: float = 0.6):
         self.robot_params = robot_params or RobotParams()
@@ -51,15 +51,20 @@ class _Static:
         )
         self.sim.set_uniform_friction(mu)
 
-    def run(self, heights: np.ndarray) -> dict[str, np.ndarray | float]:
+    def run(
+        self, heights: np.ndarray, omega: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    ) -> dict[str, np.ndarray | float]:
         self.sim.set_terrain(wp.array(heights, dtype=wp.float32, device=self.device))
-        self.sim.rollout(np.zeros((1, 1, 3), np.float32), (0.0, 0.0, 0.0))
+        cmd = np.asarray(omega, np.float32).reshape(1, 1, 3)
+        self.sim.rollout(cmd, (0.0, 0.0, 0.0))
         derived = self.sim.derived.numpy()[1, 0]
         return {
             "loads": self.sim.loads.numpy()[0, 0],
             "pitch": float(derived[1]),
             "roll": float(derived[2]),
             "stability": float(self.sim.stability.numpy()[0, 0]),
+            "saturation": float(self.sim.saturation.numpy()[0, 0]),
+            "alpha": float(self.sim.turning.numpy()[0, 0, 0]),
             "residual": float(self.sim.residual.numpy()[0, 0]),
         }
 
@@ -196,8 +201,63 @@ def selftest_shape_margin() -> None:
     print("shape margin  OK (responds to shape, never approaches tip-over)")
 
 
+def selftest_friction_saturation() -> None:
+    """The friction certificate on constant slopes: it must cross 1.0 exactly at tan(theta) = mu.
+
+    A stationary robot on a plane of tilt theta needs m g sin(theta) of tangential force and has
+    mu m g cos(theta) of budget, so `saturation` = tan(theta) / mu -- along the slope (pitch) and
+    across it (roll) alike. The crossing is the whole point: below it the robot can hold station,
+    above it it cannot.
+    """
+    print(f"{'tilt[deg]':>9} {'axis':>5} {'mu':>6} {'saturation':>11} {'tan/mu':>8} {'rel err':>9}")
+    worst = 0.0
+    for tilt in (10.0, 20.0, 30.0):
+        tan_theta = float(np.tan(np.radians(tilt)))
+        for axis in ("pitch", "roll"):
+            for mu in (0.2, 0.4, 0.6, 0.9, tan_theta):
+                static = _Static(mu=mu)
+                r = static.run(
+                    _plane(
+                        pitch_deg=-tilt if axis == "pitch" else 0.0,
+                        roll_deg=tilt if axis == "roll" else 0.0,
+                    )
+                )
+                expected = tan_theta / mu
+                rel = abs(r["saturation"] - expected) / expected
+                worst = max(worst, rel)
+                print(
+                    f"{tilt:9.1f} {axis:>5} {mu:6.3f} {r['saturation']:11.4f} "
+                    f"{expected:8.4f} {rel:9.2e}"
+                )
+            # mu == tan(theta) is the crossing itself
+            assert abs(r["saturation"] - 1.0) < 5e-3, "certificate does not cross 1 at tan = mu"
+    print(f"slope saturation = tan(theta)/mu: worst relative error {worst:.2e}")
+    assert worst < 5e-3, "friction saturation no longer matches the analytic slope value"
+
+    # the centripetal term, on flat ground: demand = m v psi_dot, budget = mu m g
+    mu = 0.6
+    static = _Static(mu=mu)
+    flat = _plane()
+    print(f"{'wL':>6} {'wR':>6} {'saturation':>11} {'v psi/(mu g)':>13} {'rel err':>9}")
+    worst_turn = 0.0
+    for wl, wr in ((1.0, 3.0), (2.0, 4.0), (0.5, 5.0)):
+        r = static.run(flat, omega=(wl, wr, 0.0))
+        rp = static.robot_params
+        v = rp.wheel_radius * (wl + wr) / 2.0
+        yaw_rate = rp.wheel_radius * (wr - wl) / (2.0 * rp.half_track * r["alpha"])
+        expected = v * yaw_rate / (mu * rp.gravity)
+        rel = abs(r["saturation"] - expected) / expected
+        worst_turn = max(worst_turn, rel)
+        print(f"{wl:6.1f} {wr:6.1f} {r['saturation']:11.4f} {expected:13.4f} {rel:9.2e}")
+    print(f"turn saturation = v psi_dot / (mu g): worst relative error {worst_turn:.2e}")
+    assert worst_turn < 5e-3, "centripetal demand no longer matches m v psi_dot"
+    print("friction saturation  OK")
+
+
 if __name__ == "__main__":
     wp.init()
     selftest_ramp_margin()
     print()
     selftest_shape_margin()
+    print()
+    selftest_friction_saturation()
