@@ -257,3 +257,37 @@ real footprints of the benchmark's own belief map; budget curve from
 clark_full.json). The Jensen figure also exposes something a schematic would have
 hidden and the paper now states: Clark over-predicts the PER-NODE Jensen gap by
 ~30%, against a first-order alternative that predicts no gap at all.
+
+### 10.1 Corrections found while writing the paper (2026-08-07, later)
+
+Three adversarial referee agents reviewed the draft (novelty / methodology / significance).
+The methodology referee recomputed ~50 numeric claims from the JSONs and confirmed them
+exactly; chasing its findings turned up two errors that were ours, not the paper's:
+
+1. **`clark_full.bench_wall_costs` is broken and its 8.48 ms/plan is ~5x optimistic.** It
+   reads `h.sim.controlled` BEFORE `h.forward()`, so it timed the Clark fold on the
+   pre-rollout buffer: an all-zeros trajectory parked at the origin, where all 40 timesteps
+   share ONE footprint (measured: 1 distinct xy vs 41, path length 0.0 m vs 4.7 m) and the
+   candidate universe collapses. A warning comment is now in that function; the code and its
+   json are left intact so the committed artifact stays reproducible. **Corrected numbers
+   (`bench/clark_fast.py`, `out/bench/clark_fast.json`, idle machine, medians over 10 seeds x
+   16 plans): clark.py 42.9 ms/plan, MC-256 6.07 ms/plan measured in the same run.** Any
+   future wall-time claim must come from clark_fast, not from clark_full's `wall` field.
+2. **The cap-pooling refutation was imported from the wrong study.** Its p=0.014 comes from
+   `ranking.py::p_magnitude_pooled` -- a SENSING policy about where to point a look budget --
+   not from any risk-magnitude experiment. It is out of the paper's ledger, which is now
+   SEVEN routes, not eight. HANDOFF §3's list should be read the same way.
+3. Smaller: `rare.json` says FORM misses by 2.97 decades (not ~2) and attack-seeded IS is
+   censored on 16/16 cases (no finite estimate at all, not "~2 dex"); the "3.4 sigma vs 0.4
+   sigma" iid-vs-correlated claim in FINDINGS §2.3 is not reproducible from study_b.json's b1
+   under any single aggregation (it is scale-dependent: 0.34/0.03 at sigma_scale 0.03 rising
+   to 13.2/1.19 at 3.0) -- the paper cites its own figure's measured 2.4x instead.
+
+**NEW AND USEFUL: `bench/clark_fast.py` makes the estimator 3.7x faster with BIT-IDENTICAL
+output** (max |dE| = max |dVar| = 0.000e+00 over 10 seeds x 16 plans). `clark_build` widens
+its tracked covariance vector with the node's own K candidates so the recursion can read
+Cov(running max, candidate i) -- but every candidate IS a universe cell, so that number is
+already in the universe part of the vector. Dropping the redundant block means the
+[3T x K x |U|] tensor (~70 MB/plan) never has to be built, sorted and concatenated. 42.9 ->
+11.6 ms/plan. Still 1.9x slower than 256 batched GPU rollouts, so the Warp kernel remains the
+open item for a wall-time claim -- but it is now a 2x gap, not a 7x one.
