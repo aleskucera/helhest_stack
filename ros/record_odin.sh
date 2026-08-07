@@ -24,6 +24,13 @@ TOPICS=(
   # --- planning I/O (plan_actuate on: a goal drives) ---
   /goal_pose                # planning goal (the input)
   /cmd_joints               # wheel command elevation sends to the LLC (the drive output)
+  # --- drivetrain response (100 Hz, from the LLC) ---
+  # Without these a bag can show WHAT was commanded but not what the wheels did, which blocks
+  # every drivetrain question: the turn gain (alpha from measured rather than commanded wheels),
+  # the command->response delay, the torque scale from `effort`, and the differential the LLC
+  # actually realizes. The Odin bags so far have none of it. Cheap: ~100 Hz of 3 floats.
+  /joint_setpoints          # per-wheel target the LLC is acting on -- splits transport from loop
+  /joint_states             # measured wheel position/velocity/effort -- the actual response
 )
 
 # Standard scenarios: name -> maneuver to perform while recording.
@@ -33,8 +40,9 @@ declare -A SCENARIOS=(
   [translate]="slow straight drive (~10 m) forward/back -- accumulator + odom drift"
   [drive_goal]="set a /goal_pose and let it drive to it -- planning + actuation capture (clear space!)"
   [dynamic]="people/objects moving through a static scene -- dynamic visibility-carve tuning"
+  [calibrate]="HOLD each command 3-5 s: straight at ~2/4/6 rad/s, then turns (differential ~1/2/4) at each speed, then a few sharp starts from rest -- the only maneuver that gives STEADY-STATE turning (the planner never holds a command longer than ~3 ms) plus clean step responses"
 )
-ORDER=(static spin translate drive_goal dynamic)
+ORDER=(static spin translate drive_goal dynamic calibrate)
 
 list_scenarios() {
   echo "scenarios:"
