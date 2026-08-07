@@ -237,6 +237,7 @@ class ElevationNode(Node):
         # plus what condition_command needs that the timer cannot recompute. None means the cloud
         # callback published directly (stop, dock, hold) and the timer must stay out of the way.
         self._drive_plan: tuple[np.ndarray, float, float, float] | None = None
+        self._last_cmd_time: float | None = None  # clock of the last /cmd_joints publish
         self._d_hist: deque[float] = deque(
             maxlen=15
         )  # recent robot->goal distances (progress check)
@@ -1541,7 +1542,7 @@ class ElevationNode(Node):
                     max_omega=self.plan_max_omega,
                     max_slew=self.plan_max_slew,
                     max_decel=self.plan_max_decel,
-                    dt=dynamics.DT,
+                    dt=self._command_dt(dynamics.DT),
                     turn_boost=self.plan_turn_boost,
                 )
                 self._prev_cmd = cmd
@@ -1676,7 +1677,7 @@ class ElevationNode(Node):
             max_omega=self.plan_max_omega,
             max_slew=self.plan_max_slew,
             max_decel=self.plan_max_decel,
-            dt=dynamics.DT,
+            dt=self._command_dt(dynamics.DT),
             turn_boost=turn_boost,
             goal_dist=d,
             brake_dist=self.plan_goal_brake_dist,
@@ -1724,7 +1725,7 @@ class ElevationNode(Node):
             max_omega=self.plan_max_omega,
             max_slew=self.plan_max_slew,
             max_decel=self.plan_max_decel,
-            dt=self._command_period,
+            dt=self._command_dt(self._command_period),
             turn_boost=turn_boost,
             goal_dist=goal_dist,
             brake_dist=self.plan_goal_brake_dist,
@@ -1751,6 +1752,23 @@ class ElevationNode(Node):
             in_flight_history(self._cmd_in_flight, n, int(self.plan_sim.batch_size))
         )
 
+    def _command_dt(self, expected: float) -> float:
+        """Seconds since the last /cmd_joints publish, for the rate limiter.
+
+        `condition_command` sizes its slew and decel caps as rate * dt, so handing it a NOMINAL
+        period that does not match the real publish interval scales every cap by the ratio. On
+        Odin the cloud arrives every ~69 ms while dynamics.DT is 0.1, which made every limit ~45%
+        looser than its parameter said -- plan_max_slew 2.0 was really acting as 2.9 rad/s^2.
+
+        Clamped to [0.25x, 2x] of `expected`. A long gap is not a licence to jump: after a stalled
+        frame the command should still ramp over the next few ticks rather than stepping by
+        whatever the elapsed time would allow.
+        """
+        if self._last_cmd_time is None:
+            return expected
+        now = float(self.get_clock().now().nanoseconds) * 1e-9
+        return float(np.clip(now - self._last_cmd_time, 0.25 * expected, 2.0 * expected))
+
     def _publish_cmd(self, cmd: np.ndarray) -> None:
         """Publish the conditioned [left, rear, right] wheel command to /cmd_joints.
 
@@ -1769,6 +1787,7 @@ class ElevationNode(Node):
         m.velocity = [float(v) for v in cmd]
         self.pub_cmd.publish(m)
         self._cmd_in_flight.append(to_engine_order(cmd))
+        self._last_cmd_time = float(self.get_clock().now().nanoseconds) * 1e-9
 
     def _publish_path(self, xy: np.ndarray, z: float, stamp) -> None:
         path = Path()
