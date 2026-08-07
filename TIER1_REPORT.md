@@ -1,6 +1,6 @@
 # Tier-1 engine certificates — session report
 
-Branch `engine/tier1-certificates`, five commits off `main` (`de96100`). Implements
+Branch `engine/tier1-certificates`, seven commits off `main` (`de96100`). Implements
 IMPROVEMENTS.md §3, §1, §2, §4 in that order. Not merged; left for review.
 
 Everything here is additive: new output arrays and two new opt-in `RobotParams` fields. With
@@ -16,6 +16,8 @@ engine, proven at every commit by `tests/engine/golden.py`.
 | `a1ef147` | §1 friction saturation certificate |
 | `8b73a5a` | §2 motor torque / stall certificate |
 | `6070747` | §4 yaw-binned cylinder wheel envelope, behind `wheel_width` |
+| `1297d27` | this report |
+| `1b8b0b4` | `wheel_width` = 0.10 m from the Ostrich model's measured column; tests use it |
 
 ## File by file
 
@@ -37,7 +39,8 @@ engine, proven at every commit by `tests/engine/golden.py`.
 
 **`src/helhest/engine/robot.py`** — two new `RobotParams` fields, both defaulting to the current
 behaviour: `wheel_width: float | None = None` and `motor_torque_limit: float = inf`
-(`Robot` carries the latter to the device). Both carry a `TODO(hardware)`.
+(`Robot` carries the latter to the device). `motor_torque_limit` carries a `TODO(hardware)`;
+`wheel_width` carries the measured 0.10 m and its source.
 
 **`src/helhest/engine/envelope.py`** — `cylinder_offset_table(cell_size, wheel_radius, half_width,
 yaw)` (rotated rectangle, cap from the along-travel offset only, own search radius so the corners
@@ -92,7 +95,7 @@ Cylinder (`python -m tests.engine.cylinder`):
 
 Cost, B=4096, T=25, 241x441 grid, RTX A500: rollout 1.144 → 1.164 ms (+1.7%) with the cylinder;
 the per-frame dilation goes 0.228 → 2.250 ms for 32 slices. Memory 32 x the envelope grid.
-Graph capture verified to record and replay with both `wheel_width=None` and `0.2`.
+Graph capture verified to record and replay with `wheel_width` both unset and set.
 
 ## Findings
 
