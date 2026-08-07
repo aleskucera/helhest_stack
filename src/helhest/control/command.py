@@ -14,6 +14,7 @@ This is the single place all actuator-safety logic lives, so it is auditable and
   2. asymmetric accel/decel rate limit  (a jumpy MPPI step can't shock the drivetrain)
   3. a hard per-joint magnitude clamp               (final backstop below the motor's safe max)
 """
+
 from __future__ import annotations
 
 import math
@@ -106,3 +107,30 @@ def condition_command(
     cmd = prev + np.clip(target - prev, -lim, lim)  # rate limit
     cmd = np.clip(cmd, -float(max_omega), float(max_omega))  # hard magnitude backstop
     return cmd.astype(np.float32)
+
+
+def to_engine_order(cmd: np.ndarray) -> np.ndarray:
+    """/cmd_joints order (left, rear, right) -> the engine's wheel vec3 (wL, wR, w_rear).
+
+    JOINT_NAMES puts the REAR wheel in the middle; every kernel expects it last. One place for the
+    swap so a caller can't get it silently backwards.
+    """
+    cmd = np.asarray(cmd, dtype=np.float32)
+    return np.array([cmd[0], cmd[2], cmd[1]], dtype=np.float32)
+
+
+def in_flight_history(commands, steps: int, batch: int) -> np.ndarray:
+    """[steps, batch, 3] buffer for `ForwardSimulator.command_history`, oldest first.
+
+    `commands` are the wheel commands already published but not yet acted on, in ENGINE order and
+    oldest first; row k acts on rollout step k. Fewer than `steps` of them (at startup, or after a
+    delay change) repeats the oldest, i.e. the robot is assumed to have been holding it; none at
+    all gives zeros, i.e. standing still.
+    """
+    rows = [np.asarray(c, dtype=np.float32) for c in commands]
+    if not rows:
+        rows = [np.zeros(3, dtype=np.float32)]
+    while len(rows) < steps:
+        rows.insert(0, rows[0])
+    stacked = np.asarray(rows[-steps:], dtype=np.float32)[:, None, :]
+    return np.ascontiguousarray(np.repeat(stacked, batch, axis=1), dtype=np.float32)

@@ -40,9 +40,16 @@ def robot_params():
     return RobotParams()
 
 
-def planning_solver(dt=DT, k_turn=K_TURN):
-    """Solver for the MPPI rollouts (B in the thousands): shallow + loose settle, for speed."""
-    return SolverParams(dt=dt, k_turn=k_turn, newton_iters=6, atol=1e-4)
+def planning_solver(dt=DT, k_turn=K_TURN, command_delay=0.0):
+    """Solver for the MPPI rollouts (B in the thousands): shallow + loose settle, for speed.
+
+    `command_delay` [s] is the transport delay between publishing a wheel command and the wheels
+    acting on it -- measured at ~200 ms on this robot, default 0 (off) because consuming it also
+    requires the caller to feed `sim.command_history`.
+    """
+    return SolverParams(
+        dt=dt, k_turn=k_turn, newton_iters=6, atol=1e-4, command_delay=command_delay
+    )
 
 
 def execution_solver(dt=DT, k_turn=K_TURN):

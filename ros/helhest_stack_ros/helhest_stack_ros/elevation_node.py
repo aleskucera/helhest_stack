@@ -71,7 +71,9 @@ from helhest.perception import transform_points
 from helhest.perception.dynamic.frontier import frontier_from_organized
 from helhest import dynamics
 from helhest.control.command import condition_command
+from helhest.control.command import in_flight_history
 from helhest.control.command import JOINT_NAMES
+from helhest.control.command import to_engine_order
 from helhest.control.mppi import CostParams
 from helhest.control.mppi import MppiGpu
 from helhest.control.mppi import SamplingConfig
@@ -107,6 +109,7 @@ def _rodrigues(omega: np.ndarray) -> np.ndarray:
     k = omega / theta
     kx = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
     return np.eye(3) + np.sin(theta) * kx + (1.0 - np.cos(theta)) * (kx @ kx)
+
 
 # Construction-time params: a change to any rebuilds the owning object.
 _ICP_BUILD = frozenset(
@@ -223,12 +226,27 @@ class ElevationNode(Node):
         self._map_T_odom: np.ndarray | None = None
         self._beam_dirs: np.ndarray | None = None  # per-beam unit dirs, built once for the frontier
         self.goal_xy: tuple[float, float] | None = None  # planning goal in map frame
-        self._prev_cmd = np.zeros(3, np.float32)  # last published /cmd_joints [L, rear, R] (slew ref)
-        self._d_hist: deque[float] = deque(maxlen=15)  # recent robot->goal distances (progress check)
-        self._prev_plan_U: np.ndarray | None = None  # last frame's nominal plan (for plan-consistency EMA)
-        self._turn_adapt: AdaptiveTurnBoost | None = None  # optional online turn_boost (gyro feedback)
-        self._last_diff_out: float | None = None  # last commanded (wR-wL), paired with the yaw it caused
-        self._goal_reached = False  # latched at the goal -> idle (no planning) until the goal changes
+        self._prev_cmd = np.zeros(
+            3, np.float32
+        )  # last published /cmd_joints [L, rear, R] (slew ref)
+        # Commands already in flight, ENGINE order (wL, wR, w_rear), oldest first. Length = the
+        # delay in whole rollout steps; empty (and unused) when plan_command_delay is 0.
+        self._cmd_in_flight: deque[np.ndarray] = deque(maxlen=1)
+        self._d_hist: deque[float] = deque(
+            maxlen=15
+        )  # recent robot->goal distances (progress check)
+        self._prev_plan_U: np.ndarray | None = (
+            None  # last frame's nominal plan (for plan-consistency EMA)
+        )
+        self._turn_adapt: AdaptiveTurnBoost | None = (
+            None  # optional online turn_boost (gyro feedback)
+        )
+        self._last_diff_out: float | None = (
+            None  # last commanded (wR-wL), paired with the yaw it caused
+        )
+        self._goal_reached = (
+            False  # latched at the goal -> idle (no planning) until the goal changes
+        )
         self._holding = False  # walled-off hold active -> planned-path marker drawn red
         self.planner: MppiGpu | None = None
         self.plan_sim: ForwardSimulator | None = None
@@ -241,7 +259,9 @@ class ElevationNode(Node):
         # (t_sec, quaternion xyzw, angular_velocity xyz) history so the deskew and the
         # rotation prior can read the gyro rate at the *cloud* stamp (not whatever arrived
         # last). The quaternion is buffered for gravity/debug only — the prior uses the gyro.
-        self._imu_buffer: deque[tuple[float, np.ndarray, np.ndarray]] = deque(maxlen=_IMU_BUFFER_LEN)
+        self._imu_buffer: deque[tuple[float, np.ndarray, np.ndarray]] = deque(
+            maxlen=_IMU_BUFFER_LEN
+        )
         # Running gyro-integrated world_R_base + the stamp it is integrated to (rotation prior).
         self._gyro_R_base: np.ndarray | None = None
         self._gyro_t: float | None = None
@@ -267,7 +287,9 @@ class ElevationNode(Node):
         # (`/imu/data`) and a best-effort one (`/ouster/imu`); a reliable sub gets nothing from
         # the latter.
         self.create_subscription(Imu, self.imu_topic, self._imu_callback, qos_profile_sensor_data)
-        self.create_subscription(PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10)
+        self.create_subscription(
+            PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10
+        )
         self.create_subscription(
             PoseStamped, self.get_parameter("follow_topic").value, self._follow_callback, 10
         )
@@ -295,7 +317,9 @@ class ElevationNode(Node):
         self.pub_frame = self.create_publisher(Marker, "frame_marker", 1)
         self.pub_cmd = self.create_publisher(JointState, self.get_parameter("cmd_topic").value, 10)
         self.pub_holding = self.create_publisher(Bool, "plan_holding", 10)  # True = walled-off hold
-        self.pub_turn_boost = self.create_publisher(Float32, "turn_boost", 10)  # turn_boost in effect (debug)
+        self.pub_turn_boost = self.create_publisher(
+            Float32, "turn_boost", 10
+        )  # turn_boost in effect (debug)
         self.add_on_set_parameters_callback(self._on_parameters_changed)
 
         self.get_logger().info(
@@ -398,7 +422,9 @@ class ElevationNode(Node):
         # wheel-occlusion shadows off to the sides. Near+front confines it to the path specks.
         # 4 (was 8): age out the trail's between-beam specks faster, matching the aggressive persist=5.
         d("carve_gap_frames", 4)
-        d("carve_gap_max_range_m", 10.0)  # only gap-carve within this range (0 = no range gate); 10 (was
+        d(
+            "carve_gap_max_range_m", 10.0
+        )  # only gap-carve within this range (0 = no range gate); 10 (was
         #                                   2.5) ages out the person's between-beam specks further out
         # Only gap-carve within this half-cone (deg) of the robot heading; excludes the wheel
         # shadows (~55-87° off heading) and the rear. 0 = no forward gate (carve all around).
@@ -466,9 +492,13 @@ class ElevationNode(Node):
         # On a REJECTED registration the pose fell back to raw odom, so the old
         # accumulated map would smear against it — drop it and re-seed from this scan.
         d("reset_map_on_reject", True)
-        d("reset_after_rejects", 5)  # wipe only after this many CONSECUTIVE rejects (sustained loss)
+        d(
+            "reset_after_rejects", 5
+        )  # wipe only after this many CONSECUTIVE rejects (sustained loss)
         d("debug_frames", False)  # INFO-log each frame's registration metrics (debugging)
-        d("profile_stages", False)  # GPU-synced per-stage timing, logged every 30 frames (debugging)
+        d(
+            "profile_stages", False
+        )  # GPU-synced per-stage timing, logged every 30 frames (debugging)
         # Gravity prior (IMU anchors ICP roll/pitch)
         d("gravity_enable", True)
         d("gravity_weight", 2000.0)
@@ -524,7 +554,9 @@ class ElevationNode(Node):
         # 'indoor' (K_TURN 0.4, alpha~1.33) or 'outdoor' (K_TURN 1.0, alpha~1.82 -- grass/dirt grips
         # harder so it understeers). ICP-calibrated per environment; see dynamics.k_turn_for.
         d("terrain", "outdoor")
-        d("k_turn", -1.0)  # explicit turn-gain override (e.g. from calibrate_turn.sh); <0 = use terrain
+        d(
+            "k_turn", -1.0
+        )  # explicit turn-gain override (e.g. from calibrate_turn.sh); <0 = use terrain
         d("plan_robust_margin_m", 0.3)  # cost-to-go safety tube: lateral (m) ~ robot half-width;
         # keeps the routed center a footprint-width off berms (validated in the Tier-C closed loop:
         # 0 belly contacts). Tighten in narrow spaces -- it erodes the feasible set both sides.
@@ -543,7 +575,9 @@ class ElevationNode(Node):
         # MPPI speed knobs (rebuild the planner on change): the robot drives slow because the cost
         # balance prefers it. Raise goal_running (reward progress) and/or lower effort (penalty on
         # wheel-speed^2) to drive faster. plan_max_omega is only the output SAFETY clamp, not speed.
-        d("plan_goal_running", 0.3)  # cost-to-go V^2 per step -> higher = faster (more progress pull)
+        d(
+            "plan_goal_running", 0.3
+        )  # cost-to-go V^2 per step -> higher = faster (more progress pull)
         d("plan_effort", 1e-3)  # penalize wheel-speed^2 -> lower = faster (less speed penalty)
         # TURN penalty: cost on the wheel differential (wr - wl)^2 -> a real gradient toward STRAIGHT
         # where the goal cost is flat w.r.t. heading (free-heading goal). Cut straight-line wander ~70%
@@ -559,7 +593,9 @@ class ElevationNode(Node):
         # (the outer wheel mean+diff/2 pegs). So keep plan_wmax a notch BELOW the ceiling (4.0) -- both
         # wheels then stay <5.3 even in a turn, so the differential survives. Trades ~0.35 m/s of top
         # speed for reliable turning. (The turn "defect" was mostly this saturation, not a fixed gain.)
-        d("plan_wmax", 4.0)  # max per-wheel omega the planner may command [rad/s] -- below the ceiling
+        d(
+            "plan_wmax", 4.0
+        )  # max per-wheel omega the planner may command [rad/s] -- below the ceiling
         # STRAIGHT sampling prior: fraction of MPPI candidates drawn as zero-differential (straight
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
@@ -577,7 +613,9 @@ class ElevationNode(Node):
         # left-wheel sign flip, rear-follower, magnitude clamp, slew limit) is in control/command.py.
         d("plan_actuate", True)  # publish /cmd_joints wheel commands
         d("cmd_topic", "/cmd_joints")  # JointState wheel-velocity command topic (to the LLC)
-        d("plan_max_omega", 5.0)  # hard cap on |wheel velocity| [rad/s] -- the motor safe max (~5, see plan_wmax)
+        d(
+            "plan_max_omega", 5.0
+        )  # hard cap on |wheel velocity| [rad/s] -- the motor safe max (~5, see plan_wmax)
         # hard cap on |d(cmd)/dt| per wheel [rad/s^2]. At DT=0.1s the command may change by
         # max_slew*0.1 per step; 50 let it jump 0->cruise in ONE step (harsh launch, ~5 m/s^2). 6.0
         # ramps 0->~1.3 m/s cruise over ~0.65s (ground ~2.1 m/s^2) -- softer start/stop, still responsive.
@@ -590,6 +628,12 @@ class ElevationNode(Node):
         # (over-commanded wheels), not a real drivetrain gain. So boosting over-turns below the limit and
         # worsens saturation at it. Keep at 1.0 now that plan_wmax leaves turning headroom; the fixed-2.0
         # story in docs/turn_differential_hotfix.md is superseded.
+        # Transport delay [s] between publishing /cmd_joints and the wheels acting on it. MEASURED
+        # at 189-249 ms (scripts/fit_actuator_lag.py); the rollout then plans against commands that
+        # land ~2 ticks late instead of instantly. 0.0 = off. Turning this on changes what the
+        # planner expects of its own commands, so any existing plan_turn_boost tuning -- which has
+        # been compensating for the delay as well as the turn gain -- must be re-checked.
+        d("plan_command_delay", 0.0)
         d("plan_turn_boost", 1.0)
         # OPTIONAL: self-tune plan_turn_boost online from gyro feedback (control/turn_adapt.py) so the
         # realized yaw matches the plan across terrains + the drivetrain defect -- makes the fixed
@@ -599,7 +643,9 @@ class ElevationNode(Node):
         d("plan_turn_boost_adapt", False)
         d("plan_turn_boost_tau", 3.0)
         d("plan_dock_radius", 1.5)  # within this range of the goal: dock (if enabled) or just stop
-        d("plan_dock_enable", True)  # True = terminal dock; False = just STOP when within dock_radius
+        d(
+            "plan_dock_enable", True
+        )  # True = terminal dock; False = just STOP when within dock_radius
         d("plan_reach_radius", 0.3)  # goal reached -> command a (ramped) stop within this range (m)
         # GOAL BRAKE: scale MPPI's forward speed to 0 over the last brake_dist m so the forward-only
         # robot noses in slow and settles AT the goal instead of overshooting/orbiting past it. Cruise
@@ -621,7 +667,9 @@ class ElevationNode(Node):
         # AND the committed plan reduces distance-to-goal by less than this, the robot is walled off
         # -> stop instead of the explore-fallback nosing into the obstacle. Keep it below a horizon's
         # worth of forward progress so genuine exploration down an open corridor is NOT stopped.
-        d("plan_progress_min", 0.3)  # min plan progress toward the goal to keep driving when saturated (m)
+        d(
+            "plan_progress_min", 0.3
+        )  # min plan progress toward the goal to keep driving when saturated (m)
         d("plan_path_width", 0.08)  # intended-path line marker width (m)
 
     def _cache_params(self) -> None:
@@ -716,6 +764,7 @@ class ElevationNode(Node):
         self.plan_max_omega: float = g("plan_max_omega")
         self.plan_max_slew: float = g("plan_max_slew")
         self.plan_max_decel: float = g("plan_max_decel")
+        self.plan_command_delay: float = g("plan_command_delay")
         self.plan_turn_boost: float = g("plan_turn_boost")
         self.plan_turn_boost_adapt: bool = g("plan_turn_boost_adapt")
         self.plan_turn_boost_tau: float = g("plan_turn_boost_tau")
@@ -820,18 +869,27 @@ class ElevationNode(Node):
             self.get_logger().info(f"planner terrain='{self.terrain}' -> K_TURN={kt}")
         self.plan_sim = ForwardSimulator(
             dynamics.robot_params(),
-            dynamics.planning_solver(k_turn=kt),
+            dynamics.planning_solver(k_turn=kt, command_delay=self.plan_command_delay),
             win_grid,
             int(self.plan_batch),
             int(self.plan_horizon),
             self.device,
         )
         self.plan_sim.set_uniform_friction(self.plan_friction)
+        # size the in-flight ring to the delay the rollout actually models
+        self._cmd_in_flight = deque(
+            self._cmd_in_flight, maxlen=max(self.plan_sim.command_delay_steps, 1)
+        )
         self.planner = MppiGpu(
             self.plan_sim,
-            CostParams(goal_running=self.plan_goal_running, effort=self.plan_effort, turn=self.plan_turn),
-            sampling=SamplingConfig(wmax=self.plan_wmax, straight_frac=self.plan_straight_frac,
-                                    elite_frac=self.plan_elite_frac),
+            CostParams(
+                goal_running=self.plan_goal_running, effort=self.plan_effort, turn=self.plan_turn
+            ),
+            sampling=SamplingConfig(
+                wmax=self.plan_wmax,
+                straight_frac=self.plan_straight_frac,
+                elite_frac=self.plan_elite_frac,
+            ),
             n_theta=int(self.plan_n_theta),
         )
         self.planner.reset_nominal(self.plan_nominal_reset)
@@ -855,7 +913,9 @@ class ElevationNode(Node):
         self.ctg = CostToGo(
             GridParams(rcnx, rcny, rccell, 0.0, 0.0),
             dynamics.robot_params(),
-            dynamics.planning_solver(k_turn=kt),  # static settle ignores k_turn; passed for consistency
+            dynamics.planning_solver(
+                k_turn=kt
+            ),  # static settle ignores k_turn; passed for consistency
             n_theta=int(self.plan_n_theta),
             robust_margin_m=self.plan_robust_margin_m,
             robust_margin_deg=self.plan_robust_margin_deg,
@@ -1084,7 +1144,11 @@ class ElevationNode(Node):
             sensor_origin = world_T_sensor[:3, 3].copy()
             # Carve against the free-space frontier (no-return beams = free space) so ghosts
             # with no background behind them are removed; returns-only if unavailable.
-            carve_scan = self._frontier_world(cloud_msg, world_T_sensor) if self.dynamic_frontier_enable else None
+            carve_scan = (
+                self._frontier_world(cloud_msg, world_T_sensor)
+                if self.dynamic_frontier_enable
+                else None
+            )
             if carve_scan is None:
                 carve_scan = world_scan
             if streak_mode:
@@ -1100,8 +1164,14 @@ class ElevationNode(Node):
                 # in front of the robot, so it can't erode the wheel shadows off to the sides.
                 fwd_az = float(np.arctan2(world_T_base[1, 0], world_T_base[0, 0]))
                 carve, streak_out = self.dynamic_filter.carve_streak(
-                    self.map_wp, carve_scan, sensor_origin, streak_in, persist,
-                    self.carve_gap_frames, self.carve_gap_max_range_m, fwd_az,
+                    self.map_wp,
+                    carve_scan,
+                    sensor_origin,
+                    streak_in,
+                    persist,
+                    self.carve_gap_frames,
+                    self.carve_gap_max_range_m,
+                    fwd_az,
                     self.carve_gap_fwd_rad,
                 )
             elif self.dynamic_recency_enable and self.map_ages is not None:
@@ -1126,15 +1196,29 @@ class ElevationNode(Node):
         center = (world_T_base[0, 3], world_T_base[1, 3])
         if streak_mode:
             # Seed streaks at 0 on frames with no prior map (bootstrap / just reset).
-            streak_arg = streak_out if streak_out is not None else wp.zeros(0, dtype=wp.int32, device=self.device)
+            streak_arg = (
+                streak_out
+                if streak_out is not None
+                else wp.zeros(0, dtype=wp.int32, device=self.device)
+            )
             self.map_wp, self.map_streak = self.acc.step(
-                self.map_wp, carve, world_scan, valid, center, map_streak=streak_arg,
+                self.map_wp,
+                carve,
+                world_scan,
+                valid,
+                center,
+                map_streak=streak_arg,
             )
             self.map_ages = None
         elif self.dynamic_recency_enable:
             self.map_wp, self.map_ages = self.acc.step(
-                self.map_wp, carve, world_scan, valid, center,
-                map_ages=self.map_ages, frame=self._frame,
+                self.map_wp,
+                carve,
+                world_scan,
+                valid,
+                center,
+                map_ages=self.map_ages,
+                frame=self._frame,
             )
             self.map_streak = None
         else:
@@ -1154,10 +1238,14 @@ class ElevationNode(Node):
         if self.profile_stages:
             self._prof_n += 1
             if self._prof_n % 30 == 0:
-                parts = " ".join(f"{k}={1000 * v / self._prof_n:.1f}"
-                                 for k, v in sorted(self._prof.items(), key=lambda kv: -kv[1]))
+                parts = " ".join(
+                    f"{k}={1000 * v / self._prof_n:.1f}"
+                    for k, v in sorted(self._prof.items(), key=lambda kv: -kv[1])
+                )
                 total = 1000 * sum(self._prof.values()) / self._prof_n
-                self.get_logger().info(f"PROFILE avg ms/frame (n={self._prof_n}) total={total:.1f} | {parts}")
+                self.get_logger().info(
+                    f"PROFILE avg ms/frame (n={self._prof_n}) total={total:.1f} | {parts}"
+                )
 
     # ------------------------------------------------------------------
     # Dual elevation map (mirrors demos/pipeline_sim's heightmap stage)
@@ -1426,8 +1514,13 @@ class ElevationNode(Node):
         if self._goal_reached:
             if self.plan_actuate:
                 cmd = condition_command(
-                    0.0, 0.0, self._prev_cmd, max_omega=self.plan_max_omega,
-                    max_slew=self.plan_max_slew, max_decel=self.plan_max_decel, dt=dynamics.DT,
+                    0.0,
+                    0.0,
+                    self._prev_cmd,
+                    max_omega=self.plan_max_omega,
+                    max_slew=self.plan_max_slew,
+                    max_decel=self.plan_max_decel,
+                    dt=dynamics.DT,
                     turn_boost=self.plan_turn_boost,
                 )
                 self._prev_cmd = cmd
@@ -1465,6 +1558,7 @@ class ElevationNode(Node):
             )
             self._ck("plan:ctg")
             self.planner.set_lattice(V, self.sgrid)
+            self._load_command_history()
             self.planner.replan(state_l, goal_l, int(self.plan_n_refine))
             self._ck("plan:replan")
         # PLAN CONSISTENCY: EMA the nominal toward last frame's plan, shifted one step forward (the
@@ -1521,16 +1615,24 @@ class ElevationNode(Node):
                 holding = True
                 self.get_logger().warning(
                     f"goal unreachable (walled off, no progress in {self._d_hist.maxlen} frames) "
-                    f"-> holding [d={d:.1f}]", throttle_duration_sec=2.0
+                    f"-> holding [d={d:.1f}]",
+                    throttle_duration_sec=2.0,
                 )
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
-        turn_boost = self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
+        turn_boost = (
+            self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
+        )
         cmd = condition_command(
-            wl, wr, self._prev_cmd,
-            max_omega=self.plan_max_omega, max_slew=self.plan_max_slew,
-            max_decel=self.plan_max_decel, dt=dynamics.DT,
+            wl,
+            wr,
+            self._prev_cmd,
+            max_omega=self.plan_max_omega,
+            max_slew=self.plan_max_slew,
+            max_decel=self.plan_max_decel,
+            dt=dynamics.DT,
             turn_boost=turn_boost,
-            goal_dist=d, brake_dist=self.plan_goal_brake_dist,
+            goal_dist=d,
+            brake_dist=self.plan_goal_brake_dist,
             turn_brake_a_max=self.plan_turn_brake_a_max,
             lat_gain=self._lat_gain,
             turn_brake_scale=self._turn_brake_lookahead(turn_boost),
@@ -1539,13 +1641,33 @@ class ElevationNode(Node):
         self._publish_cmd(cmd)
         self.pub_holding.publish(Bool(data=holding))  # True = walled-off hold, False = driving
         self._holding = holding  # colors the planned-path marker red next frame (see _publish_path)
-        self.pub_turn_boost.publish(Float32(data=float(turn_boost)))  # turn_boost in effect (debug/monitor)
+        self.pub_turn_boost.publish(
+            Float32(data=float(turn_boost))
+        )  # turn_boost in effect (debug/monitor)
         # ADAPTIVE turn_boost (optional): pair the PREVIOUS command's differential with the yaw it
         # produced (this frame's gyro) and slow-update the boost -- only while genuinely turning.
         if self._turn_adapt is not None and self._imu_buffer:
             if self._last_diff_out is not None:
                 self._turn_adapt.update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
-            self._last_diff_out = float(cmd[2] - cmd[0])  # condition_command [L, rear, R] -> (wR - wL)
+            self._last_diff_out = float(
+                cmd[2] - cmd[0]
+            )  # condition_command [L, rear, R] -> (wR - wL)
+
+    def _load_command_history(self) -> None:
+        """Copy the commands still in flight into the rollout buffer, oldest first.
+
+        Row k acts on rollout step k while k < command_delay_steps, so this is what makes the plan
+        start from what the wheels are ABOUT to do rather than from what we are about to ask.
+        Written in place into the buffer the captured MPPI graph already reads, so no re-capture.
+        Before enough commands exist (startup) the oldest entry is repeated, i.e. the robot is
+        assumed to have been holding it.
+        """
+        n = int(self.plan_sim.command_delay_steps)
+        if n <= 0:
+            return
+        self.plan_sim.command_history.assign(
+            in_flight_history(self._cmd_in_flight, n, int(self.plan_sim.batch_size))
+        )
 
     def _publish_cmd(self, cmd: np.ndarray) -> None:
         """Publish the conditioned [left, rear, right] wheel command to /cmd_joints.
@@ -1564,6 +1686,7 @@ class ElevationNode(Node):
         m.name = list(JOINT_NAMES)
         m.velocity = [float(v) for v in cmd]
         self.pub_cmd.publish(m)
+        self._cmd_in_flight.append(to_engine_order(cmd))
 
     def _publish_path(self, xy: np.ndarray, z: float, stamp) -> None:
         path = Path()
@@ -1591,7 +1714,9 @@ class ElevationNode(Node):
         if self._holding:
             m.color = ColorRGBA(r=1.0, g=0.1, b=0.1, a=1.0)
         else:
-            m.color = ColorRGBA(r=1.0, g=0.0, b=1.0, a=1.0)  # magenta: reads over the green height map
+            m.color = ColorRGBA(
+                r=1.0, g=0.0, b=1.0, a=1.0
+            )  # magenta: reads over the green height map
         m.pose.orientation.w = 1.0
         m.points = [Point(x=float(x), y=float(y), z=z) for x, y in xy]
         self.pub_path_marker.publish(m)
@@ -1623,9 +1748,7 @@ class ElevationNode(Node):
             n = float(np.linalg.norm(a))
             if n < 1e-6:  # no accel either -> give up gracefully
                 if not self._imu_warned:
-                    self.get_logger().warning(
-                        "IMU has no orientation and no accel — gravity off."
-                    )
+                    self.get_logger().warning("IMU has no orientation and no accel — gravity off.")
                     self._imu_warned = True
                 return None
             up_imu = a / n  # accelerometer measures -g -> points up when static
@@ -1763,9 +1886,6 @@ class ElevationNode(Node):
         # device gate kernel, so casting to float64 here would only double the upload.
         return np.ascontiguousarray(points, dtype=np.float32), point_times, base_T_sensor
 
-
-
-
     def _denoise(self, scan_wp: wp.array, base_T_sensor: np.ndarray) -> wp.array:
         """GPU-native statistical outlier removal on the base-frame scan (device in/out).
 
@@ -1818,7 +1938,9 @@ class ElevationNode(Node):
         self._beam_dirs = beam.reshape(n, 3).astype(np.float32)
         return self._beam_dirs
 
-    def _frontier_world(self, cloud_msg: PointCloud2, world_T_sensor: np.ndarray) -> wp.array | None:
+    def _frontier_world(
+        self, cloud_msg: PointCloud2, world_T_sensor: np.ndarray
+    ) -> wp.array | None:
         """Free-space frontier as a device cloud in the world frame, for ray-carving.
 
         Hits keep their measured point; no-return beams become a far point along the beam
