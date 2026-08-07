@@ -32,6 +32,22 @@ produced.
 WHAT IT IS NOT. This is not the GPU kernel the paper names as future work. It is the cheaper
 half of that idea -- the memory-traffic fix -- done on the host, which is where the profile
 said the time actually went.
+
+A MEASUREMENT BUG THIS RUN EXPOSED, AND THE CORRECTED NUMBERS. `clark_full.bench_wall_costs`
+reads `h.sim.controlled` BEFORE calling `h.forward()`, so it timed the estimator on the
+pre-rollout buffer: an all-zeros trajectory parked at the origin, whose 40 timesteps all share
+one footprint (1 distinct xy instead of 41, path length 0.0 m instead of 4.7 m). The candidate
+universe collapses, and the reported 8.48 ms/plan is ~5x optimistic. On the real rollouts, on
+an idle machine, medians over 10 seeds x 16 plans:
+
+    clark.py (published implementation)        42.9 ms/plan
+    lean fold (this module, bit-identical)     11.6 ms/plan
+    256-draw GPU Monte-Carlo, same run          6.1 ms/plan
+
+So the honest statement is that the analytic estimator is ~1.9x SLOWER per plan than batched
+sampling even after the 3.7x fix -- not 1.5x slower as the buggy benchmark implied, and not
+faster. `rollout_cost()` below re-measures the Monte-Carlo side in the same run so the
+comparison never again straddles two machine states.
 """
 
 from __future__ import annotations

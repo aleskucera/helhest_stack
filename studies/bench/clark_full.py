@@ -706,6 +706,12 @@ def bench_wall_costs(
     chassis_pts = rp._chassis_pts()
     corr_table = rho1_table(CORR_LEN, CELL)
 
+    # WARNING (found 2026-08-07, see bench/clark_fast.py): `controlled`/`derived` are read
+    # BEFORE `forward`, so this benchmark times the estimator on the pre-rollout buffer -- an
+    # all-zeros trajectory standing at the origin, 1 distinct footprint instead of 41. That is
+    # why clark_full.json's wall.clark_s_per_plan (8.48 ms) is ~5x optimistic. Left in place so
+    # the committed json stays reproducible; the corrected measurement lives in clark_fast.py
+    # and is the one the paper quotes. To fix here, move the forward() call above the reads.
     h = Harness(scene, poses, omega, device=device)
     controlled = h.sim.controlled.numpy()
     derived = h.sim.derived.numpy()
