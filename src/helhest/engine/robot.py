@@ -4,6 +4,7 @@
 of read-only constants passed into the kernels). The numpy geometry/mass also live
 in the top-level `model.py` for the reference/viz paths; these are the device twin.
 """
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -40,6 +41,7 @@ class Robot:
     com: wp.vec3
     mass: wp.float32
     gravity: wp.float32
+    motor_torque_limit: wp.float32  # [Nm] per wheel at the wheel; inf = no torque limit
     # --- planning capabilities (mirror of the RobotParams fields; the dynamics kernels don't read
     # these, but carrying them on the built struct lets the planner read one object). ---
     min_turn_radius: wp.float32
@@ -62,6 +64,11 @@ class RobotParams:  # host-side robot knobs — what you nudge
     com: tuple = (float(DEFAULT_COM[0]), 0.0, 0.0)  # full vec3, independent of mass
     chassis_nx: int = 3
     chassis_ny: int = 3
+    # TODO(hardware): MEASURE THIS. Per-wheel continuous torque envelope at the wheel [Nm], the
+    # open question in IMPROVEMENTS.md section 10. inf = the certificate never fires, which is the
+    # pre-certificate behaviour; the engine cannot stall until a real number lands here. For scale,
+    # holding a 15 deg grade needs ~31.5 Nm per wheel on this robot.
+    motor_torque_limit: float = float("inf")
     # --- planning capabilities: the robot's own limits. build() copies these into the device Robot
     # struct, so the cost-to-go feasibility AND the MPPI cost kernels read one shared source. ---
     # tightest forward arc the planner assumes (skid-steer maneuverability)
@@ -93,6 +100,7 @@ class RobotParams:  # host-side robot knobs — what you nudge
         r.com = wp.vec3(*self.com)
         r.mass = self.mass
         r.gravity = self.gravity
+        r.motor_torque_limit = self.motor_torque_limit
         r.min_turn_radius = self.min_turn_radius
         r.max_roll = self.max_roll
         r.max_pitch_up = self.max_pitch_up

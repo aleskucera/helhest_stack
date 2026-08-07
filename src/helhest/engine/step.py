@@ -506,6 +506,24 @@ def friction_saturation(
 
 
 @wp.func
+def torque_saturation(robot: Robot, pitch: float) -> float:
+    """Required drive torque / motor limit at this pose: > 1 means the grade stalls the drivetrain.
+
+    Holding or climbing a grade needs m g sin(pitch) of tractive force, shared by the three
+    wheels, so each must deliver `m g |sin(pitch)| * wheel_radius / 3` at the wheel. This is the
+    second reason code next to `friction_saturation`, and the planner responses differ: slip means
+    pick another route, stall means pick another speed.
+
+    Gravity only -- turn resistance and rolling resistance are NOT included, which is what makes
+    the boundary independent of mu (and hence separable from the friction certificate). With the
+    default `motor_torque_limit = inf` this is identically 0; see RobotParams for the measurement
+    that is still missing.
+    """
+    torque = robot.mass * robot.gravity * wp.abs(wp.sin(pitch)) * robot.wheel_radius / 3.0
+    return torque / robot.motor_torque_limit
+
+
+@wp.func
 def chassis_clearance(
     elevation: wp.array2d(dtype=wp.float32), grid: Grid, robot: Robot, R: wp.mat33, p: wp.vec3
 ):
@@ -614,6 +632,7 @@ def step_finalize(
     resid_out: wp.array(dtype=float),
     stability_out: wp.array(dtype=float),
     saturation_out: wp.array(dtype=float),
+    stall_out: wp.array(dtype=float),
 ):
     """Write the NEW state + diagnostics at tid from the predicted pose and its settled tilt."""
     controlled_next[tid] = pose_next
@@ -631,6 +650,7 @@ def step_finalize(
     saturation_out[tid] = friction_saturation(
         robot, loads, grip, settled[1], settled[2], twist[0], twist[1]
     )
+    stall_out[tid] = torque_saturation(robot, settled[1])
     clear_out[tid] = chassis_clearance(elev_i, grid, robot, Rn, pn)
     cres = clearances(env_i, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
     resid_out[tid] = wp.max(wp.max(wp.abs(cres[0]), wp.abs(cres[1])), wp.abs(cres[2]))
@@ -696,6 +716,7 @@ def step_kernel(
     resid_out: wp.array(dtype=float),  # [B] settle residual (max|c|) of the NEW state
     stability_out: wp.array(dtype=float),  # [B] min N_i / (m g) of the NEW state
     saturation_out: wp.array(dtype=float),  # [B] friction demand / budget of the NEW state
+    stall_out: wp.array(dtype=float),  # [B] required torque / motor limit of the NEW state
 ):
     tid = wp.tid()
     tc = derived[tid]
@@ -735,6 +756,7 @@ def step_kernel(
         resid_out,
         stability_out,
         saturation_out,
+        stall_out,
     )
 
 
@@ -759,6 +781,7 @@ def step_kernel_bt(
     resid_out: wp.array(dtype=float),
     stability_out: wp.array(dtype=float),
     saturation_out: wp.array(dtype=float),
+    stall_out: wp.array(dtype=float),
 ):
     """Batched-terrain step: rollout tid steps on its own slices; settle uses the full 3D array."""
     tid = wp.tid()
@@ -799,6 +822,7 @@ def step_kernel_bt(
         resid_out,
         stability_out,
         saturation_out,
+        stall_out,
     )
 
 
@@ -825,6 +849,7 @@ def rollout_kernel(
     resid_out: wp.array2d(dtype=float),  # [T, B]
     stability_out: wp.array2d(dtype=float),  # [T, B] min N_i / (m g)
     saturation_out: wp.array2d(dtype=float),  # [T, B] friction demand / budget
+    stall_out: wp.array2d(dtype=float),  # [T, B] required torque / motor limit
 ):
     """FORWARD-ONLY whole-rollout fusion: one thread per rollout walks all n_steps steps,
     carrying the state (pc, tc, current) in registers instead of round-tripping it through
@@ -894,6 +919,7 @@ def rollout_kernel(
         saturation_out[t, b] = friction_saturation(
             robot, loads, grip_n, settled[1], settled[2], vx, wz
         )
+        stall_out[t, b] = torque_saturation(robot, settled[1])
         turn_out[t, b] = wp.vec2(alpha, x_icr)
         clear_out[t, b] = chassis_clearance(elevation, grid, robot, Rn, pn)
         cres = clearances(envelope, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])

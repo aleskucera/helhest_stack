@@ -110,6 +110,8 @@ class BaseSimulator:
             self.stability = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             # Tangential friction demand / Coulomb budget -- see step.friction_saturation.
             self.saturation = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
+            # Required drive torque / RobotParams.motor_torque_limit (inf by default -> all zero).
+            self.stall = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             self.current_wheel_omega = wp.zeros((T + 1, B), dtype=wp.vec3f)
             self.target_wheel_omega = wp.zeros((T, B), dtype=wp.vec3f, requires_grad=control_grad)
             self.start_pose = wp.zeros(B, dtype=wp.vec3f, requires_grad=control_grad)
@@ -211,6 +213,7 @@ class ForwardSimulator(BaseSimulator):
                 self.residual,
                 self.stability,
                 self.saturation,
+                self.stall,
             ],
             device=self.device,
         )
@@ -430,6 +433,7 @@ class DifferentiableSimulator(BaseSimulator):
                         self.residual[t],
                         self.stability[t],
                         self.saturation[t],
+                        self.stall[t],
                     ],
                     device=self.device,
                 )

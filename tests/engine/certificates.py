@@ -64,6 +64,7 @@ class _Static:
             "roll": float(derived[2]),
             "stability": float(self.sim.stability.numpy()[0, 0]),
             "saturation": float(self.sim.saturation.numpy()[0, 0]),
+            "stall": float(self.sim.stall.numpy()[0, 0]),
             "alpha": float(self.sim.turning.numpy()[0, 0, 0]),
             "residual": float(self.sim.residual.numpy()[0, 0]),
         }
@@ -254,6 +255,45 @@ def selftest_friction_saturation() -> None:
     print("friction saturation  OK")
 
 
+def selftest_torque_stall() -> None:
+    """The stall certificate: a grade boundary that does not move with mu.
+
+    Each wheel must deliver m g |sin(pitch)| * wheel_radius / 3, so with a finite
+    `motor_torque_limit` the certificate crosses 1.0 at sin(theta) = 3 tau_lim / (m g R),
+    whatever the friction is. A cross-slope needs no drive torque at all, so a pure roll must
+    read 0. The default limit is inf, which must keep the certificate identically 0.
+    """
+    limit = 40.0  # [Nm] a stand-in for the unmeasured envelope, chosen to bind inside 0-30 deg
+    rp = RobotParams(motor_torque_limit=limit)
+    weight = rp.mass * rp.gravity
+    theta_stall = float(np.degrees(np.arcsin(3.0 * limit / (weight * rp.wheel_radius))))
+    print(f"torque limit {limit:.0f} Nm -> predicted stall grade {theta_stall:.2f} deg")
+    print(f"{'grade[deg]':>10} {'mu':>6} {'stall':>8} {'predicted':>10} {'rel err':>9}")
+
+    worst = 0.0
+    for mu in (0.2, 0.6, 0.9):
+        static = _Static(rp, mu=mu)
+        for tilt in (5.0, 10.0, 20.0, 30.0, theta_stall):
+            r = static.run(_plane(pitch_deg=-tilt))
+            expected = weight * abs(np.sin(np.radians(tilt))) * rp.wheel_radius / 3.0 / limit
+            rel = abs(r["stall"] - expected) / expected
+            worst = max(worst, rel)
+            print(f"{tilt:10.2f} {mu:6.2f} {r['stall']:8.4f} {expected:10.4f} {rel:9.2e}")
+        assert abs(r["stall"] - 1.0) < 5e-3, "stall does not cross 1 at the predicted grade"
+        # a cross-slope of the same angle needs no drive torque
+        r_roll = static.run(_plane(roll_deg=theta_stall))
+        assert r_roll["stall"] < 1e-6, "a pure cross-slope should not load the drivetrain"
+    print(f"stall = m g sin(theta) R / (3 tau_lim): worst relative error {worst:.2e}")
+    assert worst < 5e-3, "stall no longer matches the analytic grade value"
+
+    # default: no limit recorded -> the certificate is inert, which is what preserves bit-identity
+    default = _Static()
+    for tilt in (0.0, 15.0, 30.0):
+        assert default.run(_plane(pitch_deg=-tilt))["stall"] == 0.0
+    print("stall is identically 0 at the default motor_torque_limit = inf")
+    print("torque stall  OK")
+
+
 if __name__ == "__main__":
     wp.init()
     selftest_ramp_margin()
@@ -261,3 +301,5 @@ if __name__ == "__main__":
     selftest_shape_margin()
     print()
     selftest_friction_saturation()
+    print()
+    selftest_torque_stall()
