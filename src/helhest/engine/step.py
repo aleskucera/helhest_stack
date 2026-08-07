@@ -581,6 +581,51 @@ def yaw_bin(yaw: float, n_yaw: int) -> int:
 
 
 @wp.func
+def integrate_pose(pose: wp.vec3, world_vel: wp.vec3, yaw_rate: float, dt: float) -> wp.vec3:
+    """Advance (x, y, yaw) one step along the EXACT arc of a constant twist.
+
+    Within a step the body twist is constant, so the true path is a circular arc, not the straight
+    chord forward Euler takes. Euler holds the heading fixed across the step and is first order in
+    dt: on flat ground at 2.1 m/s it lands 10-19 cm off the analytic arc over a 2.5 s horizon, and
+    halving dt only halves that (measured in tests/engine/integrator.py). Integrating the arc in
+    closed form is EXACT for a constant twist at any dt, for about ten extra flops.
+
+    Rotating the world velocity back by yaw gives the (constant) velocity in the yaw-free frame;
+    integrating Rz(yaw + psi_dot t) across the step then contributes
+
+        sin(theta) / psi_dot        and       (1 - cos(theta)) / psi_dot,   theta = psi_dot dt
+
+    which tend to (dt, 0) as psi_dot -> 0 -- the Euler update, recovered exactly. The small-angle
+    branch uses those limits directly to avoid 0/0; it matches the series to first order, so the
+    derivative stays continuous for the taped path.
+
+    `world_vel` already carries the body's pitch/roll projection, and both stay fixed across the
+    step (the settle updates them afterwards), so only the yaw rotation has to be integrated.
+    """
+    yaw = pose[2]
+    cos_yaw = wp.cos(yaw)
+    sin_yaw = wp.sin(yaw)
+    # world velocity -> yaw-free frame, where it is constant over the step
+    u_x = cos_yaw * world_vel[0] + sin_yaw * world_vel[1]
+    u_y = -sin_yaw * world_vel[0] + cos_yaw * world_vel[1]
+
+    theta = yaw_rate * dt
+    integral_cos = dt  # int_0^dt cos(psi_dot t) dt
+    integral_sin = 0.5 * theta * dt  # int_0^dt sin(psi_dot t) dt
+    if wp.abs(theta) > 1.0e-6:
+        integral_cos = wp.sin(theta) / yaw_rate
+        integral_sin = (1.0 - wp.cos(theta)) / yaw_rate
+
+    local_x = integral_cos * u_x - integral_sin * u_y
+    local_y = integral_sin * u_x + integral_cos * u_y
+    return wp.vec3(
+        pose[0] + cos_yaw * local_x - sin_yaw * local_y,
+        pose[1] + sin_yaw * local_x + cos_yaw * local_y,
+        yaw + theta,
+    )
+
+
+@wp.func
 def body_twist(robot: Robot, om: wp.vec3, alpha: float) -> wp.vec2:
     """Body-frame (forward speed, yaw rate) from the wheel speeds and the turn resistance alpha.
 
@@ -638,7 +683,8 @@ def step_predict(
     vy = -x_icr * wz
     vw = R * wp.vec3(vx, vy, 0.0)
     turn_out[tid] = wp.vec2(alpha, x_icr)
-    return wp.vec4(x + vw[0] * solver.dt, y + vw[1] * solver.dt, yaw + wz * solver.dt, alpha)
+    next_pose = integrate_pose(pc, vw, wz, solver.dt)
+    return wp.vec4(next_pose[0], next_pose[1], next_pose[2], alpha)
 
 
 @wp.func
@@ -935,11 +981,10 @@ def rollout_kernel(
         wz = twist[1]
         vy = -x_icr * wz
         vw = R * wp.vec3(vx, vy, 0.0)
-        xn = x + vw[0] * solver.dt
-        yn = y + vw[1] * solver.dt
-        yawn = yaw + wz * solver.dt
-
-        pose_next = wp.vec3(xn, yn, yawn)
+        pose_next = integrate_pose(pc, vw, wz, solver.dt)
+        xn = pose_next[0]
+        yn = pose_next[1]
+        yawn = pose_next[2]
         env_n = envelope[yaw_bin(yawn, n_yaw)]  # envelope slice of the NEW heading
         settled = settle(env_n, grid, robot, solver, pose_next, tc)
         controlled[t + 1, b] = pose_next
