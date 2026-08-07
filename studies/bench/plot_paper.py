@@ -14,7 +14,11 @@ schematic that disagrees with the code is a liability.
                         model of the same sigma, with Clark's closed form overlaid on Monte
                         Carlo -- correlation suppresses the inflation several-fold, which is why
                         an estimator that keeps only per-cell (mean, sigma) cannot get it right.
-  budget_curve.png      Fig. 2. matched-budget MC regret vs number of draws, against the
+  geometry.png          Fig. 1. the objects Section II names but cannot draw in equations: the
+                        three wheel footprints on the grid, the K candidate cells under one of
+                        them, the spherical-cap offsets that lift each candidate, and the
+                        tripod the settle rests on. Drawn from RobotParams, not by hand.
+  budget_curve.png      Fig. 3. matched-budget MC regret vs number of draws, against the
                         analytic estimator's regret (studies/out/bench/clark_full.json).
 """
 
@@ -200,6 +204,102 @@ def fig_jensen(path: Path) -> None:
           np.round(np.array(gap_indep) / np.array(gap_corr), 2))
 
 
+def fig_geometry(path: Path) -> None:
+    """The contact geometry, drawn from the robot's own parameters: (a) plan view of the three
+    wheel footprints on the 0.10 m grid with one footprint's K candidate cells picked out;
+    (b) section through that wheel, showing the cap offsets kappa_c that lift each candidate and
+    the max that selects the support height."""
+    rp = RobotParams()
+    cell = CELL
+    radius_cells = int(np.ceil(rp.wheel_radius / cell))
+    off_dy, off_dx, off_cap = wheel_offset_table(radius_cells, cell, rp.wheel_radius)
+    wheels = np.array([[0.0, rp.half_track], [0.0, -rp.half_track], [-rp.rear_offset, 0.0]])
+
+    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(FIG_W * 2.06, 1.85))
+
+    # --- (a) plan view --------------------------------------------------------------------
+    lim_x, lim_y = (-1.25, 0.55), (-0.85, 0.85)
+    for gx in np.arange(-1.3, 0.65, cell):
+        ax_a.axvline(gx, color="#e0e0e0", lw=0.3, zorder=0)
+    for gy in np.arange(-0.9, 0.95, cell):
+        ax_a.axhline(gy, color="#e0e0e0", lw=0.3, zorder=0)
+    # chassis outline (the two belly boxes, plan view)
+    for cx, hx, hy in ((-0.13, 0.24, 0.28), (-0.61, 0.24, 0.12)):
+        ax_a.add_patch(
+            plt.Rectangle((cx - hx, -hy), 2 * hx, 2 * hy, fill=False, ec="#737373", lw=0.9,
+                          ls="-", zorder=3)
+        )
+    ax_a.plot([wheels[0, 0], wheels[1, 0]], [wheels[0, 1], wheels[1, 1]], color="#252525",
+              lw=0.8, ls=":", zorder=4)
+    ax_a.plot([wheels[0, 0], wheels[2, 0]], [wheels[0, 1], wheels[2, 1]], color="#252525",
+              lw=0.8, ls=":", zorder=4)
+    ax_a.plot([wheels[1, 0], wheels[2, 0]], [wheels[1, 1], wheels[2, 1]], color="#252525",
+              lw=0.8, ls=":", zorder=4)
+    for i, (wx, wy) in enumerate(wheels):
+        highlight = i == 0
+        # the footprint is indexed off the wheel's NEAREST cell centre, so draw the wheel there
+        # too -- otherwise the picture shows an offset the code does not have
+        wx = round(wx / cell) * cell
+        wy = round(wy / cell) * cell
+        for dyc, dxc in zip(off_dy, off_dx):
+            cx = wx + dxc * cell
+            cy = wy + dyc * cell
+            ax_a.add_patch(
+                plt.Rectangle((cx - cell / 2, cy - cell / 2), cell, cell,
+                              fc="#fdae6b" if highlight else "#deebf7",
+                              ec="#bdbdbd", lw=0.25, zorder=1)
+            )
+        ax_a.add_patch(plt.Circle((wx, wy), rp.wheel_radius, fill=False, ec="#08519c", lw=1.1,
+                                  zorder=5))
+        ax_a.plot([wx], [wy], marker="o", ms=2.5, color="#08519c", zorder=6)
+    ax_a.annotate("$\\mathcal{F}(w,t)$: $K=37$ cells",
+                  xy=(0.20, 0.52), xytext=(-0.42, 0.70),
+                  fontsize=6.6, ha="center",
+                  arrowprops=dict(arrowstyle="->", color="#a63603", lw=0.7))
+    ax_a.text(-0.44, -0.06, "tripod", fontsize=6.6, color="#252525", ha="center")
+    ax_a.set_xlim(*lim_x)
+    ax_a.set_ylim(*lim_y)
+    ax_a.set_aspect("equal")
+    ax_a.set_xlabel("$x$ [m]")
+    ax_a.set_ylabel("$y$ [m]")
+    ax_a.set_title("(a) three footprints on the belief grid", loc="left")
+
+    # --- (b) section through the highlighted wheel ------------------------------------------
+    mid = off_dy == 0
+    xs = off_dx[mid] * cell
+    caps = off_cap[mid]
+    rng = np.random.default_rng(3)
+    ground = 0.035 * np.sin(xs * 11.0) + 0.02 * rng.standard_normal(len(xs))
+    lifted = ground + caps
+    j = int(np.argmax(lifted))
+    fine = np.linspace(xs.min() - 0.02, xs.max() + 0.02, 200)
+    ax_b.fill_between(fine, -0.25, np.interp(fine, xs, ground), color="#d9d9d9", lw=0)
+    ax_b.plot(xs, ground, "o-", color="#525252", ms=2.5, lw=0.9, label="belief $h_c$")
+    for x, g, l in zip(xs, ground, lifted):
+        ax_b.plot([x, x], [g, l], color="#fd8d3c", lw=0.8)
+    ax_b.plot(xs, lifted, "s", color="#a63603", ms=2.6, label="$h_c + \\kappa_c$")
+    ax_b.annotate("$\\kappa_c \\leq 0$: how far this cell\nsits from the wheel's contact",
+                  xy=(xs[-1], 0.5 * (ground[-1] + lifted[-1])),
+                  xytext=(xs[2], lifted.min() - 0.005),
+                  fontsize=6.3, color="#a63603", ha="left", va="bottom",
+                  arrowprops=dict(arrowstyle="->", color="#a63603", lw=0.7))
+    ax_b.axhline(lifted[j], color="#cb181d", lw=1.2)
+    ax_b.plot([xs[j]], [lifted[j]], marker="*", ms=8, color="#cb181d", zorder=5)
+    ax_b.text(xs.min(), lifted[j] + 0.028, "$e_{w,t} = \\max_c\\,(h_c + \\kappa_c)$",
+              fontsize=6.8, color="#cb181d", ha="left", va="bottom")
+    ax_b.set_xlabel("distance across the footprint [m]")
+    ax_b.set_ylabel("height [m]")
+    ax_b.set_ylim(min(ground.min(), lifted.min()) - 0.055, lifted[j] + 0.075)
+    ax_b.legend(frameon=False, loc="upper right", ncol=1, handletextpad=0.4,
+                borderaxespad=0.2)
+    ax_b.set_title("(b) section: the cap offsets and the max", loc="left")
+
+    fig.tight_layout(pad=0.35)
+    fig.savefig(path, dpi=DPI, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {path}")
+
+
 def fig_budget(path: Path) -> None:
     data = json.loads((OUT / "clark_full.json").read_text())["budget"]
     n = np.array([c["n"] for c in data["curve"]])
@@ -231,6 +331,7 @@ def main() -> None:
     out = Path(args.out).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
     _style()
+    fig_geometry(out / "geometry.png")
     fig_jensen(out / "jensen_explainer.png")
     fig_budget(out / "budget_curve.png")
 
