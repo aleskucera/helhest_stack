@@ -196,3 +196,64 @@ Studies: studies/bench/{ranking,noise,policies,risk,order2,softgrad,compare_*,il
 Adjoint: studies/adjoint/{study_a,study_b,harness,scene,sigma,curb_direction,...}.py
 Outputs: studies/out/bench/*.json (figures *.png are gitignored — regenerate via scripts)
 Memory (cross-session): ~/.claude/.../memory/adjoint_sensing_paper_status.md + MEMORY.md
+
+## 10. Update — 2026-08-07 paper session (both gates closed, draft written)
+
+**The paper now lives in its OWN repo: `~/projects/clark_paper`
+(github.com/aleskucera/clark-paper, private), built from the axion-paper template
+(IEEEtran, `compile.sh`, `check_pdf.sh`, anonymized for double-blind RA-L). This
+repo keeps the evidence; that one keeps the prose.** Decisions taken by the user:
+outline A (Clark-led), venue RA-L with no hard deadline, sensing thread reduced to
+one discussion paragraph, simulation-study framing with a possible sigma upgrade
+before submission.
+
+**GATE 1a — Ono/JPL prior art: CLOSED, the novelty claim SURVIVES.** The
+chance-constrained rover line and its neighbours all propagate worst-case interval
+bounds through the contact kinematics (ACE, Otsu et al. JFR'20), fit an empirical
+Gaussian to those bounds by offline MC plus linearization (p-ACE, Ghosh/Otsu/Ono
+IROS'18 — closest by PROBLEM), or reach closed form only for a quadratic form and
+fall back to a heuristic where a max appears (Tomita & Ho AAS 23-391 — closest by
+MACHINERY). Nobody propagates moments through the max. Full record, including the
+narrowed claim wording and what could not be reached (IEEE Xplore, two Ono papers
+behind auth walls): `~/projects/clark_paper/PRIOR_ART.md`.
+
+**GATE 1b — the clear_soft hinge: the model defect is FIXED; the decision benefit
+is NOT significant.** (`bench/clark_hinge.py`, jsons `clark_hinge{,_design_all,
+_virgin,_stage2}.json`.) Root cause of clark_full's 2.2x E-overshoot was
+approximation (e) exactly as suspected, in two parts: the frozen pose drops the
+envelope max's own Jensen uplift of the chassis, AND it drops the positive
+correlation between the ground under the belly and the chassis riding up on it.
+Fix: `w_z = a_i . e_t + const` with `a_i = M[z] - px_i M[pitch] + py_i M[roll]`
+composed with settle_map's tripod map, so the hinge argument becomes
+`const + g.U - a.N` and both terms fall out of covariances clark.py already
+computes (no new fold, no new MC). A SECOND structural revision was required: the
+same-timestep-only restriction on approximation (f) had been calibrated against
+the buggy frozen model, so with (e) repaired it flipped from compensation to
+deficit; reinstating all pairs as one global Phi-weighted quadratic form is both
+correct and cheaper. Virgin cases (n=12): E-ratio 2.225 -> 0.775, |err|/mc_sd
+5.91 -> 1.08, sd-ratio 0.825, corr 0.915. Gate H nonetheless FAILS its own
+criterion (iv) (corr >= 0.93) — recorded as a defect in the BAR, not relaxed: the
+frozen comparator scores 0.905 on the same virgin cases and n=12 Pearson has a 95%
+CI of [0.72, 0.98]. Declared residual: the rollout TRAJECTORY is still frozen at
+the belief path, which explains both the ~22% E undershoot and the 0.83 sd-ratio.
+STAGE 2 (full cost, n=100, hybrid/all, run as EXPLORATORY after the user
+authorized it): clark_cvar has the lowest mean regret 0.347 (bracket 0.465, fosm
+0.467, step 0.501), the lowest median (0.000) and the best picked-best rate (54%),
+but the paired sign tests do not separate (33/59 vs step p=0.43; 39/69 vs bracket
+p=0.34). PRE-REGISTERED CRITERION FAILS -> the paper's headline stays on the
+SETTLE cost and reports the extension as calibrated-but-not-decisive.
+
+**Numbers that changed on recomputation from the JSONs** (the paper uses these;
+older summary text in this file and in CLAIMS.md is superseded where they differ):
+clark_grad's per-cell errors are 50% at 1 cm and 83% at sigma (not 48%/75%); its
+attribution tau is 0.912 vs the hard adjoint's 0.894 over 10 seeds (not 0.94 vs
+0.80 at n=1); its catch-22 gradient mass is 0.48 vs 0.30 (not 38% vs 15%); the
+"bracket beats STEP (p=1.6e-3)" claim is specifically about Kendall TAU (+0.110,
+76/117) and CVaR error (p=1.3e-3) — on REGRET the two are indistinguishable
+(p=0.37), so the paper states the metric explicitly.
+
+**Figures** regenerate from `bench/plot_paper.py` (Jensen explainer computed on
+real footprints of the benchmark's own belief map; budget curve from
+clark_full.json). The Jensen figure also exposes something a schematic would have
+hidden and the paper now states: Clark over-predicts the PER-NODE Jensen gap by
+~30%, against a first-order alternative that predicts no gap at all.
