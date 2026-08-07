@@ -64,6 +64,7 @@ class Solver:
     dt: wp.float32
     k_turn: wp.float32
     tau_motor: wp.float32  # first-order actuator lag time constant [s]; 0 = no lag
+    command_delay_steps: wp.int32  # whole-step transport delay on the wheel command; 0 = none
 
 
 @dataclass
@@ -78,6 +79,12 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     tilt_clamp: float = 1.05  # clamp |pitch|, |roll| to ~60 deg
     k_turn: float = 2.0
     tau_motor: float = 0.0  # actuator lag [s]; 0 = instantaneous (no lag)
+    # Transport delay [s] between issuing a wheel command and the wheels acting on it. MEASURED at
+    # 189-249 ms on out_experiment_goal_unreachable0/1 (scripts/fit_actuator_lag.py), where the
+    # response is essentially pure delay: the first-order `tau_motor` fits at 0.02-0.05 s, which is
+    # a no-op at dt = 0.1 since its blend saturates. Quantised to whole steps at build(), so it is
+    # only representable in multiples of dt. Default 0 = no delay, the pre-existing behaviour.
+    command_delay: float = 0.0
 
     def build(self) -> Solver:
         s = Solver()
@@ -88,6 +95,7 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
         s.dt = self.dt
         s.k_turn = self.k_turn
         s.tau_motor = self.tau_motor
+        s.command_delay_steps = int(round(self.command_delay / self.dt))
         return s
 
 
@@ -914,6 +922,7 @@ def rollout_kernel(
         dtype=wp.vec3
     ),  # [B] initial lagged omega (e.g. encoder reading)
     target_wheel_omega: wp.array2d(dtype=wp.vec3),  # [T, B] commanded (wL, wR, w_rear)
+    command_history: wp.array2d(dtype=wp.vec3),  # [>=1, B] commands already in flight, oldest first
     controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] (x, y, yaw)
     derived: wp.array2d(dtype=wp.vec3),  # [T+1, B] (z, pitch, roll)
     current_wheel_omega_out: wp.array2d(dtype=wp.vec3),  # [T+1, B] realized omega after lag
@@ -934,6 +943,13 @@ def rollout_kernel(
 
     `envelope` is the yaw-binned stack; with the default spherical wheel it is one slice and
     `yaw_bin` is a constant 0, so this reads exactly the grid the 2D kernels read.
+
+    With `solver.command_delay_steps = n > 0` the wheels act on the command issued n steps ago:
+    step t applies `command_history[t]` while t < n (the commands already in flight when the
+    rollout started, oldest first) and `target_wheel_omega[t - n]` afterwards. At n = 0 the branch
+    always takes target_wheel_omega[t] and `command_history` is never read, so the default path is
+    unchanged. The per-step `step_kernel` does NOT do this -- there the caller supplies whichever
+    command should act on that step.
 
     MUST stay bit-identical to init_state_kernel + n_steps*step_kernel (guarded by
     tests/engine/step.selftest_rollout_kernel). Edit the physics in both.
@@ -973,8 +989,14 @@ def rollout_kernel(
         x_icr = grip_x / total_grip  # grip-weighted ICR offset
         alpha = 1.0 + solver.k_turn * total_grip / (robot.gravity * robot.mass)  # turn resistance
 
-        # Apply lag first (update-then-use): tau_motor=0 gives current = target_wheel_omega[t] exactly.
-        current = motor_lag_step(current, target_wheel_omega[t, b], solver.dt, solver.tau_motor)
+        # Transport delay: the wheels act on a command issued solver.command_delay_steps ago.
+        commanded = target_wheel_omega[t, b]
+        if t < solver.command_delay_steps:
+            commanded = command_history[t, b]  # already in flight when this rollout started
+        elif solver.command_delay_steps > 0:
+            commanded = target_wheel_omega[t - solver.command_delay_steps, b]
+        # Apply lag first (update-then-use): tau_motor=0 gives current = commanded exactly.
+        current = motor_lag_step(current, commanded, solver.dt, solver.tau_motor)
         current_wheel_omega_out[t + 1, b] = current
         twist = body_twist(robot, current, alpha)
         vx = twist[0]

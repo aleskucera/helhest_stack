@@ -331,8 +331,21 @@ def selftest_rollout_kernel():
     wp.launch(
         rollout_kernel,
         B,
-        # rollout_kernel takes the yaw-binned envelope STACK; the spherical wheel is one slice
-        inputs=[T, te.reshape((1,) + te.shape), tr, tm, g, robot, sp, pose0, init_oa, omega],
+        # rollout_kernel takes the yaw-binned envelope STACK; the spherical wheel is one slice.
+        # command_history is unread at command_delay 0, but must still be a valid array.
+        inputs=[
+            T,
+            te.reshape((1,) + te.shape),
+            tr,
+            tm,
+            g,
+            robot,
+            sp,
+            pose0,
+            init_oa,
+            omega,
+            wp.zeros((1, B), dtype=wp.vec3, device="cpu"),
+        ],
         outputs=fused,
         device="cpu",
     )

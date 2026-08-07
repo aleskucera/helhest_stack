@@ -88,6 +88,7 @@ class BaseSimulator:
 
         self.robot = robot_params.build(device)  # device Robot struct
         self.solver = solver_params.build()  # device Solver struct
+        self.command_delay_steps = int(round(solver_params.command_delay / solver_params.dt))
         self.grid = grid_params.build()  # Grid (fixed)
         self.wheel_radius = robot_params.wheel_radius
         self.env_radius = int(np.ceil(robot_params.wheel_radius / grid_params.cell_size))
@@ -123,6 +124,10 @@ class BaseSimulator:
             self.target_wheel_omega = wp.zeros((T, B), dtype=wp.vec3f, requires_grad=control_grad)
             self.start_pose = wp.zeros(B, dtype=wp.vec3f, requires_grad=control_grad)
             self.init_current_wheel_omega = wp.zeros(B, dtype=wp.vec3f)  # like start_pose
+            # Commands already in flight when a rollout starts, oldest first: row k acts on step k
+            # while k < solver.command_delay_steps. Zeros = nothing in flight. At least one row is
+            # allocated so the kernel argument is always a valid array, even with no delay.
+            self.command_history = wp.zeros((max(self.command_delay_steps, 1), B), dtype=wp.vec3f)
 
     def _dilate(
         self,
@@ -250,6 +255,7 @@ class ForwardSimulator(BaseSimulator):
                 self.start_pose,
                 self.init_current_wheel_omega,
                 self.target_wheel_omega,
+                self.command_history,
             ],
             outputs=[
                 self.controlled,
