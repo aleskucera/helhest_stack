@@ -68,18 +68,28 @@ The golden fixture was regenerated in that commit. Scale of the change: `control
 `derived` 0.3 mm, `loads` 0.02 N. The numpy reference in `reference/state.py` got the same update,
 since it is the finite-difference oracle for this path.
 
-### Command transport delay
+### Actuator response — a lag, not a transport delay
 
-`SolverParams.command_delay`, defaulting to the measured `dynamics.COMMAND_DELAY = 0.17 s`, with
-`elevation_node` feeding `command_history` from the commands it actually issued.
+`dynamics.MOTOR_TAU = 0.19 s` (first-order, via the engine's existing `tau_motor`) plus
+`COMMAND_DELAY = 0.04 s` of residual dead time, which rounds to zero whole steps at dt = 0.1.
+`SolverParams.command_delay` and `elevation_node`'s `command_history` implement the dead-time path
+and stay in place for a shorter dt.
 
-Confirmed physical rather than a timing artifact, three ways: every topic's header stamp sits
-within 2 ms of its bag log time; the reported wheel velocity tracks encoder position to 10–20 ms
-(correlation 1.000, scale 0.996); and the IMU — a separate device and driver — sees the same lag on
-yaw. Localised with `/joint_setpoints`: **10 ms** from `/cmd_joints` to LLC intake, **140–189 ms**
-inside the velocity loop. So it is the motor controller, not comms, and may be tunable there.
+**This corrects an earlier reading in this same branch.** Fitting the delay first by
+cross-correlation and the lag second reports ~170 ms of *pure* delay — because cross-correlation
+returns the group delay of a slow rise. Fitting both jointly puts the drive wheels at tau
+0.17–0.20 s with 0–50 ms of dead time, and fits better (RMSE 0.395 vs 0.412). The decisive
+evidence is the step response: averaged over 34 setpoint steps the wheel is already moving 10 ms
+in and passes 50% at ~140 ms. **There is no dead zone**, so there was nothing for a 170 ms
+transport delay to describe.
 
-Quantisation is a visible approximation: 0.17 s at dt = 0.1 rounds to 2 steps = 200 ms.
+What survives from that investigation: the lag is physical, not a timing artifact (every topic's
+header sits within 2 ms of its log time; reported velocity tracks encoder position to 10–20 ms at
+correlation 1.000; the IMU sees it too), and `/cmd_joints` reaches the LLC's echoed setpoint in
+**10 ms**, so essentially all of it is downstream of ROS. Whether the remaining ~0.19 s is
+controller tuning or the robot's own torque-limited acceleration is *not* settled: 105 Nm/wheel
+gives a = 8.5 m/s², which reaches 1.4 m/s in 160 ms — the same order. A standing-start step in the
+calibration drive would separate them.
 
 ### Traction: shear compliance, momentum, rolling resistance
 
@@ -156,6 +166,11 @@ see them.
 - **"The force-balance model is refuted (α ≈ 1.02–1.08)."** That was a slip regulariser, not
   physics. The correct rigid-Coulomb answer is exactly 1.000; the model was missing shear
   compliance rather than being wrong.
+- **"The command-to-response lag is ~170 ms of pure transport delay, and `tau_motor` is the wrong
+  knob."** Both halves wrong. Sequential fitting (delay by cross-correlation, then lag) manufactures
+  a dead time out of a slow rise. The step response has no dead zone at all, and the joint fit gives
+  tau 0.19 s with under 50 ms of dead time — so `tau_motor`, which already existed, was the right
+  knob throughout.
 - **"Publishing `/cmd_joints` faster would cut the lag."** It would not — the LLC already holds the
   command. But asking exposed that both fitting scripts reconstructed commands by linear
   interpolation instead of a zero-order hold, inflating every fitted delay by ~50 ms.
@@ -174,7 +189,8 @@ see them.
 | the three certificates | on (inert) | high — analytic, nothing consumes them |
 | exact-arc integration | **on** | high — exact against a closed form, no parameter |
 | `wheel_width = 0.10` | off | high measurement, but changes planning |
-| `command_delay = 0.17` | **on** (planner) | measured three ways; quantises to 200 ms |
+| `tau_motor = 0.19` | **on** (planner) | jointly fitted; blend 0.53/step at dt=0.1 |
+| `command_delay = 0.04` | on (planner) | residual dead time; 0 steps at dt=0.1 |
 | `motor_torque_limit = 105` | on | a lower bound; inert either way |
 | `shear_lk`, `body_momentum` | off | mechanism sound, parameters unresolved |
 | `k_turn` | unchanged at 1.0 | measured α says 2.20–2.87; deliberately not changed |

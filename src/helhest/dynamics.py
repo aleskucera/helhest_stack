@@ -27,16 +27,18 @@ DT = 0.1  # control timestep -- the plan horizon step AND the driver frame step 
 # wheel_sign_convention_calibration memory.
 K_TURN_INDOOR = 0.6
 K_TURN_OUTDOOR = 1.0
-# Transport delay [s] between publishing a wheel command and the wheels acting on it. MEASURED at
-# 149-199 ms per wheel on out_experiment_goal_unreachable0/1 (scripts/fit_actuator_lag.py), with
-# the command reconstructed as a zero-order hold -- interpolating it as a ramp inflates this by
-# half a publish interval. Confirmed physical rather than a timing artifact: every topic's header
-# stamp sits within 2 ms of its bag log time, the reported wheel velocity tracks the encoder
-# position to 10-20 ms, and the IMU (separate device and driver) sees the same lag on yaw.
-#
-# QUANTISATION: the rollout can only delay by whole steps, so at DT = 0.1 this rounds to 2 steps
-# = 200 ms, about 30 ms more than measured. Getting closer needs a finer dt, not a finer constant.
-COMMAND_DELAY = 0.17
+# Wheel actuator response, MEASURED on out_experiment_goal_unreachable0/1 by fitting dead time and
+# first-order lag JOINTLY (scripts/fit_actuator_lag.py). The drivetrain is a LAG, not a transport
+# delay: averaged over 34 setpoint steps the wheel is already moving 10 ms in and reaches 50% at
+# ~140 ms, with no dead zone at all. Fitting the delay first by cross-correlation and the lag
+# second -- which is what an earlier revision of this file did -- reports ~170 ms of pure delay,
+# because cross-correlation returns the GROUP DELAY of a slow rise. The joint fit puts the drive
+# wheels at tau 0.17-0.20 s with 0-50 ms of dead time, and fits better (RMSE 0.395 vs 0.412).
+MOTOR_TAU = 0.19  # [s] first-order actuator lag; blend = dt/tau = 0.53 at DT = 0.1
+# What genuinely is transport: /cmd_joints to the LLC's echoed setpoint measures 10 ms, and the
+# joint fit leaves 0-50 ms of dead time on top. Quantised to whole rollout steps it rounds to 0 at
+# DT = 0.1, so it only bites if dt is shortened.
+COMMAND_DELAY = 0.04
 K_TURN = K_TURN_INDOOR  # module default (used by WarpDriver / demos when not overridden)
 
 
@@ -50,15 +52,21 @@ def robot_params():
     return RobotParams()
 
 
-def planning_solver(dt=DT, k_turn=K_TURN, command_delay=COMMAND_DELAY):
+def planning_solver(dt=DT, k_turn=K_TURN, command_delay=COMMAND_DELAY, tau_motor=MOTOR_TAU):
     """Solver for the MPPI rollouts (B in the thousands): shallow + loose settle, for speed.
 
-    `command_delay` [s] defaults to the measured COMMAND_DELAY. A caller that does NOT feed
-    `sim.command_history` should pass 0.0: it would otherwise roll out the first two steps against
-    an all-zero history, i.e. predict the robot standing still for 200 ms.
+    `tau_motor` defaults to the measured MOTOR_TAU: the wheels take ~0.19 s to reach a commanded
+    speed, which the planner previously ignored entirely. `command_delay` is the small remaining
+    dead time; a caller that does NOT feed `sim.command_history` should pass 0.0, since it would
+    otherwise roll out against an all-zero history.
     """
     return SolverParams(
-        dt=dt, k_turn=k_turn, newton_iters=6, atol=1e-4, command_delay=command_delay
+        dt=dt,
+        k_turn=k_turn,
+        newton_iters=6,
+        atol=1e-4,
+        command_delay=command_delay,
+        tau_motor=tau_motor,
     )
 
 

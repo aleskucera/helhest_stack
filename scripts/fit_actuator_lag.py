@@ -12,13 +12,19 @@ candidate models are fitted here to find out what the real one does:
   2nd order (omega_n, zeta), which CAN overshoot: peak overshoot = exp(-pi zeta / sqrt(1-zeta^2)).
 
 MEASURED (out_experiment_goal_unreachable0/1, the only post-fix bags with /joint_states): the
-response is essentially PURE DELAY of 149-199 ms plus a fast lag of 40-50 ms, with NO overshoot --
-the second-order fit lands at zeta 0.70-0.95 and does not beat first order on RMSE.
+response is a first-order LAG of tau 0.17-0.20 s on the drive wheels with 0-50 ms of dead time,
+and no overshoot (the second-order fit lands at zeta 0.70-1.00 and does not beat first order).
 
-That matters for what to change in the engine, because the two are not interchangeable: at
-dt = 0.1 s a 0.03 s lag is a no-op (the blend saturates at 1.0), so `tau_motor` is the wrong knob.
-The effect that dominates is a ~1.5-2 control-tick transport delay, which neither a first-order
-lag nor any instantaneous model can express -- it needs a command delay line.
+FIT THE TWO JOINTLY, NOT IN SEQUENCE. Estimating the delay first by cross-correlation and the lag
+second -- which this script originally did -- reports ~170 ms of PURE delay, because
+cross-correlation returns the group delay of a slow rise. The joint fit explains the same data
+better (RMSE 0.395 vs 0.412) with a dead time four times smaller. The decisive evidence is the
+step response: averaged over 34 setpoint steps the wheel is already moving 10 ms in and reaches
+50% at ~140 ms, so there is no dead zone to attribute a transport delay to.
+
+So `tau_motor` IS the right knob: at dt = 0.1 a tau of 0.19 s gives a blend of 0.53 per step, far
+from a no-op. The command delay line still exists for the residual dead time, but that rounds to
+zero whole steps at dt = 0.1 and only bites if dt is shortened.
 
 WARNING ABOUT INSTANTANEOUS RATIOS. Comparing measured/commanded sample by sample on a
 continuously varying command reports ratios of 1.3-1.7 and peaks above 3, which look like
