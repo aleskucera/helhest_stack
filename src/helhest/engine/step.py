@@ -156,11 +156,13 @@ def motor_lag_step(
 ) -> wp.vec3:
     """First-order actuator lag: advance current_wheel_omega one timestep toward target_wheel_omega.
 
-    alpha = min(dt / tau, 1.0) so the update never overshoots. When tau == 0
-    (the default) alpha clamps to 1.0 and current_wheel_omega = target_wheel_omega immediately,
-    reproducing the original instantaneous-tracking behavior.
+    alpha = 1 - exp(-dt/tau) is the EXACT step of a first-order lag held over dt, not the linear
+    dt/tau. The two agree only while dt << tau: at the measured tau = 0.19 s they differ by 3% at
+    dt = 0.01 but 29% at the planner's dt = 0.1, so the linear form would make the modelled wheels
+    a third more responsive than the ones that were fitted. tau -> 0 still gives alpha = 1 and
+    instantaneous tracking, so the default path is unchanged.
     """
-    alpha = wp.min(dt / wp.max(tau, 1e-6), 1.0)
+    alpha = 1.0 - wp.exp(-dt / wp.max(tau, 1e-6))
     return current_wheel_omega + alpha * (target_wheel_omega - current_wheel_omega)
 
 

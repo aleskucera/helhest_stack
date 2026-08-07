@@ -97,7 +97,7 @@ def _delay(command: np.ndarray, response: np.ndarray, dt: float, max_lag: float 
 def _simulate_first_order(command: np.ndarray, tau: float, dt: float) -> np.ndarray:
     out = np.empty_like(command)
     state = command[0]
-    blend = min(dt / max(tau, 1e-6), 1.0)
+    blend = 1.0 - np.exp(-dt / max(tau, 1e-6))  # same discretisation as engine.motor_lag_step
     for k, target in enumerate(command):
         state += blend * (target - state)
         out[k] = state

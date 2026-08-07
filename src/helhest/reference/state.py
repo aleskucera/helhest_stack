@@ -112,7 +112,7 @@ def _motor_lag_step(
     current_wheel_omega: np.ndarray, target_wheel_omega: np.ndarray, dt: float, tau: float
 ) -> np.ndarray:
     """First-order actuator lag: mirrors the device motor_lag_step @wp.func exactly."""
-    alpha = min(dt / max(tau, 1e-6), 1.0)
+    alpha = 1.0 - np.exp(-dt / max(tau, 1e-6))  # exact first-order step; see engine.motor_lag_step
     return current_wheel_omega + alpha * (target_wheel_omega - current_wheel_omega)
 
 

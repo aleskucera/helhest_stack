@@ -481,7 +481,7 @@ def selftest_motor_lag():
     oa_dev = current_wheel_omega.numpy()[:, 0, 0]  # left-wheel channel [T+1]
     # current_wheel_omega[0] = init (zeros); current_wheel_omega[t+1] = effective speed used at step t.
     # After a step command, the effective speed should converge: current[t+1] ≈ 2*(1 - exp(-t*dt/tau)).
-    alpha = min(dt / max(tau, 1e-6), 1.0)
+    alpha = 1.0 - np.exp(-dt / max(tau, 1e-6))  # exact first-order step, as the engine uses
     oa_expected = np.array([2.0 * (1.0 - (1.0 - alpha) ** t) for t in range(1, T + 1)], np.float64)
 
     d_oa = np.abs(oa_dev[1:] - oa_expected).max()
