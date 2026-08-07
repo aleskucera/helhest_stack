@@ -12,13 +12,13 @@ candidate models are fitted here to find out what the real one does:
   2nd order (omega_n, zeta), which CAN overshoot: peak overshoot = exp(-pi zeta / sqrt(1-zeta^2)).
 
 MEASURED (out_experiment_goal_unreachable0/1, the only post-fix bags with /joint_states): the
-response is essentially PURE DELAY of 189-249 ms plus a fast lag of 20-50 ms, with NO overshoot --
-the second-order fit lands at zeta 0.85-1.00 and does not beat first order on RMSE.
+response is essentially PURE DELAY of 149-199 ms plus a fast lag of 40-50 ms, with NO overshoot --
+the second-order fit lands at zeta 0.70-0.95 and does not beat first order on RMSE.
 
 That matters for what to change in the engine, because the two are not interchangeable: at
 dt = 0.1 s a 0.03 s lag is a no-op (the blend saturates at 1.0), so `tau_motor` is the wrong knob.
-The effect that dominates is a ~2-control-tick transport delay, which neither a first-order lag
-nor any instantaneous model can express -- it needs a command delay line.
+The effect that dominates is a ~1.5-2 control-tick transport delay, which neither a first-order
+lag nor any instantaneous model can express -- it needs a command delay line.
 
 WARNING ABOUT INSTANTANEOUS RATIOS. Comparing measured/commanded sample by sample on a
 continuously varying command reports ratios of 1.3-1.7 and peaks above 3, which look like
@@ -63,8 +63,19 @@ def _load(bag: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
     cmd_t, cmd = np.asarray(cmd_t), np.asarray(cmd)
     if st_t.size == 0 or cmd_t.size == 0:
         return st_t, np.empty((0, 3)), np.empty((0, 3)), 0.0
-    on_grid = np.stack([np.interp(st_t, cmd_t, cmd[:, i]) for i in range(3)], axis=1)
-    return st_t, on_grid, meas, float(np.median(np.diff(st_t)))
+    return st_t, _zero_order_hold(cmd_t, cmd, st_t), meas, float(np.median(np.diff(st_t)))
+
+
+def _zero_order_hold(stamps: np.ndarray, values: np.ndarray, grid: np.ndarray) -> np.ndarray:
+    """Resample a COMMAND onto `grid` by holding each value until the next one is published.
+
+    Not np.interp. A command is a zero-order hold, and linearly interpolating it invents a ramp
+    that starts before the receiver has been told anything -- which makes the reconstructed
+    command LEAD the real one by about half a publish interval, and inflates any delay fitted
+    against it by the same amount (measured: +40 to +60 ms at 10 Hz).
+    """
+    idx = np.clip(np.searchsorted(stamps, grid, side="right") - 1, 0, len(stamps) - 1)
+    return values[idx]
 
 
 def _delay(command: np.ndarray, response: np.ndarray, dt: float, max_lag: float = 0.6) -> float:

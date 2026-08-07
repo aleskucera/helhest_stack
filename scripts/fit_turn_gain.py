@@ -74,6 +74,18 @@ def _load(bag: Path) -> dict:
     return {k: np.asarray(v, float) for k, v in out.items()}
 
 
+def _zero_order_hold(stamps: np.ndarray, values: np.ndarray, grid: np.ndarray) -> np.ndarray:
+    """Resample a COMMAND onto `grid` by holding each value until the next one is published.
+
+    Not np.interp. A command is a zero-order hold, and linearly interpolating it invents a ramp
+    that starts before the receiver has been told anything -- which makes the reconstructed
+    command LEAD the real one by about half a publish interval, and inflates any delay fitted
+    against it by the same amount (measured: +40 to +60 ms at 10 Hz).
+    """
+    idx = np.clip(np.searchsorted(stamps, grid, side="right") - 1, 0, len(stamps) - 1)
+    return values[idx]
+
+
 def _yaw_axis(gyro: np.ndarray, reference: np.ndarray) -> tuple[int, float]:
     """Pick the gyro axis that actually carries yaw (this fleet has both z-up and -y mountings)."""
     scores = [np.corrcoef(gyro[:, i], reference)[0, 1] for i in range(3)]
@@ -111,7 +123,7 @@ def analyse(bag: Path) -> None:
         return
     dt = float(np.median(np.diff(d["gt"])))
     odom_rate = np.interp(d["gt"], d["ot"], d["v"]) if d["ot"].size > 10 else np.zeros_like(d["gt"])
-    cmd = np.stack([np.interp(d["gt"], d["ct"], d["cmd"][:, i]) for i in range(3)], 1)
+    cmd = _zero_order_hold(d["ct"], d["cmd"], d["gt"])
     # the commanded differential is the cleanest reference for which gyro axis carries yaw
     axis, score = _yaw_axis(d["gyro"], cmd[:, 1] - cmd[:, 0])
     yaw_rate = np.clip(d["gyro"][:, axis], -MAX_GYRO, MAX_GYRO)
