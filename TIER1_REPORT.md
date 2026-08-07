@@ -67,6 +67,12 @@ spread 1.9e-9). `--write` regenerates.
 **`tests/engine/cylinder.py`** (new) — `selftest_transverse_ridge`, `selftest_lateral_ridge`,
 `selftest_yaw_binning`.
 
+**`demos/wheel_envelope_drive.py`** (new) — drive both envelopes at once, same keyboard into two
+simulators (blue = sphere, red = cylinder), with the certificates in the title bar. `--headless`
+runs a scripted pass and prints the table instead, so it works without a display.
+
+**`scripts/wheel_torque_from_bags.py`** (new) — the effort->Nm calibration and the torque survey.
+
 **`tests/engine/step.py`** — updated for the new kernel signatures (buffers + the one-slice
 envelope stack). `selftest_rollout_kernel` still reports fused == per-step at exactly 0.
 
@@ -96,6 +102,14 @@ Cylinder (`python -m tests.engine.cylinder`):
 Cost, B=4096, T=25, 241x441 grid, RTX A500: rollout 1.144 → 1.164 ms (+1.7%) with the cylinder;
 the per-frame dilation goes 0.228 → 2.250 ms for 32 slices. Memory 32 x the envelope grid.
 Graph capture verified to record and replay with `wheel_width` both unset and set.
+
+Driving the two models through a rock slalom (`demos/wheel_envelope_drive.py --headless`, rocks
+0.14-0.33 m outside the wheel track) shows what the change is worth: the sphere reports **19.2,
+-9.7, 6.3, -8.2, 10.7, -19.9 deg of roll** where the cylinder reports **9.0, -0.4, 0.1, -0.2, 0.4,
+-13.8**. Worst disagreement 13.2 deg. Two of those sphere poses are past `max_roll = 15 deg`, i.e.
+the old envelope calls a corridor infeasible that the real robot drives straight through. Position
+barely moves (worst gap 1.9 cm) -- the cost of the sphere is paid in tilt, which is exactly what
+the feasibility gates and tilt costs read.
 
 ## Findings
 
