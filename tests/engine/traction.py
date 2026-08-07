@@ -50,7 +50,9 @@ def _device() -> str:
     return "cuda" if wp.get_cuda_device_count() > 0 else "cpu"
 
 
-def _reference_twist(omega: np.ndarray, lk: float, patch: float, iters: int = 200) -> np.ndarray:
+def _reference_twist(
+    omega: np.ndarray, lk: float, patch: float, rolling: float = 0.09, iters: int = 200
+) -> np.ndarray:
     """Host solve of the same force balance -- the oracle for the device version.
 
     Deliberately written from the equations rather than ported from the kernel: a damped Newton
@@ -70,11 +72,15 @@ def _reference_twist(omega: np.ndarray, lk: float, patch: float, iters: int = 20
             slip = np.array([forward - yaw_rate * y - radius * w, lateral + yaw_rate * x])
             gen = np.array([slip[0], slip[1], patch * yaw_rate])
             norm = np.linalg.norm(gen)
-            rolling = abs(radius * w)
-            lam = max(norm / rolling * lk, 1e-9) if rolling > 1e-6 else 1e6
+            rolling_speed = abs(radius * w)  # NOT `rolling`: that is the resistance coefficient
+            lam = max(norm / rolling_speed * lk, 1e-9) if rolling_speed > 1e-6 else 1e6
             mobilised = 1.0 - (1.0 - np.exp(-lam)) / lam
             scale = MU * load * mobilised / norm if norm > 1e-9 else 0.0
             fx, fy = -scale * gen[0], -scale * gen[1]
+            travel = np.array([forward - yaw_rate * y, lateral + yaw_rate * x])
+            roll_scale = rolling * load / (np.linalg.norm(travel) + 1e-2)
+            fx -= roll_scale * travel[0]
+            fy -= roll_scale * travel[1]
             out[0] += fx
             out[1] += fy
             out[2] += x * fy - y * fx - scale * patch * gen[2]
@@ -99,7 +105,7 @@ def _reference_twist(omega: np.ndarray, lk: float, patch: float, iters: int = 20
             probe[k] += 1e-7
             jac[:, k] = (residual(probe) - r) / 1e-7
         try:
-            step = np.linalg.solve(jac, r)
+            step = np.clip(np.linalg.solve(jac, r), -1.0, 1.0)  # clamped, as the kernel does
         except np.linalg.LinAlgError:
             break
         scale = 1.0
@@ -108,15 +114,26 @@ def _reference_twist(omega: np.ndarray, lk: float, patch: float, iters: int = 20
                 break
             scale *= 0.5
         twist = twist - scale * step
+    # A silently non-converged oracle is worse than none: it would turn a device bug into a
+    # "disagreement" and, worse, a device FIX into a regression. Unclamped Newton walked off to a
+    # 691 N residual once rolling resistance was added, which is how this check earned its place.
+    final = float(np.linalg.norm(residual(twist)))
+    assert final < 1.0, f"reference solve did not converge: |residual| = {final:.1f} N"
     return twist
 
 
-def _run(omega: tuple[float, float], shear_lk: float, patch: float = PATCH):
+def _run(omega: tuple[float, float], shear_lk: float, patch: float = PATCH, rolling: float = 0.09):
     """One step on flat ground; returns (yaw_rate, alpha, x_icr) as the engine reports them."""
     device = _device()
     sim = ForwardSimulator(
         RobotParams(),
-        SolverParams(dt=DT, shear_lk=shear_lk, contact_patch=patch, shear_iters=12),
+        SolverParams(
+            dt=DT,
+            shear_lk=shear_lk,
+            contact_patch=patch,
+            shear_iters=12,
+            rolling_resistance=rolling,
+        ),
         GridParams(CELLS, CELLS, CELL, *ORIGIN),
         1,
         1,
@@ -143,13 +160,13 @@ def selftest_compliance_creates_alpha() -> None:
     """
     print(f"{'L/K':>8} {'engine alpha':>13} {'numpy alpha':>12}")
     previous = None
-    for lk in (5.0, 20.0, 30.0, 100.0):
-        _, alpha, _ = _run((4.0, 6.0), lk, patch=0.0)
-        reference = _reference_twist(np.array([4.0, 6.0, 5.0]), lk, 0.0)
+    for lk in (5.0, 20.0, 30.0, 100.0):  # rolling resistance off here: isolate the shear curve
+        _, alpha, _ = _run((4.0, 6.0), lk, patch=0.0, rolling=0.0)
+        reference = _reference_twist(np.array([4.0, 6.0, 5.0]), lk, 0.0, rolling=0.0)
         rp = RobotParams()
         expected = (rp.wheel_radius * 2.0 / (2.0 * rp.half_track)) / reference[2]
         print(f"{lk:8.0f} {alpha:13.4f} {expected:12.4f}")
-        assert abs(alpha - expected) / expected < 0.01, "device disagrees with the host solve"
+        assert abs(alpha - expected) / abs(expected) < 0.01, "device disagrees with the host solve"
         if previous is not None:
             assert alpha < previous, "stiffer ground must turn MORE freely, not less"
         previous = alpha
@@ -182,8 +199,11 @@ def selftest_speed_dependence() -> None:
         _, alpha, _ = _run((forward - 1.0, forward + 1.0), SHEAR_LK)
         alphas.append(alpha)
         print(f"{forward:9.2f} {alpha:8.3f}")
-    assert alphas == sorted(alphas), "alpha should increase monotonically with forward speed"
-    assert alphas[-1] / alphas[0] > 1.1, "the speed dependence has vanished"
+    # Not monotone once rolling resistance is on: at low speed the resistance eats a larger share
+    # of the friction budget, which lifts alpha there and partly cancels the slip-ratio trend. The
+    # net rise across the range drops from 1.24 without resistance to about 1.08 with it.
+    assert alphas[-1] > alphas[0], "alpha should still be higher at speed than at a crawl"
+    assert alphas[-1] / alphas[0] > 1.03, "the speed dependence has vanished entirely"
     print(f"speed dependence  OK (ratio {alphas[-1] / alphas[0]:.2f} over the range)")
     print("  NOTE: a model prediction, not a validated fact -- the bags have no steady-state turns")
 

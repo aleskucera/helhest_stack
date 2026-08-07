@@ -49,6 +49,10 @@ _TWO_PI = wp.constant(2.0 * float(np.pi))
 # secant tracks the tangent, large enough to stay clear of float32 cancellation.
 _SHEAR_FD_STEP = wp.constant(1.0e-4)
 
+# Speed floor for the rolling-resistance direction [m/s]: the force must fall to zero at a
+# standstill (a parked robot rolls nowhere), and this keeps the unit vector finite there.
+_ROLL_FLOOR = wp.constant(1.0e-2)
+
 
 # --- settle/integration numerics: host params + the device-side `Solver` struct ---
 @wp.struct
@@ -73,6 +77,7 @@ class Solver:
     contact_patch: wp.float32  # contact patch radius [m], torsional term of the shear model
     shear_iters: wp.int32  # Newton iterations for the shear twist solve
     inertia_gain: wp.float32  # 1/dt when body momentum is on, 0 = quasi-static
+    rolling_resistance: wp.float32  # resistance to rolling as a fraction of normal load
 
 
 @dataclass
@@ -101,7 +106,9 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     # FITTED from the bags (scripts/fit_traction.py), against measured wheel speeds and a gyro --
     # no command in the loop, so no delay and no steady-state manoeuvre needed. On QUASI-STATIC
     # samples L/K lands at 8-15 (RMS 0.0393-0.0396 rad/s vs the legacy model's 0.0456, and 21%
-    # better on median), which is also where the soil literature puts it.
+    # better on median), which is also where the soil literature puts it. That fit predates
+    # rolling_resistance and the two are coupled: with the measured mu_roll = 0.09 the yaw channel
+    # wants L/K nearer 12. Refit both together if either is changed.
     # OPT-IN, and the reason is in that same fit: pooled over ALL turning samples both models sit
     # at RMS ~0.16 and are indistinguishable, because yaw-inertia transients carry roughly 4x the
     # variance of the traction difference. This model is real but it is not the dominant error.
@@ -116,6 +123,14 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     # terms in a residual that is already being evaluated. False keeps the quasi-static solve,
     # which stays the reference case the numpy oracle in tests/engine/traction.py validates.
     body_momentum: bool = False
+    # Rolling resistance as a fraction of normal load, opposing each contact's motion over the
+    # ground (not its slip). MEASURED, not fitted: the torque calibration's fit offset is 36-38 Nm
+    # total = ~106 N = 0.09 of this robot's weight (scripts/wheel_torque_from_bags.py). Without it
+    # the shear model needs NO tractive force to drive straight, so it develops no longitudinal
+    # slip and tracks the ground exactly -- against a measured forward gain of 0.906-0.925 on
+    # Odin's SLAM odometry. No value of shear_lk can fix that; only this term can. Also what makes
+    # the robot coast to a stop instead of drifting on when commands go to zero.
+    rolling_resistance: float = 0.09
 
     def build(self) -> Solver:
         s = Solver()
@@ -131,6 +146,7 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
         s.contact_patch = self.contact_patch
         s.shear_iters = self.shear_iters
         s.inertia_gain = (1.0 / self.dt) if self.body_momentum else 0.0
+        s.rolling_resistance = self.rolling_resistance
         return s
 
 
@@ -693,6 +709,7 @@ def _shear_residual(
     gravity_tangential: wp.vec2,  # body-frame in-plane weight component
     previous: wp.vec3,  # last step's twist; unused when inertia_gain is 0
     inertia_gain: float,  # 1/dt for implicit momentum, 0 for the quasi-static solve
+    rolling_resistance: float,  # fraction of normal load resisting travel over the ground
 ) -> wp.vec3:
     """Net (Fx, Fy, Mz) on the body for a candidate twist. Zero at equilibrium.
 
@@ -737,6 +754,15 @@ def _shear_residual(
             scale = mu[st_i] * loads[st_i] * mobilised / norm
         force_x = -scale * slip_x
         force_y = -scale * slip_y
+        # rolling resistance opposes the contact's TRAVEL over the ground, not its slip against
+        # the rim -- so it is present even in perfect rolling, and vanishes at a standstill.
+        travel_x = forward - yaw_rate * y
+        travel_y = lateral + yaw_rate * x
+        travel = wp.sqrt(travel_x * travel_x + travel_y * travel_y)
+        roll_scale = rolling_resistance * loads[st_i] / (travel + _ROLL_FLOOR)
+        force_x -= roll_scale * travel_x
+        force_y -= roll_scale * travel_y
+
         total_x += force_x
         total_y += force_y
         total_mz += x * force_y - y * force_x - scale * patch * slip_spin
@@ -783,6 +809,7 @@ def shear_twist(
             gravity_tangential,
             previous,
             solver.inertia_gain,
+            solver.rolling_resistance,
         )
         jac = wp.mat33()
         for k in range(wp.static(3)):
@@ -800,6 +827,7 @@ def shear_twist(
                 gravity_tangential,
                 previous,
                 solver.inertia_gain,
+                solver.rolling_resistance,
             )
             jac[0, st_k] = (shifted[0] - residual[0]) / _SHEAR_FD_STEP
             jac[1, st_k] = (shifted[1] - residual[1]) / _SHEAR_FD_STEP
@@ -833,6 +861,7 @@ def shear_twist(
                     gravity_tangential,
                     previous,
                     solver.inertia_gain,
+                    solver.rolling_resistance,
                 )
             )
             if trial_norm < best_norm:
