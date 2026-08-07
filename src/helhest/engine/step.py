@@ -45,6 +45,10 @@ _GRIP_FLOOR_FRAC = wp.constant(1.0e-3)
 
 _TWO_PI = wp.constant(2.0 * float(np.pi))
 
+# Finite-difference step for the shear twist Jacobian [m/s and rad/s]. Small enough that the
+# secant tracks the tangent, large enough to stay clear of float32 cancellation.
+_SHEAR_FD_STEP = wp.constant(1.0e-4)
+
 
 # --- settle/integration numerics: host params + the device-side `Solver` struct ---
 @wp.struct
@@ -65,6 +69,9 @@ class Solver:
     k_turn: wp.float32
     tau_motor: wp.float32  # first-order actuator lag time constant [s]; 0 = no lag
     command_delay_steps: wp.int32  # whole-step transport delay on the wheel command; 0 = none
+    shear_lk: wp.float32  # contact length / shear modulus; <= 0 = legacy kinematic traction
+    contact_patch: wp.float32  # contact patch radius [m], torsional term of the shear model
+    shear_iters: wp.int32  # Newton iterations for the shear twist solve
 
 
 @dataclass
@@ -85,6 +92,18 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     # a no-op at dt = 0.1 since its blend saturates. Quantised to whole steps at build(), so it is
     # only representable in multiples of dt. Default 0 = no delay, the pre-existing behaviour.
     command_delay: float = 0.0
+    # --- traction model. <= 0 keeps the legacy kinematic twist (commanded speed always achieved,
+    # friction only bends the turn). Above 0 switches to the quasi-static shear force balance, in
+    # which the twist is solved: `shear_lk` is contact length / shear deformation modulus L/K
+    # (soils put K at 0.01-0.06 m and L near 0.15 m, so L/K ~ 3-15), `contact_patch` is the patch
+    # radius for the torsional term (0.075 m is the polar radius of a 0.10 x 0.24 m contact).
+    # Prototyped against the bags before landing: at L/K 8 with the geometric patch the model
+    # predicts alpha ~ 2.0-2.2 against a measured-wheel 2.20, where the legacy model says 1.80.
+    # OPT-IN: it changes every trajectory, and its speed dependence is a PREDICTION awaiting a
+    # steady-state calibration drive -- see studies of alpha(v) in the branch history.
+    shear_lk: float = 0.0
+    contact_patch: float = 0.075
+    shear_iters: int = 6
 
     def build(self) -> Solver:
         s = Solver()
@@ -96,6 +115,9 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
         s.k_turn = self.k_turn
         s.tau_motor = self.tau_motor
         s.command_delay_steps = int(round(self.command_delay / self.dt))
+        s.shear_lk = self.shear_lk
+        s.contact_patch = self.contact_patch
+        s.shear_iters = self.shear_iters
         return s
 
 
@@ -647,6 +669,176 @@ def body_twist(robot: Robot, om: wp.vec3, alpha: float) -> wp.vec2:
 
 
 @wp.func
+def _shear_residual(
+    robot: Robot,
+    mu: wp.vec3,  # per-wheel friction coefficient at the contact
+    loads: wp.vec3,  # per-wheel normal load N_i
+    om: wp.vec3,  # per-wheel driven speed (wL, wR, w_rear)
+    twist: wp.vec3,  # candidate body twist (vx, vy, yaw_rate)
+    shear_lk: float,  # contact length / shear deformation modulus, L/K
+    patch: float,  # contact patch radius [m], for the torsional term
+    gravity_tangential: wp.vec2,  # body-frame in-plane weight component
+) -> wp.vec3:
+    """Net (Fx, Fy, Mz) on the body for a candidate twist. Zero at equilibrium.
+
+    Each contact slips at s = (body velocity there) - (driven rim speed); the ground opposes it
+    with a force whose MAGNITUDE follows the Janosi-Hanamoto shear curve rather than jumping to
+    mu*N at infinitesimal slip:
+
+        lambda = (|s| / |R w|) (L/K)          mobilised = 1 - (1 - exp(-lambda)) / lambda
+
+    lambda is a slip RATIO -- slip velocity over rolling speed. That is what makes this model
+    sensitive to forward speed at fixed differential (rigid Coulomb is not: adding a common
+    speed leaves every slip velocity unchanged, so it cannot produce any speed dependence).
+    It also removes the need for a slip regulariser: the force goes to zero smoothly with |s|.
+
+    The spin channel (patch * yaw_rate) carries the torsional resistance of a finite contact
+    patch, which a point contact has none of.
+    """
+    forward = twist[0]
+    lateral = twist[1]
+    yaw_rate = twist[2]
+    total_x = gravity_tangential[0]
+    total_y = gravity_tangential[1]
+    total_mz = float(0.0)
+    for i in range(wp.static(3)):
+        st_i = wp.static(i)
+        wheel = robot.wheel_pos[st_i]
+        x = wheel[0]
+        y = wheel[1]
+        slip_x = forward - yaw_rate * y - robot.wheel_radius * om[st_i]
+        slip_y = lateral + yaw_rate * x
+        slip_spin = patch * yaw_rate
+        norm = wp.sqrt(slip_x * slip_x + slip_y * slip_y + slip_spin * slip_spin)
+
+        rolling = wp.abs(robot.wheel_radius * om[st_i])
+        lam = float(1.0e6)  # a wheel that is not rolling simply slides: fully mobilised
+        if rolling > 1.0e-6:
+            lam = wp.max(norm / rolling * shear_lk, 1.0e-9)
+        mobilised = 1.0 - (1.0 - wp.exp(-lam)) / lam
+
+        scale = float(0.0)
+        if norm > 1.0e-9:
+            scale = mu[st_i] * loads[st_i] * mobilised / norm
+        force_x = -scale * slip_x
+        force_y = -scale * slip_y
+        total_x += force_x
+        total_y += force_y
+        total_mz += x * force_y - y * force_x - scale * patch * slip_spin
+    # a steady turn is not equilibrium: the body accelerates centripetally (a = omega x v)
+    total_x -= robot.mass * (-lateral * yaw_rate)
+    total_y -= robot.mass * (forward * yaw_rate)
+    return wp.vec3(total_x, total_y, total_mz)
+
+
+@wp.func
+def shear_twist(
+    robot: Robot,
+    solver: Solver,
+    mu: wp.vec3,
+    loads: wp.vec3,
+    om: wp.vec3,
+    gravity_tangential: wp.vec2,
+    guess: wp.vec3,
+) -> wp.vec3:
+    """Solve the 3x3 force/moment balance for the body twist (vx, vy, yaw_rate).
+
+    Same shape as the settle: fixed iteration count, no data-dependent branching, runs in
+    registers. The Jacobian is finite-differenced -- the analytic form of d(mobilised * slip
+    direction)/d(twist) is available but was not worth the risk while this is opt-in. Warm-started
+    from the kinematic twist, and each step is clamped so a bad Jacobian cannot throw the solve.
+    """
+    twist = guess
+    for _ in range(solver.shear_iters):
+        residual = _shear_residual(
+            robot, mu, loads, om, twist, solver.shear_lk, solver.contact_patch, gravity_tangential
+        )
+        jac = wp.mat33()
+        for k in range(wp.static(3)):
+            st_k = wp.static(k)
+            probe = twist
+            probe[st_k] = probe[st_k] + _SHEAR_FD_STEP
+            shifted = _shear_residual(
+                robot,
+                mu,
+                loads,
+                om,
+                probe,
+                solver.shear_lk,
+                solver.contact_patch,
+                gravity_tangential,
+            )
+            jac[0, st_k] = (shifted[0] - residual[0]) / _SHEAR_FD_STEP
+            jac[1, st_k] = (shifted[1] - residual[1]) / _SHEAR_FD_STEP
+            jac[2, st_k] = (shifted[2] - residual[2]) / _SHEAR_FD_STEP
+        delta = solve3(jac, residual)
+        step = wp.vec3(
+            wp.clamp(delta[0], -1.0, 1.0),
+            wp.clamp(delta[1], -1.0, 1.0),
+            wp.clamp(delta[2], -1.0, 1.0),
+        )
+        # Backtracking with a FIXED trial count: evaluate the full step and three halvings, keep
+        # whichever lowers the residual most. Uniform work per thread (no data-dependent loop, so
+        # graph capture and warp coherence are unaffected), and necessary rather than decorative:
+        # a raw Newton step diverges once the shear curve saturates, because the force magnitude
+        # then stops depending on the twist and only its DIRECTION does, leaving the Jacobian
+        # nearly singular. That stiffness is the rigid-Coulomb limit reasserting itself.
+        best = twist
+        best_norm = wp.length(residual)
+        scale = float(1.0)
+        for _trial in range(wp.static(4)):
+            candidate = twist - scale * step
+            trial_norm = wp.length(
+                _shear_residual(
+                    robot,
+                    mu,
+                    loads,
+                    om,
+                    candidate,
+                    solver.shear_lk,
+                    solver.contact_patch,
+                    gravity_tangential,
+                )
+            )
+            if trial_norm < best_norm:
+                best_norm = trial_norm
+                best = candidate
+            scale = scale * 0.5
+        twist = best
+    return twist
+
+
+@wp.func
+def traction_twist(
+    robot: Robot,
+    solver: Solver,
+    mu: wp.vec3,
+    loads: wp.vec3,
+    om: wp.vec3,
+    tilt: wp.vec2,  # (pitch, roll) of the current pose
+    alpha: float,  # legacy turn resistance, computed by the caller
+    x_icr: float,  # legacy grip-weighted ICR offset, computed by the caller
+) -> wp.vec3:
+    """Body twist (vx, vy, yaw_rate) from the wheel speeds, by whichever traction model is on.
+
+    solver.shear_lk <= 0 (the default) keeps the LEGACY kinematic model: the commanded forward
+    speed is always achieved and friction only bends the turn through alpha = 1 + k_turn * grip
+    and the grip-weighted ICR. Above 0 it solves the shear force balance instead, in which the
+    twist -- forward speed included -- is an OUTPUT, gravity enters directly (so a slope produces
+    drift), and alpha/x_icr become emergent rather than parameters.
+    """
+    if solver.shear_lk <= 0.0:
+        legacy = body_twist(robot, om, alpha)
+        return wp.vec3(legacy[0], -x_icr * legacy[1], legacy[1])
+    kinematic = body_twist(robot, om, 1.0)  # warm start: the ideal differential-drive twist
+    weight = robot.mass * robot.gravity
+    cos_pitch = wp.cos(tilt[0])
+    gravity_tangential = wp.vec2(weight * wp.sin(tilt[0]), -weight * cos_pitch * wp.sin(tilt[1]))
+    guess = wp.vec3(kinematic[0], 0.0, kinematic[1] * 0.5)
+    return shear_twist(robot, solver, mu, loads, om, gravity_tangential, guess)
+
+
+@wp.func
 def step_predict(
     env_i: wp.array2d(dtype=wp.float32),
     fric_i: wp.array2d(dtype=wp.float32),
@@ -671,6 +863,7 @@ def step_predict(
     p = wp.vec3(x, y, tc[0])
 
     loads = normal_loads(env_i, grid, robot, R, p)  # per-wheel normal load N_i
+    mu = wp.vec3()  # per-wheel friction at the contact (the shear model needs them separately)
     total_grip = float(0.0)  # Sum_i grip_i
     grip_x = float(0.0)  # Sum_i grip_i * wheel_x  (x_icr = grip_x / total_grip)
     for i in range(wp.static(3)):
@@ -679,17 +872,24 @@ def step_predict(
         wheel_center = p + R * wheel_pos
         n = sample_normal(env_i, grid, wheel_center[0], wheel_center[1])
         ct = wheel_center - robot.wheel_radius * n  # contact point
-        grip = sample_field(fric_i, grid, ct[0], ct[1]) * loads[st_i]  # grip_i = mu_i * N_i
+        mu[st_i] = sample_field(fric_i, grid, ct[0], ct[1])
+        grip = mu[st_i] * loads[st_i]  # grip_i = mu_i * N_i
         total_grip += grip
         grip_x += grip * wheel_pos[0]
+
     x_icr = grip_x / total_grip  # grip-weighted ICR offset
     alpha = 1.0 + solver.k_turn * total_grip / (robot.gravity * robot.mass)  # turn resistance
 
-    twist = body_twist(robot, om, alpha)
+    twist = traction_twist(robot, solver, mu, loads, om, wp.vec2(tc[1], tc[2]), alpha, x_icr)
     vx = twist[0]
-    wz = twist[1]
-    vy = -x_icr * wz
+    vy = twist[1]
+    wz = twist[2]
     vw = R * wp.vec3(vx, vy, 0.0)
+    # `turning` stays (alpha, x_icr) under BOTH models. Under the shear model they are emergent --
+    # what the solved twist implies -- rather than inputs to it.
+    if solver.shear_lk > 0.0 and wp.abs(wz) > 1.0e-9:
+        alpha = body_twist(robot, om, 1.0)[1] / wz
+        x_icr = -vy / wz
     turn_out[tid] = wp.vec2(alpha, x_icr)
     next_pose = integrate_pose(pc, vw, wz, solver.dt)
     return wp.vec4(next_pose[0], next_pose[1], next_pose[2], alpha)
@@ -975,6 +1175,7 @@ def rollout_kernel(
         env_c = envelope[yaw_bin(yaw, n_yaw)]  # envelope slice of the CURRENT heading
 
         loads = normal_loads(env_c, grid, robot, R, p)  # per-wheel normal load N_i
+        mu = wp.vec3()  # per-wheel friction at the contact
         total_grip = float(0.0)  # Sum_i grip_i
         grip_x = float(0.0)  # Sum_i grip_i * wheel_x  (x_icr = grip_x / total_grip)
         for i in range(wp.static(3)):
@@ -983,11 +1184,10 @@ def rollout_kernel(
             wheel_center = p + R * wheel_pos
             n = sample_normal(env_c, grid, wheel_center[0], wheel_center[1])
             ct = wheel_center - robot.wheel_radius * n  # contact point
-            grip = sample_field(friction, grid, ct[0], ct[1]) * loads[st_i]  # grip_i = mu_i * N_i
+            mu[st_i] = sample_field(friction, grid, ct[0], ct[1])
+            grip = mu[st_i] * loads[st_i]  # grip_i = mu_i * N_i
             total_grip += grip
             grip_x += grip * wheel_pos[0]
-        x_icr = grip_x / total_grip  # grip-weighted ICR offset
-        alpha = 1.0 + solver.k_turn * total_grip / (robot.gravity * robot.mass)  # turn resistance
 
         # Transport delay: the wheels act on a command issued solver.command_delay_steps ago.
         commanded = target_wheel_omega[t, b]
@@ -998,10 +1198,20 @@ def rollout_kernel(
         # Apply lag first (update-then-use): tau_motor=0 gives current = commanded exactly.
         current = motor_lag_step(current, commanded, solver.dt, solver.tau_motor)
         current_wheel_omega_out[t + 1, b] = current
-        twist = body_twist(robot, current, alpha)
+        x_icr = grip_x / total_grip  # grip-weighted ICR offset
+        alpha = 1.0 + solver.k_turn * total_grip / (robot.gravity * robot.mass)  # turn resistance
+
+        twist = traction_twist(
+            robot, solver, mu, loads, current, wp.vec2(tc[1], tc[2]), alpha, x_icr
+        )
         vx = twist[0]
-        wz = twist[1]
-        vy = -x_icr * wz
+        vy = twist[1]
+        wz = twist[2]
+        # `turning` stays (alpha, x_icr) under BOTH models; under the shear model they are
+        # emergent -- what the solved twist implies -- rather than inputs to it.
+        if solver.shear_lk > 0.0 and wp.abs(wz) > 1.0e-9:
+            alpha = body_twist(robot, current, 1.0)[1] / wz
+            x_icr = -vy / wz
         vw = R * wp.vec3(vx, vy, 0.0)
         pose_next = integrate_pose(pc, vw, wz, solver.dt)
         xn = pose_next[0]
