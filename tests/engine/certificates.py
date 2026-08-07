@@ -286,11 +286,31 @@ def selftest_torque_stall() -> None:
     print(f"stall = m g sin(theta) R / (3 tau_lim): worst relative error {worst:.2e}")
     assert worst < 5e-3, "stall no longer matches the analytic grade value"
 
-    # default: no limit recorded -> the certificate is inert, which is what preserves bit-identity
-    default = _Static()
+    # inf disables the certificate entirely (the pre-measurement behaviour)
+    disabled = _Static(RobotParams(motor_torque_limit=float("inf")))
     for tilt in (0.0, 15.0, 30.0):
-        assert default.run(_plane(pitch_deg=-tilt))["stall"] == 0.0
-    print("stall is identically 0 at the default motor_torque_limit = inf")
+        assert disabled.run(_plane(pitch_deg=-tilt))["stall"] == 0.0
+    print("stall is identically 0 at motor_torque_limit = inf")
+
+    # at the DEFAULT (the measured lower bound) friction must saturate first on any realistic
+    # terrain: torque only binds where 3 tau / R exceeds the friction budget, i.e. mu > 0.86
+    rp_default = RobotParams()
+    traction = 3.0 * rp_default.motor_torque_limit / rp_default.wheel_radius
+    mu_crossover = traction / (rp_default.mass * rp_default.gravity)
+    print(
+        f"default limit {rp_default.motor_torque_limit:.0f} Nm -> {traction:.0f} N of traction = "
+        f"{mu_crossover:.2f} x weight, so friction binds first for mu < {mu_crossover:.2f}"
+    )
+    for mu in (0.4, 0.6, 0.8):
+        static = _Static(rp_default, mu=mu)
+        grade = np.degrees(np.arctan(mu))  # the grade where the friction certificate reads 1.0
+        r = static.run(_plane(pitch_deg=-grade))
+        print(
+            f"  mu={mu:.1f}: at the {grade:.1f} deg slip grade  saturation={r['saturation']:.3f}  "
+            f"stall={r['stall']:.3f}"
+        )
+        assert r["stall"] < r["saturation"], "torque should not bind before friction below mu=0.86"
+    assert mu_crossover > 0.8, "the measured torque bound no longer clears realistic friction"
     print("torque stall  OK")
 
 

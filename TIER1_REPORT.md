@@ -131,10 +131,42 @@ peaks at 0.5 — the certificate would be structurally unable to fire on any ter
 The implementation takes only the load RATIOS from the solve (where the bias cancels) and rebuilds
 the budget from `m g cos(pitch) cos(roll)`. That is what makes the tan(theta) = mu crossing exact.
 
-**3. Which limit binds first is a real question and now measurable.** With mu = 0.6 the friction
-certificate fires at 31.0 deg of grade; with a 40 Nm placeholder the stall certificate fires at
-19.2 deg. On high-mu ground you stall before you slip, as IMPROVEMENTS.md §2 expected — but the
-crossover sits exactly on the unmeasured torque number.
+**3. The torque envelope is recoverable from the bags, and it says friction always binds first.**
+`/joint_states.effort` is populated (three wheels, raw units). Newton along the body x axis pins
+the scale: the accelerometer's specific force already contains gravity, so
+`sum_i tau_i / R = m a_x` holds on grades as well as the flat, and a second estimator using
+wheel-odometry acceleration touches no accelerometer at all. On the two post-fix bags
+(`out_experiment_goal_unreachable0/1`) the two agree:
+
+| bag | IMU fit | ODOM fit | corr |
+|---|---|---|---|
+| goal_unreachable0 | 9.73 raw/Nm | 10.60 raw/Nm | +0.93 / +0.90 |
+| goal_unreachable1 | 9.67 raw/Nm | 10.38 raw/Nm | +0.93 / +0.89 |
+
+So **effort is deci-newton-metres: 1 raw = 0.1 Nm at the wheel**, within ~10%. Two independent
+consistency checks pass: the fit offset is 36-38 Nm of constant resistance, i.e. a rolling
+coefficient of 0.09 on this robot's weight, and the implied accelerations match the odometry.
+
+At that scale the front wheels hold **111-118 Nm for a full second** and peak at 130-136 Nm, with
+no plateau (0.2-0.5% of samples within 5% of the peak), so this is a **lower bound**, not the
+envelope. It is nevertheless enough to decide the question §2 was asked to settle:
+
+| tau/wheel | traction | binds before friction for |
+|---|---|---|
+| 40 Nm (the old placeholder) | 343 N | mu < 0.33 |
+| 105 Nm (measured bound) | 900 N | mu < 0.86 |
+
+**Friction saturates before torque for any mu below 0.86** — so on this robot §1 does the work and
+§2 is inert on realistic terrain. IMPROVEMENTS.md §2's "you stall before you slip on high-mu rough
+terrain" is not true here; it was reasoning from a placeholder an order of magnitude too small.
+Two approximations in `torque_saturation` are optimistic and were checked against this margin:
+rolling resistance is excluded (~37 Nm total, measured) and the demand is split equally three ways
+while the bags put ~2.5x more through each front wheel than the rear. Neither closes a 0.86-vs-0.6
+gap.
+
+Caveats worth keeping: bags before 2026-07-14 give a NEGATIVE correlation (the IMU was remounted)
+and bags before 2026-07-27 have the `/cmd_joints` units bug, which corrupts the odometry
+estimator specifically. The script prints both correlations so a bad era is obvious.
 
 ## Open hardware numbers
 
@@ -147,11 +179,11 @@ table separates ruler-measured numbers from tuned ones. One of the three is answ
    `tests/engine/cylinder.py` now uses the measured value. `RobotParams.wheel_width` is still
    `None` by default — switching it changes planning behaviour, which is your call, not a
    side effect of this branch.
-2. **Per-wheel motor torque envelope [Nm] — still open.** The Ostrich model has no torque or
-   effort limit at all: `TARGET_KE = 150 / TARGET_KD = 0` are marked fine-tuned velocity-servo
-   gains, explicitly "not a datasheet motor constant". Holding a 15 deg grade needs ~31.5 Nm per
-   wheel here, so the useful range is roughly 20-60 Nm. Until it lands, `motor_torque_limit`
-   stays `inf` and the stall certificate reads 0.
+2. **Per-wheel torque — ANSWERED FROM THE BAGS as a lower bound: >= 105 Nm.** The Ostrich model
+   has no torque limit (`TARGET_KE = 150 / TARGET_KD = 0` are fine-tuned servo gains, "not a
+   datasheet motor constant"), but `/joint_states.effort` is populated on the real robot. See the
+   finding below and `scripts/wheel_torque_from_bags.py`. `RobotParams.motor_torque_limit` now
+   defaults to 105.0 instead of `inf`.
 3. **`omega_max` — no hardware figure, but this repo's own bag calibration implies ~5.3 rad/s**
    (the drivetrain ceiling behind the turn-differential work; `plan_wmax` is set to 4 to stay
    under it). The Ostrich side only has a keyboard ramp (10 rad/s^2 accel toward ~5 rad/s), which

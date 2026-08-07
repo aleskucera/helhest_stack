@@ -517,9 +517,14 @@ def torque_saturation(robot: Robot, pitch: float) -> float:
     pick another route, stall means pick another speed.
 
     Gravity only -- turn resistance and rolling resistance are NOT included, which is what makes
-    the boundary independent of mu (and hence separable from the friction certificate). With the
-    default `motor_torque_limit = inf` this is identically 0; see RobotParams for the measurement
-    that is still missing.
+    the boundary independent of mu (and hence separable from the friction certificate). Measured
+    rolling resistance is not negligible on this robot (~37 Nm total, i.e. ~0.09 of its weight,
+    from the fit offset in scripts/wheel_torque_from_bags.py), so the demand here is a floor.
+
+    The equal three-way split is also a simplification: the bags put ~2.5x more torque through
+    each front wheel than the rear, so a front wheel really sees ~1.35x what this reports. Both
+    approximations are optimistic, and both are far smaller than the margin by which friction
+    saturates first at the measured torque limit (see RobotParams.motor_torque_limit).
     """
     torque = robot.mass * robot.gravity * wp.abs(wp.sin(pitch)) * robot.wheel_radius / 3.0
     return torque / robot.motor_torque_limit

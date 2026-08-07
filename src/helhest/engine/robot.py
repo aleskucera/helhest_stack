@@ -71,11 +71,15 @@ class RobotParams:  # host-side robot knobs — what you nudge
     com: tuple = (float(DEFAULT_COM[0]), 0.0, 0.0)  # full vec3, independent of mass
     chassis_nx: int = 3
     chassis_ny: int = 3
-    # TODO(hardware): MEASURE THIS. Per-wheel continuous torque envelope at the wheel [Nm]
-    # (IMPROVEMENTS.md open question 2). inf = the certificate never fires, which is the
-    # pre-certificate behaviour; the engine cannot stall until a real number lands here. For scale,
-    # holding a 15 deg grade needs ~31.5 Nm per wheel on this robot.
-    motor_torque_limit: float = float("inf")
+    # Per-wheel drive torque limit at the wheel [Nm]. A measured LOWER BOUND, not a datasheet
+    # envelope: /joint_states.effort calibrates to 0.1 Nm per raw unit (two independent fits,
+    # corr ~0.93; scripts/wheel_torque_from_bags.py), and the front wheels were observed holding
+    # 111-118 Nm for a full second on out_experiment_goal_unreachable0/1 without the signal ever
+    # plateauing. So the true envelope is AT LEAST this; using the bound makes the certificate
+    # fire early rather than late. Consequence worth knowing: at 105 Nm the drivetrain can put
+    # 0.86 x the robot's weight on the ground, so friction saturates before torque does for any
+    # mu < 0.86 -- on this robot the stall certificate is inert on realistic terrain.
+    motor_torque_limit: float = 105.0
     # --- planning capabilities: the robot's own limits. build() copies these into the device Robot
     # struct, so the cost-to-go feasibility AND the MPPI cost kernels read one shared source. ---
     # tightest forward arc the planner assumes (skid-steer maneuverability)
