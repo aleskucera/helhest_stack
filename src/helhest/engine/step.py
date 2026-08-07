@@ -406,6 +406,32 @@ def normal_loads(
 
 
 @wp.func
+def stability_margin(robot: Robot, loads: wp.vec3) -> float:
+    """Static tip-over margin: min_i(N_i) / (m g) -- the least-loaded contact as a weight fraction.
+
+    Zero means one wheel carries nothing, i.e. the CoM has reached an edge of the support
+    triangle; negative means `normal_loads` is pressing down a wheel that should have lifted, and
+    from that step on z, pitch AND roll are all untrustworthy, not just the flagged wheel.
+
+    MEASURED CAVEAT (tests/engine/certificates.py, `selftest_ramp_margin`): on this robot the
+    margin barely moves. `normal_loads` balances vertical force and horizontal torque with the
+    contact NORMALS only -- the tangential (friction) reaction that actually holds the body on a
+    slope, and its moment about the CoM, are absent -- so on any uniform plane the solve reduces
+    to the body-frame barycentric weights of the CoM, giving
+
+        min_i(N_i) / (m g) = |com_x| / rear_offset / (cos(pitch) cos(roll)),
+
+    which RISES with tilt instead of falling. Terrain SHAPE does move it -- load transfer enters
+    only through the wheel-radius contact offsets, since the wheel positions are body-fixed -- but
+    only weakly: over the 12 shape worlds in `selftest_shape_margin` (rocks and 0.6 m spikes under
+    each wheel, crests, valleys, saddles, roofs, tilts to 57 deg) it stays inside [0.23, 0.33].
+    Read it as a load-transfer diagnostic, not as the slope tip-over test; the geometric tip
+    angles (29.5 deg over the front axle, 34.6 deg about a rear edge) are NOT what it reports.
+    """
+    return wp.min(wp.min(loads[0], loads[1]), loads[2]) / (robot.mass * robot.gravity)
+
+
+@wp.func
 def chassis_clearance(
     elevation: wp.array2d(dtype=wp.float32), grid: Grid, robot: Robot, R: wp.mat33, p: wp.vec3
 ):
@@ -492,6 +518,7 @@ def step_finalize(
     loads_out: wp.array(dtype=wp.vec3),
     clear_out: wp.array(dtype=float),
     resid_out: wp.array(dtype=float),
+    stability_out: wp.array(dtype=float),
 ):
     """Write the NEW state + diagnostics at tid from the predicted pose and its settled tilt."""
     controlled_next[tid] = pose_next
@@ -501,7 +528,9 @@ def step_finalize(
     yawn = pose_next[2]
     Rn = euler_zyx(yawn, settled[1], settled[2])
     pn = wp.vec3(xn, yn, settled[0])
-    loads_out[tid] = normal_loads(env_i, grid, robot, Rn, pn)
+    loads = normal_loads(env_i, grid, robot, Rn, pn)
+    loads_out[tid] = loads
+    stability_out[tid] = stability_margin(robot, loads)
     clear_out[tid] = chassis_clearance(elev_i, grid, robot, Rn, pn)
     cres = clearances(env_i, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
     resid_out[tid] = wp.max(wp.max(wp.abs(cres[0]), wp.abs(cres[1])), wp.abs(cres[2]))
@@ -565,6 +594,7 @@ def step_kernel(
     turn_out: wp.array(dtype=wp.vec2),  # [B] (alpha, x_icr) used this step
     clear_out: wp.array(dtype=float),  # [B] belly clearance of the NEW state
     resid_out: wp.array(dtype=float),  # [B] settle residual (max|c|) of the NEW state
+    stability_out: wp.array(dtype=float),  # [B] min N_i / (m g) of the NEW state
 ):
     tid = wp.tid()
     tc = derived[tid]
@@ -598,6 +628,7 @@ def step_kernel(
         loads_out,
         clear_out,
         resid_out,
+        stability_out,
     )
 
 
@@ -620,6 +651,7 @@ def step_kernel_bt(
     turn_out: wp.array(dtype=wp.vec2),
     clear_out: wp.array(dtype=float),
     resid_out: wp.array(dtype=float),
+    stability_out: wp.array(dtype=float),
 ):
     """Batched-terrain step: rollout tid steps on its own slices; settle uses the full 3D array."""
     tid = wp.tid()
@@ -654,6 +686,7 @@ def step_kernel_bt(
         loads_out,
         clear_out,
         resid_out,
+        stability_out,
     )
 
 
@@ -678,6 +711,7 @@ def rollout_kernel(
     turn_out: wp.array2d(dtype=wp.vec2),  # [T, B]
     clear_out: wp.array2d(dtype=float),  # [T, B]
     resid_out: wp.array2d(dtype=float),  # [T, B]
+    stability_out: wp.array2d(dtype=float),  # [T, B] min N_i / (m g)
 ):
     """FORWARD-ONLY whole-rollout fusion: one thread per rollout walks all n_steps steps,
     carrying the state (pc, tc, current) in registers instead of round-tripping it through
@@ -739,7 +773,9 @@ def rollout_kernel(
 
         Rn = euler_zyx(yawn, settled[1], settled[2])
         pn = wp.vec3(xn, yn, settled[0])
-        loads_out[t, b] = normal_loads(envelope, grid, robot, Rn, pn)
+        loads = normal_loads(envelope, grid, robot, Rn, pn)
+        loads_out[t, b] = loads
+        stability_out[t, b] = stability_margin(robot, loads)
         turn_out[t, b] = wp.vec2(alpha, x_icr)
         clear_out[t, b] = chassis_clearance(elevation, grid, robot, Rn, pn)
         cres = clearances(envelope, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])

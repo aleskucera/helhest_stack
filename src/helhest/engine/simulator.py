@@ -105,6 +105,9 @@ class BaseSimulator:
             self.turning = wp.zeros((T, B), dtype=wp.vec2f, requires_grad=rg)
             self.clearance = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             self.residual = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
+            # Static tip-over margin min_i(N_i) / (m g) -- see step.stability_margin for what it
+            # does and does not detect on this robot.
+            self.stability = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             self.current_wheel_omega = wp.zeros((T + 1, B), dtype=wp.vec3f)
             self.target_wheel_omega = wp.zeros((T, B), dtype=wp.vec3f, requires_grad=control_grad)
             self.start_pose = wp.zeros(B, dtype=wp.vec3f, requires_grad=control_grad)
@@ -204,6 +207,7 @@ class ForwardSimulator(BaseSimulator):
                 self.turning,
                 self.clearance,
                 self.residual,
+                self.stability,
             ],
             device=self.device,
         )
@@ -421,6 +425,7 @@ class DifferentiableSimulator(BaseSimulator):
                         self.turning[t],
                         self.clearance[t],
                         self.residual[t],
+                        self.stability[t],
                     ],
                     device=self.device,
                 )
