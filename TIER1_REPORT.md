@@ -1,239 +1,209 @@
-# Tier-1 engine certificates — session report
+# Engine work — session report
 
-Branch `engine/tier1-certificates`, seven commits off `main` (`de96100`). Implements
-IMPROVEMENTS.md §3, §1, §2, §4 in that order. Not merged; left for review.
+Two stacked branches off `main` (`de96100`). Neither is merged.
 
-Everything here is additive: new output arrays and two new opt-in `RobotParams` fields. With
-default parameters every pre-existing simulator output is bit-identical to the pre-change
-engine, proven at every commit by `tests/engine/golden.py`.
+```
+main
+ └── engine/tier1-certificates          IMPROVEMENTS.md Tier 1, complete and verified
+      └── engine/exact-arc-integration  engine fidelity work + the measurement scripts
+```
 
-## Commits
+Everything is additive or opt-in, with one stated exception (§2).
 
-| commit | item |
+---
+
+## 1. Tier 1 — complete
+
+The four commissioned items, in the order IMPROVEMENTS.md recommends. Each verified against a
+closed-form answer rather than eyeballed. `tests/engine/golden.py` pins every simulator output for
+a seeded batch and passed at every commit on this branch.
+
+| item | state |
 |---|---|
-| `1256126` | golden bit-identity fixture (written FIRST, before any engine change) |
-| `b195e61` | §3 tip-over margin |
-| `a1ef147` | §1 friction saturation certificate |
-| `8b73a5a` | §2 motor torque / stall certificate |
-| `6070747` | §4 yaw-binned cylinder wheel envelope, behind `wheel_width` |
-| `1297d27` | this report |
-| `1b8b0b4` | `wheel_width` = 0.10 m from the Ostrich model's measured column; tests use it |
+| §3 tip-over margin | exposed as `sim.stability` |
+| §1 friction saturation | exposed as `sim.saturation`; crosses 1.0 at `tan θ = μ` to 1.2e-6 |
+| §2 torque / stall | exposed as `sim.stall`; boundary independent of μ to 7e-7 |
+| §4 cylinder envelope | `wheel_width`, 32 yaw bins, +1.7% rollout cost |
 
-## File by file
-
-**`src/helhest/engine/step.py`** — the physics.
-- `stability_margin(robot, loads)` — `min_i(N_i) / (m g)`.
-- `contact_grip(...)` — `Sum_i mu_i N_i` at a pose, mirroring the turning solve's sampling.
-- `friction_saturation(...)` — friction-ellipse demand over the Coulomb budget.
-- `torque_saturation(robot, pitch)` — required drive torque over `motor_torque_limit`.
-- `body_twist(robot, om, alpha)` — extracted so the wheel-speed → `(v, psi_dot)` mapping has one
-  home; `step_predict` and the certificates now share it. Bit-identical (golden).
-- `yaw_bin(yaw, n_yaw)` — envelope-stack slice index; constant 0 for the spherical default.
-- `step_predict` now returns `vec4 (x, y, yaw, alpha)`: `step_finalize` needs alpha to rebuild the
-  twist, and re-reading the grad-tracked `turn_out` inside the kernel would have put a
-  read-after-write on a taped buffer.
-- `step_finalize` takes `fric_i`, `om`, `alpha`; writes the three certificates.
-- `step_kernel`, `step_kernel_bt`, `rollout_kernel` each gained three output arrays, **appended at
-  the end** so an out-of-tree hand-launch fails loudly on arg count rather than silently
-  rebinding. `rollout_kernel`'s `envelope` is now `array3d` (the yaw stack).
-
-**`src/helhest/engine/robot.py`** — two new `RobotParams` fields, both defaulting to the current
-behaviour: `wheel_width: float | None = None` and `motor_torque_limit: float = inf`
-(`Robot` carries the latter to the device). `motor_torque_limit` carries a `TODO(hardware)`;
-`wheel_width` carries the measured 0.10 m and its source.
-
-**`src/helhest/engine/envelope.py`** — `cylinder_offset_table(cell_size, wheel_radius, half_width,
-yaw)` (rotated rectangle, cap from the along-travel offset only, own search radius so the corners
-are not clipped) and `_contact_table_kernel` (the disk contact, for an arbitrary host-built
-element). The spherical path still runs the original `_contact_kernel` untouched — the table
-version computes its cap on the host in float64, which differs from the device's float32 by an
-ULP, and that would have broken bit-identity.
-
-**`src/helhest/engine/simulator.py`** — `stability`, `saturation`, `stall` buffers on both
-simulators; `ForwardSimulator.envelope_stack` `[n_yaw, ny, nx]` with `envelope` kept as its 2D
-slice-0 view (so existing readers, including `studies/adjoint/harness.py`, see the same object);
-`set_terrain` dilates once per yaw bin when `wheel_width` is set; `YAW_BINS = 32`;
-`DifferentiableSimulator` raises `NotImplementedError` for `wheel_width`.
-
-**`tests/engine/golden.py` + `golden_fixture.npz`** — the non-interference proof. One
-`ForwardSimulator` rollout on CPU and CUDA plus one `DifferentiableSimulator` forward+backward,
-B=8, T=16, seeded terrain/friction/controls; 26 arrays compared exactly, except the two gradient
-arrays which get a tolerance (the envelope adjoint scatters with atomics; measured run-to-run
-spread 1.9e-9). `--write` regenerates.
-
-**`tests/engine/certificates.py`** (new) — `selftest_ramp_margin`, `selftest_shape_margin`,
-`selftest_friction_saturation`, `selftest_torque_stall`.
-
-**`tests/engine/cylinder.py`** (new) — `selftest_transverse_ridge`, `selftest_lateral_ridge`,
-`selftest_yaw_binning`.
-
-**`demos/wheel_envelope_drive.py`** (new) — drive both envelopes at once, same keyboard into two
-simulators (blue = sphere, red = cylinder), with the certificates in the title bar. `--headless`
-runs a scripted pass and prints the table instead, so it works without a display.
-
-**`scripts/wheel_torque_from_bags.py`** (new) — the effort->Nm calibration and the torque survey.
-
-**`tests/engine/step.py`** — updated for the new kernel signatures (buffers + the one-slice
-envelope stack). `selftest_rollout_kernel` still reports fused == per-step at exactly 0.
-
-## Verification, as measured
-
-Analytic crossings (`python -m tests.engine.certificates`):
-
-| check | result |
-|---|---|
-| `sum_i N_i / (m g) = 1 / (cos p cos r)` on tilted planes | worst dev 1.2e-6 |
-| `saturation = tan(theta) / mu`, 10/20/30 deg, along and across slope | worst rel err 1.2e-6 |
-| saturation at `mu = tan(theta)` | 1.0000 |
-| centripetal `saturation = v psi_dot / (mu g)` on flat ground | worst rel err 2.9e-7 |
-| stall crossing at 40 Nm | 19.21 deg, rel err 7e-7, identical at mu = 0.2 / 0.6 / 0.9 |
-| stall at the default `motor_torque_limit = inf` | exactly 0 at every grade |
-
-Cylinder (`python -m tests.engine.cylinder`):
-
-| world | result |
-|---|---|
-| ridge across the path | envelopes agree to 3.0e-8 (one ULP), settled pose identical |
-| ridge 0.30 m beside the left wheel | sphere rolls **7.57 deg**, cylinder **0.00e+00** |
-| — sphere pose vs one-wheel-lifted hand geometry | roll/pitch/z match to <1% |
-| — sphere lift vs continuous spherical cap | 0.0959 m vs 0.1215 m (21% low; the dilation can only reach the ridge at whole-cell offsets and dcap/dgap = -1.7 m/m here) |
-| same ridge head-on (yaw 90 deg, bin 8/32) | sphere and cylinder identical, both -16.745 deg |
-
-Cost, B=4096, T=25, 241x441 grid, RTX A500: rollout 1.144 → 1.164 ms (+1.7%) with the cylinder;
-the per-frame dilation goes 0.228 → 2.250 ms for 32 slices. Memory 32 x the envelope grid.
-Graph capture verified to record and replay with `wheel_width` both unset and set.
-
-Driving the two models through a rock slalom (`demos/wheel_envelope_drive.py --headless`, rocks
-0.14-0.33 m outside the wheel track) shows what the change is worth: the sphere reports **19.2,
--9.7, 6.3, -8.2, 10.7, -19.9 deg of roll** where the cylinder reports **9.0, -0.4, 0.1, -0.2, 0.4,
--13.8**. Worst disagreement 13.2 deg. Two of those sphere poses are past `max_roll = 15 deg`, i.e.
-the old envelope calls a corridor infeasible that the real robot drives straight through. Position
-barely moves (worst gap 1.9 cm) -- the cost of the sphere is paid in tilt, which is exactly what
-the feasibility gates and tilt costs read.
-
-## Findings
-
-**1. `min N_i` is not a tip-over test on this robot, and it never agrees with `max_roll`.**
-This is the §3 cross-check, and it disagrees far more strongly than IMPROVEMENTS.md anticipated.
-`normal_loads` balances vertical force and horizontal torque using the contact NORMALS only — the
-tangential friction reaction that actually holds the robot on a slope, and the overturning moment
-it exerts about the CoM at wheel-radius height, are absent from the equations. Two identities
-follow on any uniform plane, and both hold to 1e-6:
+**Finding: `min N_i` is not a tip-over test on this robot.** `normal_loads` balances vertical force
+and horizontal torque with contact NORMALS only — the tangential friction reaction that holds the
+robot on a slope, and its moment about the CoM, are absent. Two identities follow on any uniform
+plane and hold to 1e-6:
 
 ```
 sum_i N_i / (m g) = 1 / (cos pitch cos roll)
 min_i N_i / (m g) = (|com_x| / rear_offset) / (cos pitch cos roll) = 0.2637 / (cp cr)
 ```
 
-So the margin is the CoM's body-frame barycentric weight divided by a cosine: it **rises** with
-tilt. It reads 0.264 flat, 0.273 exactly where the `max_roll = 15 deg` gate fires, 0.303 at the
-29.5 deg front-axle tip angle and 0.410 at 50 deg of bank. Terrain shape does move it — that is
-the only thing it responds to — but weakly: over 12 shape worlds (rocks and 0.6 m spikes under
-each wheel, crests, valleys, saddles, roofs, tilts to 57 deg) it stayed inside [0.23, 0.33]. It
-never crossed 0 in anything tried.
+So the margin *rises* with tilt: 0.264 flat, 0.273 exactly where the `max_roll = 15°` gate fires,
+0.410 at 50° of bank. It never crossed 0 across 12 shape worlds either. **Only the gate protects
+against slope tip-over**, and a planner consuming this margin as a stability cost would be reading
+a load-transfer diagnostic. Fixing it means adding the tangential moment to `normal_loads`, which
+changes an existing output and was out of scope.
 
-Consequence: **the margin cannot replace or validate the `max_roll` gate — only the gate protects
-against slope tip-over**, and a planner consuming the margin as a stability cost would be reading
-a load-transfer diagnostic, not a tip-over one. This also sharpens the study-branch note that
-`min N_i` "never fell below 0.24 anywhere in the scene": that was not an accident of the scene, it
-is structural. Fixing it means adding the tangential reaction moment to `normal_loads`, which
-changes an existing output and so was out of scope here.
+**Finding: the friction budget cannot come from `normal_loads` raw.** Same root cause — using
+`Σ μᵢNᵢ` puts the crossing at `sin θ cos θ = μ`, which peaks at 0.5, so the certificate could never
+fire on μ > 0.5 terrain. Only the load *ratios* are taken from the solve, where the bias cancels.
 
-**2. The friction budget cannot be taken from `normal_loads` directly.** Same root cause. Using
-`Sum_i mu_i N_i` as the budget puts the saturation crossing at `sin(theta) cos(theta) = mu`, which
-peaks at 0.5 — the certificate would be structurally unable to fire on any terrain with mu > 0.5.
-The implementation takes only the load RATIOS from the solve (where the bias cancels) and rebuilds
-the budget from `m g cos(pitch) cos(roll)`. That is what makes the tan(theta) = mu crossing exact.
+**Firing rates**, B=512 rollouts on synthetic terrain: `saturation` reaches 0.84 at 25° and μ=0.6,
+and fires only on 15°+ slopes at μ=0.3. `stability` sat in [0.259, 0.291] everywhere. `stall` never
+exceeded 0.49.
 
-**3. The torque envelope is recoverable from the bags, and it says friction always binds first.**
-`/joint_states.effort` is populated (three wheels, raw units). Newton along the body x axis pins
-the scale: the accelerometer's specific force already contains gravity, so
-`sum_i tau_i / R = m a_x` holds on grades as well as the flat, and a second estimator using
-wheel-odometry acceleration touches no accelerometer at all. On the two post-fix bags
-(`out_experiment_goal_unreachable0/1`) the two agree:
+---
 
-| bag | IMU fit | ODOM fit | corr |
-|---|---|---|---|
-| goal_unreachable0 | 9.73 raw/Nm | 10.60 raw/Nm | +0.93 / +0.90 |
-| goal_unreachable1 | 9.67 raw/Nm | 10.38 raw/Nm | +0.93 / +0.89 |
+## 2. Engine fidelity work
 
-So **effort is deci-newton-metres: 1 raw = 0.1 Nm at the wheel**, within ~10%. Two independent
-consistency checks pass: the fit offset is 36-38 Nm of constant resistance, i.e. a rolling
-coefficient of 0.09 on this robot's weight, and the implied accelerations match the odometry.
+### Exact-arc pose integration — the one behaviour change
 
-At that scale the front wheels hold **111-118 Nm for a full second** and peak at 130-136 Nm, with
-no plateau (0.2-0.5% of samples within 5% of the peak), so this is a **lower bound**, not the
-envelope. It is nevertheless enough to decide the question §2 was asked to settle:
+`integrate_pose` replaces forward Euler with the closed-form arc of a constant twist. Euler took
+the chord and was first order in dt; on flat ground with constant wheel speeds, where the model's
+own exact answer exists in closed form, it landed **10.9 / 18.7 / 17.7 cm** off over a 2.5 s horizon
+at 2.1 m/s (gentle / hard / tight turn). Yaw was never wrong — only position lagged.
 
-| tau/wheel | traction | binds before friction for |
+The engine now sits on the analytic arc to **0.000 cm at every dt**, and on bumpy terrain halving
+dt moves the endpoint **0.7 mm** where Euler moved 93 mm. **That removes the case for dt = 0.05**:
+dt = 0.1 is converged for trajectory accuracy even at 2.1 m/s.
+
+The golden fixture was regenerated in that commit. Scale of the change: `controlled` 3.8 mm,
+`derived` 0.3 mm, `loads` 0.02 N. The numpy reference in `reference/state.py` got the same update,
+since it is the finite-difference oracle for this path.
+
+### Command transport delay
+
+`SolverParams.command_delay`, defaulting to the measured `dynamics.COMMAND_DELAY = 0.17 s`, with
+`elevation_node` feeding `command_history` from the commands it actually issued.
+
+Confirmed physical rather than a timing artifact, three ways: every topic's header stamp sits
+within 2 ms of its bag log time; the reported wheel velocity tracks encoder position to 10–20 ms
+(correlation 1.000, scale 0.996); and the IMU — a separate device and driver — sees the same lag on
+yaw. Localised with `/joint_setpoints`: **10 ms** from `/cmd_joints` to LLC intake, **140–189 ms**
+inside the velocity loop. So it is the motor controller, not comms, and may be tunable there.
+
+Quantisation is a visible approximation: 0.17 s at dt = 0.1 rounds to 2 steps = 200 ms.
+
+### Traction: shear compliance, momentum, rolling resistance
+
+All behind `SolverParams.shear_lk` (default 0 = legacy). The model solves the body twist from a
+force balance where each contact follows the Janosi–Hanamoto shear curve, with
+`λ = (|slip| / |Rω|) · (L/K)` — a slip *ratio*, not a velocity.
+
+That distinction is the content. Under rigid Coulomb the front wheels supply any yaw moment at
+essentially zero longitudinal slip, so **α is exactly 1.000**, and no rate-independent model can
+depend on forward speed at all (adding a common speed leaves every slip velocity unchanged).
+Finite compliance is what makes α exceed 1.
+
+- **Momentum** is implicit, inside the same 3×3 Newton. Explicit would need dt ≈ 5 ms and a 20×
+  horizon — the §9(a) wall. Stable and monotone at dt from 0.02 to **0.5 s**. `I_zz = 10.135 kg m²`
+  is derived from the mass table, and a sweep over 0.1×–8× puts the optimum exactly there.
+- **Rolling resistance** `μ_roll = 0.09` is measured, not fitted — the torque calibration's offset
+  is 36–38 Nm ≈ 106 N ≈ 0.09 × weight. It is also what makes the robot coast to a stop.
+
+**Scored on bags** — the engine driven at 100 Hz on *measured* wheel speeds, predicted yaw rate vs
+gyro, 12,254 samples:
+
+| model | RMS all | RMS quasi-static |
 |---|---|---|
-| 40 Nm (the old placeholder) | 343 N | mu < 0.33 |
-| 105 Nm (measured bound) | 900 N | mu < 0.86 |
+| legacy | 0.1512 | 0.0455 |
+| shear | 0.1630 | 0.0384 |
+| shear + momentum | **0.1368** | 0.0399 |
 
-**Friction saturates before torque for any mu below 0.86** — so on this robot §1 does the work and
-§2 is inert on realistic terrain. IMPROVEMENTS.md §2's "you stall before you slip on high-mu rough
-terrain" is not true here; it was reasoning from a placeholder an order of magnitude too small.
-Two approximations in `torque_saturation` are optimistic and were checked against this margin:
-rolling resistance is excluded (~37 Nm total, measured) and the demand is split equally three ways
-while the bags put ~2.5x more through each front wheel than the rear. Neither closes a 0.86-vs-0.6
-gap.
+Better — but the criterion I set was whether all-sample RMS falls toward the 0.04 that quasi-static
+samples reach, and it reached 0.137. **Inertia explains part of the transient residual, not most of
+it.** The residual still correlates −0.136 with the gyro's own acceleration, i.e. the real robot
+responds *faster* than the model.
 
-A scalar limit is empirically adequate over the whole operating range: binning the front-wheel
-torque by wheel speed shows NO droop -- p99 goes 87 Nm below 0.5 rad/s to 119-129 Nm at 3-4.5
-rad/s, and 121 Nm at 5-5.9 rad/s. A drive running out of voltage would fall off at high omega and
-a single `motor_torque_limit` would then be wrong at cruise even if right at standstill; that does
-not happen here (and note the fastest wheel seen, 5.86 rad/s, corroborates omega_max ~ 5.3).
+**Open conflict.** One isotropic `(L/K, μ_roll)` does not fit both channels: α = 2.20 wants
+L/K ≈ 8–12 at low resistance, while the forward gain of 0.915 wants μ_roll ≈ 0.15–0.25, which
+drives α to 2.6–3.1. Either the isotropic `|slip|` treatment is wrong — terramechanics distinguishes
+longitudinal from lateral shear moduli — or the forward target is soft, since it comes from
+*commanded* wheels on Odin where no `/joint_states` exists to confirm 1:1 forward realisation.
 
-Caveats worth keeping: bags before 2026-07-14 give a NEGATIVE correlation (the IMU was remounted)
-and bags before 2026-07-27 have the `/cmd_joints` units bug, which corrupts the odometry
-estimator specifically. The script prints both correlations so a bad era is obvious.
+---
 
-## Open hardware numbers
+## 3. Measurements from the existing bags
 
-Checked against `~/projects/ostrich/examples/helhest_junior/robot_parameters.md`, whose provenance
-table separates ruler-measured numbers from tuned ones. One of the three is answered there.
+Reusable scripts, all in `scripts/`.
 
-1. **Wheel width — ANSWERED: 0.10 m, ruler-measured** (§6 of that document; collision shape
-   `cylinder r = 0.35, half-height 0.05`). So the half-width is **0.05 m**, half of what
-   IMPROVEMENTS.md §4 assumed: the spherical envelope over-reaches sideways by **7x**, not 3.5x.
-   `tests/engine/cylinder.py` now uses the measured value. `RobotParams.wheel_width` is still
-   `None` by default — switching it changes planning behaviour, which is your call, not a
-   side effect of this branch.
-2. **Per-wheel torque — ANSWERED FROM THE BAGS as a lower bound: >= 105 Nm.** The Ostrich model
-   has no torque limit (`TARGET_KE = 150 / TARGET_KD = 0` are fine-tuned servo gains, "not a
-   datasheet motor constant"), but `/joint_states.effort` is populated on the real robot. See the
-   finding below and `scripts/wheel_torque_from_bags.py`. `RobotParams.motor_torque_limit` now
-   defaults to 105.0 instead of `inf`.
-3. **`omega_max` — no hardware figure, but this repo's own bag calibration implies ~5.3 rad/s**
-   (the drivetrain ceiling behind the turn-differential work; `plan_wmax` is set to 4 to stay
-   under it). The Ostrich side only has a keyboard ramp (10 rad/s^2 accel toward ~5 rad/s), which
-   is a UI limit, not hardware. Taking 5.3 rad/s: spin-in-place gives
-   `psi_dot = R w / (half_track alpha) = 2.3 rad/s` at mu = 0.6, i.e. **13.2 deg of heading swept
-   per 0.1 s step against 11.25 deg bins**. So §7's coupling is real at full spin — and note more
-   bins do NOT fix it: the issue is that one step samples a single envelope snapshot while the
-   robot sweeps through headings, which only a finer `dt` addresses. At the practical
-   `plan_wmax = 4` it is 10 deg/step, just inside a bin.
+| quantity | value | how |
+|---|---|---|
+| wheel torque scale | `effort` = **0.1 Nm/unit** | two independent fits, corr 0.93 (`wheel_torque_from_bags.py`) |
+| per-wheel torque | ≥ 105 Nm sustained, no plateau | a lower bound; nothing ever saturated |
+| rolling resistance | 0.09 × weight | the same fit's offset |
+| turn gain α | **2.20** measured wheels, 3.06 commanded | `fit_turn_gain.py`, two IMUs agree to 1% |
+| drivetrain realisation | 0.60–0.70 of the commanded differential | the ratio of those two |
+| command delay | 149–199 ms | `fit_actuator_lag.py` |
+| friction saturation, real terrain | ≤ 0.69 at μ=0.2, ≤ 0.23 at μ=0.6 | `saturation_from_bags.py` |
+| L/K | 8–15 (pre-rolling-resistance) | `fit_traction.py`, quasi-static samples only |
 
-## Things you should know before merging
+**The friction budget never binds on terrain you have driven.** Tilt stays under 5.4° in those
+bags; binding needs `tan θ = μ`, i.e. 31° at μ=0.6. That is a lower bound — these are trajectories
+the robot drove and survived — and it says nothing about terrain you have not recorded.
 
-- **`studies/adjoint/harness.py` will need three extra output arrays** when the research line
-  reruns: it hand-launches `step_kernel_bt` with a positional `outputs=[...]` list, and the kernel
-  now takes `stability`, `saturation`, `stall` appended at the end. It will fail loudly with an
-  arg-count error, not silently. Nothing else in the repo launches these kernels directly.
+**Torque never binds either.** 105 Nm/wheel is 900 N of traction, 0.86 × weight, so friction
+saturates first for any μ < 0.86. IMPROVEMENTS.md §2's "you stall before you slip" does not hold
+here; it reasoned from a placeholder an order of magnitude too small.
+
+---
+
+## 4. Claims retracted during the session
+
+Recorded because the commit messages carry them but a reader of this report would not otherwise
+see them.
+
+- **"The drivetrain overshoots 45%."** It does not. That came from an instantaneous
+  measured/commanded ratio on a continuously varying command, which cannot separate lag from
+  overshoot. A second-order fit lands at ζ = 0.85–1.00 and does not beat first order.
+- **"The force-balance model is refuted (α ≈ 1.02–1.08)."** That was a slip regulariser, not
+  physics. The correct rigid-Coulomb answer is exactly 1.000; the model was missing shear
+  compliance rather than being wrong.
+- **"Publishing `/cmd_joints` faster would cut the lag."** It would not — the LLC already holds the
+  command. But asking exposed that both fitting scripts reconstructed commands by linear
+  interpolation instead of a zero-order hold, inflating every fitted delay by ~50 ms.
+- **"A calibration drive is needed to fit the traction model."** It was not: the fit uses measured
+  wheel speeds against a gyro, with no command in the loop.
+- **α(v) is NOT established.** The trend was fitted on transient-dominated data; the robot holds a
+  turn command for a median of 3 ms, so the archive has almost no steady-state turning.
+- **The left-wheel response asymmetry is not significant.** 8/11 segments, sign test p = 0.23.
+
+---
+
+## 5. What is safe to enable, and what is not
+
+| change | default | confidence |
+|---|---|---|
+| the three certificates | on (inert) | high — analytic, nothing consumes them |
+| exact-arc integration | **on** | high — exact against a closed form, no parameter |
+| `wheel_width = 0.10` | off | high measurement, but changes planning |
+| `command_delay = 0.17` | **on** (planner) | measured three ways; quantises to 200 ms |
+| `motor_torque_limit = 105` | on | a lower bound; inert either way |
+| `shear_lk`, `body_momentum` | off | mechanism sound, parameters unresolved |
+| `k_turn` | unchanged at 1.0 | measured α says 2.20–2.87; deliberately not changed |
+
+---
+
+## 6. What to do next
+
+1. **Drive the `calibrate` scenario** (added to `ros/record_odin.sh`, which now also records
+   `/joint_states` and `/joint_setpoints`). Five minutes settles: whether Odin realises the forward
+   channel 1:1 — the soft side of the traction conflict — plus the steady turn gain, whether α
+   depends on speed, the delay's step count, and the standing-start prediction.
+2. **Decide `k_turn`.** The planner currently expects ~60% more yaw than it gets. One line, but it
+   interacts with the delay, so change them together and re-check together.
+3. Only then reconsider the traction model. It is better and cheap to justify, but body inertia is
+   the larger unmodelled effect and neither is yet the dominant residual.
+
+---
+
+## 7. Before merging
+
+- **`studies/adjoint/harness.py` must be updated.** It hand-launches `step_kernel_bt` positionally,
+  which now takes `twist_in` as an extra input and `stability`, `saturation`, `stall`, `twist` as
+  extra outputs. It fails on arg count, not silently.
 - **Merging with `study/adjoint-sensitivity` will conflict.** That branch's `clear_soft` work
-  touches the same lines of `step_finalize`, the three kernel signatures and
-  `_alloc_rollout_buffers`. The conflicts are mechanical (both sides append), but they are certain.
-  `tests/engine/golden.py` already picks up `clear_soft` automatically if the attribute exists —
-  regenerate the fixture after the merge, since the merged engine is a different engine.
-- **`tests/engine/gradients.py` is broken on `main`** and still is here: it launches `step_kernel`
-  with 15 arguments (it needed 17 before this branch, 20 after). Pre-existing, and already
-  repaired on the study branch; left alone deliberately.
-- **Nothing is wired into the MPPI cost.** The certificates are computed and exposed only.
-- **The cylinder envelope has a hard lateral edge.** Its underside is a straight line across the
-  tread, so an obstacle inside the width lifts by its full height with no cap taper: the envelope
-  steps 0 -> obstacle height across ONE cell at the tread edge, where the sphere's cap tapered
-  smoothly over 0.35 m. Measured in `selftest_lateral_ridge` (a 0.30 m ridge under the tread reads
-  0.175 m at the wheel centre, mid-ramp). Lateral behaviour is therefore cell-resolution-limited
-  and non-smooth — a further reason not to hand this to the differentiable path unexamined.
-- The golden fixture is device- and Warp-version-specific (float32 CUDA arithmetic is not portable
-  across architectures). It was generated on the RTX A500 with Warp 1.14.0.
+  touches the same lines of `step_finalize`, the kernel signatures and `_alloc_rollout_buffers`.
+  Mechanical, but certain. Regenerate the golden fixture afterwards — the merged engine is a
+  different engine, and `golden.py` picks up `clear_soft` automatically if present.
+- **`tests/engine/gradients.py` is broken on `main`** and still is (it launches 15 args at a kernel
+  that wanted 17 even before this work). Pre-existing, already repaired on the study branch, left
+  alone deliberately.
+- The golden fixture is device- and Warp-version-specific: RTX A500, Warp 1.14.0.
