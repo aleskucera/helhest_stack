@@ -97,10 +97,13 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     # which the twist is solved: `shear_lk` is contact length / shear deformation modulus L/K
     # (soils put K at 0.01-0.06 m and L near 0.15 m, so L/K ~ 3-15), `contact_patch` is the patch
     # radius for the torsional term (0.075 m is the polar radius of a 0.10 x 0.24 m contact).
-    # Prototyped against the bags before landing: at L/K 8 with the geometric patch the model
-    # predicts alpha ~ 2.0-2.2 against a measured-wheel 2.20, where the legacy model says 1.80.
-    # OPT-IN: it changes every trajectory, and its speed dependence is a PREDICTION awaiting a
-    # steady-state calibration drive -- see studies of alpha(v) in the branch history.
+    # FITTED from the bags (scripts/fit_traction.py), against measured wheel speeds and a gyro --
+    # no command in the loop, so no delay and no steady-state manoeuvre needed. On QUASI-STATIC
+    # samples L/K lands at 8-15 (RMS 0.0393-0.0396 rad/s vs the legacy model's 0.0456, and 21%
+    # better on median), which is also where the soil literature puts it.
+    # OPT-IN, and the reason is in that same fit: pooled over ALL turning samples both models sit
+    # at RMS ~0.16 and are indistinguishable, because yaw-inertia transients carry roughly 4x the
+    # variance of the traction difference. This model is real but it is not the dominant error.
     shear_lk: float = 0.0
     contact_patch: float = 0.075
     shear_iters: int = 6
