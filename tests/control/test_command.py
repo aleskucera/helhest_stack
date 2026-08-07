@@ -4,6 +4,7 @@ import numpy as np
 
 from helhest.control.command import condition_command
 from helhest.control.command import in_flight_history
+from helhest.control.command import plan_control_at
 from helhest.control.command import to_engine_order
 from helhest.control.command import JOINT_NAMES
 
@@ -104,3 +105,18 @@ def test_in_flight_history_pads_short_and_empty_histories():
     np.testing.assert_allclose(short[:, :, 0], 5.0)  # repeat the oldest: it was being held
     empty = in_flight_history([], 2, 2)
     np.testing.assert_allclose(empty, 0.0)  # nothing published yet -> standing still
+
+
+def test_plan_control_walks_the_plan():
+    U = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], np.float32)
+    np.testing.assert_allclose(plan_control_at(U, 0.0, 0.1), [1.0, 2.0])
+    np.testing.assert_allclose(plan_control_at(U, 0.1, 0.1), [3.0, 4.0])
+    np.testing.assert_allclose(plan_control_at(U, 0.05, 0.1), [2.0, 3.0])  # interpolated, not held
+    np.testing.assert_allclose(plan_control_at(U, 0.15, 0.1), [4.0, 5.0])
+
+
+def test_plan_control_clamps_at_both_ends():
+    U = np.array([[1.0, 2.0], [3.0, 4.0]], np.float32)
+    np.testing.assert_allclose(plan_control_at(U, -1.0, 0.1), [1.0, 2.0])
+    np.testing.assert_allclose(plan_control_at(U, 99.0, 0.1), [3.0, 4.0])  # stale plan -> hold last
+    np.testing.assert_allclose(plan_control_at(U[:1], 5.0, 0.1), [1.0, 2.0])

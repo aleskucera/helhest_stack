@@ -134,3 +134,27 @@ def in_flight_history(commands, steps: int, batch: int) -> np.ndarray:
         rows.insert(0, rows[0])
     stacked = np.asarray(rows[-steps:], dtype=np.float32)[:, None, :]
     return np.ascontiguousarray(np.repeat(stacked, batch, axis=1), dtype=np.float32)
+
+
+def plan_control_at(nominal: np.ndarray, elapsed: float, plan_dt: float) -> np.ndarray:
+    """The committed (wL, wR) at `elapsed` seconds into a plan sampled every `plan_dt`.
+
+    A plan is a trajectory, not a single command, so a controller ticking faster than the planner
+    should WALK it rather than hold its first step. Linear interpolation between plan steps: at
+    dt = 0.1 s and a 50 ms tick that is the difference between two distinct commands per plan and
+    the same one twice.
+
+    Clamped at both ends -- before the start it gives the first step, past the horizon the last, so
+    a stale plan degrades to holding its final command rather than indexing off the end.
+    """
+    nominal = np.asarray(nominal, dtype=np.float32)
+    if nominal.ndim != 2 or nominal.shape[1] < 2:
+        raise ValueError(f"nominal must be [T, >=2], got {nominal.shape}")
+    if len(nominal) == 1:
+        return nominal[0, :2].astype(np.float32)
+    position = float(np.clip(elapsed / plan_dt, 0.0, len(nominal) - 1))
+    step = int(np.floor(position))
+    if step >= len(nominal) - 1:
+        return nominal[-1, :2].astype(np.float32)
+    frac = position - step
+    return ((1.0 - frac) * nominal[step, :2] + frac * nominal[step + 1, :2]).astype(np.float32)

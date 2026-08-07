@@ -73,6 +73,7 @@ from helhest import dynamics
 from helhest.control.command import condition_command
 from helhest.control.command import in_flight_history
 from helhest.control.command import JOINT_NAMES
+from helhest.control.command import plan_control_at
 from helhest.control.command import to_engine_order
 from helhest.control.mppi import CostParams
 from helhest.control.mppi import MppiGpu
@@ -232,6 +233,10 @@ class ElevationNode(Node):
         # Commands already in flight, ENGINE order (wL, wR, w_rear), oldest first. Length = the
         # delay in whole rollout steps; empty (and unused) when plan_command_delay is 0.
         self._cmd_in_flight: deque[np.ndarray] = deque(maxlen=1)
+        # Set by the driving branch when plan_command_rate > 0: the plan the command timer walks,
+        # plus what condition_command needs that the timer cannot recompute. None means the cloud
+        # callback published directly (stop, dock, hold) and the timer must stay out of the way.
+        self._drive_plan: tuple[np.ndarray, float, float, float] | None = None
         self._d_hist: deque[float] = deque(
             maxlen=15
         )  # recent robot->goal distances (progress check)
@@ -286,6 +291,13 @@ class ElevationNode(Node):
         # Sensor QoS (best-effort): a best-effort sub receives from BOTH a reliable publisher
         # (`/imu/data`) and a best-effort one (`/ouster/imu`); a reliable sub gets nothing from
         # the latter.
+        if self.plan_command_rate > 0.0:
+            self._command_period = 1.0 / float(self.plan_command_rate)
+            self.create_timer(self._command_period, self._command_tick)
+            self.get_logger().info(
+                f"command timer at {self.plan_command_rate:.0f} Hz "
+                f"(replanning stays at the sensor rate)"
+            )
         self.create_subscription(Imu, self.imu_topic, self._imu_callback, qos_profile_sensor_data)
         self.create_subscription(
             PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10
@@ -634,6 +646,13 @@ class ElevationNode(Node):
         # SOONER, not more: it no longer expects a command to bite instantly. If plan_turn_boost is
         # ever raised above 1.0 to compensate for under-turning, re-check it after changing this --
         # the two corrections overlap.
+        # Publish /cmd_joints on a TIMER at this rate [Hz] instead of once per point cloud, walking
+        # the committed plan between replans. 0 = off (publish once per cloud, as before).
+        # Replanning stays at the sensor rate -- a new plan on a 66 ms-old map is barely new
+        # information -- but the COMMAND can change faster, which is where the value is: finer slew
+        # and goal-brake resolution, and the LLC stays fed if a cloud is dropped. It does NOT reduce
+        # the ~175 ms actuator delay, which lives in the LLC velocity loop.
+        d("plan_command_rate", 0.0)
         d("plan_command_delay", dynamics.COMMAND_DELAY)
         d("plan_turn_boost", 1.0)
         # OPTIONAL: self-tune plan_turn_boost online from gyro feedback (control/turn_adapt.py) so the
@@ -765,6 +784,7 @@ class ElevationNode(Node):
         self.plan_max_omega: float = g("plan_max_omega")
         self.plan_max_slew: float = g("plan_max_slew")
         self.plan_max_decel: float = g("plan_max_decel")
+        self.plan_command_rate: float = g("plan_command_rate")
         self.plan_command_delay: float = g("plan_command_delay")
         self.plan_turn_boost: float = g("plan_turn_boost")
         self.plan_turn_boost_adapt: bool = g("plan_turn_boost_adapt")
@@ -1586,6 +1606,7 @@ class ElevationNode(Node):
         d = float(np.hypot(gx - mf.ex, gy - mf.ey))  # robot -> goal distance
         self._d_hist.append(d)
         holding = False  # walled-off hold this frame -> published on /plan_holding
+        from_plan = False  # True only on the MPPI branch, whose command IS a plan to walk
         if d < self.plan_reach_radius:
             wl, wr = 0.0, 0.0  # reached -> stop (the slew limiter ramps the command down)
         elif self.plan_dock_enable and d < self.plan_dock_radius:
@@ -1595,6 +1616,7 @@ class ElevationNode(Node):
             # MPPI drives; the goal brake (in condition_command) bleeds off speed on the final
             # approach so it settles instead of orbiting. With the dock disabled this branch covers
             # the whole reach_radius..inf band -- the continuous brake replaces the hard stop-radius.
+            from_plan = True
             u0 = self.planner.nominal()[0]  # first committed step (wL, wR), model convention
             wl, wr = float(u0[0]), float(u0[1])
             # UNREACHABLE-GOAL STOP: the robot sits at the routing-window CENTER, so the cost-to-go
@@ -1623,6 +1645,30 @@ class ElevationNode(Node):
         turn_boost = (
             self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
         )
+        if self.plan_command_rate > 0.0 and from_plan and not holding:
+            # Hand the whole plan to the command timer and let it walk. Stops, docks and holds are
+            # NOT handed over: those are single commands, not trajectories, and must go out now.
+            # The adaptive turn_boost stays on the PLAN cadence -- turn_adapt's EMA uses a fixed
+            # per-call coefficient, so running it at the command rate would quietly shorten its
+            # time constant by the ratio of the two rates.
+            if (
+                self._turn_adapt is not None
+                and self._imu_buffer
+                and self._last_diff_out is not None
+            ):
+                self._turn_adapt.update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
+            self._last_diff_out = float(self._prev_cmd[2] - self._prev_cmd[0])
+            self._drive_plan = (
+                self.planner.nominal().copy(),
+                float(self.get_clock().now().nanoseconds) * 1e-9,
+                d,
+                turn_boost,
+            )
+            self.pub_holding.publish(Bool(data=False))
+            self._holding = False
+            self.pub_turn_boost.publish(Float32(data=float(turn_boost)))
+            return
+        self._drive_plan = None  # this frame publishes directly; keep the timer quiet
         cmd = condition_command(
             wl,
             wr,
@@ -1653,6 +1699,41 @@ class ElevationNode(Node):
             self._last_diff_out = float(
                 cmd[2] - cmd[0]
             )  # condition_command [L, rear, R] -> (wR - wL)
+
+    def _command_tick(self) -> None:
+        """Publish the committed plan's control for the time that has actually elapsed.
+
+        Runs at plan_command_rate while the driving branch is active. `condition_command` is given
+        the TIMER's period, not the plan dt -- its slew and decel limits are rates, so passing the
+        plan dt here would silently allow several times the intended jerk per second.
+
+        The goal distance is the one measured when the plan was made, up to a tick stale (~9 cm at
+        1.4 m/s). The brake is a smooth function of it, so that is a small error in a gain, not a
+        latched decision.
+        """
+        plan = self._drive_plan
+        if plan is None or not self.plan_actuate:
+            return
+        nominal, made_at, goal_dist, turn_boost = plan
+        elapsed = float(self.get_clock().now().nanoseconds) * 1e-9 - made_at
+        wl, wr = (float(v) for v in plan_control_at(nominal, elapsed, dynamics.DT))
+        cmd = condition_command(
+            wl,
+            wr,
+            self._prev_cmd,
+            max_omega=self.plan_max_omega,
+            max_slew=self.plan_max_slew,
+            max_decel=self.plan_max_decel,
+            dt=self._command_period,
+            turn_boost=turn_boost,
+            goal_dist=goal_dist,
+            brake_dist=self.plan_goal_brake_dist,
+            turn_brake_a_max=self.plan_turn_brake_a_max,
+            lat_gain=self._lat_gain,
+            turn_brake_scale=self._turn_brake_lookahead(turn_boost),
+        )
+        self._prev_cmd = cmd
+        self._publish_cmd(cmd)
 
     def _load_command_history(self) -> None:
         """Copy the commands still in flight into the rollout buffer, oldest first.
