@@ -24,6 +24,8 @@ script prints both and their ratio, which IS the drivetrain realization factor.
 from __future__ import annotations
 
 import sys
+from datetime import datetime
+from datetime import timezone
 from pathlib import Path
 
 import numpy as np
@@ -35,11 +37,22 @@ IMU_TOPICS = ("/imu/data", "/odin1/imu", "/ouster/imu")
 ODOM_TOPICS = ("/odom_2d", "/odin1/odometry")
 MIN_DIFFERENTIAL = 0.5  # [rad/s] commanded (wR - wL) below this is noise, not a turn
 MAX_GYRO = np.radians(600.0)
+# Before commit f056dcc (2026-07-27) the LLC read /cmd_joints through a x22.5/2pi scaling, so
+# commanded wheel speeds in older bags are NOT wheel rad/s and any alpha fitted from them is wrong
+# by that factor. Refuse rather than silently mis-fit; multiply by 2pi/22.5 first if you must.
+CMD_UNITS_FIX = datetime(2026, 7, 27, tzinfo=timezone.utc).timestamp()
 
 
 def _load(bag: Path) -> dict:
     out: dict[str, list] = {k: [] for k in ("gt", "gyro", "ct", "cmd", "st", "meas", "ot", "v")}
     with AnyReader([bag]) as reader:
+        started = reader.start_time * 1e-9
+        if started < CMD_UNITS_FIX:
+            when = datetime.fromtimestamp(started, timezone.utc).date()
+            raise SystemExit(
+                f"{bag.name}: recorded {when}, before the 2026-07-27 /cmd_joints units fix -- "
+                "its commanded wheel speeds are not rad/s and alpha would be wrong. Refusing."
+            )
         topics = set(IMU_TOPICS) | set(ODOM_TOPICS) | {"/cmd_joints", "/joint_states"}
         conns = [c for c in reader.connections if c.topic in topics]
         imu_topic = next((t for t in IMU_TOPICS if any(c.topic == t for c in conns)), None)
