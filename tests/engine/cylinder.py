@@ -31,7 +31,8 @@ from helhest.engine import SolverParams
 CELL = 0.05
 CELLS = 201
 ORIGIN = (-5.0, -5.0)
-WHEEL_WIDTH = 0.2  # assumed until the real wheel is measured (RobotParams.wheel_width)
+# the real wheel, ruler-measured: 0.10 m wide, i.e. a 0.05 m half-width against the sphere's 0.35
+WHEEL_WIDTH = 0.10
 RIDGE_HEIGHT = 0.3
 RIDGE_GAP = 0.30  # lateral gap from the left wheel centre to the near edge of the ridge
 
@@ -165,6 +166,17 @@ def selftest_lateral_ridge() -> None:
     assert roll_s > np.radians(5.0), "the sphere should be climbing this ridge"
     assert abs(cylinder["roll"]) < 1e-6, "the cylinder reached a ridge 0.30 m off its track"
     assert abs(cylinder["pitch"]) < 1e-6, "the cylinder was lifted by a ridge beside the track"
+    # ...but a ridge INSIDE the tread must still lift it. The cylinder's underside is a straight
+    # line across its width, so an obstacle at zero along-travel offset lifts by its FULL height
+    # with no cap falloff -- the envelope steps 0 -> 0.30 m across a single cell at the tread
+    # edge, where the sphere's cap tapered smoothly. The settled lift here (0.175 m of a 0.30 m
+    # ridge) is that step, bilinearly sampled under the wheel centre.
+    near = _run(WHEEL_WIDTH, _ridge(along_x=True, edge=rp.half_track + 0.03), (0.0, 0.0, 0.0))
+    print(
+        f"  ridge 0.03 m out (inside the {WHEEL_WIDTH / 2:.2f} m half-width): cylinder rolls "
+        f"{np.degrees(near['roll']):.2f} deg"
+    )
+    assert near["roll"] > np.radians(10.0), "the cylinder ignored an obstacle under its own tread"
     print(
         f"lateral ridge  OK (sphere tilts {np.degrees(sphere['roll']):.2f} deg, cylinder "
         f"{np.degrees(cylinder['roll']):.2e} deg)"

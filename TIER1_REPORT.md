@@ -133,20 +133,31 @@ certificate fires at 31.0 deg of grade; with a 40 Nm placeholder the stall certi
 19.2 deg. On high-mu ground you stall before you slip, as IMPROVEMENTS.md §2 expected — but the
 crossover sits exactly on the unmeasured torque number.
 
-## Open hardware numbers, still needed from you
+## Open hardware numbers
 
-1. **`omega_max`** (IMPROVEMENTS.md open question 1) — decides whether §4 forces a finer `dt`. With
-   32 bins and dt = 0.1 s the cylinder envelope is safe up to `psi_dot ~ 2 rad/s`, which
-   spin-in-place reaches at roughly `omega_max = 4.5 rad/s`. Above that the rollout aliases across
-   yaw bins and §4 and §7 have to land together. Documented on `yaw_bin`, not solved.
-2. **Per-wheel motor torque envelope [Nm]** (open question 2) — `RobotParams.motor_torque_limit`,
-   currently `inf`, which makes the stall certificate inert. Holding a 15 deg grade needs ~31.5 Nm
-   per wheel here, so the answer is likely in the 20–60 Nm range where it changes planner
-   behaviour.
-3. **Real wheel width [m]** (open question 4) — `RobotParams.wheel_width`, currently `None`. The
-   tests use 0.2 m (a 0.1 m half-width) as an assumption. This one has the largest behavioural
-   effect of the three: at 0.2 m the robot stops being lifted by anything more than 0.1 m off its
-   wheel track.
+Checked against `~/projects/ostrich/examples/helhest_junior/robot_parameters.md`, whose provenance
+table separates ruler-measured numbers from tuned ones. One of the three is answered there.
+
+1. **Wheel width — ANSWERED: 0.10 m, ruler-measured** (§6 of that document; collision shape
+   `cylinder r = 0.35, half-height 0.05`). So the half-width is **0.05 m**, half of what
+   IMPROVEMENTS.md §4 assumed: the spherical envelope over-reaches sideways by **7x**, not 3.5x.
+   `tests/engine/cylinder.py` now uses the measured value. `RobotParams.wheel_width` is still
+   `None` by default — switching it changes planning behaviour, which is your call, not a
+   side effect of this branch.
+2. **Per-wheel motor torque envelope [Nm] — still open.** The Ostrich model has no torque or
+   effort limit at all: `TARGET_KE = 150 / TARGET_KD = 0` are marked fine-tuned velocity-servo
+   gains, explicitly "not a datasheet motor constant". Holding a 15 deg grade needs ~31.5 Nm per
+   wheel here, so the useful range is roughly 20-60 Nm. Until it lands, `motor_torque_limit`
+   stays `inf` and the stall certificate reads 0.
+3. **`omega_max` — no hardware figure, but this repo's own bag calibration implies ~5.3 rad/s**
+   (the drivetrain ceiling behind the turn-differential work; `plan_wmax` is set to 4 to stay
+   under it). The Ostrich side only has a keyboard ramp (10 rad/s^2 accel toward ~5 rad/s), which
+   is a UI limit, not hardware. Taking 5.3 rad/s: spin-in-place gives
+   `psi_dot = R w / (half_track alpha) = 2.3 rad/s` at mu = 0.6, i.e. **13.2 deg of heading swept
+   per 0.1 s step against 11.25 deg bins**. So §7's coupling is real at full spin — and note more
+   bins do NOT fix it: the issue is that one step samples a single envelope snapshot while the
+   robot sweeps through headings, which only a finer `dt` addresses. At the practical
+   `plan_wmax = 4` it is 10 deg/step, just inside a bin.
 
 ## Things you should know before merging
 
@@ -163,5 +174,11 @@ crossover sits exactly on the unmeasured torque number.
   with 15 arguments (it needed 17 before this branch, 20 after). Pre-existing, and already
   repaired on the study branch; left alone deliberately.
 - **Nothing is wired into the MPPI cost.** The certificates are computed and exposed only.
+- **The cylinder envelope has a hard lateral edge.** Its underside is a straight line across the
+  tread, so an obstacle inside the width lifts by its full height with no cap taper: the envelope
+  steps 0 -> obstacle height across ONE cell at the tread edge, where the sphere's cap tapered
+  smoothly over 0.35 m. Measured in `selftest_lateral_ridge` (a 0.30 m ridge under the tread reads
+  0.175 m at the wheel centre, mid-ramp). Lateral behaviour is therefore cell-resolution-limited
+  and non-smooth — a further reason not to hand this to the differentiable path unexamined.
 - The golden fixture is device- and Warp-version-specific (float32 CUDA arithmetic is not portable
   across architectures). It was generated on the RTX A500 with Warp 1.14.0.

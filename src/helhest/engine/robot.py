@@ -57,10 +57,12 @@ class Robot:
 @dataclass(frozen=True)
 class RobotParams:  # host-side robot knobs — what you nudge
     wheel_radius: float = 0.35
-    # TODO(hardware): MEASURE THIS. Wheel WIDTH [m] (IMPROVEMENTS.md open question 4). None keeps
-    # the spherical wheel envelope, which reaches a full wheel_radius sideways and so lifts the
-    # robot over rocks it would really straddle. A float switches ForwardSimulator to the
-    # yaw-binned cylinder envelope; 0.2 (a 0.1 m half-width) is the assumed order of magnitude.
+    # Wheel WIDTH [m]. None keeps the spherical wheel envelope, which reaches a full wheel_radius
+    # sideways and so lifts the robot over rocks it would really straddle; a float switches
+    # ForwardSimulator to the yaw-binned cylinder envelope. The REAL wheel is 0.10 m wide
+    # (ruler-measured; ostrich examples/helhest_junior/robot_parameters.md section 6, collision
+    # cylinder r = 0.35, half-height 0.05) -- so the sphere over-reaches sideways by 7x. Left at
+    # None because switching it changes planning behaviour; set it deliberately.
     wheel_width: float | None = None
     half_track: float = 0.365
     rear_offset: float = 0.75
