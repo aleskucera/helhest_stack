@@ -291,3 +291,42 @@ already in the universe part of the vector. Dropping the redundant block means t
 [3T x K x |U|] tensor (~70 MB/plan) never has to be built, sorted and concatenated. 42.9 ->
 11.6 ms/plan. Still 1.9x slower than 256 batched GPU rollouts, so the Warp kernel remains the
 open item for a wall-time claim -- but it is now a 2x gap, not a 7x one.
+
+### 10.2 Optimization (2026-08-08): the estimator is now faster than sampling
+
+`bench/clark_conv.py` (settle) and `bench/clark_hinge_fast.py` (full cost) rewrite the
+estimator around two structural facts that the original implementation did not use:
+
+1. **A moment-matched max node IS a fixed linear functional of its own candidates.** Clark's
+   covariance recursion unrolls to `Cov(node,·) = Σ_i w_i Cov(X_i,·)` with
+   `w_0 = Π Φ_i`, `w_i = (1−Φ_i) Π_{j>i} Φ_j`, `Σ w_i = 1` (verified against `clark_build`
+   to 8e-16). The fold therefore needs only the node's own K×K covariance and can emit K
+   weights; the [N, K, |U|] tensor is unnecessary.
+2. **`rho_lookup` is separable with hard-zero support** (`ρ(dy,dx) = ρ1(dy)ρ1(dx)`, zero past
+   11 cells). Any linear functional of cells has `Var = <G, (G*ρ1)*ρ1>` — scatter onto the
+   corridor patch, two 11-tap convolutions. No covariance matrix is ever built.
+
+O(3TK|U| + |U|²) → O(3TK² + P). Measured on an idle machine, medians over seeds × 16 plans:
+
+| path | before | after | vs MC-256 (6.07 ms/plan) |
+|---|---|---|---|
+| settle, sphere | 42.9 ms | **1.6 ms** (batched over the candidate set) | 3.8× faster |
+| settle, cylinder | — | 0.95 ms unbatched | 6.4× faster |
+| full cost, sphere | 50.9 ms | **9.6 ms** | 1.6× slower |
+| full cost, cylinder | 49.4 ms | **2.6 ms** | 2.3× faster |
+
+Output is unchanged: E exact, Var to 5e-16 (settle) / 1.2e-15 (full cost). **The paper's
+wall-time caveat is now a claim.** Three ingredients, in order of payoff: the weight/convolution
+collapse (16×), the cylinder element (K 37→5-7, another 2.7×), batching the fold over the
+candidate set (1.6×). Also `_rho` folds abs/clip/where into a zero-padded signed-lag table —
+that alone was 77% of the first hinge version's runtime.
+
+**Two process notes.** (a) `clark_hinge_fast` verifies against `clark_hinge` on every case
+before it reports any timing; the cylinder's delta is PHYSICS and is emitted under a separate
+json key so it can never be read as accuracy. (b) Clark was **91% of a stage-2 seed's cost**
+(the 256 MC draws batch into 0.11 s/seed), so the full-cost head-to-head at n=500 costs ~2
+minutes now and cost ~10 before — it was never compute-limited, which means the
+non-significant p=0.43/0.34 result can be settled at higher n whenever wanted. IF THAT IS
+RUN: the n=100 test already failed its pre-registration, so a larger-n rerun is a NEW test
+that must be pre-registered separately and reported alongside the original failure, never in
+place of it.
