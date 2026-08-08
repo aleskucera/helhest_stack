@@ -58,71 +58,143 @@ from ..adjoint.harness import DERIV_WZ
 from helhest.engine import RobotParams
 from helhest.engine.envelope import wheel_offset_table
 
-MEASURED_RHO = OUT / "rho_measured.npy"
+BELIEF_MODEL = OUT / "belief_model.npz"
 RANK = 5  # PSD-projected rank-5 holds Var[J] to 0.57%; see clark_conv.separable_terms
 
 
-def measured_kernel() -> np.ndarray:
-    """The 2-D lag correlation measured by the sensing simulator, PSD-projected."""
-    rho = np.load(MEASURED_RHO)
-    terms = separable_terms(rho, RANK, enforce_psd=True)
-    k = np.zeros_like(rho)
-    for a, b in terms:
-        k += np.outer(a, b)
-    return k / k[k.shape[0] // 2, k.shape[1] // 2]
+class BeliefModel:
+    """Sigma = a rank-3 plane plus a compact stationary kernel, fitted to simulated sensing.
+
+    The first attempt used one stationary kernel and its generator gate failed: the measured
+    correlation never decays inside the window, because a scan's pose error shifts and TILTS
+    every point in it together, and no stationary kernel can express that. Splitting it off
+    leaves a residual that decorrelates within three cells. Measured split: 30% plane, 70%
+    stationary.
+
+    Marginal per-cell variance is preserved at sigma_p^2 -- the pre-registration fixes the sigma
+    field and moves only the correlation -- so the two parts carry `share` and `1 - share` of it:
+
+        e(p) = sigma_p [ sqrt(share)/sd_P (a + b xc_p + c yc_p) + sqrt(1-share) s(p) ]
+    """
+
+    def __init__(self, path: Path = BELIEF_MODEL):
+        d = np.load(path)
+        self.plane_cov = d["plane_cov"]
+        self.share = float(d["plane_share"])
+        self.rho_s = d["rho_stationary"]
+        self.xc, self.yc = float(d["x_center"]), float(d["y_center"])
+        self.terms = separable_terms(self.rho_s, RANK, enforce_psd=True)
+
+    def basis(self, ny: int, nx: int, x0: float, y0: float) -> np.ndarray:
+        gy, gx = np.mgrid[0:ny, 0:nx]
+        return np.stack([
+            np.ones((ny, nx)), gx * CELL + x0 - self.xc, gy * CELL + y0 - self.yc
+        ])
+
+    def sd_plane(self, ny: int, nx: int, x0: float, y0: float) -> float:
+        """RMS of the plane over the map, the constant that normalizes it to unit variance."""
+        b = self.basis(ny, nx, x0, y0).reshape(3, -1)
+        return float(np.sqrt(np.mean(np.einsum("in,ij,jn->n", b, self.plane_cov, b))))
+
+    def rho_kk(self, off_dy: np.ndarray, off_dx: np.ndarray) -> np.ndarray:
+        """Correlation between a node's own candidates. The plane is smooth over a 0.9 m
+        footprint, so its contribution there is `share` to within a fraction of a percent --
+        stated as an approximation rather than hidden."""
+        L = self.rho_s.shape[0] // 2
+        dy = off_dy[:, None] - off_dy[None, :]
+        dx = off_dx[:, None] - off_dx[None, :]
+        return self.share + (1.0 - self.share) * self.rho_s[dy + L, dx + L]
+
+    def variance_of(
+        self, field: np.ndarray, ny: int, nx: int, x0: float, y0: float
+    ) -> float:
+        """Var of a linear functional of the cells, EXACT in both parts: a 3x3 form for the
+        plane, the rank-M convolution for the stationary residual."""
+        b = self.basis(ny, nx, x0, y0)
+        u = np.array([float((field * b[i]).sum()) for i in range(3)])
+        sdp = self.sd_plane(ny, nx, x0, y0)
+        v_plane = self.share / sdp**2 * float(u @ self.plane_cov @ u)
+        v_stat = (1.0 - self.share) * separable_quadratic_multi(field, self.terms)
+        return max(v_plane + v_stat, 0.0)
 
 
-class KernelDraws:
-    """Correlated terrain realisations with an arbitrary stationary kernel, by FFT synthesis."""
+class TwoPartDraws:
+    """Unit-variance realisations of the two-part model: a random plane plus a stationary field
+    synthesised by FFT. The stationary kernel decays inside three cells, so the zero-padding
+    that broke the single-kernel generator is harmless here."""
 
-    def __init__(self, kernel: np.ndarray, shape: tuple[int, int]):
+    def __init__(self, model: BeliefModel, shape: tuple[int, int], x0: float, y0: float):
         ny, nx = shape
-        emb = np.zeros((ny, nx))
-        L = kernel.shape[0] // 2
-        idx_y = (np.arange(-L, L + 1)) % ny
-        idx_x = (np.arange(-L, L + 1)) % nx
-        emb[np.ix_(idx_y, idx_x)] = kernel
-        spec = np.fft.rfft2(emb).real
-        self.amp = np.sqrt(np.maximum(spec, 0.0))
+        self.m = model
         self.shape = shape
+        emb = np.zeros((ny, nx))
+        L = model.rho_s.shape[0] // 2
+        k = np.zeros_like(model.rho_s)
+        for a, b in model.terms:
+            k += np.outer(a, b)
+        k /= k[L, L]
+        emb[np.ix_(np.arange(-L, L + 1) % ny, np.arange(-L, L + 1) % nx)] = k
+        self.amp = np.sqrt(np.maximum(np.fft.rfft2(emb).real, 0.0))
+        self.basis = model.basis(ny, nx, x0, y0)
+        self.sdp = model.sd_plane(ny, nx, x0, y0)
+        self.chol = np.linalg.cholesky(model.plane_cov + 1e-15 * np.eye(3))
 
     def draw(self, n: int, rng: np.random.Generator) -> np.ndarray:
-        """`n` unit-variance fields with the kernel's correlation, [n, ny, nx]."""
         w = rng.standard_normal((n, *self.shape))
-        f = np.fft.irfft2(np.fft.rfft2(w) * self.amp[None], s=self.shape)
-        return f / f.std(axis=(1, 2), keepdims=True)
+        s = np.fft.irfft2(np.fft.rfft2(w) * self.amp[None], s=self.shape)
+        s /= s.std(axis=(1, 2), keepdims=True)
+        c = rng.standard_normal((n, 3)) @ self.chol.T
+        plane = np.einsum("nc,cyx->nyx", c, self.basis) / self.sdp
+        return np.sqrt(self.m.share) * plane + np.sqrt(1.0 - self.m.share) * s
 
 
 def gate(device: str) -> dict:
-    """Does the generator produce what it was asked for? Nothing below means anything if not."""
-    k = measured_kernel()
-    chk = kernel_is_psd(k, separable_terms(k, RANK, enforce_psd=True))
+    """End-to-end: does the variance the estimator PREDICTS for a linear functional match the
+    variance the generator actually produces for it?
+
+    Checking that the synthesised kernel matches the target would only test the generator. This
+    tests the generator and the estimator against each other, which is the property every number
+    below depends on -- and it is what the single-kernel attempt failed.
+    """
+    m = BeliefModel()
     ny = nx = 90
-    draws = KernelDraws(k, (ny, nx))
-    f = draws.draw(256, np.random.default_rng(0))
-    L = k.shape[0] // 2
-    emp = np.zeros_like(k)
-    for dy in range(-L, L + 1):
-        for dx in range(-L, L + 1):
-            a = f[:, L : ny - L, L : nx - L]
-            b = f[:, L + dy : ny - L + dy, L + dx : nx - L + dx]
-            emp[dy + L, dx + L] = float((a * b).mean())
-    emp /= emp[L, L]
-    err = np.abs(emp - k)
+    x0 = y0 = 0.0
+    draws = TwoPartDraws(m, (ny, nx), x0, y0)
+    fields = draws.draw(2048, np.random.default_rng(0))
+    rng = np.random.default_rng(3)
+    errs = []
+    for _ in range(24):
+        g = np.zeros((ny, nx))
+        iy = rng.integers(8, ny - 8, 200)
+        ix = rng.integers(8, nx - 8, 200)
+        np.add.at(g, (iy, ix), rng.normal(0, 1, 200))
+        emp = float(np.var(np.einsum("nyx,yx->n", fields, g)))
+        pred = m.variance_of(g, ny, nx, x0, y0)
+        errs.append(abs(pred - emp) / max(emp, 1e-12))
+    # and the split the model claims
+    b = m.basis(ny, nx, x0, y0).reshape(3, -1)
+    proj = np.linalg.lstsq(b.T, fields.reshape(len(fields), -1).T, rcond=None)[0]
+    plane = (b.T @ proj).T.reshape(fields.shape)
+    share_emp = float(np.var(plane) / np.var(fields))
     return {
-        "psd": chk["psd"], "min_spectrum_over_max": chk["min_over_max"],
-        "field_std": float(f.std()),
-        "max_abs_rho_error": float(err.max()),
-        "median_abs_rho_error": float(np.median(err)),
-        "passed": bool(chk["psd"] and err.max() < 0.05 and abs(f.std() - 1.0) < 0.05),
+        "field_std": float(fields.std()),
+        "plane_share_model": m.share,
+        "plane_share_realized": share_emp,
+        "median_var_error": float(np.median(errs)),
+        "max_var_error": float(np.max(errs)),
+        "passed": bool(
+            abs(fields.std() - 1.0) < 0.05
+            and abs(share_emp - m.share) < 0.05
+            and np.median(errs) < 0.05
+        ),
     }
 
 
 def _clark_moments(
     belief: np.ndarray, sigma: np.ndarray, controlled: np.ndarray, rp: RobotParams,
-    x0: float, y0: float, kernel: np.ndarray, terms: list, off: tuple,
+    x0: float, y0: float, model: BeliefModel, off: tuple,
 ) -> tuple[float, float]:
-    """`clark_conv.plan_moments_conv` with a general (non-separable) kernel."""
+    """`clark_conv.plan_moments_conv` under the two-part belief."""
     ny, nx = belief.shape
     bflat, sflat = belief.ravel(), sigma.ravel()
     off_dy, off_dx, off_cap, rho_kk = off
@@ -140,22 +212,21 @@ def _clark_moments(
     c_w = np.repeat(_settle_weights(rp), n_t)
     e_j = float(c_w @ mean_n) + n_t * DERIV_WZ * rp.wheel_radius
     cells_s = np.take_along_axis(cells, order, axis=1)
-    iy, ix = cells_s // nx, cells_s % nx
-    pad = kernel.shape[0]
-    y_lo, x_lo = int(iy.min()) - pad, int(ix.min()) - pad
-    patch = np.zeros((int(iy.max()) + pad + 1 - y_lo, int(ix.max()) + pad + 1 - x_lo))
-    np.add.at(patch, (iy - y_lo, ix - x_lo), c_w[:, None] * w * sflat[cells_s])
-    return e_j, max(separable_quadratic_multi(patch, terms), 0.0)
+    field = np.zeros((ny, nx))
+    np.add.at(field, (cells_s // nx, cells_s % nx), c_w[:, None] * w * sflat[cells_s])
+    return e_j, model.variance_of(field, ny, nx, x0, y0)
 
 
-def _fosm_variance(grad: np.ndarray, sigma: np.ndarray, terms: list, kernel: np.ndarray) -> float:
-    """g^T Sigma g under the SAME measured kernel -- FOSM is not handicapped by being given the
-    old one while Clark gets the new one."""
-    field = grad * sigma
-    return max(separable_quadratic_multi(field, terms), 0.0)
+def _fosm_variance(
+    grad: np.ndarray, sigma: np.ndarray, model: BeliefModel, x0: float, y0: float
+) -> float:
+    """g^T Sigma g under the SAME two-part belief -- FOSM is not handicapped by being given the
+    old kernel while Clark gets the new one."""
+    ny, nx = sigma.shape
+    return model.variance_of(grad * sigma, ny, nx, x0, y0)
 
 
-def run_seed(seed: int, device: str, kernel: np.ndarray, terms: list) -> dict:
+def run_seed(seed: int, device: str, model: BeliefModel) -> dict:
     scene, _t, _m, _o, sigma, poses, omega, _g = build_case(seed, "hybrid", "all")
     belief = scene.elevation.astype(np.float32)
     ny, nx = belief.shape
@@ -163,9 +234,7 @@ def run_seed(seed: int, device: str, kernel: np.ndarray, terms: list) -> dict:
     env_r = int(np.ceil(rp.wheel_radius / CELL))
     o_dy, o_dx, o_cap = wheel_offset_table(env_r, CELL, rp.wheel_radius)
     o_dy, o_dx = np.asarray(o_dy, np.int64), np.asarray(o_dx, np.int64)
-    L = kernel.shape[0] // 2
-    rho_kk = kernel[o_dy[:, None] - o_dy[None, :] + L, o_dx[:, None] - o_dx[None, :] + L]
-    off = (o_dy, o_dx, o_cap, rho_kk)
+    off = (o_dy, o_dx, o_cap, model.rho_kk(o_dy, o_dx))
 
     h = Harness(scene, poses, omega, device=device)
     grads, terms_c = h.adjoint(dilate=True, leaf="elevation")
@@ -187,11 +256,12 @@ def run_seed(seed: int, device: str, kernel: np.ndarray, terms: list) -> dict:
     fosm = np.empty(N_PLANS)
     for k in range(N_PLANS):
         e_c[k], v = _clark_moments(
-            belief, sigma, controlled[:, k, :], rp, scene.origin_x, scene.origin_y,
-            kernel, terms, off,
+            belief, sigma, controlled[:, k, :], rp, scene.origin_x, scene.origin_y, model, off,
         )
         sd_c[k] = np.sqrt(v)
-        fosm[k] = np.sqrt(_fosm_variance(grad[k], sigma, terms, kernel))
+        fosm[k] = np.sqrt(
+            _fosm_variance(grad[k], sigma, model, scene.origin_x, scene.origin_y)
+        )
     sig_t = np.array([
         sigma[
             np.clip(((controlled[1:, k, 1] - scene.origin_y) / CELL).astype(int), 0, ny - 1),
@@ -211,7 +281,7 @@ def run_seed(seed: int, device: str, kernel: np.ndarray, terms: list) -> dict:
     }
 
     # --- Monte-Carlo truth, drawn from the MEASURED kernel ------------------------------------
-    draws = KernelDraws(kernel, (ny, nx))
+    draws = TwoPartDraws(model, (ny, nx), scene.origin_x, scene.origin_y)
     fields = draws.draw(N_DRAWS, np.random.default_rng(900_000 + seed))
     poses_d = np.tile(poses[0], (N_DRAWS, 1)).astype(np.float32)
     omega_d = np.zeros((omega.shape[0], N_DRAWS, 3), np.float32)
@@ -262,12 +332,11 @@ def main() -> None:
     if args.gate:
         return
 
-    kernel = measured_kernel()
-    terms = separable_terms(kernel, RANK, enforce_psd=True)
+    model = BeliefModel()
     rows = []
     t0 = time.perf_counter()
     for seed in range(args.seeds):
-        rows.append(run_seed(seed, args.device, kernel, terms))
+        rows.append(run_seed(seed, args.device, model))
         if (seed + 1) % 10 == 0:
             print(f"  {seed + 1}/{args.seeds} seeds, {(time.perf_counter() - t0) / 60:.1f} min")
 
