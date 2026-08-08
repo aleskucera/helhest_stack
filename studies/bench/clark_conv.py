@@ -275,12 +275,21 @@ def run(device: str, n_seeds: int, element: str) -> dict:
         scale_v = max(abs(a[1]) for a in ref)
         de = max(abs(a[0] - b[0]) for a, b in zip(ref, fast)) / max(scale_e, 1e-12)
         dv = max(abs(a[1] - b[1]) for a, b in zip(ref, fast)) / max(scale_v, 1e-12)
-        rows.append(
-            {"seed": seed, "rel_dE": de, "rel_dVar": dv, "ref_s": t_ref, "fast_s": t_fast,
-             "speedup": t_ref / max(t_fast, 1e-12)}
-        )
+        row = {"seed": seed, "rel_dE": de, "rel_dVar": dv, "ref_s": t_ref, "fast_s": t_fast,
+               "speedup": t_ref / max(t_fast, 1e-12)}
+        if element == "sphere":
+            # A planner ranks a candidate SET, so the batched fold is the deployment case.
+            t0 = time.perf_counter()
+            bat = plan_moments_conv_batch(belief, sigma, controlled, rp, *geo, rho1)
+            row["batch_s"] = (time.perf_counter() - t0) / N_PLANS
+            row["batch_rel_dE"] = max(
+                abs(a[0] - b[0]) for a, b in zip(ref, bat)) / max(scale_e, 1e-12)
+            row["batch_rel_dVar"] = max(
+                abs(a[1] - b[1]) for a, b in zip(ref, bat)) / max(scale_v, 1e-12)
+        rows.append(row)
+        extra = (f"  batched {row['batch_s']*1e3:.2f}" if "batch_s" in row else "")
         print(f"  seed {seed:2d}: rel dE {de:.2e}  rel dVar {dv:.2e}   "
-              f"{t_ref*1e3:6.2f} -> {t_fast*1e3:5.2f} ms/plan  ({t_ref/t_fast:.1f}x)")
+              f"{t_ref*1e3:6.2f} -> {t_fast*1e3:5.2f} ms/plan  ({t_ref/t_fast:.1f}x){extra}")
     kind = "numerical_error" if element == "sphere" else "physics_difference_vs_sphere"
     return {
         "element": element, "delta_meaning": kind, "rows": rows,
@@ -289,6 +298,12 @@ def run(device: str, n_seeds: int, element: str) -> dict:
         "median_ref_ms": float(np.median([r["ref_s"] for r in rows]) * 1e3),
         "median_fast_ms": float(np.median([r["fast_s"] for r in rows]) * 1e3),
         "median_speedup": float(np.median([r["speedup"] for r in rows])),
+        "median_batch_ms": (
+            float(np.median([r["batch_s"] for r in rows]) * 1e3) if "batch_s" in rows[0] else None
+        ),
+        "max_batch_rel_dVar": (
+            max(r["batch_rel_dVar"] for r in rows) if "batch_s" in rows[0] else None
+        ),
     }
 
 
@@ -307,10 +322,69 @@ def main() -> None:
     print(f"  max relative dVar {out['max_rel_dVar']:.2e}")
     print(f"  median {out['median_ref_ms']:.2f} -> {out['median_fast_ms']:.2f} ms/plan"
           f"  ({out['median_speedup']:.1f}x)")
+    if out.get("median_batch_ms"):
+        print(f"  batched over the candidate set: {out['median_batch_ms']:.2f} ms/plan"
+              f"  ({out['median_ref_ms']/out['median_batch_ms']:.1f}x overall,"
+              f" max rel dVar {out['max_batch_rel_dVar']:.1e})")
     path = OUT / f"clark_conv_{args.element}.json"
     path.write_text(json.dumps(out, indent=1))
     print(f"wrote {path}")
 
+
+
+# --- batching every plan through one fold ------------------------------------------------------
+def plan_moments_conv_batch(
+    belief: np.ndarray, sigma: np.ndarray, controlled_all: np.ndarray, rp: RobotParams,
+    x0: float, y0: float, cell: float, rho1: np.ndarray,
+) -> list[tuple[float, float]]:
+    """`plan_moments_conv` for ALL plans of a scene at once (sphere element).
+
+    The fold is K sequential steps of about a dozen numpy calls on [3T, K] arrays -- 4.4k
+    elements, small enough that per-call interpreter and dispatch overhead is a third of the
+    runtime. The steps are sequential in K but INDEPENDENT across plans, so stacking the plans
+    into the row axis runs the same 444 numpy calls on 16x the data and amortizes that overhead.
+    Only the fold is batched; the scatter and the convolution stay per plan, because plans sweep
+    different corridors and a shared patch would be mostly zeros.
+    """
+    ny, nx = belief.shape
+    belief_flat, sigma_flat = belief.ravel(), sigma.ravel()
+    n_plans = controlled_all.shape[1]
+    env_radius = int(np.ceil(rp.wheel_radius / cell))
+    off_dy, off_dx, off_cap = wheel_offset_table(env_radius, cell, rp.wheel_radius)
+    off_dy, off_dx = np.asarray(off_dy, np.int64), np.asarray(off_dx, np.int64)
+    rho_kk = rho_lookup(rho1, off_dy[:, None] - off_dy[None, :], off_dx[:, None] - off_dx[None, :])
+    wheel_xy = np.array([[0.0, rp.half_track], [0.0, -rp.half_track], [-rp.rear_offset, 0.0]])
+    t_idx = np.arange(1, controlled_all.shape[0])
+    n_t = len(t_idx)
+
+    cells = []
+    for k in range(n_plans):
+        ctl = controlled_all[:, k, :]
+        x, y, yaw = ctl[t_idx, 0], ctl[t_idx, 1], ctl[t_idx, 2]
+        c, s = np.cos(yaw), np.sin(yaw)
+        wx = np.stack([x + wheel_xy[w, 0] * c - wheel_xy[w, 1] * s for w in range(3)]).ravel()
+        wy = np.stack([y + wheel_xy[w, 0] * s + wheel_xy[w, 1] * c for w in range(3)]).ravel()
+        cells.append(_footprint_cells(wx, wy, off_dy, off_dx, x0, y0, cell, ny, nx))
+    cell_flat = np.concatenate(cells, axis=0)  # [n_plans * 3T, K]
+
+    means = belief_flat[cell_flat] + off_cap[None, :]
+    mean_n, w, order = fold_weights(means, sigma_flat[cell_flat], rho_kk)
+
+    c_w = np.repeat(_settle_weights(rp), n_t)
+    cells_sorted = np.take_along_axis(cell_flat, order, axis=1)
+    wsig = w * sigma_flat[cells_sorted]
+    pad = rho1.shape[0]
+    n_nodes = 3 * n_t
+    out = []
+    for k in range(n_plans):
+        sl = slice(k * n_nodes, (k + 1) * n_nodes)
+        e_j = float(c_w @ mean_n[sl]) + n_t * DERIV_WZ * rp.wheel_radius
+        iy, ix = cells_sorted[sl] // nx, cells_sorted[sl] % nx
+        y_lo, x_lo = int(iy.min()) - pad, int(ix.min()) - pad
+        patch = np.zeros((int(iy.max()) + pad + 1 - y_lo, int(ix.max()) + pad + 1 - x_lo))
+        np.add.at(patch, (iy - y_lo, ix - x_lo), c_w[:, None] * wsig[sl])
+        out.append((e_j, max(_separable_quadratic(patch, rho1), 0.0)))
+    return out
 
 if __name__ == "__main__":
     main()
