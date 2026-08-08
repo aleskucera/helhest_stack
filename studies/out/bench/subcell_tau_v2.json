@@ -1,0 +1,68 @@
+[
+ {
+  "seed": 0,
+  "beta": 1.8,
+  "n_probe": 264,
+  "tau_true_median_cm": 7.750323014495724,
+  "tau_hat_median_cm": 4.235662506862716,
+  "tau_corr": 0.03414875482474547,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -12.165655592859949,
+    "rms_cm": 13.0281588596231
+   },
+   "corrected, tau v2": {
+    "bias_cm": -0.6184682190778393,
+    "rms_cm": 5.894665471625412
+   },
+   "corrected, tau ORACLE": {
+    "bias_cm": 0.05027167275368442,
+    "rms_cm": 4.710353983157026
+   }
+  }
+ },
+ {
+  "seed": 0,
+  "beta": 2.4,
+  "n_probe": 226,
+  "tau_true_median_cm": 4.0557786666739375,
+  "tau_hat_median_cm": 2.982093694511741,
+  "tau_corr": 0.023982952883075326,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -7.943612078030718,
+    "rms_cm": 9.02326998479546
+   },
+   "corrected, tau v2": {
+    "bias_cm": -0.48254356067282705,
+    "rms_cm": 5.560456867710414
+   },
+   "corrected, tau ORACLE": {
+    "bias_cm": -0.5741863617925727,
+    "rms_cm": 4.349337978632273
+   }
+  }
+ },
+ {
+  "seed": 0,
+  "beta": 3.0,
+  "n_probe": 259,
+  "tau_true_median_cm": 1.511888598693184,
+  "tau_hat_median_cm": 1.3854291741874702,
+  "tau_corr": 0.05351923604239844,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -4.131088175567003,
+    "rms_cm": 5.619975077028584
+   },
+   "corrected, tau v2": {
+    "bias_cm": -0.7742404469465487,
+    "rms_cm": 4.04447620358199
+   },
+   "corrected, tau ORACLE": {
+    "bias_cm": -0.3967771116433836,
+    "rms_cm": 3.8639903003226803
+   }
+  }
+ }
+]
