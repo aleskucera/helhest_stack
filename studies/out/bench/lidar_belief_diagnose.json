@@ -1,0 +1,58 @@
+{
+ "baseline": {
+  "bias_median_cm": 4.42986679972299,
+  "bias_p90_cm": 11.463315078474244,
+  "sigma_median_cm": 3.132845401763916,
+  "resolvable_above_cm": 0.7832113653421402,
+  "bias_share_mse": 0.7730239917833859,
+  "observed_frac": 0.827283950617284
+ },
+ "noiseless vs cell AREA avg": {
+  "bias_median_cm": 0.9456552751949056,
+  "bias_p90_cm": 3.430933551084845,
+  "sigma_median_cm": 0.0,
+  "resolvable_above_cm": 0.0,
+  "bias_share_mse": 1.0,
+  "observed_frac": 0.8048148148148148
+ },
+ "noiseless (geometry only)": {
+  "bias_median_cm": 2.595252966767233,
+  "bias_p90_cm": 6.6270417030656485,
+  "sigma_median_cm": 0.0,
+  "resolvable_above_cm": 0.0,
+  "bias_share_mse": 1.0,
+  "observed_frac": 0.8048148148148148
+ },
+ "no dropout": {
+  "bias_median_cm": 4.686304256552839,
+  "bias_p90_cm": 12.527897013509964,
+  "sigma_median_cm": 3.2389159202575684,
+  "resolvable_above_cm": 0.8097290061414242,
+  "bias_share_mse": 0.7856431967934906,
+  "observed_frac": 0.8914814814814814
+ },
+ "half march step": {
+  "bias_median_cm": 4.541375134954335,
+  "bias_p90_cm": 11.776597555137881,
+  "sigma_median_cm": 3.1707122325897217,
+  "resolvable_above_cm": 0.7926780730485916,
+  "bias_share_mse": 0.7787566885094458,
+  "observed_frac": 0.8320987654320988
+ },
+ "FLAT, full noise": {
+  "bias_median_cm": 0.6163656245917082,
+  "bias_p90_cm": 1.5526179783046241,
+  "sigma_median_cm": 2.2432422637939453,
+  "resolvable_above_cm": 0.5608105566352606,
+  "bias_share_mse": 0.11398795446094316,
+  "observed_frac": 0.9961728395061729
+ },
+ "FLAT, noiseless": {
+  "bias_median_cm": 1.0173223152776245e-06,
+  "bias_p90_cm": 1.395900568468278e-06,
+  "sigma_median_cm": 0.0,
+  "resolvable_above_cm": 0.0,
+  "bias_share_mse": 0.0001065631531839057,
+  "observed_frac": 1.0
+ }
+}

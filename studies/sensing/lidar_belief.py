@@ -231,7 +231,8 @@ class LidarSim:
             self._out = wp.zeros(n_beams, dtype=wp.vec3)
             self._counter = wp.zeros(1, dtype=wp.int32)
 
-    def scan(self, pose: tuple[float, float, float], p: NoiseParams, seed: int) -> wp.array:
+    def scan(self, pose: tuple[float, float, float], p: NoiseParams, seed: int,
+             step_frac: float = 0.5) -> wp.array:
         """One scan from (x, y, yaw). Returns the surviving hits as a device vec3 array."""
         x, y, yaw = pose
         z = self._ground(x, y) + SENSOR_HEIGHT
@@ -244,7 +245,7 @@ class LidarSim:
                 inputs=[
                     self.truth, self.x0, self.y0, 1.0 / self.cell, self.nx, self.ny,
                     x, y, z, yaw, self.az, self.el, N_AZIMUTH,
-                    0.5 * self.cell, MAX_RANGE,
+                    step_frac * self.cell, MAX_RANGE,
                     p.sigma_base, p.sigma_per_m, p.sigma_incidence,
                     p.dropout_base, p.dropout_incidence, seed,
                 ],
@@ -267,6 +268,7 @@ class LidarSim:
 
 def simulate_belief(
     sim: LidarSim, traj: np.ndarray, p: NoiseParams, seed: int, builder: HeightMapBuilder,
+    step_frac: float = 0.5,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Drive `traj`, accumulate every scan's hits, rasterize with the robot's own builder.
 
@@ -281,7 +283,7 @@ def simulate_belief(
     clouds = []
     for k, (x, y, yaw) in enumerate(traj):
         drift = drift + rng.normal(0.0, steps)
-        pts = sim.scan((float(x), float(y), float(yaw)), p, seed * 7919 + k)
+        pts = sim.scan((float(x), float(y), float(yaw)), p, seed * 7919 + k, step_frac)
         if len(pts) == 0:
             continue
         arr = pts.numpy()
@@ -454,13 +456,121 @@ def figure(res: dict, sigma: np.ndarray, err: np.ndarray, observed: np.ndarray,
     print(f"wrote {path}")
 
 
+def _bias_stats(
+    truth: np.ndarray, sim: LidarSim, traj: np.ndarray, p: NoiseParams, builder: HeightMapBuilder,
+    seed: int, reps: int, step_frac: float,
+) -> dict:
+    maps, counts = [], []
+    for r in range(reps):
+        m, c = simulate_belief(sim, traj, p, seed * 1000 + r, builder, step_frac)
+        maps.append(m)
+        counts.append(c)
+    maps, counts = np.stack(maps), np.stack(counts)
+    obs = np.isfinite(maps).all(axis=0) & (counts > 0).all(axis=0)
+    mean_map = np.nanmean(maps, axis=0)
+    sigma = np.nanstd(maps, axis=0)
+    bias = mean_map - truth
+    # how finely CAN we resolve a bias with this many realizations? Anything at or below the
+    # standard error of the ensemble mean is not measurable here.
+    sem = float(np.nanmedian(sigma[obs]) / np.sqrt(max(reps, 1)))
+    return {
+        "bias_median_cm": float(np.nanmedian(np.abs(bias[obs])) * 100),
+        "bias_p90_cm": float(np.nanpercentile(np.abs(bias[obs]), 90) * 100),
+        "sigma_median_cm": float(np.nanmedian(sigma[obs]) * 100),
+        "resolvable_above_cm": sem * 100,
+        "bias_share_mse": float(
+            np.nanmean(bias[obs] ** 2)
+            / max(np.nanmean(bias[obs] ** 2) + np.nanmean(sigma[obs] ** 2), 1e-12)
+        ),
+        "observed_frac": float(obs.mean()),
+        "_mean_map": mean_map, "_obs": obs,
+    }
+
+
+def cell_area_average(truth: np.ndarray, supersample: int = 7) -> np.ndarray:
+    """The bilinear surface averaged over each cell's AREA, rather than read at its centre.
+
+    The distinction is not pedantic. A rasterized map cell holds the mean height of the points
+    that fell in it -- an area average -- while the planner samples the grid as if each cell were
+    the height AT its centre. On terrain with sub-cell relief those are different numbers, and
+    the difference is a representation error that no (mean, sigma) belief expresses."""
+    ny, nx = truth.shape
+    off = (np.arange(supersample) + 0.5) / supersample - 0.5
+    gy, gx = np.meshgrid(np.arange(ny), np.arange(nx), indexing="ij")
+    acc = np.zeros_like(truth)
+    for dy in off:
+        for dx in off:
+            fy = np.clip(gy + dy, 0, ny - 1.001)
+            fx = np.clip(gx + dx, 0, nx - 1.001)
+            iy, ix = fy.astype(int), fx.astype(int)
+            ty, tx = fy - iy, fx - ix
+            acc += (
+                truth[iy, ix] * (1 - tx) * (1 - ty)
+                + truth[iy, ix + 1] * tx * (1 - ty)
+                + truth[iy + 1, ix] * (1 - tx) * ty
+                + truth[iy + 1, ix + 1] * tx * ty
+            )
+    return acc / (supersample * supersample)
+
+
+def diagnose(seed: int, device: str, reps: int) -> dict:
+    """Four tests that separate physics from artifact. The last is the decisive one: on a plane
+    none of the physical mechanisms (slope-dependent dropout selection, cell-mean vs cell-centre
+    on a gradient, partial visibility at edges) can act, so any bias left there is the
+    simulator's own."""
+    ny = nx = 90
+    xs = np.linspace(1.0, 8.0, 40)
+    traj = np.stack([xs, np.full_like(xs, 4.5), np.zeros_like(xs)], axis=1)
+    rough = fractal_terrain(ny, nx, CELL, seed=seed)
+    flat = np.zeros_like(rough)
+
+    quiet = NoiseParams(
+        sigma_base=0.0, sigma_per_m=0.0, sigma_incidence=0.0,
+        dropout_base=0.0, dropout_incidence=0.0,
+        pose_step_xy=0.0, pose_step_yaw=0.0, pose_step_z=0.0, pose_step_pitch=0.0,
+    )
+    no_drop = NoiseParams(dropout_base=0.0, dropout_incidence=0.0)
+
+    builder = HeightMapBuilder(
+        CELL, (0.0, nx * CELL, 0.0, ny * CELL), device=wp.get_device(device)
+    )
+    sim_rough = LidarSim(rough, 0.0, 0.0, CELL, device)
+    sim_flat = LidarSim(flat, 0.0, 0.0, CELL, device)
+
+    cases = {
+        "baseline": (sim_rough, rough, NoiseParams(), reps, 0.5),
+        "noiseless vs cell AREA avg": (sim_rough, cell_area_average(rough), quiet, 1, 0.5),
+        "noiseless (geometry only)": (sim_rough, rough, quiet, 1, 0.5),
+        "no dropout": (sim_rough, rough, no_drop, reps, 0.5),
+        "half march step": (sim_rough, rough, NoiseParams(), reps, 0.25),
+        "FLAT, full noise": (sim_flat, flat, NoiseParams(), reps, 0.5),
+        "FLAT, noiseless": (sim_flat, flat, quiet, 1, 0.5),
+    }
+    out = {}
+    for name, (sim, truth, p, n, sf) in cases.items():
+        st = _bias_stats(truth, sim, traj, p, builder, seed, n, sf)
+        st.pop("_mean_map"), st.pop("_obs")
+        out[name] = st
+        print(f"  {name:26s} |bias| med {st['bias_median_cm']:5.2f}  p90 {st['bias_p90_cm']:6.2f}"
+              f"   sigma {st['sigma_median_cm']:5.2f}   bias/MSE {st['bias_share_mse']:4.0%}"
+              f"   (resolvable > {st['resolvable_above_cm']:.2f} cm)   obs {st['observed_frac']:.0%}")
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--realizations", type=int, default=32)
+    ap.add_argument("--diagnose", action="store_true", help="decompose the systematic bias")
     args = ap.parse_args()
     wp.init()
+    if args.diagnose:
+        print("=== where does the bias come from? (all values in cm) ===")
+        d = diagnose(args.seed, args.device, args.realizations)
+        (Path(OUT) / "lidar_belief_diagnose.json").write_text(json.dumps(d, indent=1))
+        print(f"wrote {Path(OUT) / 'lidar_belief_diagnose.json'}")
+        return
     res, extras = run(args.seed, args.realizations, args.device, NoiseParams())
     print("=== belief produced by simulated sensing ===")
     print(f"  observed cells              {res['observed_frac']:.1%}")
