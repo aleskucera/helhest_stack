@@ -1,0 +1,33 @@
+{
+ "bag": "outdoor_experiment_new2",
+ "n_clouds": 40,
+ "n_points": 325010,
+ "grid": "90x90 @ 0.1 m",
+ "observed_frac": 0.4893827160493827,
+ "median_hits_per_observed_cell": 33.0,
+ "ground_level_m": -1.2314663516435018,
+ "sigma_observed_median_cm": 1.5964585321154139,
+ "policies": {
+  "ground-referenced": {
+   "ms_per_plan": 3.136145687676617,
+   "n_nonfinite_or_raised": 0,
+   "E_spread": 21.69104511314955,
+   "E_median": -31.65202604619265,
+   "sd_median": 3.3745332024358
+  },
+  "zero-filled (the old bug)": {
+   "ms_per_plan": 3.199309874617029,
+   "n_nonfinite_or_raised": 0,
+   "E_spread": 45.879552756903756,
+   "E_median": -1.9319872096724566,
+   "sd_median": 3.446374736783743
+  },
+  "raw (NaN left in)": {
+   "ms_per_plan": 0.006570937330252491,
+   "n_nonfinite_or_raised": 16,
+   "E_spread": NaN,
+   "E_median": NaN,
+   "sd_median": NaN
+  }
+ }
+}

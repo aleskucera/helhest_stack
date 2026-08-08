@@ -175,6 +175,17 @@ def plan_moments_conv(
     """E[J_settle], Var[J_settle] for one plan, with no covariance matrix anywhere."""
     ny, nx = belief.shape
     belief_flat, sigma_flat = belief.ravel(), sigma.ravel()
+    # A real map has holes. Replaying a bag through this estimator showed every plan returning
+    # a non-finite (E, Var) with no complaint, because NaN flows through the fold silently and
+    # comes out the far end. Unobserved cells are the CALLER's decision -- fill policy changes
+    # the ranking sharply -- so refuse the input rather than invent one.
+    if not np.isfinite(belief).all():
+        raise ValueError(
+            "belief contains non-finite cells: choose a fill policy before calling "
+            "(ground-referenced fill is the one that does not create phantom plateaus)"
+        )
+    if not np.isfinite(sigma).all():
+        raise ValueError("sigma contains non-finite cells")
     wheel_xy = np.array([[0.0, rp.half_track], [0.0, -rp.half_track], [-rp.rear_offset, 0.0]])
     t_idx = np.arange(1, controlled.shape[0])
     n_t = len(t_idx)
