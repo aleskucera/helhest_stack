@@ -1,0 +1,128 @@
+{
+ "per_seed": [
+  {
+   "seed": 0,
+   "n_probe": 400,
+   "sub": 5,
+   "k_coarse": 37,
+   "tau_median_cm": 7.737560269175658,
+   "fitted_n_bumps": 26,
+   "held_out": {
+    "mean layer (current)": {
+     "bias_cm": -19.15030840655428,
+     "rms_cm": 19.5566725304142
+    },
+    "max layer (free)": {
+     "bias_cm": 0.026241415261986714,
+     "rms_cm": 1.4213519595573536
+    },
+    "relief-corrected": {
+     "bias_cm": 0.248203149072584,
+     "rms_cm": 3.072950336452121
+    }
+   }
+  },
+  {
+   "seed": 1,
+   "n_probe": 400,
+   "sub": 5,
+   "k_coarse": 37,
+   "tau_median_cm": 7.59454060167638,
+   "fitted_n_bumps": 26,
+   "held_out": {
+    "mean layer (current)": {
+     "bias_cm": -18.52174046182124,
+     "rms_cm": 18.864687817478
+    },
+    "max layer (free)": {
+     "bias_cm": 0.10050875579568985,
+     "rms_cm": 1.3496269915638828
+    },
+    "relief-corrected": {
+     "bias_cm": 0.0470091649415062,
+     "rms_cm": 3.007484958065899
+    }
+   }
+  },
+  {
+   "seed": 2,
+   "n_probe": 400,
+   "sub": 5,
+   "k_coarse": 37,
+   "tau_median_cm": 7.297383900786349,
+   "fitted_n_bumps": 26,
+   "held_out": {
+    "mean layer (current)": {
+     "bias_cm": -17.995151609717748,
+     "rms_cm": 18.36372943033426
+    },
+    "max layer (free)": {
+     "bias_cm": 0.1670812058606411,
+     "rms_cm": 1.2821062045420968
+    },
+    "relief-corrected": {
+     "bias_cm": -0.09996506373927427,
+     "rms_cm": 2.9652492439594917
+    }
+   }
+  },
+  {
+   "seed": 3,
+   "n_probe": 400,
+   "sub": 5,
+   "k_coarse": 37,
+   "tau_median_cm": 7.401258293454925,
+   "fitted_n_bumps": 28,
+   "held_out": {
+    "mean layer (current)": {
+     "bias_cm": -18.123732575666153,
+     "rms_cm": 18.541906553697984
+    },
+    "max layer (free)": {
+     "bias_cm": 0.03943138586737447,
+     "rms_cm": 1.4419847499226155
+    },
+    "relief-corrected": {
+     "bias_cm": 0.20462414900098103,
+     "rms_cm": 3.2857789797274264
+    }
+   }
+  },
+  {
+   "seed": 4,
+   "n_probe": 400,
+   "sub": 5,
+   "k_coarse": 37,
+   "tau_median_cm": 7.622765977417917,
+   "fitted_n_bumps": 26,
+   "held_out": {
+    "mean layer (current)": {
+     "bias_cm": -18.847983146051437,
+     "rms_cm": 19.197437933284856
+    },
+    "max layer (free)": {
+     "bias_cm": 0.007592164223237066,
+     "rms_cm": 1.5275372748010458
+    },
+    "relief-corrected": {
+     "bias_cm": 0.011995079441620982,
+     "rms_cm": 3.0274643493788393
+    }
+   }
+  }
+ ],
+ "aggregate": {
+  "mean layer (current)": {
+   "bias_cm": -18.52778323996217,
+   "rms_cm": 18.904886853041862
+  },
+  "max layer (free)": {
+   "bias_cm": 0.06817098540178583,
+   "rms_cm": 1.4045214360773988
+  },
+  "relief-corrected": {
+   "bias_cm": 0.0823732957434836,
+   "rms_cm": 3.0717855735167556
+  }
+ }
+}

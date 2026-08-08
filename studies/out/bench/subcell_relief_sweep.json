@@ -1,0 +1,218 @@
+[
+ {
+  "seed": 0,
+  "n_probe": 300,
+  "sub": 5,
+  "k_coarse": 37,
+  "beta": 1.8,
+  "hits_per_cell": null,
+  "tau_median_cm": 7.737560269175658,
+  "fitted_n_bumps": 24,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -18.482539021005792,
+    "rms_cm": 18.829448584387034
+   },
+   "max layer (free)": {
+    "bias_cm": 0.2594175869711682,
+    "rms_cm": 1.374152986413804
+   },
+   "relief-corrected": {
+    "bias_cm": 0.35225029646892025,
+    "rms_cm": 3.020104622828059
+   }
+  }
+ },
+ {
+  "seed": 0,
+  "n_probe": 300,
+  "sub": 5,
+  "k_coarse": 37,
+  "beta": 1.8,
+  "hits_per_cell": 8,
+  "tau_median_cm": 7.737560269175658,
+  "fitted_n_bumps": 24,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -18.482539021005792,
+    "rms_cm": 18.829448584387034
+   },
+   "max layer (free)": {
+    "bias_cm": -3.882838433977102,
+    "rms_cm": 5.4220481698647625
+   },
+   "relief-corrected": {
+    "bias_cm": 0.35225029646892025,
+    "rms_cm": 3.020104622828059
+   }
+  }
+ },
+ {
+  "seed": 0,
+  "n_probe": 300,
+  "sub": 5,
+  "k_coarse": 37,
+  "beta": 1.8,
+  "hits_per_cell": 3,
+  "tau_median_cm": 7.737560269175658,
+  "fitted_n_bumps": 24,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -18.482539021005792,
+    "rms_cm": 18.829448584387034
+   },
+   "max layer (free)": {
+    "bias_cm": -5.635029988926836,
+    "rms_cm": 7.120301953138387
+   },
+   "relief-corrected": {
+    "bias_cm": 0.35225029646892025,
+    "rms_cm": 3.020104622828059
+   }
+  }
+ },
+ {
+  "seed": 0,
+  "n_probe": 300,
+  "sub": 5,
+  "k_coarse": 37,
+  "beta": 2.4,
+  "hits_per_cell": null,
+  "tau_median_cm": 4.04942169573164,
+  "fitted_n_bumps": 23,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -9.287017482780485,
+    "rms_cm": 9.53100456821139
+   },
+   "max layer (free)": {
+    "bias_cm": 0.45437857204893584,
+    "rms_cm": 1.2285006892181167
+   },
+   "relief-corrected": {
+    "bias_cm": 0.17661273919926448,
+    "rms_cm": 1.8117801331261312
+   }
+  }
+ },
+ {
+  "seed": 0,
+  "n_probe": 300,
+  "sub": 5,
+  "k_coarse": 37,
+  "beta": 2.4,
+  "hits_per_cell": 8,
+  "tau_median_cm": 4.04942169573164,
+  "fitted_n_bumps": 23,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -9.287017482780485,
+    "rms_cm": 9.53100456821139
+   },
+   "max layer (free)": {
+    "bias_cm": -2.0287987210989074,
+    "rms_cm": 2.9803603216274848
+   },
+   "relief-corrected": {
+    "bias_cm": 0.17661273919926448,
+    "rms_cm": 1.8117801331261312
+   }
+  }
+ },
+ {
+  "seed": 0,
+  "n_probe": 300,
+  "sub": 5,
+  "k_coarse": 37,
+  "beta": 2.4,
+  "hits_per_cell": 3,
+  "tau_median_cm": 4.04942169573164,
+  "fitted_n_bumps": 23,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -9.287017482780485,
+    "rms_cm": 9.53100456821139
+   },
+   "max layer (free)": {
+    "bias_cm": -2.88440554643841,
+    "rms_cm": 3.823440743589843
+   },
+   "relief-corrected": {
+    "bias_cm": 0.17661273919926448,
+    "rms_cm": 1.8117801331261312
+   }
+  }
+ },
+ {
+  "seed": 0,
+  "n_probe": 300,
+  "sub": 5,
+  "k_coarse": 37,
+  "beta": 3.0,
+  "hits_per_cell": null,
+  "tau_median_cm": 1.5134965665477154,
+  "fitted_n_bumps": 22,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -3.348516400744539,
+    "rms_cm": 3.4637421323818764
+   },
+   "max layer (free)": {
+    "bias_cm": 0.5994746243102537,
+    "rms_cm": 1.0628977806884983
+   },
+   "relief-corrected": {
+    "bias_cm": 0.022563569782131858,
+    "rms_cm": 0.7333633082279752
+   }
+  }
+ },
+ {
+  "seed": 0,
+  "n_probe": 300,
+  "sub": 5,
+  "k_coarse": 37,
+  "beta": 3.0,
+  "hits_per_cell": 8,
+  "tau_median_cm": 1.5134965665477154,
+  "fitted_n_bumps": 22,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -3.348516400744539,
+    "rms_cm": 3.4637421323818764
+   },
+   "max layer (free)": {
+    "bias_cm": -0.44390112869049836,
+    "rms_cm": 1.1354740593610417
+   },
+   "relief-corrected": {
+    "bias_cm": 0.022563569782131858,
+    "rms_cm": 0.7333633082279752
+   }
+  }
+ },
+ {
+  "seed": 0,
+  "n_probe": 300,
+  "sub": 5,
+  "k_coarse": 37,
+  "beta": 3.0,
+  "hits_per_cell": 3,
+  "tau_median_cm": 1.5134965665477154,
+  "fitted_n_bumps": 22,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -3.348516400744539,
+    "rms_cm": 3.4637421323818764
+   },
+   "max layer (free)": {
+    "bias_cm": -0.9378457270859252,
+    "rms_cm": 1.501013717682734
+   },
+   "relief-corrected": {
+    "bias_cm": 0.022563569782131858,
+    "rms_cm": 0.7333633082279752
+   }
+  }
+ }
+]

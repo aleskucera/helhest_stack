@@ -1,0 +1,241 @@
+"""Model the discretization error the same way the method models everything else: through the max.
+
+    .venv/bin/python -m studies.sensing.subcell_relief
+
+THE PROBLEM. The wheel does not rest on the max of the grid's cell VALUES; it rests on the max
+of the true surface. `lidar_belief.py --diagnose` showed the difference is real: on 10 cm cells
+over 12 cm RMS terrain, a rasterized cell holds the mean height of the returns in it -- an area
+average -- while the contact model reads it as the height AT the cell centre, and the two differ
+by ~2 cm. A max over sampled points is BELOW the max over the surface those points came from, so
+the grid is systematically optimistic about contact height, and it is most optimistic exactly
+where the terrain is roughest.
+
+THE FIX IS THE METHOD'S OWN THESIS, ONE LEVEL DOWN, because max is associative:
+
+    max over the footprint  =  max over cells of ( max WITHIN the cell )
+
+The current model silently replaces the inner max with the stored cell value. So instead of a
+correction bolted on afterwards, we give the fold the within-cell max as its candidate:
+
+    h(x) = h_c + eta(x),  eta zero-mean within the cell, variance tau_c^2  (the sub-grid relief)
+    m_c  = h_c + tau_c a(n),   v_c = tau_c^2 b(n)     n = independent bumps per cell
+
+and a(n), b(n) come from Clark's own recursion over n iid candidates rather than from an
+imported extreme-value approximation, so the two levels are the same machinery.
+
+TWO THINGS THAT DECIDE WHETHER IT WORKS, both handled here.
+  * tau must be the relief left AFTER removing the local plane. A 10 cm cell on a 20 deg slope
+    varies by 3.6 cm from the gradient alone, but that is the smooth field the neighbouring cells
+    already encode -- counting it as sub-grid relief would double-count every hillside.
+  * n is not guessable from first principles for broadband terrain, so it is FIT as a single
+    scalar on one half of the map and validated on the other.
+
+WHAT IS COMPARED, over many wheel placements, against the true footprint max computed on a 5x
+finer surface:
+  mean layer     the current model: max over coarse cells of (cell mean + cap)
+  max layer      the free alternative: the mapper already computes a per-cell max, use it
+  corrected      the model above
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+
+import numpy as np
+
+from ..adjoint.generalise import fractal_terrain
+from ..bench.clark import clark_build
+from ..bench.ranking import CELL
+from ..bench.ranking import OUT
+from helhest.engine import RobotParams
+
+SUB = 5  # the true surface is this many times finer than the belief grid
+
+
+def _iid_max_moments(tau: float, n: int) -> tuple[float, float]:
+    """E[max] and Var[max] of `n` iid N(0, tau^2), via the same Clark fold the method uses."""
+    if n <= 1:
+        return 0.0, tau * tau
+    means = np.zeros((1, n))
+    sigmas = np.full((1, n), tau)
+    cov = np.zeros((1, n, n))
+    cov[0, np.arange(n), np.arange(n)] = tau * tau
+    mean_n, var_n, *_ = clark_build(means, sigmas, cov, cov)
+    return float(mean_n[0]), float(var_n[0])
+
+
+def build_surfaces(
+    seed: int, n_coarse: int, beta: float = 1.8, hits_per_cell: int | None = None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """One fine surface, and the coarse views of it a mapper could produce.
+
+    `beta` sets how much power the surface has below the grid's Nyquist -- the whole magnitude
+    of this effect is set by that, so it is swept rather than fixed. `hits_per_cell` samples
+    only that many of the SUB^2 sub-cells before taking the max, which is what a real mapper
+    sees: the max layer is only as good as the returns that landed in the cell."""
+    fine = fractal_terrain(n_coarse * SUB, n_coarse * SUB, CELL / SUB, seed=seed, beta=beta)
+    blocks = fine.reshape(n_coarse, SUB, n_coarse, SUB).transpose(0, 2, 1, 3)
+    coarse_mean = blocks.mean(axis=(2, 3))
+    if hits_per_cell is None:
+        coarse_max = blocks.max(axis=(2, 3))
+    else:
+        flat = blocks.reshape(n_coarse, n_coarse, SUB * SUB)
+        rng = np.random.default_rng(seed + 5)
+        pick = rng.integers(0, SUB * SUB, (n_coarse, n_coarse, hits_per_cell))
+        coarse_max = np.take_along_axis(flat, pick, axis=2).max(axis=2)
+
+    # tau: the within-cell spread AFTER removing the plane the coarse grid already represents.
+    # The bilinear interpolation of `coarse_mean` evaluated at the fine positions IS that plane.
+    gy, gx = np.meshgrid(np.arange(n_coarse * SUB), np.arange(n_coarse * SUB), indexing="ij")
+    fy = np.clip((gy + 0.5) / SUB - 0.5, 0, n_coarse - 1.001)
+    fx = np.clip((gx + 0.5) / SUB - 0.5, 0, n_coarse - 1.001)
+    iy, ix = fy.astype(int), fx.astype(int)
+    ty, tx = fy - iy, fx - ix
+    plane = (
+        coarse_mean[iy, ix] * (1 - tx) * (1 - ty)
+        + coarse_mean[iy, ix + 1] * tx * (1 - ty)
+        + coarse_mean[iy + 1, ix] * (1 - tx) * ty
+        + coarse_mean[iy + 1, ix + 1] * tx * ty
+    )
+    resid = (fine - plane).reshape(n_coarse, SUB, n_coarse, SUB).transpose(0, 2, 1, 3)
+    tau = resid.std(axis=(2, 3))
+    return fine, coarse_mean, coarse_max, tau
+
+
+def footprint_tables(rp: RobotParams) -> tuple[tuple, tuple]:
+    """(dy, dx, cap) for the wheel disk at the coarse and at the fine resolution."""
+
+    def table(cell: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        r = int(np.ceil(rp.wheel_radius / cell))
+        dy, dx = np.meshgrid(np.arange(-r, r + 1), np.arange(-r, r + 1), indexing="ij")
+        d2 = (dy * cell) ** 2 + (dx * cell) ** 2
+        keep = d2 <= rp.wheel_radius**2
+        cap = np.sqrt(np.maximum(rp.wheel_radius**2 - d2[keep], 0.0)) - rp.wheel_radius
+        return dy[keep], dx[keep], cap
+
+    return table(CELL), table(CELL / SUB)
+
+
+def compare(
+    seed: int, n_coarse: int, n_probe: int, beta: float = 1.8, hits: int | None = None
+) -> dict:
+    rp = RobotParams()
+    fine, c_mean, c_max, tau = build_surfaces(seed, n_coarse, beta, hits)
+    (cdy, cdx, ccap), (fdy, fdx, fcap) = footprint_tables(rp)
+    k = len(cdy)
+
+    rng = np.random.default_rng(seed + 99)
+    margin = 6
+    iy = rng.integers(margin, n_coarse - margin, n_probe)
+    ix = rng.integers(margin, n_coarse - margin, n_probe)
+
+    # truth: the max of the real surface over the wheel's disk, at fine resolution
+    fy = iy[:, None] * SUB + SUB // 2 + fdy[None, :]
+    fx = ix[:, None] * SUB + SUB // 2 + fdx[None, :]
+    truth = (fine[fy, fx] + fcap[None, :]).max(axis=1)
+
+    cy = iy[:, None] + cdy[None, :]
+    cx = ix[:, None] + cdx[None, :]
+    plain_mean = (c_mean[cy, cx] + ccap[None, :]).max(axis=1)
+    plain_max = (c_max[cy, cx] + ccap[None, :]).max(axis=1)
+
+    # --- the corrected model, with n fit on the first half and reported on the second ---------
+    tau_probe = tau[cy, cx]
+    half = n_probe // 2
+    best_n, best_err = 1, np.inf
+    for n in range(1, 33):
+        a, b = _iid_max_moments(1.0, n)
+        means = c_mean[cy[:half], cx[:half]] + ccap[None, :] + a * tau_probe[:half]
+        sig = np.sqrt(b) * tau_probe[:half]
+        cov = np.zeros((half, k, k))
+        idx = np.arange(k)
+        cov[:, idx, idx] = sig**2
+        pred, _v, *_ = clark_build(means, sig, cov, cov)
+        err = abs(float(np.mean(pred - truth[:half])))
+        if err < best_err:
+            best_n, best_err = n, err
+
+    a, b = _iid_max_moments(1.0, best_n)
+    means = c_mean[cy, cx] + ccap[None, :] + a * tau_probe
+    sig = np.sqrt(b) * tau_probe
+    cov = np.zeros((n_probe, k, k))
+    idx = np.arange(k)
+    cov[:, idx, idx] = sig**2
+    corrected, _v, *_ = clark_build(means, sig, cov, cov)
+
+    def stats(pred: np.ndarray, sl: slice) -> dict:
+        e = (pred - truth)[sl]
+        return {"bias_cm": float(e.mean() * 100), "rms_cm": float(np.sqrt((e**2).mean()) * 100)}
+
+    hold = slice(half, n_probe)
+    return {
+        "seed": seed, "n_probe": n_probe, "sub": SUB, "k_coarse": int(k),
+        "beta": beta, "hits_per_cell": hits,
+        "tau_median_cm": float(np.median(tau) * 100),
+        "fitted_n_bumps": best_n,
+        "held_out": {
+            "mean layer (current)": stats(plain_mean, hold),
+            "max layer (free)": stats(plain_max, hold),
+            "relief-corrected": stats(corrected, hold),
+        },
+    }
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seeds", type=int, default=5)
+    ap.add_argument("--cells", type=int, default=90)
+    ap.add_argument("--probes", type=int, default=400)
+    ap.add_argument("--sweep", action="store_true",
+                    help="how the effect scales with sub-grid roughness and with hit count")
+    args = ap.parse_args()
+
+    if args.sweep:
+        print("=== how big is this, really? ===")
+        print("  beta = terrain spectrum (higher = smoother below the grid); "
+              "hits = returns per cell\n")
+        print(f"  {'beta':>5} {'hits':>5} {'tau[cm]':>8} | {'mean layer':>18} "
+              f"{'max layer':>18} {'corrected':>18}")
+        out = []
+        for beta in (1.8, 2.4, 3.0):
+            for hits in (None, 8, 3):
+                r = compare(0, args.cells, args.probes, beta, hits)
+                h = r["held_out"]
+                out.append(r)
+                cells = "   ".join(
+                    f"{h[k]['bias_cm']:+6.2f}/{h[k]['rms_cm']:5.2f}"
+                    for k in ("mean layer (current)", "max layer (free)", "relief-corrected")
+                )
+                hl = "all" if hits is None else str(hits)
+                print(f"  {beta:>5.1f} {hl:>5} {r['tau_median_cm']:>8.2f} |  {cells}")
+        (OUT / "subcell_relief_sweep.json").write_text(json.dumps(out, indent=1))
+        print(f"\nwrote {OUT / 'subcell_relief_sweep.json'}  (bias/RMS in cm, held-out half)")
+        return
+
+    print("=== predicting the TRUE footprint max from a coarse grid ===")
+    print("    (bias < 0 means the model sits BELOW the real contact height: optimistic)")
+    rows = []
+    for seed in range(args.seeds):
+        r = compare(seed, args.cells, args.probes)
+        rows.append(r)
+        h = r["held_out"]
+        print(f"  seed {seed}  tau {r['tau_median_cm']:.2f} cm, n={r['fitted_n_bumps']:2d}   "
+              + "   ".join(f"{k}: {v['bias_cm']:+.2f}/{v['rms_cm']:.2f}" for k, v in h.items()))
+    agg = {
+        name: {
+            "bias_cm": float(np.mean([r["held_out"][name]["bias_cm"] for r in rows])),
+            "rms_cm": float(np.mean([r["held_out"][name]["rms_cm"] for r in rows])),
+        }
+        for name in rows[0]["held_out"]
+    }
+    print("\n  held-out mean over seeds        bias [cm]   RMS [cm]")
+    for name, v in agg.items():
+        print(f"    {name:26s}   {v['bias_cm']:+7.2f}   {v['rms_cm']:7.2f}")
+    path = OUT / "subcell_relief.json"
+    path.write_text(json.dumps({"per_seed": rows, "aggregate": agg}, indent=1))
+    print(f"\nwrote {path}")
+
+
+if __name__ == "__main__":
+    main()
