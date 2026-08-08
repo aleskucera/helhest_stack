@@ -1,0 +1,107 @@
+[
+ {
+  "seed": 0,
+  "beta": 1.8,
+  "n_probe": 273,
+  "median_hits_per_cell": 56.0,
+  "tau_true_median_cm": 7.7502879255842805,
+  "tau_hat_median_cm": 4.43233518897502,
+  "tau_corr": 0.0366184384625911,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -12.5370326479919,
+    "rms_cm": 13.478638298526382
+   },
+   "max layer (free)": {
+    "bias_cm": 19.151930631082344,
+    "rms_cm": 28.95121446318505
+   },
+   "p95 layer (free)": {
+    "bias_cm": 1.6483193407134642,
+    "rms_cm": 12.409798086894604
+   },
+   "p90 layer (free)": {
+    "bias_cm": -2.052554668391408,
+    "rms_cm": 9.484963498372347
+   },
+   "corrected, tau ESTIMATED": {
+    "bias_cm": -1.8876655292322142,
+    "rms_cm": 8.150615814851767
+   },
+   "corrected, tau ORACLE": {
+    "bias_cm": -0.2694784947953737,
+    "rms_cm": 4.856009366638368
+   }
+  }
+ },
+ {
+  "seed": 0,
+  "beta": 2.4,
+  "n_probe": 236,
+  "median_hits_per_cell": 60.0,
+  "tau_true_median_cm": 4.057165999570406,
+  "tau_hat_median_cm": 2.8788854445854026,
+  "tau_corr": 0.047665738018576126,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -7.483335823686684,
+    "rms_cm": 8.758606361233227
+   },
+   "max layer (free)": {
+    "bias_cm": 19.908302290772777,
+    "rms_cm": 28.92598392399417
+   },
+   "p95 layer (free)": {
+    "bias_cm": 4.616746084906974,
+    "rms_cm": 13.635914846293595
+   },
+   "p90 layer (free)": {
+    "bias_cm": 2.198382287016865,
+    "rms_cm": 13.11897053171614
+   },
+   "corrected, tau ESTIMATED": {
+    "bias_cm": 0.2873815499671913,
+    "rms_cm": 8.396664507015045
+   },
+   "corrected, tau ORACLE": {
+    "bias_cm": -0.29190741752922617,
+    "rms_cm": 4.3562619155064715
+   }
+  }
+ },
+ {
+  "seed": 0,
+  "beta": 3.0,
+  "n_probe": 267,
+  "median_hits_per_cell": 67.0,
+  "tau_true_median_cm": 1.5134069990070462,
+  "tau_hat_median_cm": 0.6938731225522579,
+  "tau_corr": 0.042163493481883016,
+  "held_out": {
+   "mean layer (current)": {
+    "bias_cm": -3.7407899264847435,
+    "rms_cm": 5.238109886128945
+   },
+   "max layer (free)": {
+    "bias_cm": 22.03238141197779,
+    "rms_cm": 29.587314935884518
+   },
+   "p95 layer (free)": {
+    "bias_cm": 6.259756652128051,
+    "rms_cm": 13.954658323434376
+   },
+   "p90 layer (free)": {
+    "bias_cm": 2.2117145956411566,
+    "rms_cm": 7.028876912470908
+   },
+   "corrected, tau ESTIMATED": {
+    "bias_cm": 0.744712927291527,
+    "rms_cm": 5.808760389950583
+   },
+   "corrected, tau ORACLE": {
+    "bias_cm": 0.09197687057313209,
+    "rms_cm": 3.6881436102443064
+   }
+  }
+ }
+]
