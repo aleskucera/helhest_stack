@@ -128,8 +128,9 @@ def main() -> None:
         blobs[f"{name}/tracks"] = tracks
         blobs[f"{name}/soils"] = soils
         blobs[f"{name}/times"] = times
+        yaw_deg = math.degrees(poses[-1][3])
         print(f"  {name:>20}: {len(poses)} poses, {len(soils)} soil snapshots, "
-              f"end ({poses[-1][0]:+.2f}, {poses[-1][1]:+.2f}) yaw {math.degrees(poses[-1][3]):+.0f} deg")
+              f"end ({poses[-1][0]:+.2f}, {poses[-1][1]:+.2f}) yaw {yaw_deg:+.0f} deg")
     np.savez_compressed(args.out, **blobs)
     print(f"wrote {args.out}")
 
