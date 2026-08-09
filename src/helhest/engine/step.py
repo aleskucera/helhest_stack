@@ -73,6 +73,7 @@ class Solver:
     tau_motor: wp.float32  # first-order actuator lag time constant [s]; 0 = no lag
     command_delay_steps: wp.int32  # whole-step transport delay on the wheel command; 0 = none
     shear_lk: wp.float32  # contact length / shear modulus; <= 0 = legacy kinematic traction
+    yaw_tau: wp.float32  # [s] first-order yaw-rate lag on the legacy twist; 0 = off
     contact_patch: wp.float32  # contact patch radius [m], torsional term of the shear model
     shear_iters: wp.int32  # Newton iterations for the shear twist solve
     inertia_gain: wp.float32  # 1/dt when body momentum is on, 0 = quasi-static
@@ -112,6 +113,11 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     # at RMS ~0.16 and are indistinguishable, because yaw-inertia transients carry roughly 4x the
     # variance of the traction difference. This model is real but it is not the dominant error.
     shear_lk: float = 0.0
+    # Yaw-rate lag [s] for the LEGACY twist: the body's rotational inertia, which the kinematic
+    # map omits by returning a steady-state yaw rate instantly. 0 = off (the pre-existing
+    # behaviour). Fitted against Chrono at a converged step, not measured on the robot -- see
+    # scripts/engine_ranking.py and PREREG_chrono_vehicle.md.
+    yaw_tau: float = 0.0
     contact_patch: float = 0.075
     shear_iters: int = 6
     # Body momentum, IMPLICITLY integrated inside the same twist solve (requires shear_lk > 0).
@@ -142,6 +148,7 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
         s.tau_motor = self.tau_motor
         s.command_delay_steps = int(round(self.command_delay / self.dt))
         s.shear_lk = self.shear_lk
+        s.yaw_tau = self.yaw_tau
         s.contact_patch = self.contact_patch
         s.shear_iters = self.shear_iters
         s.inertia_gain = (1.0 / self.dt) if self.body_momentum else 0.0
@@ -816,7 +823,20 @@ def traction_twist(
     """
     if solver.shear_lk <= 0.0:
         legacy = body_twist(robot, om, alpha)
-        return wp.vec3(legacy[0], -x_icr * legacy[1], legacy[1])
+        yaw_rate = legacy[1]
+        # YAW INERTIA. The kinematic map is a STEADY-STATE relation: it returns the yaw rate the
+        # robot would eventually hold, reached instantly. Over a planning horizon the command
+        # changes every step and the body never gets there, so the quasi-static model
+        # over-rotates on exactly the manoeuvres MPPI samples. Measured against Chrono at a
+        # CONVERGED step (scripts/engine_ranking.py): steady-state alpha agrees at ~1.6, yet the
+        # endpoint error grows 0.08 m on near-straight candidates to 0.31 m on hard turns, and
+        # inflating k_turn to hide it needs alpha ~3, which then contradicts the steady-state
+        # measurement. One first-order lag on the yaw channel fixes the mechanism instead:
+        # implicit, so it is unconditionally stable and costs nothing at dt >> tau.
+        if solver.yaw_tau > 0.0:
+            blend = solver.dt / (solver.dt + solver.yaw_tau)
+            yaw_rate = previous[2] + blend * (yaw_rate - previous[2])
+        return wp.vec3(legacy[0], -x_icr * yaw_rate, yaw_rate)
     kinematic = body_twist(robot, om, 1.0)  # warm start: the ideal differential-drive twist
     weight = robot.mass * robot.gravity
     cos_pitch = wp.cos(tilt[0])

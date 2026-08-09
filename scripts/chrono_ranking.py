@@ -30,7 +30,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import chrono_vehicle_model as M  # noqa: E402
 
 DT_PLAN = 0.1  # the planner's step; the candidate holds each command for one of these
-DT_SIM = 5.0e-3  # Chrono's integration step
+# Chrono's integration step. 5 ms is NOT converged: the turn gain reads alpha 3.17 there and
+# 1.66 at 0.5 ms, so a ranking taken at 5 ms is comparing against a discretisation artifact.
+DT_SIM = 1.0e-3
 
 
 def candidates(n: int, horizon: int, seed: int, wmin=0.0, wmax=4.0, nominal=1.5) -> np.ndarray:
@@ -104,8 +106,10 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=150)
     ap.add_argument("--horizon", type=int, default=25)
     ap.add_argument("--seed", type=int, default=11)
+    ap.add_argument("--dt", type=float, default=DT_SIM)
     args = ap.parse_args()
 
+    globals()["DT_SIM"] = args.dt
     U = candidates(args.n, args.horizon, args.seed)
     trajs = np.zeros((args.n, args.horizon + 1, 3), np.float32)
     for i in range(args.n):

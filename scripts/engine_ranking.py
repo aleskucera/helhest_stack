@@ -89,7 +89,7 @@ def main() -> None:
 
     print(f"{'k_turn':>8}{'alpha':>8}{'endpt mean':>12}{'endpt p95':>11}"
           + "".join(f"{f'tau/elite g{i}':>16}" for i in range(len(GOALS))))
-    for k_turn in (dynamics.K_TURN, 1.5, 2.71, 3.5):
+    for k_turn in (dynamics.K_TURN, 0.75, 1.0, 1.5, 2.71):
         eng = run_engine(U, k_turn, args.device)
         derr = np.linalg.norm(eng[:, -1, :2] - ref[:, -1, :2], axis=1)
         cells = ""
@@ -103,13 +103,13 @@ def main() -> None:
         print(head + f"{derr.mean():>11.3f}m{np.percentile(derr, 95):>10.3f}m" + cells)
 
     # where do they disagree most? that is the input to any fix
-    eng = run_engine(U, 2.71, args.device)
+    eng = run_engine(U, 0.75, args.device)
     derr = np.linalg.norm(eng[:, -1, :2] - ref[:, -1, :2], axis=1)
     dyaw = np.degrees(np.abs(np.arctan2(np.sin(eng[:, -1, 2] - ref[:, -1, 2]),
                                         np.cos(eng[:, -1, 2] - ref[:, -1, 2]))))
     diff = np.abs(U[:, :, 1] - U[:, :, 0]).mean(axis=0)
     speed = 0.5 * (U[:, :, 0] + U[:, :, 1]).mean(axis=0)
-    print(f"\nat the matched k_turn: endpoint error {derr.mean():.3f} m mean, "
+    print(f"\nat k_turn 0.75: endpoint error {derr.mean():.3f} m mean, "
           f"{derr.max():.3f} m worst; final-yaw error {dyaw.mean():.1f} deg mean, "
           f"{dyaw.max():.1f} deg worst")
     q = np.quantile(diff, [0.25, 0.5, 0.75])
