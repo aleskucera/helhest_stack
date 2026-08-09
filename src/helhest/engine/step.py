@@ -449,26 +449,66 @@ def normal_loads(
     placed at this pose; the contacts then sit on `envelope` (the wheel-envelope
     grid). `robot` carries mass/gravity/com/wheel_pos/wheel_radius.
 
-    Row 0: vertical force balance Sum N_i n_iz = m g.
-    Rows 1-2: horizontal torque balance about the CoM. Returns N = vec3(N0,N1,N2).
+    Row 0: force balance ALONG THE SURFACE NORMAL, Sum N_i = m g (n_bar . z).
+    Rows 1-2: horizontal torque balance about the CoM, including the moment of the tangential
+    (friction) reaction. Returns N = vec3(N0,N1,N2).
+
+    THE TANGENTIAL REACTION. What holds the robot on a slope is not the contact normals alone:
+    the contacts also supply an in-plane friction force, and it acts at the ground, BELOW the CoM,
+    so it carries a moment about the CoM. Balancing normals only -- which this function used to do
+    -- gets the load split wrong as soon as the ground tilts. Measured against Project Chrono
+    (PREREG_chrono.md, scripts/chrono_compare.py): at 25 deg of pitch the least-loaded contact
+    came out at 0.291 m g against Chrono's 0.042, an error of 0.249 m g = 259 N. Worse, on a side
+    slope the old balance produced NO left/right transfer at all, and could not have: with
+    parallel normals the split collapses to the CoM's barycentric weight, and the CoM sits on the
+    centreline. Chrono transfers 0.405 m g by 25 deg of bank.
+
+    The closure is that friction is shared in proportion to normal load, f_i = (N_i / S) F_t with
+    S = Sum N_i. The total tangential force then follows from force balance, F_t = m g z - S n_bar,
+    and the moment it contributes is LINEAR in N_i, so this stays a 3x3 solve at the same cost.
+    Resolving the force balance along n_bar instead of vertically is what makes S right: friction
+    has a vertical component on a slope, so the normals alone do not carry the full weight. The
+    old row gave Sum N_i = m g / (cos pitch cos roll), a 10% overshoot at 25 deg, where the truth
+    is m g cos(tilt) -- which Chrono confirms to 1e-4.
+
+    On FLAT ground n_bar = z, S = m g and F_t = 0, so every coefficient reduces to the previous
+    one and the result is bit-identical. Only sloped terrain moves.
     """
     com_world = p + R * robot.com
+    weight = robot.mass * robot.gravity
 
-    A = wp.mat33()  # row 0: n_iz (vertical force); rows 1-2: (r_i x n_i)_xy (torque about CoM)
+    normals = wp.mat33()  # rows: the three contact normals
+    arms = wp.mat33()  # rows: the three moment arms about the CoM
+    n_sum = wp.vec3()
     for i in range(wp.static(3)):
         st_i = wp.static(i)
-        wheel_pos = robot.wheel_pos[st_i]
-        wheel_center = p + R * wheel_pos
+        wheel_center = p + R * robot.wheel_pos[st_i]
         n = sample_normal(envelope, grid, wheel_center[0], wheel_center[1])
-        ct = wheel_center - robot.wheel_radius * n  # contact point
-        r = ct - com_world  # moment arm about the CoM
-        m = wp.cross(r, n)
-        A[0, st_i] = n[2]
+        r = (wheel_center - robot.wheel_radius * n) - com_world  # contact point, then moment arm
+        for k in range(wp.static(3)):
+            st_k = wp.static(k)
+            normals[st_i, st_k] = n[st_k]
+            arms[st_i, st_k] = r[st_k]
+        n_sum += n
+
+    n_bar = wp.normalize(n_sum)
+    # total normal load and the in-plane reaction that holds the robot on the slope
+    load_sum = weight * n_bar[2]
+    tangential = wp.vec3(0.0, 0.0, weight) - load_sum * n_bar
+    # guard: on a near-vertical face load_sum collapses and the 1/S weighting would blow up
+    inv_sum = 1.0 / wp.max(load_sum, 1.0e-3 * weight)
+
+    A = wp.mat33()
+    for i in range(wp.static(3)):
+        st_i = wp.static(i)
+        n = wp.vec3(normals[st_i, 0], normals[st_i, 1], normals[st_i, 2])
+        r = wp.vec3(arms[st_i, 0], arms[st_i, 1], arms[st_i, 2])
+        m = wp.cross(r, n) + inv_sum * wp.cross(r, tangential)
+        A[0, st_i] = 1.0
         A[1, st_i] = m[0]
         A[2, st_i] = m[1]
 
-    b = wp.vec3(robot.mass * robot.gravity, 0.0, 0.0)
-    return solve3(A, b)
+    return solve3(A, wp.vec3(load_sum, 0.0, 0.0))
 
 
 @wp.func
