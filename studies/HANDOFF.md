@@ -330,3 +330,110 @@ non-significant p=0.43/0.34 result can be settled at higher n whenever wanted. I
 RUN: the n=100 test already failed its pre-registration, so a larger-n rerun is a NEW test
 that must be pre-registered separately and reported alongside the original failure, never in
 place of it.
+
+### 10.3 Where the belief comes from (2026-08-08/09) — the noise model stopped being invented
+
+This is the largest change to the project's foundations since Clark itself, and none of it is in
+the paper yet. New code: `sensing/lidar_belief.py`, `sensing/subcell_relief.py`,
+`sensing/bag_belief.py`, `bench/clark_conv.py` (rank-M), `bench/realistic_sigma.py`,
+`PREREG_realistic_sigma.md`. Outputs alongside in `out/bench/`.
+
+**THE MOTIVATION: the study was circular.** Estimators were handed a belief, and the MC "truth"
+they were graded against sampled from THAT SAME hand-built noise model. Every arm was being
+scored on how well it predicted a distribution we wrote down.
+
+**1. Simulate the sensing instead of assuming it** (`lidar_belief.py`). A Warp ray-march of an
+Ouster-like 1024x64 pattern against a true height field; noise corrupts the RANGE, not the
+height (so a given error lands in z at normal incidence and slides sideways at grazing, which
+no additive per-cell noise can express); dropout grows at grazing incidence; a 6-DoF drifting
+pose error; and the survivors rasterized by the robot's own `HeightMapBuilder`. Truth is the
+terrain we generated, so nothing is assumed twice. Measured, 32 realizations, one scene:
+sigma 3.1 cm median (the study assumes ~10), correlation TWO-SCALE and anisotropic with a floor
+past 2.5 m (the study assumes one separable kernel, zero by 1 m), separability error 0.48,
+excess kurtosis +9.0, 21% of cells never observed.
+
+**2. The bias decomposition, and a claim of mine that was wrong.** I first reported "79% of the
+error is systematic and no covariance model captures it". That was overstated and the
+diagnostics caught it. FLAT+noiseless gives bias exactly 0.00 (ray-marcher acquitted); halving
+the march step changes nothing; removing dropout does not shrink it. What remains is mostly
+DEFINITIONAL: a rasterized cell holds the mean height of the points in it (an area average)
+while the planner reads it as the height AT the cell centre, and on 10 cm cells over 12 cm RMS
+relief those differ by ~2 cm. Genuine systematic sensing error is ~1 cm against a sigma of 3 cm.
+
+**3. Discretization CAN be modelled, through the max** (`subcell_relief.py`). Max is
+associative, so max over the footprint = max over cells of the max WITHIN each cell; the current
+model silently substitutes the stored value for the inner max. Validated against the true
+footprint max on a 5x finer surface: the mean layer is optimistic by **bias/tau = -2.39, -2.29,
+-2.22** across a roughness sweep, i.e. a LAW (bias ~ -2.3 tau), not a property of one terrain.
+Feeding the fold the within-cell max removes the bias at every roughness.
+  - WITHDRAWN: "just use the mapper's max layer". On a noiseless surface it was the best arm;
+    with real returns it is the WORST (+20 cm) because one bad return owns a cell. A p90 of the
+    same returns recovers most of it.
+  - tau from returns: bias removed, but corr(tau_hat, tau_true) ~0.03 per cell. Two hypotheses
+    were wrong (drift contamination; range/hit-count -- corr is ~0 even at 127 hits/cell). The
+    RIGHT answer: tau_true's own split-half reliability is 0.21-0.50 on homogeneous fractal
+    terrain, so there is no per-cell roughness structure to find. On terrain that HAS roughness
+    structure (patchy amplitude, as real ground does), corr rises to 0.37 per cell and
+    **0.62 / 0.71 / 0.78 pooled over 3x3 / 5x5 / 9x9** against a reliability ceiling of 0.85.
+    So sub-grid roughness is recoverable at PATCH scale (0.5-0.9 m), which is the scale it
+    exists at. A within-cell max cannot be pooled; a variance can. That is the argument for
+    modelling the discretization rather than measuring it.
+
+**4. Real-bag robustness** (`bag_belief.py`). Reads mcap with `rosbags` -- NO ROS, no container --
+recovers the Ouster mount by fitting a ground plane (this bag has no tf_static for it),
+accumulates 40 scans on /odom_2d. 9x9 m window: 49% observed, 33 hits/cell, ground at -1.23 m.
+  - BUG FOUND AND FIXED: the estimator accepted NaN cells and returned non-finite moments for
+    all 16 plans without complaining. `clark_conv` now refuses non-finite input.
+  - CONFIRMED: zero-filling unobserved cells more than DOUBLES the spread between candidates
+    (45.9 vs 21.7) -- the phantom-plateau mechanism reaches the risk term as a RANKING change.
+  - ON RECORD: 16 plans at ~3.15 ms is ~50 ms per replan on a real map (26 ms batched), against
+    a plan/replan budget the profiling put at 4.7 ms. Real integration problem.
+
+**5. rank-M separable kernels** (`clark_conv.separable_terms`). The convolution optimization
+assumes rho(dy,dx) = rho1(dy) rho1(dx). Under the measured kernel that single term gets Var[J]
+wrong by **60%**. Any kernel is a sum of separable products: PSD-projected rank 5 holds Var[J]
+to 0.57%. Truncation alone breaks positive semi-definiteness (min spectrum -4e-4), so alternating
+projections (truncate to rank M; clip the Fourier spectrum at zero, per Bochner) restore it at no
+accuracy cost. NOTE rank 3 scored WORSE than rank 2 on dVar despite a smaller residual on rho --
+choose M by measuring dVar, never by reading the spectrum.
+
+**6. THE BELIEF MODEL THAT FITS: Sigma = rank-3 plane + compact stationary kernel.** The first
+generator gate FAILED and was right to: the realized correlation missed by 0.06 and the miss did
+not shrink with draws. The measured kernel never decays inside its window because a scan's pose
+error shifts and TILTS every point together, and no stationary kernel can express that. Split it
+off: **plane 30%, stationary 70%**, and the residual decorrelates within three cells
+(rho +0.022 at 1 m, -0.004 at 2 m). Both halves are cheap AND EXACT for a linear functional of
+cells -- the plane is a 3x3 form on (sum G, sum G x, sum G y), the residual uses the rank-M
+convolution. Fitted parameters in `out/bench/belief_model.npz` (sigma_offset 1.4 cm, tilt sigma
+~0.005 rad/m).
+
+**7. THE RESULT** (`realistic_sigma.py`, criteria pre-registered and committed BEFORE the run).
+Gate is end-to-end -- does the variance the ESTIMATOR predicts for a linear functional match the
+variance the GENERATOR realizes? -- because the first attempt passed a kernel check and was still
+wrong. Median error 2.2%. hybrid/all, n=100, mean regret:
+
+    clark_cvar  0.0500   vs none    -0.2491  49/62  p=4.8e-06
+    clark_mean  0.1053   vs step    -0.3110  58/67  p=6.8e-10
+    bracket     0.1273   vs bracket -0.0773  28/40  p=1.7e-02
+    fosm        0.2006   vs fosm    -0.1506  39/50  p=9.0e-05
+    none        0.2991
+    step        0.3610   pooled sd-ratio 0.911
+
+**ALL FOUR PRE-REGISTERED CRITERIA PASS.** Our regret barely moves (0.042 -> 0.050) while every
+arm that discards correlation degrades badly: STEP-form 0.181 -> 0.361, now WORSE than planning
+on the mean map; FOSM 0.110 -> 0.201. That is the mechanism -- the advantage comes from consuming
+a correlation structure the alternatives throw away, not from a noise model tuned to suit us.
+Predictions recorded beforehand: two right (longer correlation helps us; the bracket becomes the
+closest competitor), one WRONG (I predicted calibration would be the casualty; it passed most
+comfortably at 0.911).
+
+**CAVEATS.** The belief model is fitted to ONE terrain and ONE straight traverse, so the 30/70
+split and the tilt magnitudes are that scenario's. The plane-within-footprint approximation
+treats the plane's correlation as constant over 0.9 m (true to a fraction of a percent, stated
+in the code). Vegetation, multi-echo, wet surfaces and dust are not modelled at all.
+
+**WHAT THE PAPER DOES NOT YET CONTAIN — none of section 10.3.** In particular it still claims
+the single-separable-kernel convolution (60% wrong under a measured belief; rank-M is the
+repair), still reports the comparison under the invented sigma only, and says nothing about the
+plane/stationary decomposition, the discretization law, or the real-bag robustness fix. Deciding
+how much of this belongs in an 8-page RA-L versus a follow-up is the next call to make.
