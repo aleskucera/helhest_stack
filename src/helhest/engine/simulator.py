@@ -113,13 +113,6 @@ class BaseSimulator:
             self.turning = wp.zeros((T, B), dtype=wp.vec2f, requires_grad=rg)
             self.clearance = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             self.residual = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
-            # Static tip-over margin min_i(N_i) / (m g) -- see step.stability_margin for what it
-            # does and does not detect on this robot.
-            self.stability = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
-            # Tangential friction demand / Coulomb budget -- see step.friction_saturation.
-            self.saturation = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
-            # Required drive torque / RobotParams.motor_torque_limit (inf by default -> all zero).
-            self.stall = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             # Body twist (vx, vy, yaw_rate) carried between steps; only read/written by the
             # momentum traction model, but grad-tracked like the other state so enabling it in
             # the taped path does not silently break gradients.
@@ -271,9 +264,6 @@ class ForwardSimulator(BaseSimulator):
                 self.turning,
                 self.clearance,
                 self.residual,
-                self.stability,
-                self.saturation,
-                self.stall,
                 self.twist,
             ],
             device=self.device,
@@ -499,9 +489,6 @@ class DifferentiableSimulator(BaseSimulator):
                         self.turning[t],
                         self.clearance[t],
                         self.residual[t],
-                        self.stability[t],
-                        self.saturation[t],
-                        self.stall[t],
                         self.twist[t + 1],
                     ],
                     device=self.device,

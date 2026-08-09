@@ -63,7 +63,6 @@ class Robot:
     mass: wp.float32
     yaw_inertia: wp.float32  # [kg m^2] about the CoM; only the momentum traction model reads it
     gravity: wp.float32
-    motor_torque_limit: wp.float32  # [Nm] per wheel at the wheel; inf = no torque limit
     # --- planning capabilities (mirror of the RobotParams fields; the dynamics kernels don't read
     # these, but carrying them on the built struct lets the planner read one object). ---
     min_turn_radius: wp.float32
@@ -94,15 +93,6 @@ class RobotParams:  # host-side robot knobs — what you nudge
     com: tuple = (float(DEFAULT_COM[0]), 0.0, 0.0)  # full vec3, independent of mass
     chassis_nx: int = 3
     chassis_ny: int = 3
-    # Per-wheel drive torque limit at the wheel [Nm]. A measured LOWER BOUND, not a datasheet
-    # envelope: /joint_states.effort calibrates to 0.1 Nm per raw unit (two independent fits,
-    # corr ~0.93; scripts/wheel_torque_from_bags.py), and the front wheels were observed holding
-    # 111-118 Nm for a full second on out_experiment_goal_unreachable0/1 without the signal ever
-    # plateauing. So the true envelope is AT LEAST this; using the bound makes the certificate
-    # fire early rather than late. Consequence worth knowing: at 105 Nm the drivetrain can put
-    # 0.86 x the robot's weight on the ground, so friction saturates before torque does for any
-    # mu < 0.86 -- on this robot the stall certificate is inert on realistic terrain.
-    motor_torque_limit: float = 105.0
     # --- planning capabilities: the robot's own limits. build() copies these into the device Robot
     # struct, so the cost-to-go feasibility AND the MPPI cost kernels read one shared source. ---
     # tightest forward arc the planner assumes (skid-steer maneuverability)
@@ -135,7 +125,6 @@ class RobotParams:  # host-side robot knobs — what you nudge
         r.mass = self.mass
         r.yaw_inertia = self.yaw_inertia
         r.gravity = self.gravity
-        r.motor_torque_limit = self.motor_torque_limit
         r.min_turn_radius = self.min_turn_radius
         r.max_roll = self.max_roll
         r.max_pitch_up = self.max_pitch_up

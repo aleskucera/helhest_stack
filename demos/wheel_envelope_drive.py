@@ -11,7 +11,7 @@ from the wheel track, a rock the wheels straddle, and two ridges (one across the
 it). Drive between the rocks and watch the blue robot climb what the red one drives past.
 
 The title bar carries the live numbers -- the pose/tilt gap between the two models, and the new
-certificates (tip-over margin, friction saturation, torque stall) for each.
+settled pitch/roll for each.
 
 What to expect: the two models barely separate in POSITION (planar motion comes from the wheel
 speeds and the grip solve, which the envelope only touches indirectly) but disagree sharply in
@@ -118,9 +118,6 @@ class _Model:
         self.pose = controlled[1, 0].astype(np.float64)
         self.derived = derived[1, 0]
         self.clearance, self.residual = float(clearance[0, 0]), float(residual[0, 0])
-        self.stability = float(self.sim.stability.numpy()[0, 0])
-        self.saturation = float(self.sim.saturation.numpy()[0, 0])
-        self.stall = float(self.sim.stall.numpy()[0, 0])
         self.trail.append(np.array([self.pose[0], self.pose[1], self.derived[0] + 0.05]))
         if len(self.trail) > 4000:
             self.trail.pop(0)
@@ -264,11 +261,9 @@ def run(device: str, wheel_width: float) -> None:
         glfw.set_window_title(
             win,
             f"BLUE sphere  roll {np.degrees(sphere.derived[2]):+5.1f} pitch "
-            f"{np.degrees(sphere.derived[1]):+5.1f} sat {sphere.saturation:4.2f} "
-            f"stab {sphere.stability:4.2f} stall {sphere.stall:4.2f}   |   "
+            f"{np.degrees(sphere.derived[1]):+5.1f}   |   "
             f"RED cylinder  roll {np.degrees(cylinder.derived[2]):+5.1f} pitch "
-            f"{np.degrees(cylinder.derived[1]):+5.1f} sat {cylinder.saturation:4.2f} "
-            f"stab {cylinder.stability:4.2f} stall {cylinder.stall:4.2f}   |   "
+            f"{np.degrees(cylinder.derived[1]):+5.1f}   |   "
             f"gap {d_pos:4.2f} m  d_roll {d_roll:+5.1f} deg  d_pitch {d_pitch:+5.1f} deg",
         )
 
@@ -318,9 +313,9 @@ def run_headless(device: str, wheel_width: float, steps: int = 90) -> None:
         if i % 6 == 0:
             print(
                 f"{sphere.pose[0]:7.2f} | {np.degrees(sphere.derived[2]):11.2f} "
-                f"{np.degrees(sphere.derived[1]):7.2f} {sphere.saturation:5.2f} | "
+                f"{np.degrees(sphere.derived[1]):7.2f} | "
                 f"{np.degrees(cylinder.derived[2]):9.2f} {np.degrees(cylinder.derived[1]):7.2f} "
-                f"{cylinder.saturation:5.2f} | {gap:8.3f}"
+                f"{gap:8.3f}"
             )
     print(f"worst tilt disagreement {worst_roll:.2f} deg, worst position gap {worst_gap:.3f} m")
 

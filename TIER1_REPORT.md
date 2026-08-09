@@ -20,9 +20,9 @@ a seeded batch and passed at every commit on this branch.
 
 | item | state |
 |---|---|
-| §3 tip-over margin | exposed as `sim.stability` |
-| §1 friction saturation | exposed as `sim.saturation`; crosses 1.0 at `tan θ = μ` to 1.2e-6 |
-| §2 torque / stall | exposed as `sim.stall`; boundary independent of μ to 7e-7 |
+| §3 tip-over margin | built, verified, **since REMOVED** — see §1.1 |
+| §1 friction saturation | built, crossed 1.0 at `tan θ = μ` to 1.2e-6, **since REMOVED** — see §1.1 |
+| §2 torque / stall | built, boundary independent of μ to 7e-7, **since REMOVED** — see §1.1 |
 | §4 cylinder envelope | `wheel_width`, 32 yaw bins, +1.7% rollout cost |
 
 **Finding: `min N_i` is not a tip-over test on this robot.** `normal_loads` balances vertical force
@@ -48,6 +48,52 @@ fire on μ > 0.5 terrain. Only the load *ratios* are taken from the solve, where
 **Firing rates**, B=512 rollouts on synthetic terrain: `saturation` reaches 0.84 at 25° and μ=0.6,
 and fires only on 15°+ slopes at μ=0.3. `stability` sat in [0.259, 0.291] everywhere. `stall` never
 exceeded 0.49.
+
+### 1.1 All three certificates were then removed
+
+They were correct and they were inert, and the second fact turned out to cost more than the first
+was worth. Measured at B=4096, T=25 on this machine:
+
+| | ms | share |
+|---|---|---|
+| `main` | 1.23 | — |
+| this branch, with certificates | 2.60 | |
+| this branch, without them | **1.55** | **1.05 ms, 40%** |
+
+IMPROVEMENTS.md §1 estimated "<1%". The gap is ~40x. It splits 0.41 ms for `contact_grip` and
+0.65 ms for the saturation/stall arithmetic; the tip-over margin was genuinely free (one `min`
+over registers) and was removed only because it does not measure what its name says.
+
+**They could not have earned it at the current settings, and that is algebra rather than luck.**
+Substituting `sin²p + cos²p sin²r = 1 - cos²p cos²r` into the demand, and `cos θ = cos p cos r`
+for the total tilt, the whole certificate collapses to
+
+    saturation  =  tan(θ) / mu_bar          (exactly, with the centripetal term at zero)
+
+verified against the engine to 2.5e-6 at headings 0/45/90 deg on 10 and 20 deg ramps. Two
+consequences. With a UNIFORM friction field `mu_bar` is a constant, so the per-step work computes
+a fixed function of the pitch and roll the settle already has -- `contact_grip` samples the
+terrain three times to recover a number that was known on the host. And the steepest total tilt
+the existing gates admit is the box corner, `cos θ = cos 25 cos 15` → 28.9 deg, so saturation
+caps at `tan(28.9°)/mu = 0.552/mu`: at the deployed `plan_friction = 0.8` it cannot exceed 0.69.
+Not "rarely fires" — cannot fire.
+
+Verified decision-neutral, not just argued: every surviving array in `golden_fixture.npz` stayed
+bit-identical before the fixture was regenerated to drop the nine stale keys, and the whole
+`scripts/model_ablation.py` sweep -- 280 arrays, per-candidate cost and endpoints over 5 model
+levels x 28 scenarios -- is bit-identical, with the executed elite-mean command unchanged to 0.0.
+
+**What to restore them for.** The certificate's only real content is making the tilt limit depend
+on the LOCAL friction; the `max_roll` / `max_pitch_up` gates are mu-blind constants. Nothing in
+the perception stack estimates mu per cell today (`elevation_node` calls `set_uniform_friction`),
+so that content is unreachable. The day a per-cell mu exists, `contact_grip` is the piece that is
+needed back, and this commit is the place to read it from. Until then, the same decision is
+available for free on the host: set the tilt gate to `atan(mu)` at plan build, which also makes
+the cost-to-go ROUTER friction-aware -- something the per-step certificate never did, since the
+lattice solver runs no rollouts.
+
+`scripts/saturation_from_bags.py` is unaffected: it computes the ratio from bag data in numpy and
+imports no engine code, so it remains the way to decide whether the terrain ever warrants this.
 
 ---
 
@@ -186,12 +232,11 @@ see them.
 
 | change | default | confidence |
 |---|---|---|
-| the three certificates | on (inert) | high — analytic, nothing consumes them |
+| the three certificates | **removed** | were analytic and correct; 40% of the rollout, and inert |
 | exact-arc integration | **on** | high — exact against a closed form, no parameter |
 | `wheel_width = 0.10` | off | high measurement, but changes planning |
 | `tau_motor = 0.19` | **on** (planner) | jointly fitted; blend 0.53/step at dt=0.1 |
 | `command_delay = 0.04` | on (planner) | residual dead time; 0 steps at dt=0.1 |
-| `motor_torque_limit = 105` | on | a lower bound; inert either way |
 | `shear_lk`, `body_momentum` | off | mechanism sound, parameters unresolved |
 | `k_turn` | unchanged at 1.0 | measured α says 2.20–2.87; deliberately not changed |
 
@@ -212,9 +257,9 @@ see them.
 
 ## 7. Before merging
 
-- **`studies/adjoint/harness.py` must be updated.** It hand-launches `step_kernel_bt` positionally,
-  which now takes `twist_in` as an extra input and `stability`, `saturation`, `stall`, `twist` as
-  extra outputs. It fails on arg count, not silently.
+- **`studies/adjoint/harness.py` must be updated.** It hand-launches `step_kernel_bt`
+  positionally, which now takes `twist_in` as an extra input and `twist` as an extra output (the
+  three certificate outputs are gone again as of §1.1). It fails on arg count, not silently.
 - **Merging with `study/adjoint-sensitivity` will conflict.** That branch's `clear_soft` work
   touches the same lines of `step_finalize`, the kernel signatures and `_alloc_rollout_buffers`.
   Mechanical, but certain. Regenerate the golden fixture afterwards — the merged engine is a

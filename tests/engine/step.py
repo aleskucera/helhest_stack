@@ -71,9 +71,6 @@ def rollout_device(
     turn = wp.zeros((T, 1), dtype=wp.vec2, device=device)
     clear = wp.zeros((T, 1), dtype=float, device=device)
     resid = wp.zeros((T, 1), dtype=float, device=device)
-    stability = wp.zeros((T, 1), dtype=float, device=device)
-    saturation = wp.zeros((T, 1), dtype=float, device=device)
-    stall = wp.zeros((T, 1), dtype=float, device=device)
     twist = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
 
     wp.launch(
@@ -108,9 +105,6 @@ def rollout_device(
                 turn[t],
                 clear[t],
                 resid[t],
-                stability[t],
-                saturation[t],
-                stall[t],
                 twist[t + 1],
             ],
             device=device,
@@ -317,15 +311,14 @@ def selftest_rollout_kernel():
     init_oa = wp.zeros(B, dtype=wp.vec3, device="cpu")
 
     def buffers():
+        # positional, in the kernels' own output order: controlled, derived,
+        # current_wheel_omega, loads, turning, clearance, residual, twist
         return [
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
-            wp.zeros((T, B), dtype=float, device="cpu"),
-            wp.zeros((T, B), dtype=float, device="cpu"),
-            wp.zeros((T, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
@@ -377,7 +370,7 @@ def selftest_rollout_kernel():
                 perstep[2][t],
                 perstep[0][t],
                 perstep[1][t],
-                perstep[10][t],
+                perstep[7][t],
             ],
             outputs=[
                 perstep[2][t + 1],
@@ -387,10 +380,7 @@ def selftest_rollout_kernel():
                 perstep[4][t],
                 perstep[5][t],
                 perstep[6][t],
-                perstep[7][t],
-                perstep[8][t],
-                perstep[9][t],
-                perstep[10][t + 1],
+                perstep[7][t + 1],
             ],
             device="cpu",
         )
@@ -433,9 +423,6 @@ def selftest_motor_lag():
     turn = wp.zeros((T, 1), dtype=wp.vec2, device="cpu")
     clear = wp.zeros((T, 1), dtype=float, device="cpu")
     resid = wp.zeros((T, 1), dtype=float, device="cpu")
-    stability = wp.zeros((T, 1), dtype=float, device="cpu")
-    saturation = wp.zeros((T, 1), dtype=float, device="cpu")
-    stall = wp.zeros((T, 1), dtype=float, device="cpu")
     twist = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
 
     wp.launch(
@@ -470,9 +457,6 @@ def selftest_motor_lag():
                 turn[t],
                 clear[t],
                 resid[t],
-                stability[t],
-                saturation[t],
-                stall[t],
                 twist[t + 1],
             ],
             device="cpu",
