@@ -99,8 +99,8 @@ def main() -> None:
             k = max(int(0.1 * n), 1)
             ov = len(set(np.argsort(ce)[:k]) & set(np.argsort(cr)[:k])) / k
             cells += f"{tau_b(ce, cr):>9.3f}/{ov:>5.0%}"
-        print(f"{k_turn:>8.2f}{1 + k_turn * MU:>8.2f}{derr.mean():>11.3f}m{np.percentile(derr, 95):>10.3f}m"
-              + cells)
+        head = f"{k_turn:>8.2f}{1 + k_turn * MU:>8.2f}"
+        print(head + f"{derr.mean():>11.3f}m{np.percentile(derr, 95):>10.3f}m" + cells)
 
     # where do they disagree most? that is the input to any fix
     eng = run_engine(U, 2.71, args.device)
