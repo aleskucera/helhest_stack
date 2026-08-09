@@ -200,9 +200,11 @@ def drive(terrain_kind: str, omega: tuple[float, float, float], t_end: float,
     mat = chrono.ChContactMaterialNSC()
     mat.SetFriction(MU)
     mat.SetRestitution(0.0)
-    # Chrono's rolling friction is a torque per unit normal force; the engine's mu_roll is a
-    # force fraction, so the arm is mu_roll * R
-    mat.SetRollingFriction(ROLLING_RESISTANCE * WHEEL_RADIUS)
+    # Rolling resistance is applied as an explicit TORQUE in the step loop, NOT via
+    # SetRollingFriction. Chrono's NSC rolling friction is a complementarity constraint, and with
+    # three wheels on a rigid body it locks the yaw solid: alpha came out at 26 with it on and
+    # 1.13 with it off, on an otherwise identical model. Measured, not reasoned.
+    mat.SetRollingFriction(0.0)
 
     chassis, wheels, motors = build_robot(sys, mat, rear)
     if terrain_kind == "rigid":
@@ -232,6 +234,15 @@ def drive(terrain_kind: str, omega: tuple[float, float, float], t_end: float,
         for k in cmd:
             realized[k] += blend * (cmd[k] - realized[k])
             motors[k].SetConstant(realized[k])
+        # measured rolling resistance mu_roll * N, as a torque about each wheel's spin axis
+        # opposing its rotation -- the same quantity the engine applies as a contact force
+        for k, w in wheels.items():
+            w.EmptyAccumulators()
+            n = abs(float(w.GetContactForce().z))
+            spin = float(w.GetAngVelLocal().y)
+            if n > 1.0 and abs(spin) > 1e-6:
+                t_roll = -math.copysign(ROLLING_RESISTANCE * n * WHEEL_RADIUS, spin)
+                w.AccumulateTorque(chrono.ChVector3d(0.0, t_roll, 0.0), True)
         if terrain_kind == "scm":
             terrain.Advance(dt)
         sys.DoStepDynamics(dt)
@@ -261,10 +272,23 @@ def forward_gain(run: dict) -> float:
 
 
 def turn_gain(run: dict) -> float:
-    """alpha = ideal differential-drive yaw rate / realised yaw rate, over the steady half."""
+    """alpha = ideal differential-drive yaw rate / realised yaw rate, over the steady half.
+
+    The realised rate is NET rotation over the window, not the mean of the instantaneous `wz`.
+    Those disagreed by 13x in a locked case -- mean wz read 0.0396 rad/s while the body turned a
+    total of 0.016 rad in 5 s -- because `wz` picks up contact jitter that integrates to nothing.
+    """
     tr = run["traj"]
     half = tr[len(tr) // 2:]
-    wz = sum(p["wz"] for p in half) / len(half)
+    unwrapped = [half[0]["yaw"]]
+    for p in half[1:]:
+        d = p["yaw"] - unwrapped[-1]
+        while d > math.pi:
+            d -= 2.0 * math.pi
+        while d < -math.pi:
+            d += 2.0 * math.pi
+        unwrapped.append(unwrapped[-1] + d)
+    wz = (unwrapped[-1] - unwrapped[0]) / (half[-1]["t"] - half[0]["t"])
     ideal = WHEEL_RADIUS * (run["omega"][1] - run["omega"][0]) / (2.0 * HALF_TRACK)
     return float("nan") if abs(wz) < 1e-6 else ideal / wz
 

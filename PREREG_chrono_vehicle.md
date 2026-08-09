@@ -91,58 +91,80 @@ which is what `scripts/replay_traction.py` does for the engine. That stays open.
 
 ---
 
-## Result, written after the run: forward channel PASSES, turn channel is NOT TRUSTWORTHY
+## Result, written after the run
 
-**Chrono 9.0.1 is built from source with the vehicle module and SCM** (`scripts/build_chrono.sh`,
-`scripts/chrono_env.sh`). Three non-obvious blockers are recorded in the build script.
+**Chrono 9.0.1 built from source with the vehicle module and SCM** (`scripts/build_chrono.sh`,
+`scripts/chrono_env.sh`); three non-obvious blockers recorded there.
 
 **Two ASSUMED parameters became MODEL.** The engine's mass table carries box extents, so the
-chassis is now built from the real geometry -- two boxes (78.8375 kg at x=-0.13, 0.48x0.56x0.20;
-10.8625 kg at x=-0.61, 0.48x0.24x0.20) giving mass 89.7 kg, CoM_x -0.188127 and inertia
-(2.4114, 4.2209, 6.0343) about its own CoM -- and the wheels are the table's 5.5 kg. Cross-check:
-the wheel's diametral inertia computes to 0.173021, which is the engine's table value exactly.
+chassis is built from real geometry -- two boxes giving 89.7 kg, CoM_x -0.188127, inertia
+(2.4114, 4.2209, 6.0343) -- and the wheels are the table's 5.5 kg. Cross-check: the wheel's
+diametral inertia computes to 0.173021, the table's value exactly.
 
-**Forward gain: PASS as a model check, and it is not the bag number.** On rigid ground the model
-returns 1.0016 -- pure rolling, no slip, and the 0.16% residual is the circumscribed 48-gon's
-+0.21% radius. That is the correct answer for RIGID ground and it says the drivetrain, the lag and
-the contact are wired right. It cannot be compared against the bags' 0.906-0.925, which is a soil
-number; that comparison needs the SCM run.
+### Three bugs found, all mine, all worth recording
 
-Getting there took two real bugs, both worth recording: `QuatFromAngleX(+pi/2)` puts the motor
-axis on body -y, so positive omega drove the robot BACKWARDS; and handing the motor a NEW
-`ChFunctionConst` every step disturbs the angle it integrates internally from the speed function,
-which alone accounted for a 3.6% forward-gain error. One function object, mutated in place.
+1. `QuatFromAngleX(+pi/2)` puts the motor axis on body -y, so positive omega drove BACKWARDS.
+2. Handing the motor a NEW `ChFunctionConst` each step disturbs the angle it integrates internally
+   from the speed function. Worth 3.6% of forward gain on its own. One object, mutated in place.
+3. **`SetRollingFriction` locks the yaw.** Chrono's NSC rolling friction is a complementarity
+   constraint; with three wheels on one rigid body it froze rotation -- alpha 26.0 with it on,
+   1.13 with it off, on an otherwise identical model. Rolling resistance is now applied as an
+   explicit torque `mu_roll * N * R` about each wheel's spin axis, which is the same quantity the
+   engine applies as a contact force. **This retracts an earlier claim in this file that a
+   fixed-axle rear wheel cannot turn the vehicle "as a matter of kinematics". It turns fine. The
+   rolling-friction constraint was the whole effect.**
 
-**Turn gain: NOT REPRODUCED, and the model is not trustworthy here.** alpha should be 2.20.
-Measured across the variants:
+A fourth was in the measurement, not the model: alpha was taken from the MEAN instantaneous `wz`,
+which reads 0.0396 rad/s in a case whose body rotated 0.016 rad in 5 s. Contact jitter integrates
+to nothing; net rotation over the window is the honest estimator, and `turn_gain` now uses it.
 
-| rear mount | mu | alpha |
-|---|---|---|
-| fixed axle | 0.8 | 24.2 |
-| caster, zero trail | 0.8 | 57.6 |
-| caster, 8 cm trail | 0.8 | 29.9 |
-| caster, 8 cm trail | 0.4 | **0.86** |
-| caster, 15 cm trail | 0.8 | 31.7 |
+### The numbers
 
-A physical model does not jump 24 -> 57 -> 30 -> 0.86 -> 32 under small parameter changes. This is
-bimodal -- essentially locked, or free -- so no value here is evidence about the real robot, and
-tuning until one of them reads 2.20 would be fitting noise.
+Soil stiffness swept; everything else fixed, Janosi = our own 0.0125 m.
 
-Two things WERE learned on the way, and they survive the above:
+| Kphi | rear | forward gain | alpha | sinkage |
+|---|---|---|---|---|
+| rigid | fixed | 1.0022 | 3.168 | -- |
+| rigid | caster | 1.0016 | 1.102 | -- |
+| 0.05 MPa | fixed | **0.9226** | 4.563 | 6.8 cm |
+| 0.10 MPa | fixed | 0.9480 | 4.223 | 6.3 cm |
+| 0.20 MPa | fixed | 0.9688 | 3.741 | 5.1 cm |
+| 0.50 MPa | fixed | 0.9874 | 3.081 | 3.6 cm |
+| 0.20 MPa | caster | 0.9683 | 1.258 | 5.3 cm |
+| 0.50 MPa | caster | 0.9874 | 1.359 | 3.6 cm |
+| **measured** | | **0.906 - 0.925** | **2.20** | |
 
-- **A fixed-axle rear wheel cannot turn this vehicle**, and that is kinematics rather than a
-  solver artifact: a rear wheel whose axle is parallel to the front pair pins the instantaneous
-  centre onto its own axle line. It also explains the engine's own wording --
-  docs/motion_model_pipeline.md calls the rear wheel "trailing" and "kinematically redundant",
-  and a fixed axle would be neither. Whether the hardware has a swivel is a ten-second question
-  for someone standing next to the robot, and it should be answered before any of this is retried.
-- **A zero-trail caster is not a caster.** With the swivel axis through the contact patch there is
-  no self-aligning moment, and it behaves exactly like a fixed axle. Trail must be measured too.
+### What it says
 
-**The most likely cause of the bimodality, and the next thing to try:** the wheels are driven by
-`ChLinkMotorRotationSpeed`, which imposes the commanded spin as a HARD constraint. Three hard
-speed constraints on one rigid body over rigid contacts is over-determined -- the system can only
-resolve it by slipping, and whether it slips or locks is exactly the kind of knife-edge that
-produces this. The fix is to drive the wheels with TORQUE motors under a speed controller, capped
-at the measured 105 Nm, which is also closer to the real drivetrain. That is the first thing to do
-before trusting any turn number, and before running SCM at all.
+**The conflict is NOT an artefact of our isotropic |slip| treatment.** That was the leading suspect
+in TIER1_REPORT.md section 2, and it is now much less likely: with a fixed rear axle the two
+channels move MONOTONICALLY AND IN OPPOSITE DIRECTIONS with soil stiffness. Soft soil lands the
+forward gain squarely in the measured band (0.9226 at Kphi 0.05 MPa) and pushes alpha to 4.56;
+stiff soil pulls alpha toward 2.20 and drives the forward gain to 1.0. An independent simulator,
+with a completely different soil formulation, reproduces the same tension our own fit hit.
+
+**The rear-wheel mounting is a near-orthogonal knob for alpha.** At fixed soil it moves alpha by a
+factor of three (3.741 -> 1.258 at 0.20 MPa) while leaving the forward gain untouched to four
+decimal places (0.9688 -> 0.9683). And the measured 2.20 is BRACKETED by the two mountings. So the
+two channels probably CAN be fitted together -- with a rear wheel between a free caster and a
+fixed axle, i.e. a caster with swivel friction. That is one parameter, and it is a hardware fact.
+
+Neither pre-registered bar is met (alpha 1.26 or 3.74 against a 1.76-2.64 band; forward gain 0.9688
+against 0.906-0.925 at the same soil). Reported as failures. But they fail in a structured way that
+localises the remaining freedom to one measurable thing, which is worth more than a pass would have
+been.
+
+### Caveat
+
+The caster goes unstable in soft soil -- alpha reads -9.9 at Kphi 0.05 MPa and -59.3 at 0.10 MPa,
+i.e. it flips. Only the fixed-rear column is trustworthy across the whole sweep, and the caster
+rows at 0.20 and 0.50 MPa. Do not read the soft-soil caster numbers as anything.
+
+### Next
+
+1. **Measure the rear wheel**: does it swivel, and with how much trail and swivel friction? Ten
+   seconds next to the robot, and it is now the dominant unknown for yaw.
+2. Model it as a caster WITH swivel friction and fit that one parameter to alpha = 2.20 at the soil
+   stiffness that already matches the forward gain. If a single configuration lands both, the
+   conflict is resolved and the answer is a rear-wheel model, not a traction model.
+3. Only then the bag replay, for trajectory-level scoring rather than two scalars.
