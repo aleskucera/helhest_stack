@@ -66,3 +66,31 @@ Traction, slip, momentum, deformable soil. Chrono's rigid contact says nothing a
 Hanamoto shear or L/K, and this conda build has no `pychrono.vehicle`, so SCM is unavailable
 without a source build. The slope-drive question (the 169 cm divergence at 15 deg) is a DYNAMICS
 comparison and comes after this gate passes.
+
+---
+
+## Addendum, written after the run: the cylinder contact is NOT resolved by this setup
+
+The sphere result above stands (it is the engine's default contact and every prediction resolved).
+The cylinder was attempted as well, to settle the modelling question left open in 621a4a0 -- whether
+a real cylinder rides its RIM on a side slope, as that commit assumes, or bridges with the load
+resultant near the mid-plane. Three attempts, none conclusive:
+
+- **`ChCollisionShapeCylinder` + Bullet.** Reports ONE contact point per wheel. A cylinder on a
+  plane is a LINE contact, so a single point is degenerate -- its position along the tread is
+  arbitrary. Symptom: a flat plane came out asymmetric (left 0.3803 vs right 0.3551) and roll 10
+  transferred load the WRONG WAY. Not usable.
+- **`Type_MULTICORE`.** Not available: this conda build reports "Chrono was not built with Thrust
+  support" and falls back to Bullet SILENTLY -- identical numbers, no error. Worth knowing, because
+  nothing in the API tells you the backend request was ignored.
+- **A 48-gon convex-hull prism.** Fixes the LOADS: flat ground returns to 0.3680 / 0.3680 / 0.2640,
+  matching the sphere exactly, and every load sum equals cos(tilt). Load distribution under roll
+  then tracks the sphere to within 0.015 of m g, which is a real (if secondary) result: on a
+  uniform plane the contact SHAPE barely moves the load split. But the contact POINT still will
+  not localise -- the load-weighted axial offset gives left ~0.1 cm while right jumps +4.00, -3.47,
+  -3.94 cm across adjacent tilts. Inconsistent signs on neighbouring cases is a facet artifact.
+
+So 621a4a0's rim-vs-bridge question stays open. Resolving it needs either a Chrono build with a
+true cylinder-plane manifold, or a different instrument entirely -- and it is worth remembering
+that the ablation already found the cylinder envelope decision-neutral (elite overlap 99-100%),
+so the question is about physical honesty rather than planner behaviour.
