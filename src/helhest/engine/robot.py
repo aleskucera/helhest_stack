@@ -36,6 +36,7 @@ class Robot:
     chassis_pts: wp.array(dtype=wp.vec3)  # [Np] belly non-penetration samples
     n_chassis: wp.int32  # len(chassis_pts); struct-member .shape is unreliable on CUDA
     wheel_radius: wp.float32
+    wheel_half_width: wp.float32  # 0.0 = sphere contact (the default); >0 = cylinder of that tread
     half_track: wp.float32
     com: wp.vec3
     mass: wp.float32
@@ -55,6 +56,11 @@ class Robot:
 @dataclass(frozen=True)
 class RobotParams:  # host-side robot knobs — what you nudge
     wheel_radius: float = 0.35
+    # Half the wheel tread. 0.0 keeps the SPHERE contact point that every result to date was
+    # produced with; set it (0.05 for the ruler-measured 0.10 m tread) to place the contact on
+    # the cylinder's rim instead. Independent of the envelope choice: the envelope decides the
+    # HEIGHT the wheel rests at, this decides WHERE on the wheel the load acts.
+    wheel_half_width: float = 0.0
     half_track: float = 0.365
     rear_offset: float = 0.75
     gravity: float = 9.81
@@ -89,6 +95,7 @@ class RobotParams:  # host-side robot knobs — what you nudge
         r.chassis_pts = wp.array(cpts, dtype=wp.vec3, device=device)
         r.n_chassis = int(cpts.shape[0])
         r.wheel_radius = self.wheel_radius
+        r.wheel_half_width = self.wheel_half_width
         r.half_track = self.half_track
         r.com = wp.vec3(*self.com)
         r.mass = self.mass

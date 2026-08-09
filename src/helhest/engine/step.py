@@ -394,7 +394,36 @@ def normal_loads(
         wheel_pos = robot.wheel_pos[st_i]
         wheel_center = p + R * wheel_pos
         n = sample_normal(envelope, grid, wheel_center[0], wheel_center[1])
+        # Contact point: the wheel's support point in direction -n. For a SPHERE that is one
+        # radius down the normal -- the default, left bit-identical. A CYLINDER of half-tread w
+        # is a different body; maximising (-n).q over its surface gives
+        #     ct = c - R * n_perp/|n_perp| - w * sgn(n . a) * a
+        # with a the spin axis (body +y) and n_perp = n - (n.a) a. Two ways this differs from the
+        # sphere on a side slope, and the RADIAL one is the larger: the sphere's contact slides
+        # R|n.a| off the mid-plane (6.9 cm at 11 deg of lateral tilt), which is outside the real
+        # 5 cm tread, whereas the cylinder's drop stays in the wheel's own plane and its axial
+        # offset saturates at the rim, w.
+        # NOTE the rim term is discontinuous at n.a = 0, and that is exact rigid geometry, not an
+        # artifact: a rigid cylinder tips onto one rim the instant the ground tilts sideways. Only
+        # at n.a == 0 is the contact a LINE across the tread, whose load resultant is centred --
+        # which is why the sign below must be 0 there and wp.sign (which returns +1 at 0) is wrong.
         ct = wheel_center - robot.wheel_radius * n  # contact point
+        if robot.wheel_half_width > 0.0:
+            axis = R * wp.vec3(0.0, 1.0, 0.0)
+            n_ax = wp.dot(n, axis)
+            n_perp = n - n_ax * axis
+            len_perp = wp.length(n_perp)
+            if len_perp > 1.0e-6:
+                sgn = float(0.0)
+                if n_ax > 0.0:
+                    sgn = 1.0
+                elif n_ax < 0.0:
+                    sgn = -1.0
+                ct = (
+                    wheel_center
+                    - robot.wheel_radius * (n_perp / len_perp)
+                    - robot.wheel_half_width * sgn * axis
+                )
         r = ct - com_world  # moment arm about the CoM
         m = wp.cross(r, n)
         A[0, st_i] = n[2]
