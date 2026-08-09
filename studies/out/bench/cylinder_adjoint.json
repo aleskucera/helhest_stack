@@ -1,0 +1,20 @@
+{
+ "sphere": {
+  "K": 37,
+  "n_cells": 150,
+  "median_rel_err": 0.0,
+  "p90_rel_err": 0.00011852966019327387,
+  "max_rel_err": 0.07037866894931087,
+  "frac_within_1pct": 0.97,
+  "grad_scale": 7.425307750701904
+ },
+ "cylinder": {
+  "K": 7,
+  "n_cells": 150,
+  "median_rel_err": 0.0,
+  "p90_rel_err": 0.00013350588790175146,
+  "max_rel_err": 0.07870026570901219,
+  "frac_within_1pct": 0.985,
+  "grad_scale": 5.659579753875732
+ }
+}
