@@ -88,3 +88,61 @@ which is what `scripts/replay_traction.py` does for the engine. That stays open.
 - Turn passes, forward fails (or vice versa) -> the conflict is real physics and localised.
 - Both fail -> the soil parameterisation, not our fit, is doing the work; report and stop, because
   nothing downstream would be trustworthy.
+
+---
+
+## Result, written after the run: forward channel PASSES, turn channel is NOT TRUSTWORTHY
+
+**Chrono 9.0.1 is built from source with the vehicle module and SCM** (`scripts/build_chrono.sh`,
+`scripts/chrono_env.sh`). Three non-obvious blockers are recorded in the build script.
+
+**Two ASSUMED parameters became MODEL.** The engine's mass table carries box extents, so the
+chassis is now built from the real geometry -- two boxes (78.8375 kg at x=-0.13, 0.48x0.56x0.20;
+10.8625 kg at x=-0.61, 0.48x0.24x0.20) giving mass 89.7 kg, CoM_x -0.188127 and inertia
+(2.4114, 4.2209, 6.0343) about its own CoM -- and the wheels are the table's 5.5 kg. Cross-check:
+the wheel's diametral inertia computes to 0.173021, which is the engine's table value exactly.
+
+**Forward gain: PASS as a model check, and it is not the bag number.** On rigid ground the model
+returns 1.0016 -- pure rolling, no slip, and the 0.16% residual is the circumscribed 48-gon's
++0.21% radius. That is the correct answer for RIGID ground and it says the drivetrain, the lag and
+the contact are wired right. It cannot be compared against the bags' 0.906-0.925, which is a soil
+number; that comparison needs the SCM run.
+
+Getting there took two real bugs, both worth recording: `QuatFromAngleX(+pi/2)` puts the motor
+axis on body -y, so positive omega drove the robot BACKWARDS; and handing the motor a NEW
+`ChFunctionConst` every step disturbs the angle it integrates internally from the speed function,
+which alone accounted for a 3.6% forward-gain error. One function object, mutated in place.
+
+**Turn gain: NOT REPRODUCED, and the model is not trustworthy here.** alpha should be 2.20.
+Measured across the variants:
+
+| rear mount | mu | alpha |
+|---|---|---|
+| fixed axle | 0.8 | 24.2 |
+| caster, zero trail | 0.8 | 57.6 |
+| caster, 8 cm trail | 0.8 | 29.9 |
+| caster, 8 cm trail | 0.4 | **0.86** |
+| caster, 15 cm trail | 0.8 | 31.7 |
+
+A physical model does not jump 24 -> 57 -> 30 -> 0.86 -> 32 under small parameter changes. This is
+bimodal -- essentially locked, or free -- so no value here is evidence about the real robot, and
+tuning until one of them reads 2.20 would be fitting noise.
+
+Two things WERE learned on the way, and they survive the above:
+
+- **A fixed-axle rear wheel cannot turn this vehicle**, and that is kinematics rather than a
+  solver artifact: a rear wheel whose axle is parallel to the front pair pins the instantaneous
+  centre onto its own axle line. It also explains the engine's own wording --
+  docs/motion_model_pipeline.md calls the rear wheel "trailing" and "kinematically redundant",
+  and a fixed axle would be neither. Whether the hardware has a swivel is a ten-second question
+  for someone standing next to the robot, and it should be answered before any of this is retried.
+- **A zero-trail caster is not a caster.** With the swivel axis through the contact patch there is
+  no self-aligning moment, and it behaves exactly like a fixed axle. Trail must be measured too.
+
+**The most likely cause of the bimodality, and the next thing to try:** the wheels are driven by
+`ChLinkMotorRotationSpeed`, which imposes the commanded spin as a HARD constraint. Three hard
+speed constraints on one rigid body over rigid contacts is over-determined -- the system can only
+resolve it by slipping, and whether it slips or locks is exactly the kind of knife-edge that
+produces this. The fix is to drive the wheels with TORQUE motors under a speed controller, capped
+at the measured 105 Nm, which is also closer to the real drivetrain. That is the first thing to do
+before trusting any turn number, and before running SCM at all.
