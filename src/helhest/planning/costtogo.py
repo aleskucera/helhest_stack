@@ -197,6 +197,9 @@ class CostToGo:
         flatness_weight: float = 2.0,  # planner strength: how much detour to trade for flat ground
         robust_margin_m: float = 0.0,  # lateral disturbance tube -> erode the feasible set by this
         robust_margin_deg: float = 0.0,  # heading disturbance tube (orientation-aware erosion)
+        in_place_cost: float = 0.0,  # >0 lets the router TURN ON THE SPOT, at this cost per
+        # heading bin (in metres of equivalent path). The forward-arc primitives cannot express it,
+        # so a goal behind the robot otherwise routes as a loop. 0 = off, the previous behaviour.
         obstacle_step_m: float = 0.0,  # hard-block cells with a local step taller than this [m];
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
         profile: bool = False,  # opt-in per-stage CUDA-event timing (tiny event nodes + per-call sync)
@@ -253,6 +256,7 @@ class CostToGo:
             n_theta=n_theta,
             turn_radius=self.robot.min_turn_radius,
             step=step,
+            in_place_cost=in_place_cost,
             device=self.device,
         )
 

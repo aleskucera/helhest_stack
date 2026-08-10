@@ -75,7 +75,21 @@
     plan_robust_margin_deg: 15.0
     plan_wheel_width: 0.10
     k_turn: 0.6
-    plan_turn: 0.8            # wheel-differential penalty -> strong straight bias / gentler turns
+    # Wheel-differential penalty. THE knob for how willing the planner is to turn, and 0.8 was
+    # far too high: measured closed-loop on flat open ground (scripts/turn_eval.py), a goal at 90
+    # or 180 deg was NEVER REACHED in 70 s, because a differential of 2 rad/s costs 0.8*25*4 = 80
+    # against a progress pull of only 0.3*V^2 -- 10.8 at 6 m to go. Turning lost by 7x, so the
+    # robot drove almost straight and orbited.
+    #
+    #   plan_turn   goal at 90 deg      goal at 180 deg
+    #   0.8         never (70 s)        never (70 s)
+    #   0.4         17.9 s              28.0 s
+    #   0.2         13.7 s              15.5 s      <- here
+    #   0.1         11.0 s              13.7 s
+    #
+    # Lower is quicker but restores the micro-turn wobble on straights this was raised to damp;
+    # 0.2 is the compromise. plan_max_slew turned out NOT to matter (17.9 s at both 2 and 6).
+    plan_turn: 0.2
     plan_max_slew: 2.0        # accel cap d(cmd)/dt [rad/s^2] -> smooth turn ease-in
     plan_max_decel: 8.0       # decel cap d(cmd)/dt [rad/s^2] -> softer slow-down (also the stop ramp)
     plan_goal_running: 0.3    # progress pull -> higher = faster toward goal

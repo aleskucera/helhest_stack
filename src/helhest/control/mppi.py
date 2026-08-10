@@ -46,6 +46,15 @@ class SamplingConfig:
     # fraction drawn from the STRAIGHT prior (zero differential, wl == wr): straight-ahead is usually
     # near-optimal, so seeding it explicitly stops the sampling-noise wobble on a clear shot. 0 = off.
     straight_frac: float = 0.0
+    # Fraction drawn from the SPIN prior: zero mean, pure differential (wl = -v, wr = +v), i.e.
+    # turning on the spot. Nothing else in the sampler can express this, because wmin >= 0 forbids
+    # a negative wheel speed and the tightest sampleable turn is one wheel STOPPED -- a 0.54 m
+    # radius, not zero. Without this a goal behind the robot can only be reached by driving a
+    # forward loop. 0 = off.
+    spin_frac: float = 0.0
+    # Minimum |wheel speed| for a spin candidate. MEASURED on the robot 2026-08-10: below about
+    # 2 rad/s it will not break loose on the spot at all, so a smaller command just strains.
+    spin_min: float = 2.0
     elite_frac: float = 0.02  # CEM top-k elite fraction
 
 
@@ -178,6 +187,8 @@ def _sample_target_wheel_omega_kernel(
     wmax: float,
     n_wide: int,
     n_straight: int,
+    n_spin: int,
+    spin_min: float,
     n_knots: int,
     seed: wp.array(dtype=int),
     target_wheel_omega: wp.array2d(dtype=wp.vec3),
@@ -209,7 +220,17 @@ def _sample_target_wheel_omega_kernel(
         )
         wheel_l = (1.0 - frac) * left_lo + frac * left_hi
         wheel_r = (1.0 - frac) * right_lo + frac * right_hi
-    elif b < n_wide + n_straight:
+    elif b < n_wide + n_spin:
+        # SPIN prior: zero mean, pure differential -- turn on the spot. One speed per candidate,
+        # held across the horizon, because a spin that changes its mind mid-rollout is not a spin.
+        # Magnitude is floored at spin_min: the real robot will not break loose below ~2 rad/s.
+        u_spin = wp.randf(wp.rand_init(seed[0] + 5150, b))
+        mag = spin_min + (wmax - spin_min) * u_spin
+        if wp.randf(wp.rand_init(seed[0] + 6271, b)) < 0.5:
+            mag = -mag
+        wheel_l = -mag
+        wheel_r = mag
+    elif b < n_wide + n_spin + n_straight:
         # STRAIGHT prior: zero differential (wl == wr -> drives straight ahead). One common forward
         # speed per knot (so it can ramp/decelerate along the horizon while staying straight). Straight
         # is usually the near-optimal path, so seeding it explicitly lets the elite collapse onto a
@@ -235,8 +256,14 @@ def _sample_target_wheel_omega_kernel(
         jitter = wp.rand_init(seed[0] + 9176, t * n_cand + b)
         wheel_l += sigma * wp.randn(jitter)
         wheel_r += sigma * wp.randn(jitter)
-    # clamp to the forward-arc box (wmin >= 0 -> no reverse)
-    target_wheel_omega[t, r] = wp.vec3(wp.clamp(wheel_l, wmin, wmax), wp.clamp(wheel_r, wmin, wmax), 0.0)
+    # Clamp to the forward-arc box (wmin >= 0 -> no reverse) -- EXCEPT the spin band, whose whole
+    # point is one reversed wheel. Clamping it to wmin would silently zero that wheel and turn
+    # every spin candidate into a one-wheel-stopped arc, which is the thing the prior exists to
+    # get past.
+    lo = wmin
+    if b >= n_wide and b < n_wide + n_spin:
+        lo = -wmax
+    target_wheel_omega[t, r] = wp.vec3(wp.clamp(wheel_l, lo, wmax), wp.clamp(wheel_r, lo, wmax), 0.0)
 
 
 @wp.kernel
@@ -450,6 +477,7 @@ class MppiGpu:
         self.sampling = sampling
         self.n_wide = int(sampling.wide_frac * self.n_cand)  # candidates drawn from the WIDE prior
         self.n_straight = int(sampling.straight_frac * self.n_cand)  # candidates from the STRAIGHT prior
+        self.n_spin = int(sampling.spin_frac * self.n_cand)  # candidates from the SPIN prior
 
         # CEM elite count (over candidates)
         self.target_k = float(int(sampling.elite_frac * self.n_cand))
@@ -530,6 +558,8 @@ class MppiGpu:
                 self.sampling.wmax,
                 self.n_wide,
                 self.n_straight,
+                self.n_spin,
+                self.sampling.spin_min,
                 self.sampling.n_knots,
                 self.seed,
             ],

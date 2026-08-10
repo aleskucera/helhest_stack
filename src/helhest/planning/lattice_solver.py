@@ -127,7 +127,8 @@ def _relax_lattice_pose_kernel(
 
 
 def _build_primitives(
-    n_theta: int, resolution: float, step: float, turn_radius: float, max_sweep: int, nseg: int
+    n_theta: int, resolution: float, step: float, turn_radius: float, max_sweep: int, nseg: int,
+    in_place_cost: float = 0.0
 ) -> tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Host-side forward-arc motion primitives. For each heading bin and each turn rate, integrate
     the arc of length `step`, and record: endpoint cell offset (dr, dc), resulting heading bin, arc
@@ -167,6 +168,32 @@ def _build_primitives(
                 sweep_dr[it, p, s] = cr
                 sweep_dc[it, p, s] = cc
             sweep_n[it, p] = len(uniq)
+
+    if in_place_cost > 0.0:
+        # TURN ON THE SPOT: two extra primitives, +1 and -1 heading bin at zero displacement. The
+        # arcs above are all FORWARD, so without these the router cannot represent "turn around
+        # here" and a goal behind the robot can only be reached by driving a loop.
+        #
+        # dr = dc = 0 and sweep_n = 0, which is correct rather than lazy: nothing is traversed, and
+        # the successor state's own feasibility is already enforced because a blocked state holds
+        # `inf` in dist_in. Cost must be > 0 or same-cell rotations form a zero-cost cycle. One
+        # consequence of the empty sweep is that rotation escapes the tilt weighting, so it is
+        # costed as flat -- acceptable while the cost is a tunable stand-in for time.
+        rot_dr = np.zeros((n_theta, 2), np.int32)
+        rot_dc = np.zeros((n_theta, 2), np.int32)
+        rot_heading = np.zeros((n_theta, 2), np.int32)
+        rot_cost = np.full((n_theta, 2), float(in_place_cost), np.float32)
+        for it in range(n_theta):
+            rot_heading[it, 0] = (it + 1) % n_theta
+            rot_heading[it, 1] = (it - 1) % n_theta
+        prim_dr = np.concatenate([prim_dr, rot_dr], axis=1)
+        prim_dc = np.concatenate([prim_dc, rot_dc], axis=1)
+        prim_heading = np.concatenate([prim_heading, rot_heading], axis=1)
+        prim_cost = np.concatenate([prim_cost, rot_cost], axis=1)
+        sweep_dr = np.concatenate([sweep_dr, np.zeros((n_theta, 2, max_sweep), np.int32)], axis=1)
+        sweep_dc = np.concatenate([sweep_dc, np.zeros((n_theta, 2, max_sweep), np.int32)], axis=1)
+        sweep_n = np.concatenate([sweep_n, np.zeros((n_theta, 2), np.int32)], axis=1)
+        n_prim += 2
     return n_prim, prim_dr, prim_dc, prim_heading, prim_cost, sweep_dr, sweep_dc, sweep_n
 
 
@@ -179,6 +206,7 @@ class LatticeValueSolver:
         n_theta: int = 16,
         turn_radius: float = 0.6,
         step: float | None = None,
+        in_place_cost: float = 0.0,  # >0 adds turn-on-the-spot primitives, at this cost per bin
         device: wp.Device | None = None,
     ):
         self.resolution = resolution
@@ -196,7 +224,8 @@ class LatticeValueSolver:
         nseg = max(8, int(step_cells * 4))
         n_prim, prim_dr, prim_dc, prim_heading, prim_cost, sweep_dr, sweep_dc, sweep_n = (
             _build_primitives(
-                self.n_theta, self.resolution, self._step, float(turn_radius), max_sweep, nseg
+                self.n_theta, self.resolution, self._step, float(turn_radius), max_sweep, nseg,
+                float(in_place_cost),
             )
         )
         self.n_prim = n_prim
