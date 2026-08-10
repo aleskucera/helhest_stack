@@ -620,6 +620,12 @@ class ElevationNode(Node):
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
         # a clear shot, no cost when a turn is actually needed. 0 = off.
+        # Wheel-speed CHANGE penalty: the anti-jerk knob. plan_turn penalises the SIZE of a turn
+        # and so cannot tell a deliberate repositioning from a wobble; this penalises CHANGING
+        # your mind, which is what wobble is. Raised from the 2e-3 library default -- measured
+        # closed-loop, it cuts turn-direction flips 0.60 -> 0.36 /s and lateral wander 0.09 ->
+        # 0.05 m on a straight shot while leaving the 90 deg turn time unchanged.
+        d("plan_smooth", 0.04)
         d("plan_straight_frac", 0.2)
         # CEM elite fraction: MPPI commits the MEAN of the top-k lowest-cost candidates. Because the
         # goal heading is free, small turns near the goal barely change cost -> the elite fills with
@@ -787,6 +793,7 @@ class ElevationNode(Node):
         self.plan_goal_running: float = g("plan_goal_running")
         self.plan_effort: float = g("plan_effort")
         self.plan_turn: float = g("plan_turn")
+        self.plan_smooth: float = g("plan_smooth")
         self.plan_straight_frac: float = g("plan_straight_frac")
         self.plan_elite_frac: float = g("plan_elite_frac")
         self.plan_wmax: float = g("plan_wmax")
@@ -914,7 +921,10 @@ class ElevationNode(Node):
         self.planner = MppiGpu(
             self.plan_sim,
             CostParams(
-                goal_running=self.plan_goal_running, effort=self.plan_effort, turn=self.plan_turn
+                goal_running=self.plan_goal_running,
+                effort=self.plan_effort,
+                turn=self.plan_turn,
+                smoothness=self.plan_smooth,
             ),
             sampling=SamplingConfig(
                 wmax=self.plan_wmax,

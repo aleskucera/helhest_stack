@@ -90,6 +90,20 @@
     # Lower is quicker but restores the micro-turn wobble on straights this was raised to damp;
     # 0.2 is the compromise. plan_max_slew turned out NOT to matter (17.9 s at both 2 and 6).
     plan_turn: 0.2
+    # Wheel-speed CHANGE penalty -- the anti-jerk knob, and the right one for wobble. plan_turn
+    # above penalises the SIZE of a turn, which cannot tell a deliberate 90 deg repositioning from
+    # a wobble; this penalises CHANGING YOUR MIND, which is what wobble is. It expands to
+    # 2*d(mean)^2 + d(diff)^2/2, so it damps both channels. Raised from the 2e-3 default:
+    #
+    #   plan_smooth   straight: flips/s  jerk   max lat   90 deg   180 deg
+    #   2e-3          0.60               0.042  0.09 m    13.7 s   15.5 s
+    #   4e-2          0.36               0.033  0.05 m    13.7 s   15.8 s   <- here
+    #   1e-1          0.12               0.043  0.09 m    16.4 s   17.8 s   over-damped
+    #
+    # For comparison the old plan_turn 0.8 gave 0.32 / 0.027 / 0.03 m on straights -- so this
+    # recovers nearly all of that smoothness while turning still works. Past 1e-1 it inverts:
+    # corrections get deferred and come out larger, so jerk rises again AND turning degrades.
+    plan_smooth: 0.04
     plan_max_slew: 2.0        # accel cap d(cmd)/dt [rad/s^2] -> smooth turn ease-in
     plan_max_decel: 8.0       # decel cap d(cmd)/dt [rad/s^2] -> softer slow-down (also the stop ramp)
     plan_goal_running: 0.3    # progress pull -> higher = faster toward goal

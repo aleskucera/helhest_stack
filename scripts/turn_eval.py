@@ -45,7 +45,8 @@ def flat() -> Heightmap:
     return Heightmap(np.zeros_like(XX).astype(np.float32), (-EXTENT, -EXTENT), CELL)
 
 
-def run(bearing_deg: float, turn_w: float, max_slew: float, device: str = "cuda",
+def run(bearing_deg: float, turn_w: float, max_slew: float, smooth_w: float | None = None,
+        device: str = "cuda",
         dist: float = 5.0, max_frames: int = 700, n_theta: int = 24,
         spin_frac: float = 0.0, in_place_cost: float = 0.0) -> dict:
     scene = flat()
@@ -60,7 +61,9 @@ def run(bearing_deg: float, turn_w: float, max_slew: float, device: str = "cuda"
         wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
     )
     sim.set_friction(mu_hm)
-    cost = dataclasses.replace(CostParams(), turn=turn_w)  # CostParams is frozen
+    base = CostParams()  # frozen
+    cost = dataclasses.replace(base, turn=turn_w,
+                               smoothness=base.smoothness if smooth_w is None else smooth_w)
     kw = {}
     if spin_frac > 0.0:  # only pass it once the sampler supports it
         from helhest.control.mppi import SamplingConfig
@@ -81,6 +84,7 @@ def run(bearing_deg: float, turn_w: float, max_slew: float, device: str = "cuda"
     drv = WarpDriver(scene, mu_hm, init_pose=(0.0, 0.0, 0.0), device=device)
     prev = np.zeros(3, np.float32)
     path, yaws, reached, f = 0.0, [], False, 0
+    diffs, lat = [], []   # commanded differential per step, and lateral offset from the straight line
     px, py, pyaw = 0.0, 0.0, 0.0
     for f in range(max_frames):
         st = drv.render_state()
@@ -99,14 +103,25 @@ def run(bearing_deg: float, turn_w: float, max_slew: float, device: str = "cuda"
             u = planner.nominal()
             cmd = condition_command(float(u[0, 0]), float(u[0, 1]), prev,
                                     max_omega=7.5, max_slew=max_slew, dt=dynamics.DT)
-        prev = np.asarray(cmd, np.float32)
-        drv.step(np.asarray(cmd, np.float32))
+        c = np.asarray(cmd, np.float32)
+        diffs.append(float(c[2] - c[0]))
+        lat.append(abs(-math.sin(th) * st.x + math.cos(th) * st.y))  # offset from the goal line
+        prev = c
+        drv.step(c)
     del planner, sim, ctg, drv
+    d_arr = np.array(diffs) if diffs else np.zeros(1)
+    # WOBBLE: how often the commanded turn direction reverses, per second. A committed turn holds
+    # its sign; wobble flips it. This is the thing plan_turn was raised to suppress, and it is
+    # NOT the same quantity as the size of the turn.
+    sign_flips = int(np.sum(np.diff(np.sign(d_arr[np.abs(d_arr) > 0.05])) != 0))
     return {
         "reached": reached,
         "s": (f + 1) * dynamics.DT,
         "detour": path / max(dist, 1e-6),
         "peak_yaw": float(np.percentile(yaws[1:], 98)) if len(yaws) > 2 else 0.0,
+        "flips_per_s": sign_flips / max((f + 1) * dynamics.DT, 1e-6),
+        "jerk": float(np.mean(np.abs(np.diff(d_arr)))) if len(d_arr) > 1 else 0.0,
+        "max_lat": float(np.max(lat)) if lat else 0.0,
     }
 
 
