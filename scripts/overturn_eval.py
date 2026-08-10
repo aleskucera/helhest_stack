@@ -187,22 +187,28 @@ def run(
         )
         planner.set_lattice(V, route_grid.build())
 
+        # TWO WHEEL ORDERS, and mixing them silently halves the turn: `dock_control` and the engine
+        # use (wL, wR, rear), while `condition_command` returns the /cmd_joints publication order
+        # [left, rear, right]. `prev` must stay in the ROS order the conditioner expects.
         if d < 1.5:
-            cmd = dock_control(state, goal)
+            eng = np.asarray(dock_control(state, goal), np.float32)
         else:
             planner.replan(state, goal, 3)
             u = planner.nominal()
-            cmd = condition_command(
-                float(u[0, 0]), float(u[0, 1]), prev,
-                max_omega=DEPLOYED["max_omega"], max_slew=max_slew, dt=dynamics.DT,
-                max_decel=DEPLOYED["max_decel"], goal_dist=d,
-                brake_dist=DEPLOYED["goal_brake_dist"],
-                turn_brake_a_max=a_max, lat_gain=lat_gain,
+            ros = np.asarray(
+                condition_command(
+                    float(u[0, 0]), float(u[0, 1]), prev,
+                    max_omega=DEPLOYED["max_omega"], max_slew=max_slew, dt=dynamics.DT,
+                    max_decel=DEPLOYED["max_decel"], goal_dist=d,
+                    brake_dist=DEPLOYED["goal_brake_dist"],
+                    turn_brake_a_max=a_max, lat_gain=lat_gain,
+                ),
+                np.float32,
             )
-        c = np.asarray(cmd, np.float32)
-        diffs.append(float(c[2] - c[0]))
-        prev = c
-        drv.step(c)
+            eng = np.array([ros[0], ros[2], ros[1]], np.float32)
+        prev = np.array([eng[0], eng[2], eng[1]], np.float32)
+        diffs.append(float(eng[1] - eng[0]))
+        drv.step(eng)
         if drv.clear < 0.05:
             hits += 1
     del planner, sim, ctg, drv

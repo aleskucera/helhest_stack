@@ -128,19 +128,23 @@
     # TOGETHER so the planned arc is unchanged, only slower. At plan_wmax 6 / k_turn 1 the
     # hardest arc the planner can command is ~1.5 m/s^2, so start around 0.6-1.2.
     #
-    # 1.1 -> 0.4 after the field report of an abrupt evasive turn near obstacles. This is the ONLY
-    # knob measured to soften the turn without giving up clearance, because it scales mean and
-    # differential TOGETHER -- the robot tracks the same arc slower rather than turning less.
-    # scripts/overturn_eval.py, slalom world: yaw rate at closest approach 0.71 -> 0.43 rad/s,
-    # clearance 0.83 -> 0.84 m (flat), travel time +29%. Turning it off gives 0.97, so the cap
-    # DOES bind in tight terrain -- the earlier "does not bind" reading was flat open ground,
-    # where the planner never commands an arc hard enough to reach it.
+    # 1.1 -> 0.4 after the field report of an abrupt evasive turn near obstacles. It scales mean
+    # and differential TOGETHER, so the robot tracks the same arc slower rather than turning less
+    # -- which is why it costs no clearance. scripts/overturn_eval.py at the deployed config:
     #
-    # Damping the RESPONSE instead was tried and is worse. plan_max_slew 6 -> 3 -> 1.5 cuts jerk
-    # but walks clearance down 0.83 -> 0.75 -> 0.59 m and leaves the yaw rate untouched: reacting
-    # more slowly to a tight gap just means arriving closer before the turn takes effect. And
-    # plan_smooth does nothing (it penalises changes INSIDE a rollout; only the first step is ever
-    # executed, so it damps the plan's interior, not the command).
+    #            yaw at closest approach      clearance        travel time
+    #   slalom   0.98 -> 0.53 rad/s           1.07 -> 1.03 m   +13%
+    #   pillars  1.04 -> 0.74 rad/s           1.04 -> 1.04 m   +4%
+    #
+    # Turning the cap off gives 1.21 / 1.12, so 1.1 was already binding in tight terrain. The
+    # earlier note that this knob "does not bind" came from flat open ground, where the planner
+    # never commands an arc hard enough to reach it.
+    #
+    # Also measured, on the same harness: plan_smooth does NOTHING (it penalises changes INSIDE a
+    # rollout, but only the first step is ever executed, so it damps the plan's interior, not the
+    # command). plan_max_slew 6 -> 1.5 does help (yaw@closest 0.98 -> 0.34) and does NOT cost
+    # clearance, but it only delays WHEN the turn happens -- peak yaw over the run stays 0.89 vs
+    # 0.60 for a_max 0.4 -- and it undoes the slew raise that fixed the sluggish turning.
     plan_turn_brake_a_max: 0.4
     # Pre-apply the tightest cap found this far ahead along the committed plan, so the robot is
     # already slow when it enters the corner. 0 = react to the current command only.

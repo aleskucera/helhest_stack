@@ -108,11 +108,15 @@ def run(bearing_deg: float, turn_w: float, max_slew: float, smooth_w: float | No
             cmd = condition_command(float(u[0, 0]), float(u[0, 1]), prev,
                                     max_omega=7.5, max_slew=max_slew, dt=dynamics.DT,
                                     turn_brake_a_max=a_max, lat_gain=lat_gain)
+        # TWO WHEEL ORDERS: dock_control and the engine take (wL, wR, rear), condition_command
+        # returns the /cmd_joints order [left, rear, right]. Mixing them feeds the engine the REAR
+        # wheel as the right one, which halves the realised differential. `prev` stays ROS-order.
         c = np.asarray(cmd, np.float32)
-        diffs.append(float(c[2] - c[0]))
+        eng = c if d < 1.5 else np.array([c[0], c[2], c[1]], np.float32)
+        prev = np.array([eng[0], eng[2], eng[1]], np.float32)
+        diffs.append(float(eng[1] - eng[0]))
         lat.append(abs(-math.sin(th) * st.x + math.cos(th) * st.y))  # offset from the goal line
-        prev = c
-        drv.step(c)
+        drv.step(eng)
     del planner, sim, ctg, drv
     d_arr = np.array(diffs) if diffs else np.zeros(1)
     # WOBBLE: how often the commanded turn direction reverses, per second. A committed turn holds
