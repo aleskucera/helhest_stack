@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from rosbags.highlevel import AnyReader
 
-GYRO_TOPICS = ("/ouster/imu", "/imu/data")
+GYRO_TOPICS = ("/ouster/imu", "/imu/data", "/odin1/imu")
 WHEEL_TOPIC = "/joint_states"
 MAX_GYRO_DPS = 600.0  # drop single-sample glitch spikes (real motion is well under this)
 

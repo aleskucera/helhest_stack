@@ -43,8 +43,12 @@ def _load(bag: Path):
     """Measured wheel speeds, gyro yaw rate, and a quasi-static mask, on the /joint_states clock."""
     stamps, wheels, gyro_t, gyro = [], [], [], []
     with AnyReader([bag]) as reader:
-        topics = {"/joint_states", "/ouster/imu"}
+        topics = {"/joint_states", "/ouster/imu", "/odin1/imu"}
         conns = [c for c in reader.connections if c.topic in topics]
+        imu_topic = next(
+            (t for t in ("/ouster/imu", "/odin1/imu") if any(c.topic == t for c in conns)),
+            "/ouster/imu",
+        )
         for conn, stamp, raw in reader.messages(connections=conns):
             msg = reader.deserialize(raw, conn.msgtype)
             if conn.topic == "/joint_states":
@@ -53,9 +57,11 @@ def _load(bag: Path):
                 idx = [list(msg.name).index(j) for j in JOINTS]
                 stamps.append(stamp * 1e-9)
                 wheels.append([msg.velocity[i] for i in idx])
-            else:
+            elif conn.topic == imu_topic:
                 gyro_t.append(stamp * 1e-9)
-                gyro.append(-msg.angular_velocity.y)  # the Ouster IMU carries yaw on negated y
+                g = msg.angular_velocity
+                # the Ouster IMU carries yaw on negated y; the Odin IMU carries it on +z
+                gyro.append(-g.y if imu_topic == "/ouster/imu" else g.z)
     stamps, wheels = np.asarray(stamps), np.asarray(wheels)
     yaw = np.interp(stamps, np.asarray(gyro_t), np.asarray(gyro))
     dt = float(np.median(np.diff(stamps)))

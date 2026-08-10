@@ -44,9 +44,12 @@ def _load(bag: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(wheel speeds, gyro yaw rate, wheel-speed peak-to-peak) on the /joint_states clock."""
     stamps, wheels, gyro_t, gyro = [], [], [], []
     with AnyReader([bag]) as reader:
-        topics = {"/joint_states", "/ouster/imu", "/imu/data"}
+        topics = {"/joint_states", "/ouster/imu", "/imu/data", "/odin1/imu"}
         conns = [c for c in reader.connections if c.topic in topics]
-        imu_topic = "/ouster/imu" if any(c.topic == "/ouster/imu" for c in conns) else "/imu/data"
+        imu_topic = next(
+            (t for t in ("/ouster/imu", "/imu/data", "/odin1/imu") if any(c.topic == t for c in conns)),
+            "/imu/data",
+        )
         for conn, stamp, raw in reader.messages(connections=conns):
             msg = reader.deserialize(raw, conn.msgtype)
             if conn.topic == "/joint_states":
