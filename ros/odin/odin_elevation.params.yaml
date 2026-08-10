@@ -52,6 +52,22 @@
     # robot can straddle. 0.0 = back to the sphere. This is also the lateral SAFETY MARGIN dial --
     # 0.15 keeps 5 cm per side, 0.20 keeps 10 cm, both far tighter than the sphere's fixed 0.35.
     # Costs ~3.9 ms per perception frame to dilate (64 yaw slices) against 0.06 for the sphere.
+    # --- robustness tube: the OTHER kind of margin ---------------------------------------------
+    # These erode the cost-to-go's feasible set, so a pose only routes as feasible if it stays
+    # feasible under +/- this much POSITION and HEADING error. That is margin against localisation
+    # and tracking error, and it is independent of plan_wheel_width, which is margin against the
+    # robot's own SHAPE. Prefer widening these over fattening the wheel: the tube keeps the routing
+    # conservative while the envelope stays geometrically honest.
+    #
+    # BOTH QUANTISE, so small values silently do nothing. At map cell 0.1 x plan_lat_coarsen 4 the
+    # routing cell is 0.40 m, so 0.30 rounds to ONE cell = 0.40 m eroded each side. At
+    # plan_n_theta 24 a heading bin is 15 deg, so anything under 7.5 deg rounds to ZERO -- 15.0 is
+    # the smallest value that does anything at all, and it buys exactly one bin.
+    #
+    # 0.3 m was validated in the Tier-C closed loop (0 belly contacts). Tighten in narrow spaces:
+    # it erodes from both sides, so a 1.2 m gap loses 0.8 m of it.
+    plan_robust_margin_m: 0.3
+    plan_robust_margin_deg: 15.0
     plan_wheel_width: 0.10
     k_turn: 0.6
     plan_turn: 0.8            # wheel-differential penalty -> strong straight bias / gentler turns
