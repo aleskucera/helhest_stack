@@ -89,6 +89,15 @@ class YawRateTracker:
         """Accumulated yaw-rate bias [rad/s]; exposed for logging, not for control."""
         return self._integral
 
+    def set_gains(self, kp: float, ki: float, deadband: float, max_correction: float) -> None:
+        """Retune live. Kept off the constructor path so `ros2 param set` can adjust gains during
+        a drive without rebuilding the planner -- a rebuild stalls the plan long enough to trip
+        the command timer's staleness stop, i.e. tuning a gain would brake the robot."""
+        self._kp = float(kp)
+        self._ki = float(ki)
+        self._deadband = float(deadband)
+        self._max = float(max_correction)
+
     def reset(self) -> None:
         """Drop all state. Call on e-stop, on losing actuation, and when a new plan is committed
         after a gap -- a stale integrator applied to a fresh manoeuvre is a lurch."""

@@ -171,10 +171,6 @@ _PLAN_BUILD = frozenset(
         "plan_turn_boost_adapt",
         "plan_turn_boost_tau",
         "plan_yaw_track",
-        "plan_yaw_track_kp",
-        "plan_yaw_track_ki",
-        "plan_yaw_track_deadband",
-        "plan_yaw_track_max",
         "device",
     }
 )
@@ -1892,6 +1888,12 @@ class ElevationNode(Node):
         assert self._yaw_track is not None
         if not self._imu_buffer:
             return
+        self._yaw_track.set_gains(  # live-tunable: these are not in _PLAN_BUILD
+            self.plan_yaw_track_kp,
+            self.plan_yaw_track_ki,
+            self.plan_yaw_track_deadband,
+            self.plan_yaw_track_max,
+        )
         t_imu, _, w_base = self._imu_buffer[-1]
         now = float(self.get_clock().now().nanoseconds) * 1e-9
         dt = self._command_period
