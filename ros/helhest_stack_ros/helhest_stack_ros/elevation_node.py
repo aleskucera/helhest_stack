@@ -1614,6 +1614,16 @@ class ElevationNode(Node):
                 f"REACHED goal (d={d_goal:.2f} m) -- stopping; idle until a new goal is set."
             )
         if self._goal_reached:
+            # DISARM THE TIMER. This branch returns before the `_drive_plan = None` below, so
+            # without this the timer keeps walking the last DRIVING plan at plan_command_rate
+            # while this branch publishes stops -- two publishers, opposite intents, ~2 ms apart.
+            # Latent until plan_command_rate became non-zero; visible in fast_experiment1 as 6.4%
+            # of command intervals under 10 ms, and absent from fast_experiment0, recorded with
+            # the timer still off. plan_stale_s bounds each episode to ~0.5 s, and in "follow"
+            # mode _goal_reached is per-frame rather than latched, so it can re-arm repeatedly.
+            self._drive_plan = None
+            if self._yaw_track is not None:
+                self._yaw_track.reset()  # at rest: a held integrator is a lurch on the next goal
             if self.plan_actuate:
                 cmd = condition_command(
                     0.0,
