@@ -9,18 +9,15 @@ model currently predicts — the point of the trip is to find out whether it is 
 
 ---
 
-## 0. Thirty seconds that beat an hour of driving
+## 0. Answered — the rear wheel is FIXED
 
-**Look at the rear wheel before you do anything else.**
+Confirmed 2026-08-10: the rear axle is rigidly parallel to the front pair, not a caster. Trail does
+not apply (it is a caster-only quantity) and the hub position was never in doubt — it is in the
+mass table at (-0.75, 0, 0).
 
-1. Does the hub **swivel** about a vertical axis, or is its axle rigidly parallel to the front pair?
-2. If it swivels, roughly how much **trail** — the horizontal distance from the swivel axis down to
-   where the tyre touches the ground?
-
-Write the answer down. In Chrono this single fact moves the turn gain from α 1.10 (free caster) to
-α 3.17 (fixed axle), and the robot's measured 2.20 sits between them — so it is currently the
-largest single unknown in the yaw model, and no amount of driving resolves it faster than looking.
-Take a photo of the mounting.
+This was the largest unknown in the yaw model and it closed in the model's favour: with the rear
+fixed, the robot (α 1.50), converged Chrono (1.60) and our engine at the shipped `k_turn = 0.6`
+(1.48) all agree within 7%. Nothing further to inspect.
 
 ---
 

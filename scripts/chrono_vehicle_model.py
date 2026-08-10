@@ -77,19 +77,21 @@ def hull_points(radius: float, half_width: float, n: int) -> "chrono.vector_ChVe
     return pts
 
 
-def build_robot(sys, mat, rear: str = "caster"):
+def build_robot(sys, mat, rear: str = "fixed"):
     """Chassis + three driven wheels. Returns (chassis, wheels, motor functions).
 
     `rear` decides how the trailing wheel is MOUNTED, which turns out to decide whether this
     vehicle can turn at all:
 
-      fixed   its axle is parallel to the front pair. Then the vehicle is kinematically unable to
-              yaw without skidding that wheel sideways on a 0.75 m lever, and Chrono says it
-              essentially does not yaw (alpha ~ 24 against a measured 2.20).
-      caster  the hub swivels about a vertical axis, so the wheel trails the motion. This is what
-              docs/motion_model_pipeline.md implies by calling the rear wheel "trailing" and
-              "kinematically redundant" -- a fixed axle would not be redundant, it would pin the
-              instantaneous centre onto the rear axle line.
+      fixed   CONFIRMED BY THE OPERATOR, 2026-08-10, and therefore the default: the rear axle is
+              parallel to the front pair. Converged Chrono then gives alpha ~ 1.6 against the
+              robot's measured ~1.5, so this is the model that matches.
+      caster  a swivelling hub. Kept only to document the alternative that was tested and ruled
+              out; it gives alpha ~1.1-1.3, which the robot contradicts. NOT the hardware.
+
+    An earlier revision of this docstring claimed a fixed axle is "kinematically unable to yaw".
+    That was wrong twice over -- it was Chrono's rolling-friction CONSTRAINT locking the yaw (see
+    99e850e), and the robot turns perfectly well on a fixed axle.
     """
     chassis = chrono.ChBodyAuxRef()
     chassis.SetMass(CHASSIS_MASS)
@@ -188,7 +190,7 @@ def scm_terrain(sys):
 
 
 def drive(terrain_kind: str, omega: tuple[float, float, float], t_end: float,
-          dt: float = 2.0e-3, rear: str = "caster") -> dict:
+          dt: float = 2.0e-3, rear: str = "fixed") -> dict:
     """Run one commanded-wheel-speed manoeuvre and return the chassis trajectory."""
     # a tight collision envelope: the default leaves the robot riding ~1.4 mm high, which is
     # noise on a rigid plane but would be read as sinkage against SCM

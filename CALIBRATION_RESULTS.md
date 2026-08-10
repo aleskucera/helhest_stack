@@ -71,10 +71,33 @@ Lesson for the next trip: **the wide speed range has to come from driving, not s
 **0.932**. Consistent with the 0.906–0.925 on record. The legacy model gives 1.000 by construction,
 so the ~7% loss is real and unmodelled.
 
+## The rear wheel is fixed — and that closes the loop
+
+Confirmed by the operator on 2026-08-10. With the rear modelled correctly as a fixed axle, all
+three independent numbers agree:
+
+| | α |
+|---|---|
+| the robot, this trip | **1.50** |
+| Project Chrono, fixed rear, converged dt | **1.60** |
+| our engine at the shipped `k_turn = 0.6` | **1.48** |
+
+Within 7% across a real robot, a full contact solver and a quasi-static kinematic model. The
+caster branch that was explored in `chrono_vehicle_model.py` gives α 1.1–1.3 and is contradicted
+by the robot; it is retained only as documentation of a ruled-out alternative, and `fixed` is now
+the default there.
+
+Worth being explicit that the earlier framing was wrong in both directions: a fixed axle was once
+claimed here to be "kinematically unable to turn the vehicle" (it was Chrono's rolling-friction
+constraint locking the yaw, 99e850e), and the docs' description of the wheel as "trailing" and
+"kinematically redundant" was read as implying a swivel. Neither survived contact with the
+hardware.
+
 ## What is still open
 
-- **The rear-wheel mounting.** Still the largest unknown in the yaw model (Chrono: α 1.10 free
-  caster against 3.17 fixed axle). Not answered by these bags — it needs a look at the hardware.
+- ~~The rear-wheel mounting.~~ **CLOSED**: the operator confirms the rear axle is FIXED, not a
+  caster. That was the largest unknown in the yaw model and it resolves in the model's favour —
+  see below.
 - **Slopes.** No `slope` bag yet, so the `normal_loads` load-transfer fix remains validated against
   Chrono only. The archive still tops out at 5.4 deg of tilt.
 - **α on other surfaces.** One surface is not a terrain model.
