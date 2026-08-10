@@ -74,7 +74,6 @@ from helhest import dynamics
 from helhest.control.command import condition_command
 from helhest.control.command import in_flight_history
 from helhest.control.command import JOINT_NAMES
-from helhest.control.command import plan_control_at
 from helhest.control.command import to_engine_order
 from helhest.control.mppi import CostParams
 from helhest.control.mppi import MppiGpu
@@ -236,10 +235,6 @@ class ElevationNode(Node):
         # Commands already in flight, ENGINE order (wL, wR, w_rear), oldest first. Length = the
         # delay in whole rollout steps; empty (and unused) when plan_command_delay is 0.
         self._cmd_in_flight: deque[np.ndarray] = deque(maxlen=1)
-        # Set by the driving branch when plan_command_rate > 0: the plan the command timer walks,
-        # plus what condition_command needs that the timer cannot recompute. None means the cloud
-        # callback published directly (stop, dock, hold) and the timer must stay out of the way.
-        self._drive_plan: tuple[np.ndarray, float, float, float] | None = None
         self._last_cmd_time: float | None = None  # clock of the last /cmd_joints publish
         self._d_hist: deque[float] = deque(
             maxlen=15
@@ -298,13 +293,6 @@ class ElevationNode(Node):
         # Sensor QoS (best-effort): a best-effort sub receives from BOTH a reliable publisher
         # (`/imu/data`) and a best-effort one (`/ouster/imu`); a reliable sub gets nothing from
         # the latter.
-        if self.plan_command_rate > 0.0:
-            self._command_period = 1.0 / float(self.plan_command_rate)
-            self.create_timer(self._command_period, self._command_tick)
-            self.get_logger().info(
-                f"command timer at {self.plan_command_rate:.0f} Hz "
-                f"(replanning stays at the sensor rate)"
-            )
         self.create_subscription(Imu, self.imu_topic, self._imu_callback, qos_profile_sensor_data)
         self.create_subscription(
             PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10
@@ -675,15 +663,6 @@ class ElevationNode(Node):
         # information -- but the COMMAND can change faster, which is where the value is: finer slew
         # and goal-brake resolution, and the LLC stays fed if a cloud is dropped. It does NOT reduce
         # the ~175 ms actuator delay, which lives in the LLC velocity loop.
-        # Command timer: walk the committed plan on a fixed clock instead of publishing once
-        # per replan. 20 Hz is above the ~14.5 Hz Odin plan rate, so the plan is interpolated
-        # rather than held, and it is the clock the inner yaw loop runs on. 0 = off.
-        d("plan_command_rate", 20.0)
-        # How stale a committed plan may get before the timer stops the robot. MUST be short:
-        # plan_control_at CLAMPS past the horizon, so without this a starved or crashed planner
-        # would have the timer hold the plan's last control forever -- and keep feeding the
-        # LLC deadman, which is what would otherwise stop the robot. ~7 missed frames at 14.5 Hz.
-        d("plan_stale_s", 0.5)
         d("plan_command_delay", dynamics.COMMAND_DELAY)
         d("plan_turn_boost", 1.0)
         # OPTIONAL: self-tune plan_turn_boost online from gyro feedback (control/turn_adapt.py) so the
@@ -695,8 +674,7 @@ class ElevationNode(Node):
         d("plan_turn_boost_tau", 3.0)
         # OPTIONAL fast inner yaw-rate loop (control/yaw_track.py): correct the commanded
         # differential so the REALIZED yaw matches the command actually published. Needs
-        # plan_command_rate > 0 -- it lives in the command timer, and a regulator running at
-        # the plan rate is pointless. Off by default; see the module docstring for gains.
+        # Off by default; see the module docstring for the gains.
         d("plan_yaw_track", False)
         d("plan_yaw_track_kp", 0.4)
         d("plan_yaw_track_ki", 1.0)
@@ -827,12 +805,10 @@ class ElevationNode(Node):
         self.plan_max_omega: float = g("plan_max_omega")
         self.plan_max_slew: float = g("plan_max_slew")
         self.plan_max_decel: float = g("plan_max_decel")
-        self.plan_command_rate: float = g("plan_command_rate")
         self.plan_command_delay: float = g("plan_command_delay")
         self.plan_turn_boost: float = g("plan_turn_boost")
         self.plan_turn_boost_adapt: bool = g("plan_turn_boost_adapt")
         self.plan_turn_boost_tau: float = g("plan_turn_boost_tau")
-        self.plan_stale_s: float = g("plan_stale_s")
         self.plan_yaw_track: bool = g("plan_yaw_track")
         self.plan_yaw_track_kp: float = g("plan_yaw_track_kp")
         self.plan_yaw_track_ki: float = g("plan_yaw_track_ki")
@@ -1005,17 +981,10 @@ class ElevationNode(Node):
                 deadband=self.plan_yaw_track_deadband,
                 max_correction=self.plan_yaw_track_max,
             )
-            if self.plan_command_rate <= 0.0:
-                self.get_logger().warn(
-                    "plan_yaw_track is ON but plan_command_rate is 0 -- the yaw loop lives in "
-                    "the command timer, which is not running, so it will do NOTHING"
-                )
-            else:
-                self.get_logger().info(
-                    f"yaw-rate loop ON at {self.plan_command_rate:.0f} Hz "
-                    f"(kp={self.plan_yaw_track_kp}, ki={self.plan_yaw_track_ki}, "
-                    f"deadband={self.plan_yaw_track_deadband} rad/s)"
-                )
+            self.get_logger().info(
+                f"yaw-rate loop ON at the plan rate (kp={self.plan_yaw_track_kp}, "
+                f"ki={self.plan_yaw_track_ki}, deadband={self.plan_yaw_track_deadband} rad/s)"
+            )
         else:
             self._yaw_track = None
         self.ctg = CostToGo(
@@ -1614,14 +1583,6 @@ class ElevationNode(Node):
                 f"REACHED goal (d={d_goal:.2f} m) -- stopping; idle until a new goal is set."
             )
         if self._goal_reached:
-            # DISARM THE TIMER. This branch returns before the `_drive_plan = None` below, so
-            # without this the timer keeps walking the last DRIVING plan at plan_command_rate
-            # while this branch publishes stops -- two publishers, opposite intents, ~2 ms apart.
-            # Latent until plan_command_rate became non-zero; visible in fast_experiment1 as 6.4%
-            # of command intervals under 10 ms, and absent from fast_experiment0, recorded with
-            # the timer still off. plan_stale_s bounds each episode to ~0.5 s, and in "follow"
-            # mode _goal_reached is per-frame rather than latched, so it can re-arm repeatedly.
-            self._drive_plan = None
             if self._yaw_track is not None:
                 self._yaw_track.reset()  # at rest: a held integrator is a lurch on the next goal
             if self.plan_actuate:
@@ -1736,11 +1697,9 @@ class ElevationNode(Node):
         turn_boost = (
             self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
         )
-        if self.plan_command_rate > 0.0 and from_plan and not holding:
-            # Hand the whole plan to the command timer and let it walk. Stops, docks and holds are
-            # NOT handed over: those are single commands, not trajectories, and must go out now.
-            # The adaptive turn_boost stays on the PLAN cadence: it pairs a commanded differential
-            # with the yaw that differential produced, and that pairing is per-plan.
+        if from_plan and not holding:
+            # The adaptive turn_boost pairs a commanded differential with the yaw it produced, so
+            # it belongs on the PLAN cadence -- once per committed plan, not per publish.
             if (
                 self._turn_adapt is not None
                 and self._imu_buffer
@@ -1748,27 +1707,18 @@ class ElevationNode(Node):
             ):
                 self._turn_adapt_update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
             self._last_diff_out = float(self._prev_cmd[2] - self._prev_cmd[0])
-            self._drive_plan = (
-                self.planner.nominal().copy(),
-                float(self.get_clock().now().nanoseconds) * 1e-9,
-                d,
-                turn_boost,
-            )
-            self.pub_holding.publish(Bool(data=False))
-            self._holding = False
-            self.pub_turn_boost.publish(Float32(data=float(turn_boost)))
-            # Publish the plan's first step NOW rather than waiting for the timer's next slot.
-            # rclpy.spin is single-threaded and this callback owns most of each ~69 ms cloud
-            # cycle, so the timer cannot preempt it: measured on fast_experiment1, 29.7% of cloud
-            # cycles produced NO command at all and only 1.08 went out per cycle against the 1.38
-            # a free 20 Hz timer would give. Before the timer existed every plan frame published
-            # directly, so handing off without this traded a guaranteed command per cycle for a
-            # timer that may not get to run -- intervals stretched to 100-150 ms. The timer still
-            # earns its keep interpolating the plan BETWEEN clouds; it just no longer owns the
-            # only path to the wheels.
-            self._command_tick()
-            return
-        self._drive_plan = None  # this frame publishes directly; keep the timer quiet
+        # INNER YAW LOOP. The reference is the UNCORRECTED plan through the same conditioner:
+        # post-turn-brake and post-slew, but free of the loop's own output. Referencing the
+        # corrected command makes reference and measurement both scale with the correction, so the
+        # error has no fixed point and the loop inflates the turn even at zero model error
+        # (measured: peak yaw 0.517 -> 0.575 rad/s on correctly-modelled ground).
+        ref_cmd = None
+        if self._yaw_track is not None and from_plan and not holding:
+            ref_cmd = self._conditioned(wl, wr, d, turn_boost)
+            half = 0.5 * self._yaw_track.correction  # differential only; the planner owns speed
+            wl, wr = wl - half, wr + half
+        elif self._yaw_track is not None:
+            self._yaw_track.reset()  # stopping, docking or held: do not carry an integrator over
         cmd = condition_command(
             wl,
             wr,
@@ -1786,6 +1736,8 @@ class ElevationNode(Node):
         )
         self._prev_cmd = cmd
         self._publish_cmd(cmd)
+        if ref_cmd is not None:
+            self._yaw_track_update(ref_cmd, cmd)
         self.pub_holding.publish(Bool(data=holding))  # True = walled-off hold, False = driving
         self._holding = holding  # colors the planned-path marker red next frame (see _publish_path)
         self.pub_turn_boost.publish(
@@ -1800,94 +1752,10 @@ class ElevationNode(Node):
                 cmd[2] - cmd[0]
             )  # condition_command [L, rear, R] -> (wR - wL)
 
-    def _command_tick(self) -> None:
-        """Publish the committed plan's control for the time that has actually elapsed.
-
-        Runs at plan_command_rate while the driving branch is active. `condition_command` is given
-        the TIMER's period, not the plan dt -- its slew and decel limits are rates, so passing the
-        plan dt here would silently allow several times the intended jerk per second.
-
-        The goal distance is the one measured when the plan was made, up to a tick stale (~9 cm at
-        1.4 m/s). The brake is a smooth function of it, so that is a small error in a gain, not a
-        latched decision.
-        """
-        plan = self._drive_plan
-        if plan is None or not self.plan_actuate:
-            # Not driving: a held integrator applied to the next manoeuvre would be a lurch.
-            if self._yaw_track is not None:
-                self._yaw_track.reset()
-            return
-        nominal, made_at, goal_dist, turn_boost = plan
-        elapsed = float(self.get_clock().now().nanoseconds) * 1e-9 - made_at
-        if self.plan_stale_s > 0.0 and elapsed > self.plan_stale_s:
-            self._stop_stale_plan()
-            return
-        wl, wr = (float(v) for v in plan_control_at(nominal, elapsed, dynamics.DT))
-        # The loop's REFERENCE is the uncorrected plan put through the same conditioner, so it is
-        # the braked, slew-limited intent -- and, critically, independent of the loop's own output.
-        # Referencing the corrected command instead makes the reference move with the correction:
-        # both scale with the differential, the error never closes, and the loop inflates the turn
-        # even when the model is exact (measured: peak yaw +11% at zero model error).
-        ref_cmd = None
-        if self._yaw_track is not None:
-            ref_cmd = self._conditioned(wl, wr, plan)
-            # The correction rides on the DIFFERENTIAL only -- the inner loop owns yaw, the planner
-            # owns forward speed. Applied before conditioning, so the slew limiter, the omega clamp
-            # and the turn brake all still bound the result.
-            half = 0.5 * self._yaw_track.correction
-            wl, wr = wl - half, wr + half
-        cmd = condition_command(
-            wl,
-            wr,
-            self._prev_cmd,
-            max_omega=self.plan_max_omega,
-            max_slew=self.plan_max_slew,
-            max_decel=self.plan_max_decel,
-            dt=self._command_dt(self._command_period),
-            turn_boost=turn_boost,
-            goal_dist=goal_dist,
-            brake_dist=self.plan_goal_brake_dist,
-            turn_brake_a_max=self.plan_turn_brake_a_max,
-            lat_gain=self._lat_gain,
-            turn_brake_scale=self._turn_brake_lookahead(turn_boost),
-        )
-        self._prev_cmd = cmd
-        self._publish_cmd(cmd)
-        if self._yaw_track is not None and ref_cmd is not None:
-            self._yaw_track_update(ref_cmd, cmd)
-
-    def _stop_stale_plan(self) -> None:
-        """The planner has stopped delivering: ramp to a stop rather than walk a stale plan.
-
-        `plan_control_at` clamps past the horizon, so a crashed or starved planner would otherwise
-        have this timer hold the last control indefinitely -- and, worse, keep the LLC deadman fed,
-        removing the very thing that stops the robot when the pipeline dies. Zero through the
-        conditioner decelerates at plan_max_decel instead of cutting; once at rest the timer goes
-        quiet and the deadman holds it there.
-        """
-        if self._yaw_track is not None:
-            self._yaw_track.reset()
-        cmd = condition_command(
-            0.0,
-            0.0,
-            self._prev_cmd,
-            max_omega=self.plan_max_omega,
-            max_slew=self.plan_max_slew,
-            max_decel=self.plan_max_decel,
-            dt=self._command_dt(self._command_period),
-        )
-        self._prev_cmd = cmd
-        self._publish_cmd(cmd)
-        if float(np.max(np.abs(cmd))) < 1e-3:
-            self._drive_plan = None  # at rest: stop publishing and let the deadman hold it
-            self.get_logger().warn(
-                f"no plan for {self.plan_stale_s:.2f} s -- command timer ramped the robot to a stop"
-            )
-
-    def _conditioned(self, wl: float, wr: float, plan) -> np.ndarray:
-        """Run the output conditioner without publishing. Pure, so it is safe to call twice a
-        tick: once on the plan alone (the yaw loop's reference) and once with the correction."""
-        _, _, goal_dist, turn_boost = plan
+    def _conditioned(self, wl: float, wr: float, goal_dist: float, turn_boost: float):
+        """Run the output conditioner without publishing. Pure, so the yaw loop can call it on the
+        uncorrected plan to get its reference, and the caller then runs it again with the
+        correction folded in."""
         return condition_command(
             wl,
             wr,
@@ -1895,7 +1763,7 @@ class ElevationNode(Node):
             max_omega=self.plan_max_omega,
             max_slew=self.plan_max_slew,
             max_decel=self.plan_max_decel,
-            dt=self._command_dt(self._command_period),
+            dt=self._command_dt(dynamics.DT),
             turn_boost=turn_boost,
             goal_dist=goal_dist,
             brake_dist=self.plan_goal_brake_dist,
@@ -1921,7 +1789,7 @@ class ElevationNode(Node):
         )
         t_imu, _, w_base = self._imu_buffer[-1]
         now = float(self.get_clock().now().nanoseconds) * 1e-9
-        dt = self._command_period
+        dt = dynamics.DT
         if self._last_yaw_track_time is not None:
             dt = max(now - self._last_yaw_track_time, 1e-4)
         self._last_yaw_track_time = now
