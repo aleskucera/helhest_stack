@@ -332,9 +332,15 @@ def fig_budget(path: Path) -> None:
     fig, ax = plt.subplots(figsize=(FIG_W, 1.9))
     ax.plot(n, regret, "o-", color="#2171b5", label="Monte-Carlo with $N$ draws", ms=3.5)
     ax.axhline(clark, color="#cb181d", lw=1.3, label=f"Clark (no draws): {clark:.3f}")
-    ax.axvline(data["n_star"], color="#969696", ls=":", lw=1.0)
-    ax.text(data["n_star"] * 1.06, max(regret) * 0.55, f"$N^* = {data['n_star']}$",
-            fontsize=6.8, color="#525252")
+    # n_star is None when the MC curve never reaches Clark's regret within the held-out
+    # budget (the strongest outcome) — state that instead of drawing a crossing line.
+    if data["n_star"] is not None:
+        ax.axvline(data["n_star"], color="#969696", ls=":", lw=1.0)
+        ax.text(data["n_star"] * 1.06, max(regret) * 0.55, f"$N^* = {data['n_star']}$",
+                fontsize=6.8, color="#525252")
+    else:
+        ax.text(n[0] * 1.2, max(regret) * 0.55, f"$N^* > {n[-1]}$: MC never catches up",
+                fontsize=6.8, color="#525252")
     ax.set_xscale("log", base=2)
     ax.set_xticks(n)
     ax.set_xticklabels([str(v) for v in n])
