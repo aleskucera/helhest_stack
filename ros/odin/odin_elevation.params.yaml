@@ -149,3 +149,29 @@
     # Pre-apply the tightest cap found this far ahead along the committed plan, so the robot is
     # already slow when it enters the corner. 0 = react to the current command only.
     plan_turn_brake_lookahead_s: 1.5
+
+    # --- INNER YAW-RATE LOOP (control/yaw_track.py) -- OFF, needs a field trial ---
+    # Everything downstream of MPPI is feedforward: the planner maps a differential to a yaw rate
+    # through alpha = 1 + k_turn*plan_friction and publishes it. alpha DIVIDES the yaw rate, so
+    # ground softer than plan_friction turns MORE than asked -- 19% at mu 0.4, 32% at mu 0.2 in
+    # the engine, and the `compact` bag reads alpha 1.68-2.01 against the planner's 1.48. This
+    # closes the loop on /odin1/imu (400 Hz, yaw on +z, no spikes -- verified on bags).
+    #
+    # BOTH knobs are needed: the loop lives in the command timer, which only runs when
+    # plan_command_rate > 0. A regulator at the plan rate would be pointless. tau_motor is 0.19 s
+    # so the useful bandwidth is ~1 Hz -- 50 Hz is ample and 400 Hz would buy nothing.
+    #
+    # Note plan_command_rate > 0 is a behaviour change on its own: commands then interpolate the
+    # committed plan on a timer instead of going out once per replan. Turn it on first, confirm
+    # the robot drives the same, and only then set plan_yaw_track.
+    #
+    # Measured on flat ground, commanded differential 2.0, planner believing mu 0.8:
+    #   real mu     0.80    0.40    0.20
+    #   open        0.0%   19.4%   32.1%   steady-state yaw error
+    #   closed      0.4%    1.0%    1.1%   and peak yaw DROPS, 0.617 -> 0.597 at mu 0.4
+    plan_command_rate: 0.0    # [Hz] 0 = off (publish once per replan); 50 to run the loop
+    plan_yaw_track: false
+    plan_yaw_track_kp: 0.4
+    plan_yaw_track_ki: 1.0
+    plan_yaw_track_deadband: 0.05   # [rad/s] idle band, so a straight line is not regulated
+    plan_yaw_track_max: 1.5         # [rad/s] hard clamp on the differential correction

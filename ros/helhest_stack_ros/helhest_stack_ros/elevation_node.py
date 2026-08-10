@@ -80,6 +80,7 @@ from helhest.control.mppi import MppiGpu
 from helhest.control.mppi import SamplingConfig
 from helhest.control.terminal import dock_control
 from helhest.control.turn_adapt import AdaptiveTurnBoost
+from helhest.control.yaw_track import YawRateTracker
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 from helhest.planning.costtogo import CostToGo
@@ -169,6 +170,11 @@ _PLAN_BUILD = frozenset(
         "plan_elite_frac",
         "plan_turn_boost_adapt",
         "plan_turn_boost_tau",
+        "plan_yaw_track",
+        "plan_yaw_track_kp",
+        "plan_yaw_track_ki",
+        "plan_yaw_track_deadband",
+        "plan_yaw_track_max",
         "device",
     }
 )
@@ -251,6 +257,8 @@ class ElevationNode(Node):
             None  # last commanded (wR-wL), paired with the yaw it caused
         )
         self._last_turn_adapt_time: float | None = None  # clock of the last turn_boost EMA update
+        self._yaw_track: YawRateTracker | None = None  # optional fast inner yaw-rate loop
+        self._last_yaw_track_time: float | None = None  # clock of the last yaw-loop update
         self._goal_reached = (
             False  # latched at the goal -> idle (no planning) until the goal changes
         )
@@ -676,6 +684,15 @@ class ElevationNode(Node):
         # fight replanning). Only adapts while turning; clamps to [1, 3].
         d("plan_turn_boost_adapt", False)
         d("plan_turn_boost_tau", 3.0)
+        # OPTIONAL fast inner yaw-rate loop (control/yaw_track.py): correct the commanded
+        # differential so the REALIZED yaw matches the command actually published. Needs
+        # plan_command_rate > 0 -- it lives in the command timer, and a regulator running at
+        # the plan rate is pointless. Off by default; see the module docstring for gains.
+        d("plan_yaw_track", False)
+        d("plan_yaw_track_kp", 0.4)
+        d("plan_yaw_track_ki", 1.0)
+        d("plan_yaw_track_deadband", 0.05)  # [rad/s] straight-running idle band
+        d("plan_yaw_track_max", 1.5)  # [rad/s] hard clamp on the differential correction
         d("plan_dock_radius", 1.5)  # within this range of the goal: dock (if enabled) or just stop
         d(
             "plan_dock_enable", True
@@ -806,6 +823,11 @@ class ElevationNode(Node):
         self.plan_turn_boost: float = g("plan_turn_boost")
         self.plan_turn_boost_adapt: bool = g("plan_turn_boost_adapt")
         self.plan_turn_boost_tau: float = g("plan_turn_boost_tau")
+        self.plan_yaw_track: bool = g("plan_yaw_track")
+        self.plan_yaw_track_kp: float = g("plan_yaw_track_kp")
+        self.plan_yaw_track_ki: float = g("plan_yaw_track_ki")
+        self.plan_yaw_track_deadband: float = g("plan_yaw_track_deadband")
+        self.plan_yaw_track_max: float = g("plan_yaw_track_max")
         self.plan_dock_radius: float = g("plan_dock_radius")
         self.plan_dock_enable: bool = g("plan_dock_enable")
         self.plan_reach_radius: float = g("plan_reach_radius")
@@ -951,6 +973,27 @@ class ElevationNode(Node):
             )
         else:
             self._turn_adapt = None
+        if self.plan_yaw_track:
+            self._yaw_track = YawRateTracker(
+                yaw_per_diff=self._yaw_per_diff,
+                kp=self.plan_yaw_track_kp,
+                ki=self.plan_yaw_track_ki,
+                deadband=self.plan_yaw_track_deadband,
+                max_correction=self.plan_yaw_track_max,
+            )
+            if self.plan_command_rate <= 0.0:
+                self.get_logger().warn(
+                    "plan_yaw_track is ON but plan_command_rate is 0 -- the yaw loop lives in "
+                    "the command timer, which is not running, so it will do NOTHING"
+                )
+            else:
+                self.get_logger().info(
+                    f"yaw-rate loop ON at {self.plan_command_rate:.0f} Hz "
+                    f"(kp={self.plan_yaw_track_kp}, ki={self.plan_yaw_track_ki}, "
+                    f"deadband={self.plan_yaw_track_deadband} rad/s)"
+                )
+        else:
+            self._yaw_track = None
         self.ctg = CostToGo(
             GridParams(rcnx, rcny, rccell, 0.0, 0.0),
             dynamics.robot_params(self.plan_wheel_width),
@@ -970,6 +1013,14 @@ class ElevationNode(Node):
         # is 1 + k_turn, which is the value the planner itself is tuned against.
         _rp = dynamics.robot_params(self.plan_wheel_width)
         self._lat_gain = _rp.wheel_radius**2 / (2.0 * _rp.half_track * (1.0 + kt))
+        # Yaw rate per unit differential, for the inner yaw loop. NOT _lat_gain / R: the turn
+        # brake deliberately uses alpha = 1 + k_turn (the mu = 1 worst case) because it is a
+        # SAFETY cap and over-braking is harmless. A yaw REFERENCE has to be the planner's own
+        # model, alpha = 1 + k_turn*plan_friction, or the loop would steer the robot away from
+        # what MPPI actually planned -- about 8% less yaw at the deployed mu 0.8.
+        self._yaw_per_diff = _rp.wheel_radius / (
+            2.0 * _rp.half_track * (1.0 + kt * self.plan_friction)
+        )
         # Routing field expressed in the PLANNING window's frame: both windows are robot-centered,
         # so their origins differ by a constant cell offset.
         self.sgrid = GridParams(
@@ -1732,10 +1783,26 @@ class ElevationNode(Node):
         """
         plan = self._drive_plan
         if plan is None or not self.plan_actuate:
+            # Not driving: a held integrator applied to the next manoeuvre would be a lurch.
+            if self._yaw_track is not None:
+                self._yaw_track.reset()
             return
         nominal, made_at, goal_dist, turn_boost = plan
         elapsed = float(self.get_clock().now().nanoseconds) * 1e-9 - made_at
         wl, wr = (float(v) for v in plan_control_at(nominal, elapsed, dynamics.DT))
+        # The loop's REFERENCE is the uncorrected plan put through the same conditioner, so it is
+        # the braked, slew-limited intent -- and, critically, independent of the loop's own output.
+        # Referencing the corrected command instead makes the reference move with the correction:
+        # both scale with the differential, the error never closes, and the loop inflates the turn
+        # even when the model is exact (measured: peak yaw +11% at zero model error).
+        ref_cmd = None
+        if self._yaw_track is not None:
+            ref_cmd = self._conditioned(wl, wr, plan)
+            # The correction rides on the DIFFERENTIAL only -- the inner loop owns yaw, the planner
+            # owns forward speed. Applied before conditioning, so the slew limiter, the omega clamp
+            # and the turn brake all still bound the result.
+            half = 0.5 * self._yaw_track.correction
+            wl, wr = wl - half, wr + half
         cmd = condition_command(
             wl,
             wr,
@@ -1753,6 +1820,53 @@ class ElevationNode(Node):
         )
         self._prev_cmd = cmd
         self._publish_cmd(cmd)
+        if self._yaw_track is not None and ref_cmd is not None:
+            self._yaw_track_update(ref_cmd, cmd)
+
+    def _conditioned(self, wl: float, wr: float, plan) -> np.ndarray:
+        """Run the output conditioner without publishing. Pure, so it is safe to call twice a
+        tick: once on the plan alone (the yaw loop's reference) and once with the correction."""
+        _, _, goal_dist, turn_boost = plan
+        return condition_command(
+            wl,
+            wr,
+            self._prev_cmd,
+            max_omega=self.plan_max_omega,
+            max_slew=self.plan_max_slew,
+            max_decel=self.plan_max_decel,
+            dt=self._command_dt(self._command_period),
+            turn_boost=turn_boost,
+            goal_dist=goal_dist,
+            brake_dist=self.plan_goal_brake_dist,
+            turn_brake_a_max=self.plan_turn_brake_a_max,
+            lat_gain=self._lat_gain,
+            turn_brake_scale=self._turn_brake_lookahead(turn_boost),
+        )
+
+    def _yaw_track_update(self, ref_cmd: np.ndarray, cmd: np.ndarray) -> None:
+        """Close the yaw loop: reference from the uncorrected intent, saturation from what went out.
+
+        Both are post-turn-brake, so the loop tracks the braked arc rather than fighting the brake
+        to recover the yaw the brake deliberately removed.
+        """
+        assert self._yaw_track is not None
+        if not self._imu_buffer:
+            return
+        t_imu, _, w_base = self._imu_buffer[-1]
+        now = float(self.get_clock().now().nanoseconds) * 1e-9
+        dt = self._command_period
+        if self._last_yaw_track_time is not None:
+            dt = max(now - self._last_yaw_track_time, 1e-4)
+        self._last_yaw_track_time = now
+        # /cmd_joints order is (left, rear, right), so the differential is [2] - [0].
+        yaw_ref = float(ref_cmd[2] - ref_cmd[0]) * self._yaw_per_diff
+        self._yaw_track.update(
+            yaw_ref,
+            float(w_base[2]),  # base-frame gyro z; /odin1/imu carries yaw on +z, verified on bags
+            dt,
+            age=now - t_imu,
+            saturated=bool(np.max(np.abs(cmd)) >= self.plan_max_omega - 1e-3),
+        )
 
     def _load_command_history(self) -> None:
         """Copy the commands still in flight into the rollout buffer, oldest first.
