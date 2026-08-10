@@ -114,16 +114,19 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     # at RMS ~0.16 and are indistinguishable, because yaw-inertia transients carry roughly 4x the
     # variance of the traction difference. This model is real but it is not the dominant error.
     shear_lk: float = 0.0
-    # Yaw-rate lag [s] for the LEGACY twist: the body's rotational inertia, which the kinematic
-    # map omits by returning a steady-state yaw rate instantly. 0 = off (the pre-existing
-    # behaviour). Fitted against Chrono at a converged step, not measured on the robot -- see
-    # scripts/engine_ranking.py and PREREG_chrono_vehicle.md.
+    # Yaw-rate lag [s] for the LEGACY twist. REFUTED ON THE ROBOT, 2026-08-10: fitting (alpha,
+    # tau) to driving-arc onsets over a 7x contact-speed range prefers tau = 0, with the residual
+    # rising monotonically away from it (+15.8% at tau = 0.25). Once the MEASURED wheel speeds are
+    # used -- they already contain the 0.19 s actuator lag -- the body's yaw follows with no
+    # further lag. Chrono has a lag the robot does not, which is also why this knob turned out
+    # redundant with k_turn: both were absorbing the same simulator artifact. Kept at 0 as a
+    # documented negative; see CALIBRATION_RESULTS.md.
     yaw_tau: float = 0.0
-    # Relaxation LENGTH [m]: the same yaw lag, but keyed to distance travelled instead of time,
-    # tau_eff = yaw_relax_len / |v|. Rigid-body yaw inertia cannot be what the lag represents --
-    # mu m g b / I_zz is 30 rad/s^2, so inertia settles in 0.033 s, a third of one planner step --
-    # whereas a tyre's lateral force builds over DISTANCE, which lands in the right range at these
-    # speeds. The two forms are distinguishable because only this one is speed-dependent. 0 = off.
+    # Relaxation LENGTH [m]: the same yaw lag keyed to distance, tau_eff = yaw_relax_len / v.
+    # REFUTED ON THE ROBOT alongside yaw_tau -- see that field and CALIBRATION_RESULTS.md. The
+    # reasoning that motivated it still stands (rigid-body yaw inertia CANNOT be the mechanism:
+    # mu m g b / I_zz = 30 rad/s^2 settles in 0.033 s, a third of a planner step), but the premise
+    # that there is a lag to explain does not survive the measurement. 0 = off.
     yaw_relax_len: float = 0.0
     contact_patch: float = 0.075
     shear_iters: int = 6
