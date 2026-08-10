@@ -71,14 +71,16 @@ def program(name: str) -> list[tuple[float, float, float]]:
         # gets the same measurement on a patch, by SPINNING IN PLACE. What sets a tyre's relaxation
         # is the speed its contact patch travels over the ground, R * mean|omega|, which is nonzero
         # in a spin even though the body does not translate -- so the speed sweep survives and the
-        # footprint collapses to the robot's own turning circle. Contact speed spans 0.18-1.40 m/s
-        # here, a WIDER range than the driving version manages.
+        # footprint collapses to the robot's own turning circle. Contact speed spans 0.70-1.40 m/s
+        # here. The sweep would like to go lower for a wider lever on the tau = sigma/v fit, but a
+        # spin does not break static friction below ~2 rad/s on this drivetrain (found in the field
+        # 2026-08-10: 0.5 and 1.0 rad/s did not move it, 2.0 did), so the low end is dropped.
         #
         # The caveat is real: a spin has every wheel skidding laterally, which is not the regime
         # the planner spends its time in, so sigma fitted here should be checked against a couple
         # of driving steps before it is trusted. `--pause` stops between blocks so a short driving
         # segment can be added by hand on whatever run-up the site allows.
-        for w in (0.5, 1.0, 2.0, 4.0):
+        for w in (2.0, 3.0, 4.0):
             hold = max(2.0, 8.0 * 0.15 / (0.35 * w))  # ~8 relaxation lengths of contact travel
             out.append(block(2.0, 0.0, 0.0))
             for _ in range(3):
