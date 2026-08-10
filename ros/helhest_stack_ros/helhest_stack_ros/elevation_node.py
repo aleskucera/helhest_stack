@@ -1757,6 +1757,16 @@ class ElevationNode(Node):
             self.pub_holding.publish(Bool(data=False))
             self._holding = False
             self.pub_turn_boost.publish(Float32(data=float(turn_boost)))
+            # Publish the plan's first step NOW rather than waiting for the timer's next slot.
+            # rclpy.spin is single-threaded and this callback owns most of each ~69 ms cloud
+            # cycle, so the timer cannot preempt it: measured on fast_experiment1, 29.7% of cloud
+            # cycles produced NO command at all and only 1.08 went out per cycle against the 1.38
+            # a free 20 Hz timer would give. Before the timer existed every plan frame published
+            # directly, so handing off without this traded a guaranteed command per cycle for a
+            # timer that may not get to run -- intervals stretched to 100-150 ms. The timer still
+            # earns its keep interpolating the plan BETWEEN clouds; it just no longer owns the
+            # only path to the wheels.
+            self._command_tick()
             return
         self._drive_plan = None  # this frame publishes directly; keep the timer quiet
         cmd = condition_command(
