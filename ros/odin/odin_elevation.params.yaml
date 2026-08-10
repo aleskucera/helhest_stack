@@ -60,18 +60,18 @@
     # conservative while the envelope stays geometrically honest.
     #
     # BOTH QUANTISE, so small values silently do nothing and intermediate ones are unreachable.
-    # The routing cell is `resolution` x `plan_lat_coarsen` = 0.08 x 4 = 0.32 m, and the erosion is
-    # a whole number of CELLS: 0.30 -> 1 cell = 0.32 m, and the next step up is 0.64 m. There is
-    # nothing in between. Likewise a heading bin is 360/plan_n_theta = 15 deg, so anything under
-    # 7.5 deg rounds to ZERO -- 15.0 is the smallest value that does anything, and buys one bin.
+    # The lateral erosion is a whole number of ROUTING CELLS, and the routing cell is
+    # `resolution` x `plan_lat_coarsen` = 0.08 x 3 = 0.24 m. So the tube can be 0.24 or 0.48 --
+    # 0.20 was asked for and is NOT reachable; it rounds to one cell, 0.24 m. Likewise a heading
+    # bin is 360/plan_n_theta = 15 deg, so under 7.5 deg rounds to ZERO and 15.0 buys one bin.
     #
-    # Going finer costs more than it returns: plan_lat_coarsen 3 (cell 0.24 m) takes the cost-to-go
-    # solve from 3.8 to 10.1 ms, 2.7x, and REDUCES this tube to 0.24 m unless the margin is raised
-    # with it. Measured on the deployed 16 m window at resolution 0.08.
-    #
-    # 0.3 m was validated in the Tier-C closed loop (0 belly contacts). Tighten in narrow spaces:
-    # it erodes from both sides, so a 1.2 m gap loses 0.8 m of it.
-    plan_robust_margin_m: 0.3
+    # plan_lat_coarsen was 4 (cell 0.32 m, tube 0.32 m). Going to 3 buys a finer routing grid AND
+    # a smaller tube, and costs solve time: measured on the deployed 16 m window, 3.8 -> 10.1 ms,
+    # which is 15% of a 66 ms sensor frame since the cost-to-go re-solves every plan cycle.
+    # Coarsen 2 (cell 0.16, tube 0.16 m) would be the way to get nearer 20 cm but costs 25.0 ms,
+    # 38% of the frame -- not worth 8 cm.
+    plan_robust_margin_m: 0.20
+    plan_lat_coarsen: 3
     plan_robust_margin_deg: 15.0
     plan_wheel_width: 0.10
     k_turn: 0.6
