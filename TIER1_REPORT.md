@@ -4,11 +4,22 @@ Two stacked branches off `main` (`de96100`). Neither is merged.
 
 ```
 main
- └── engine/tier1-certificates          IMPROVEMENTS.md Tier 1, complete and verified
-      └── engine/exact-arc-integration  engine fidelity work + the measurement scripts
+ └── engine/tier1-certificates          HISTORICAL -- do not work here (see below)
+      └── engine/exact-arc-integration  <- THE WORKING BRANCH; everything is here
 ```
 
-Everything is additive or opt-in, with one stated exception (§2).
+**Work on `engine/exact-arc-integration`.** `tier1-certificates` is an ANCESTOR of it, not an
+alternative: an intermediate point in the same history. It was originally described here as the
+smaller, safer merge candidate, and that is no longer true. What made it "safe" was that its Tier-1
+additions were all default-on and inert -- and those certificates were later REMOVED (§1.1), after
+Chrono showed the tip-over margin could not work and measurement showed the other two cost 40% of
+the rollout for outputs nothing read. So `tier1-certificates` is now the one branch that still
+carries code the project has deliberately deleted, and it has none of the load-transfer fix, the
+Chrono validation, or the recording tooling. It is pushed for history and nothing else.
+
+Everything on the working branch is additive or opt-in, with two stated exceptions: the exact-arc
+integrator (§2) and the `normal_loads` tangential reaction (§1.2), both of which change existing
+outputs on purpose and are validated against Chrono.
 
 ---
 
