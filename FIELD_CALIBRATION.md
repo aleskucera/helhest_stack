@@ -27,7 +27,7 @@ fixed, the robot (α 1.50), converged Chrono (1.60) and our engine at the shippe
 - [ ] Laptop can reach the robot (`bags/fetch_bag.sh` uses `robot@192.168.18.5`).
 - [ ] Space in mind: see the footprint table in §3. `compact` needs almost nothing; `calibrate`
       driven manually needs room to hold a straight line for five seconds at a time.
-- [ ] Tape measure or a phone, for the rear-wheel trail and the slope angle.
+- [ ] A phone, for the slope angle. (The rear-wheel question is closed — see §0.)
 
 ---
 
@@ -76,13 +76,12 @@ python3 ros/calibrate_drive.py compact    # terminal 2: DRY RUN first, prints th
 python3 ros/calibrate_drive.py compact --go
 ```
 
-Spins in place at four wheel speeds. It measures whether the yaw lag is keyed to TIME or to
-DISTANCE, which needs identical steps at different speeds — a hand-made step has an uncertain
-onset, an uncertain amplitude and a different speed every repeat, and the fit cannot absorb that.
+Spins in place at three wheel speeds (2/3/4 — **the robot will not break loose below ~2 rad/s**,
+found on the first trip). Gives α per surface cheaply.
 
-Spinning works because what sets a tyre's relaxation is the speed its CONTACT PATCH travels over
-the ground, which is non-zero in a spin even though the body does not translate. Contact speed
-spans 0.18–1.40 m/s here, a wider range than the driving version manages.
+It was designed to separate a time-keyed yaw lag from a distance-keyed one, and it could not: the
+breakaway limit cut its contact-speed range to 2x, and the answer came from the manual driving bag
+instead, whose arcs span 7x. **If you need a speed sweep, drive it — do not spin it.**
 
 `--pause` waits for Enter between blocks if you need to reposition.
 
@@ -155,16 +154,14 @@ What each should come out at, and what it decides:
 
 | quantity | current value | where it came from | if the bag disagrees |
 |---|---|---|---|
-| α (turn gain) | 2.20 | bags, two IMUs to 1% | re-decide `k_turn`; the planner ships 0.6 (α 1.48) and under-turns ~1.5x |
-| forward gain | 0.906–0.925 | bags, SLAM odometry | it is a real loss; the legacy model gives 1.000 by construction |
-| τ_motor | 0.19 s | bags, 34 step responses | already solid; this is a re-confirmation |
-| **σ (relaxation length)** | **0.15 m** | **fitted to CHRONO only** | **this is the trip's main question** |
+| α (turn gain) | **1.50 on tarmac** | 2026-08-10 bags, 3 estimates | matches `k_turn` 0.6; on grass/dirt it may be the 1.82 the outdoor preset assumes |
+| forward gain | **0.932** | 2026-08-10 bags + earlier | a real ~7% loss; the legacy model gives 1.000 by construction |
+| τ_motor | 0.19 s | bags, 34 step responses | solid |
+| σ (relaxation length) | **0 — refuted** | 2026-08-10, 7x speed range | no yaw lag beyond the actuator's; do not reintroduce without evidence |
 | L/K | 8–15 | bags, quasi-static samples only | still conflicted with the forward gain |
 
-**σ is the one to look at first.** Under the distance hypothesis the response time scales as
-`τ = σ/v`, so across the four `compact` speeds it should vary by roughly 8×. If instead the
-response time is about the same at every speed, the lag is time-keyed, σ is wrong, and
-`yaw_relax_len` should be dropped in favour of `yaw_tau`.
+**σ was settled on the first trip and the answer was zero** (CALIBRATION_RESULTS.md). What remains
+unmeasured is α on other SURFACES, and anything at all on a slope.
 
 `replay_traction.py` currently scores legacy / shear / shear+momentum. It should gain the two yaw-lag
 variants so σ and τ get scored against the gyro rather than against Chrono — worth writing once
