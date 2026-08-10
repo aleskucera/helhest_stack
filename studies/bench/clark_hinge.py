@@ -432,7 +432,9 @@ def gateH_trajectory_vs_mc(
 
 
 # --- STAGE 2: the full-cost head-to-head, protocol reused verbatim from clark_full -------------
-def run_stage2(device: str, n_seeds: int, family: str, noise: str) -> dict:
+def run_stage2(
+    device: str, n_seeds: int, family: str, noise: str, seed_offset: int = 0
+) -> dict:
     """`clark_full.run_seed_full` with the coupled moments swapped in for the frozen ones.
 
     The swap is a module-attribute injection rather than a copy of the 90-line comparison
@@ -445,7 +447,7 @@ def run_stage2(device: str, n_seeds: int, family: str, noise: str) -> dict:
     try:
         rows = [
             clark_full.run_seed_full(seed, family, noise, device, use_full=True)
-            for seed in range(n_seeds)
+            for seed in range(seed_offset, seed_offset + n_seeds)
         ]
     finally:
         clark_full.full_cost_plan_moments = original
@@ -466,8 +468,8 @@ def run_stage2(device: str, n_seeds: int, family: str, noise: str) -> dict:
         }
     passed = all(t["p"] < 0.05 and t["mean_regret_diff"] < 0.0 for t in tests.values())
     return {
-        "family": family, "noise": noise, "n_seeds": n_seeds, "rows": rows,
-        "mean_regret": regret, "tests": tests,
+        "family": family, "noise": noise, "n_seeds": n_seeds, "seed_offset": seed_offset,
+        "rows": rows, "mean_regret": regret, "tests": tests,
         "passed": passed,  # PRE-REG: clark_cvar beats step AND bracket at p < 0.05, full cost
     }
 
@@ -501,6 +503,12 @@ def main() -> None:
         help="run stage 2 even though Gate H failed -- EXPLORATORY, must be user-authorized",
     )
     ap.add_argument("--seeds", type=int, default=100)
+    ap.add_argument(
+        "--seed-offset",
+        type=int,
+        default=0,
+        help="first stage-2 seed; virgin confirmation uses 5000 (PREREG_stage2_virgin.md)",
+    )
     args = ap.parse_args()
     wp.init()
 
@@ -526,7 +534,9 @@ def main() -> None:
                 if args.force_stage2
                 else "confirmatory: Gate H passed"
             )
-            out["stage2"] = run_stage2(args.device, args.seeds, "hybrid", "all")
+            out["stage2"] = run_stage2(
+                args.device, args.seeds, "hybrid", "all", args.seed_offset
+            )
             s = out["stage2"]
             print("\n=== STAGE 2: full cost (settle + clear_soft), hybrid/all ===")
             for a, v in sorted(s["mean_regret"].items(), key=lambda kv: kv[1]):
