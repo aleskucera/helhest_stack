@@ -1,19 +1,31 @@
 # Paper claims — revision 2, post red-team and post holdout
 
-> **CORRECTION BANNER (2026-08-10, temporary until rev 3).** A code review found 13
+> **REVISION 3 BANNER (2026-08-11, correction cycle complete).** A code review found 13
 > number-corrupting defects (commit 8e0aef5; ledger in `RERUNS.md`, narrative in
-> `HANDOFF.md` §11). Two affect this document's numbers: (a) every occlusion/localisation/
-> all-noise number was computed on wrong observation masks (occlusion rays cast from the
-> grid corner, half-cell pose shift); (b) every Kendall tau in the repo was actually
-> Goodman-Kruskal gamma — true tau-b is smaller wherever believed costs tie. Stage-4
-> reruns (commit 5f13dcb) confirm every QUALITATIVE claim below survives (entropy still
-> loses decisively, corridor still ties/beats the adjoint on realistic settings, the
-> motion-coupled retraction stands, elites still compress edges), but the specific
-> all-noise/occlusion/localisation taus and p-values below are superseded by
-> `ranking_hybrid_{all,occlusion,localisation}.json` / `elites_*.json` /
-> `sensing/{sweep,holdout}.json` as committed 2026-08-10. Clean/sensor-arm numbers
-> (incl. C1's +0.691/+0.471) are being recomputed under tau-b; rev 3 replaces them
-> in-text. Do not quote a number from this file without checking the current json.
+> `HANDOFF.md` §11); every affected artifact was rerun (commits 5f13dcb, 4c71c94). Outcome
+> for this document, claim by claim:
+> - **C1 clean-arm numbers stand UNCHANGED** — the hybrid/clean rerun is byte-identical to
+>   the committed artifact (the clean arm never touches the fixed code paths, and tau-b
+>   equals gamma absent exact ties), so +0.691/p=2.5e-60 and the clean-regime scope law
+>   survive as written. All-noise/occlusion/localisation numbers are superseded by the
+>   2026-08-10 jsons; the qualitative claims (entropy loses everywhere, corridor ties/beats
+>   the adjoint under realistic noise, elites compress every edge, the motion-coupled
+>   retraction) all reproduce on corrected masks.
+> - **C2 stands**; the rare-event number tightens to FORM missing by 1.99 dex (stalled
+>   attacks now censored rather than reported as finite Φ(−4)) vs subset simulation's 0.107.
+> - **The "Follow-up direction validated: decision-focused perception training" section
+>   below is RETRACTED (▼▼).** Under the corrected noise model the thread's one surviving
+>   positive REVERSES: the decision-loss-trained inpainter loses to MSE at p=3.9e-10
+>   (9/68 wins, dfl_full.json 2026-08-11); the cost-space arm is marginal (p=0.019, 15/19).
+>   dfl_settle's rerun refused to complete because the retrained rung-2 model no longer
+>   reproduces the recorded capacity result (0.157 vs 0.257) — the training landscape
+>   itself moved with the noise fix. The p=0.006 headline, the ablation chain, and the
+>   "symmetric law" sentence built on it describe the corrupted benchmark, not the
+>   phenomenon. The section is kept below as the historical record; do not cite it.
+>   The dual-consumer insight and the observability result (75% zero-gradient mass) were
+>   derived from mechanisms, not that headline — they need re-verification before reuse,
+>   not automatic retraction (observability.json was rerun 2026-08-10 and its qualitative
+>   claim reproduces).
 
 Written 2026-08-06 (rev 2, same day). Revision 1 was adversarially reviewed by three
 independent referees (novelty / methodology / significance) and stress-tested by a
@@ -169,6 +181,7 @@ characterisation, with the method as its constructive half.)
   (disagreement-swath @400/all = +0.016) matches the prior pipeline exactly.
 
 ## Follow-up direction validated (2026-08-06 evening): decision-focused perception training
+## ▼▼ RETRACTED 2026-08-11 — see the rev-3 banner; historical record only, do not cite
 
 The one gradient use that PASSED its pre-registered bar (studies/bench/dfl.py,
 dfl_full.json): train a terrain inpainter with a decision loss (softmin expected regret,

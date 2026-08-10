@@ -495,10 +495,25 @@ motion-coupled holdout still null (p=0.57-1.00). Occlusion/localisation arms hav
 masks for the first time. NOTE: clean/sensor ranking arms (C1's +0.691/+0.471 headline
 class) still carry gamma taus — rerunning in stage 5; every tau shrinks where costs tie.
 
-**In flight at write time:** hinge virgin gate (tagged rerun), the pre-registered virgin
-stage 2, stage 5 (DFL suite, risk/certify/bundled/order2/softgrad/observability/rare,
-run_bench, bag_belief, ranking clean/sensor arms). CLAIMS.md carries a correction banner
-until those land. Paper edit list: scratchpad paper_number_inventory.md (~85 claims, 21/27
+**The virgin verdicts (commit 730ef00).** Gate H on virgin cases PASSES all four criteria
+under the fixed noise (corr 0.961 vs the 0.915 fail on record; the earlier bit-identical
+virgin json was the stage-2 flow not recomputing it). The pre-registered virgin stage 2
+(seeds 5000-5099, PREREG_stage2_virgin.md) FAILS its composite: lowest mean regret (0.196
+vs step 0.393, bracket 0.335) and beats step p=0.044, but does not separate from the
+bracket (p=0.31) — exactly the criterion the prereg predicted was at risk. Per the frozen
+rule the full-cost claim is CALIBRATED BUT NOT INDEPENDENTLY CONFIRMED; the paper headline
+stays on the settle/measured-belief results and reports the trajectory whole.
+
+**Stage 5 (commit 4c71c94) — one reversal that outranks the bookkeeping.** The DFL
+thread's single surviving positive (decision-loss training beats MSE, p=0.006) REVERSES
+under the fixed noise: decision-trained loses to MSE at p=3.9e-10 (9/68 wins); cost-space
+marginal (p=0.019). dfl_settle's rerun rc=1 by its own reproduction guard (retrained
+rung-2 regret 0.157 vs recorded 0.257) — the training landscape moved with the fix.
+CLAIMS.md rev 3 retracts the section. The refutations hold with cleaner numbers (FORM
+1.99 dex with stalls properly censored, vs subset 0.107; bag_belief zero-fill spread 45.9
+vs 11.5 ground-referenced). CONTROL: ranking hybrid/clean returned BYTE-IDENTICAL to the
+committed artifact — the clean arm never touches the fixed paths and tau-b equals gamma
+absent exact ties — so C1's clean-arm headline numbers stand unchanged. Paper edit list: scratchpad paper_number_inventory.md (~85 claims, 21/27
 spot-checked numbers drifted; two framing flips: hinge verdict negative->positive pending
 the virgin run, and "STEP worse than the mean map" no longer holds — STEP 0.214 vs none
 0.313). Writing standard for the paper: clark_paper/CLAUDE.md (strict academic register,
