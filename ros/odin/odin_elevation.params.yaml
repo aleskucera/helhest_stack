@@ -47,6 +47,12 @@
     # 0.6 gives 1.48 and is the indoor preset. The previous 1.0 here was the OUTDOOR preset,
     # calibrated on grass/dirt where the wheels grip harder: it predicts alpha 1.80 and over-
     # estimates turn resistance by 20% on tarmac. Raise it back toward 1.0 for grass or dirt.
+    # Wheel envelope half-width [m]. 0.10 = the measured tread as a yaw-binned CYLINDER (the
+    # default): honest laterally, where the sphere reached 0.35 m sideways and refused gaps the
+    # robot can straddle. 0.0 = back to the sphere. This is also the lateral SAFETY MARGIN dial --
+    # 0.15 keeps 5 cm per side, 0.20 keeps 10 cm, both far tighter than the sphere's fixed 0.35.
+    # Costs ~3.9 ms per perception frame to dilate (64 yaw slices) against 0.06 for the sphere.
+    plan_wheel_width: 0.10
     k_turn: 0.6
     plan_turn: 0.8            # wheel-differential penalty -> strong straight bias / gentler turns
     plan_max_slew: 2.0        # accel cap d(cmd)/dt [rad/s^2] -> smooth turn ease-in
