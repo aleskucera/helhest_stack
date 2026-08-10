@@ -31,7 +31,15 @@ TOPICS=(
   # actually realizes. The Odin bags so far have none of it. Cheap: ~100 Hz of 3 floats.
   /joint_setpoints          # per-wheel target the LLC is acting on -- splits transport from loop
   /joint_states             # measured wheel position/velocity/effort -- the actual response
+  # --- camera (compressed only; raw / undistorted / intensity_gray are heavy and unused here) ---
+  /odin1/image/compressed   # JPEG camera stream -- light, handy for reviewing a follow-me run
 )
+
+# Tracking namespaces recorded via --regex (below), so EVERY radio/uwb/bluetooth topic -- and any
+# new anchor that appears -- is captured without listing each. Covers the follow-me target
+# (/radio/estimate_pose, in the 'locator' frame; with /tf it reconstructs the chased point in map),
+# the UWB two-way-ranging estimates + per-anchor distances, and the bluetooth AoA stack.
+TOPIC_REGEX="^/(radio|uwb|bluetooth)/"
 
 # Standard scenarios: name -> maneuver to perform while recording.
 declare -A SCENARIOS=(
@@ -94,4 +102,4 @@ mkdir -p ~/bags
 QOS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/odin/rosbag2_qos.yaml"
 
 echo "recording -> ~/bags/$NAME   (Ctrl-C to stop)"
-exec ros2 bag record -o "$DEST" --qos-profile-overrides-path "$QOS" "${TOPICS[@]}"
+exec ros2 bag record -o "$DEST" --qos-profile-overrides-path "$QOS" "${TOPICS[@]}" --regex "$TOPIC_REGEX"
