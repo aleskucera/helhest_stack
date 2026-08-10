@@ -565,11 +565,12 @@ class ElevationNode(Node):
         d("plan_lat_coarsen", 4)  # routing/cost-to-go grid coarsening vs the map cell
         d("plan_n_refine", 3)  # MPPI refine iterations per frame
         d("plan_friction", 0.8)  # uniform rollout friction
-        # Wheel envelope: 0.0 = SPHERE (reaches 0.35 m sideways, pessimistic beside obstacles),
-        # 0.10 = the measured tread as a yaw-binned CYLINDER, honest laterally. The cylinder costs
-        # ~3.9 ms per perception frame to dilate (64 yaw slices) against 0.06 for the sphere, and
-        # removes a conservative margin -- gaps the robot currently refuses it will attempt.
-        d("plan_wheel_width", 0.0)
+        # Wheel envelope half-width [m]. DEFAULT 0.10 = the measured tread, as a yaw-binned
+        # CYLINDER: honest laterally, where the sphere reached 0.35 m sideways and refused gaps the
+        # robot can straddle. 0.0 = back to the sphere. Costs ~3.9 ms per perception frame to
+        # dilate (64 yaw slices) against 0.06 for the sphere. Widen it (0.15, 0.20) to buy lateral
+        # margin back without the sphere's fixed 0.35.
+        d("plan_wheel_width", 0.10)
         # 'indoor' (K_TURN 0.4, alpha~1.33) or 'outdoor' (K_TURN 1.0, alpha~1.82 -- grass/dirt grips
         # harder so it understeers). ICP-calibrated per environment; see dynamics.k_turn_for.
         d("terrain", "outdoor")

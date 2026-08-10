@@ -40,7 +40,14 @@
     # --- tuning knobs (override inline with -p) ---
     plan_wmax: 6.0            # top per-wheel speed [rad/s] -- motor limit ~15, so headroom to raise this
     plan_max_omega: 7.5       # hard output clamp on |wheel vel| [rad/s] -- keep >= plan_wmax
-    k_turn: 1.0              # turn gain override (outdoor-preset value)
+    # Turn gain. alpha = 1 + k_turn*mu sets how much the skid-steer resists yaw, and alpha
+    # DIVIDES the predicted yaw rate -- too high and the planner expects less yaw than it gets, so
+    # the robot overshoots turns. MEASURED 2026-08-10 on flat tarmac: alpha = 1.50 from three
+    # independent estimates (steady arcs 1.52, spins 1.50-1.70, lag fit 1.55), which is k = 0.62.
+    # 0.6 gives 1.48 and is the indoor preset. The previous 1.0 here was the OUTDOOR preset,
+    # calibrated on grass/dirt where the wheels grip harder: it predicts alpha 1.80 and over-
+    # estimates turn resistance by 20% on tarmac. Raise it back toward 1.0 for grass or dirt.
+    k_turn: 0.6
     plan_turn: 0.8            # wheel-differential penalty -> strong straight bias / gentler turns
     plan_max_slew: 2.0        # accel cap d(cmd)/dt [rad/s^2] -> smooth turn ease-in
     plan_max_decel: 8.0       # decel cap d(cmd)/dt [rad/s^2] -> softer slow-down (also the stop ramp)

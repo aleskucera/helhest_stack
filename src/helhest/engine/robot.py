@@ -83,8 +83,19 @@ class RobotParams:  # host-side robot knobs — what you nudge
     # ForwardSimulator to the yaw-binned cylinder envelope. The REAL wheel is 0.10 m wide
     # (ruler-measured; ostrich examples/helhest_junior/robot_parameters.md section 6, collision
     # cylinder r = 0.35, half-height 0.05) -- so the sphere over-reaches sideways by 7x. Left at
-    # None because switching it changes planning behaviour; set it deliberately.
-    wheel_width: float | None = None
+    # DEFAULT since 2026-08-10: the CYLINDER envelope at the ruler-measured 0.10 m tread. The
+    # sphere reaches the full 0.35 m radius sideways, so a rock 0.3 m beside the wheel lifts and
+    # tilts the robot when in reality it is straddled -- systematically pessimistic in tight and
+    # rocky places. Set to None for the sphere.
+    #
+    # This half-width is also the SAFETY-MARGIN dial, and a far better one than the sphere: the
+    # sphere's 0.35 m of lateral margin is fixed and unavoidable, whereas 0.10 is honest, 0.15
+    # keeps 5 cm of margin per side and 0.20 keeps 10 cm -- all still far tighter than the sphere.
+    # Prefer widening this, or clear_margin / max_roll, over going back to the sphere.
+    #
+    # NOT usable with DifferentiableSimulator: the taped settle would need a yaw index threaded
+    # through it, so the gradient paths pass wheel_width=None explicitly.
+    wheel_width: float | None = 0.10
     half_track: float = 0.365
     rear_offset: float = 0.75
     gravity: float = 9.81

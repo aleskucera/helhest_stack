@@ -34,7 +34,7 @@ def _time(fn, reps, device):
 
 def _build(scene, mu, B, T, device):
     sim = DifferentiableSimulator(
-        dynamics.robot_params(),
+        dynamics.robot_params(wheel_width=None),  # sphere: the taped settle needs it
         dynamics.execution_solver(),  # deep settle (12 Newton iters): the gradient wants a converged root
         GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
         B,

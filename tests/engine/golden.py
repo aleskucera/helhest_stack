@@ -125,7 +125,7 @@ def _run_differentiable(device: str) -> dict[str, np.ndarray]:
     fric_stack = np.repeat(friction[None], BATCH, axis=0)
 
     sim = DifferentiableSimulator(
-        RobotParams(),
+        RobotParams(wheel_width=None),  # sphere: DifferentiableSimulator requires it
         SolverParams(),
         GridParams(CELLS_X, CELLS_Y, CELL, *ORIGIN),
         BATCH,
