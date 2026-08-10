@@ -46,7 +46,7 @@ def flat() -> Heightmap:
 
 
 def run(bearing_deg: float, turn_w: float, max_slew: float, smooth_w: float | None = None,
-        device: str = "cuda",
+        a_max: float = 0.0, device: str = "cuda",
         dist: float = 5.0, max_frames: int = 700, n_theta: int = 24,
         spin_frac: float = 0.0, in_place_cost: float = 0.0) -> dict:
     scene = flat()
@@ -102,8 +102,12 @@ def run(bearing_deg: float, turn_w: float, max_slew: float, smooth_w: float | No
         else:
             planner.replan(state, goal, 3)
             u = planner.nominal()
+            # lat_gain as the node computes it: R^2 / (2 * half_track * alpha)
+            rp = dynamics.robot_params()
+            lat_gain = rp.wheel_radius ** 2 / (2.0 * rp.half_track * (1.0 + dynamics.K_TURN))
             cmd = condition_command(float(u[0, 0]), float(u[0, 1]), prev,
-                                    max_omega=7.5, max_slew=max_slew, dt=dynamics.DT)
+                                    max_omega=7.5, max_slew=max_slew, dt=dynamics.DT,
+                                    turn_brake_a_max=a_max, lat_gain=lat_gain)
         c = np.asarray(cmd, np.float32)
         diffs.append(float(c[2] - c[0]))
         lat.append(abs(-math.sin(th) * st.x + math.cos(th) * st.y))  # offset from the goal line

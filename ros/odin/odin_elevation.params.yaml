@@ -104,7 +104,18 @@
     # recovers nearly all of that smoothness while turning still works. Past 1e-1 it inverts:
     # corrections get deferred and come out larger, so jerk rises again AND turning degrades.
     plan_smooth: 0.04
-    plan_max_slew: 2.0        # accel cap d(cmd)/dt [rad/s^2] -> smooth turn ease-in
+    # Accel cap on the published command [rad/s^2]. Raised 2.0 -> 6.0 (the node default). The
+    # justification is the drivetrain's own lag: tau = 0.19 s means a 1 rad/s step is already
+    # answered at only ~5.3 rad/s^2 by the motors, so a 2.0 clamp was TIGHTER THAN THE HARDWARE
+    # and was shaping a command the wheels could not have followed anyway.
+    #
+    # Measured cost, plan_turn 0.2 / plan_smooth 0.04: straight-line 8.4 -> 7.7 s and 180 deg
+    # 15.8 -> 15.5 s, against COMMAND jerk 0.033 -> 0.058. Note that is jerk in the command; the
+    # 0.19 s actuator lag low-passes it before it reaches the wheels, so the robot should not feel
+    # 76% jerkier. If it does, come back here rather than to plan_smooth -- raising plan_smooth to
+    # compensate was measured and BACKFIRES (0.06 doubles the turn-direction flips to 0.89/s and
+    # costs 2 s on a 90 deg turn).
+    plan_max_slew: 6.0
     plan_max_decel: 8.0       # decel cap d(cmd)/dt [rad/s^2] -> softer slow-down (also the stop ramp)
     plan_goal_running: 0.3    # progress pull -> higher = faster toward goal
     plan_effort: 0.001        # wheel-speed^2 penalty -> lower = faster
