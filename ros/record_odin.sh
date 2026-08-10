@@ -41,8 +41,18 @@ declare -A SCENARIOS=(
   [drive_goal]="set a /goal_pose and let it drive to it -- planning + actuation capture (clear space!)"
   [dynamic]="people/objects moving through a static scene -- dynamic visibility-carve tuning"
   [calibrate]="HOLD each command 3-5 s: straight at ~2/4/6 rad/s, then turns (differential ~1/2/4) at each speed, then a few sharp starts from rest -- the only maneuver that gives STEADY-STATE turning (the planner never holds a command longer than ~3 ms) plus clean step responses"
+  [relax]="the SAME differential step (e.g. +1.5 rad/s) applied from three different forward
+speeds -- ~0.5, ~1.0, ~2.0 rad/s mean -- held 4 s each, 5 repeats per speed, both directions.
+Separates a yaw lag keyed to TIME from one keyed to DISTANCE: only the distance form has a
+response time that scales as 1/v. Chrono says the distance form (sigma ~0.15 m) fits better; this
+is the measurement that confirms or kills it on the real robot."
+  [slope]="drive a slope of 10 deg or more: straight up, straight down, and ACROSS it in both
+directions, 4-5 s each, plus a turn while on the cross-slope. Nothing in the archive exceeds 5.4
+deg of tilt, so the load-transfer fix (normal_loads, validated only against Chrono) has never been
+seen on real data. The across-slope runs are the ones that matter -- that is where the old model
+predicted zero lateral transfer and Chrono predicts 0.4 m g."
 )
-ORDER=(static spin translate drive_goal dynamic calibrate)
+ORDER=(static spin translate drive_goal dynamic calibrate relax slope)
 
 list_scenarios() {
   echo "scenarios:"
