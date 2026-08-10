@@ -57,9 +57,17 @@ def k_turn_for(terrain: str) -> float:
     return {"indoor": K_TURN_INDOOR, "outdoor": K_TURN_OUTDOOR}.get(terrain, K_TURN)
 
 
-def robot_params():
-    """The canonical robot geometry/mass model."""
-    return RobotParams()
+def robot_params(wheel_width=None):
+    """The canonical robot geometry/mass model.
+
+    `wheel_width` None keeps the SPHERE wheel envelope, which reaches the full 0.35 m radius
+    SIDEWAYS and is therefore systematically pessimistic in tight and rocky places -- a rock 0.3 m
+    beside the wheel lifts and tilts the robot when in reality it is straddled. 0.10 (the
+    ruler-measured tread) switches to the yaw-binned CYLINDER envelope, which is honest laterally.
+    That trades away a conservative margin, so clearances tuned around the sphere's pessimism are
+    worth re-checking.
+    """
+    return RobotParams(wheel_width=wheel_width)
 
 
 def planning_solver(dt=DT, k_turn=K_TURN, command_delay=COMMAND_DELAY, tau_motor=MOTOR_TAU):

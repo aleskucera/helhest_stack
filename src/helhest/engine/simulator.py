@@ -43,7 +43,7 @@ DILATE_TILE = 16  # output tile size for the batched tiled dilation (Differentia
 # contact by more than a cell: R * dpsi <= cell -> dpsi <= 0.1/0.35 = 0.29 rad = 16 deg, so >= 22
 # bins over the circle; 32 rounds that up. Costs n_yaw x the envelope grid (1.6 MB at the real
 # 0.1 m cell) and n_yaw dilations per perception frame, nothing per rollout.
-YAW_BINS = 32
+YAW_BINS = 64
 
 
 @wp.kernel

@@ -565,6 +565,11 @@ class ElevationNode(Node):
         d("plan_lat_coarsen", 4)  # routing/cost-to-go grid coarsening vs the map cell
         d("plan_n_refine", 3)  # MPPI refine iterations per frame
         d("plan_friction", 0.8)  # uniform rollout friction
+        # Wheel envelope: 0.0 = SPHERE (reaches 0.35 m sideways, pessimistic beside obstacles),
+        # 0.10 = the measured tread as a yaw-binned CYLINDER, honest laterally. The cylinder costs
+        # ~3.9 ms per perception frame to dilate (64 yaw slices) against 0.06 for the sphere, and
+        # removes a conservative margin -- gaps the robot currently refuses it will attempt.
+        d("plan_wheel_width", 0.0)
         # 'indoor' (K_TURN 0.4, alpha~1.33) or 'outdoor' (K_TURN 1.0, alpha~1.82 -- grass/dirt grips
         # harder so it understeers). ICP-calibrated per environment; see dynamics.k_turn_for.
         d("terrain", "outdoor")
@@ -770,6 +775,8 @@ class ElevationNode(Node):
         self.plan_lat_coarsen: int = g("plan_lat_coarsen")
         self.plan_n_refine: int = g("plan_n_refine")
         self.plan_friction: float = g("plan_friction")
+        _ww = float(g("plan_wheel_width"))
+        self.plan_wheel_width: float | None = _ww if _ww > 0.0 else None
         self.terrain: str = g("terrain")
         self.k_turn_override: float = g("k_turn")
         self.plan_robust_margin_m: float = g("plan_robust_margin_m")
@@ -891,7 +898,7 @@ class ElevationNode(Node):
             kt = dynamics.k_turn_for(self.terrain)
             self.get_logger().info(f"planner terrain='{self.terrain}' -> K_TURN={kt}")
         self.plan_sim = ForwardSimulator(
-            dynamics.robot_params(),
+            dynamics.robot_params(self.plan_wheel_width),
             dynamics.planning_solver(k_turn=kt, command_delay=self.plan_command_delay),
             win_grid,
             int(self.plan_batch),
@@ -918,7 +925,7 @@ class ElevationNode(Node):
         self.planner.reset_nominal(self.plan_nominal_reset)
         # optional online turn_boost from gyro feedback: alpha = 1 + k_turn*mu matches the plan model.
         if self.plan_turn_boost_adapt:
-            rp = dynamics.robot_params()
+            rp = dynamics.robot_params(self.plan_wheel_width)
             self._turn_adapt = AdaptiveTurnBoost(
                 alpha_model=1.0 + kt * self.plan_friction,
                 wheel_radius=rp.wheel_radius,
@@ -935,7 +942,7 @@ class ElevationNode(Node):
             self._turn_adapt = None
         self.ctg = CostToGo(
             GridParams(rcnx, rcny, rccell, 0.0, 0.0),
-            dynamics.robot_params(),
+            dynamics.robot_params(self.plan_wheel_width),
             dynamics.planning_solver(
                 k_turn=kt
             ),  # static settle ignores k_turn; passed for consistency
@@ -950,7 +957,7 @@ class ElevationNode(Node):
         # v = R*mean and wz = R*diff/(2*half_track*alpha). alpha = 1 + k_turn*grip/(m*g) is the
         # model's turn resistance; on flat ground with the wheels carrying the full weight that
         # is 1 + k_turn, which is the value the planner itself is tuned against.
-        _rp = dynamics.robot_params()
+        _rp = dynamics.robot_params(self.plan_wheel_width)
         self._lat_gain = _rp.wheel_radius**2 / (2.0 * _rp.half_track * (1.0 + kt))
         # Routing field expressed in the PLANNING window's frame: both windows are robot-centered,
         # so their origins differ by a constant cell offset.
