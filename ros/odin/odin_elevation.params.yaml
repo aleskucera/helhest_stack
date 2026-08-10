@@ -74,7 +74,14 @@
     plan_lat_coarsen: 3
     plan_robust_margin_deg: 15.0
     plan_wheel_width: 0.10
-    k_turn: 0.6
+    # 0.6 -> 1.0 (alpha 1.80) from fast_experiment0/1, 2026-08-10. Regressing the MEASURED gyro
+    # on the MEASURED wheel differential gives alpha 1.68-2.27 across both bags, against the 1.48
+    # that 0.6 assumes -- so the planner expected up to 38% more yaw than it got and under-turned
+    # consistently. Measured wheels, not commanded, precisely so motor saturation cannot be
+    # mistaken for turn resistance: the deficit is present well BELOW the ~5.3 rad/s ceiling
+    # (alpha 1.68 in the 3.5-4.5 band), and worsens at it (2.36 above 5.3) -- two separate effects.
+    # 1.0 is this file's own outdoor preset and lands mid-band; these were outdoor runs.
+    k_turn: 1.0
     # Wheel-differential penalty. THE knob for how willing the planner is to turn, and 0.8 was
     # far too high: measured closed-loop on flat open ground (scripts/turn_eval.py), a goal at 90
     # or 180 deg was NEVER REACHED in 70 s, because a differential of 2 rad/s costs 0.8*25*4 = 80

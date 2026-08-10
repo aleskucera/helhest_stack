@@ -24,6 +24,9 @@ TOPICS=(
   # --- planning I/O (plan_actuate on: a goal drives) ---
   /goal_pose                # planning goal (the input)
   /cmd_joints               # wheel command elevation sends to the LLC (the drive output)
+  /yaw_track                # inner yaw loop (x=reference, y=gyro, z=correction) -- the
+                            # correction is NOT recoverable from /cmd_joints, which
+                            # already contains it
   # --- drivetrain response (100 Hz, from the LLC) ---
   # Without these a bag can show WHAT was commanded but not what the wheels did, which blocks
   # every drivetrain question: the turn gain (alpha from measured rather than commanded wheels),

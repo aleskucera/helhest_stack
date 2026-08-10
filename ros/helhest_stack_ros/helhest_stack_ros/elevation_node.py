@@ -36,6 +36,7 @@ import rclpy
 import tf2_ros
 import warp as wp
 from geometry_msgs.msg import Point
+from geometry_msgs.msg import Vector3
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import TransformStamped
 from message_filters import ApproximateTimeSynchronizer
@@ -338,6 +339,10 @@ class ElevationNode(Node):
         self.pub_turn_boost = self.create_publisher(
             Float32, "turn_boost", 10
         )  # turn_boost in effect (debug)
+        # Inner yaw loop, as (reference, measured, correction). The correction is the ONLY
+        # one not reconstructible from a bag: /cmd_joints carries the CORRECTED differential,
+        # so without this there is no way to tell what the loop did -- or whether it ran.
+        self.pub_yaw_track = self.create_publisher(Vector3, "yaw_track", 10)
         self.add_on_set_parameters_callback(self._on_parameters_changed)
 
         self.get_logger().info(
@@ -1902,13 +1907,15 @@ class ElevationNode(Node):
         self._last_yaw_track_time = now
         # /cmd_joints order is (left, rear, right), so the differential is [2] - [0].
         yaw_ref = float(ref_cmd[2] - ref_cmd[0]) * self._yaw_per_diff
-        self._yaw_track.update(
+        yaw_meas = float(w_base[2])  # base-frame gyro z; /odin1/imu carries yaw on +z
+        corr = self._yaw_track.update(
             yaw_ref,
-            float(w_base[2]),  # base-frame gyro z; /odin1/imu carries yaw on +z, verified on bags
+            yaw_meas,
             dt,
             age=now - t_imu,
             saturated=bool(np.max(np.abs(cmd)) >= self.plan_max_omega - 1e-3),
         )
+        self.pub_yaw_track.publish(Vector3(x=yaw_ref, y=yaw_meas, z=float(corr)))
 
     def _load_command_history(self) -> None:
         """Copy the commands still in flight into the rollout buffer, oldest first.
