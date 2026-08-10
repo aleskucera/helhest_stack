@@ -437,3 +437,69 @@ the single-separable-kernel convolution (60% wrong under a measured belief; rank
 repair), still reports the comparison under the invented sigma only, and says nothing about the
 plane/stationary decomposition, the discretization law, or the real-bag robustness fix. Deciding
 how much of this belongs in an 8-page RA-L versus a follow-up is the next call to make.
+
+## 11. The 2026-08-10 defect session — 13 fixes, full rerun, and the verdicts that moved
+
+An adversarially-verified code review of studies/bench + studies/sensing found 18 confirmed
+defects; the 13 that corrupt numbers were fixed in commit 8e0aef5 (worst: occlusion rays
+marched from the GRID CORNER instead of the sensor, so every occlusion/localisation/all
+noise arm — including every clark*.json — was computed on wrong observation masks; also a
+half-cell pose-resample shift, an in-sample budget curve, a frozen CVaR baseline rng, and
+kendall_tau computing Goodman-Kruskal gamma instead of tau-b, inflating every tied tau).
+`studies/RERUNS.md` is the ledger: fix -> stale artifacts -> rerun order. Reruns are
+POST-HOC CORRECTIONS of pre-registered results: the corrected number is reported beside the
+original everywhere, never in place of it. Numbers below supersede §3/§10 where they differ.
+
+**Belief foundation (commit db26720) — stable, one qualitative correction.** Sigma median
+3.11 cm, 80% observed, kurtosis +10, bias ~78% of MSE and still mostly definitional. The
+36-scenario sweep keeps "the plane is sensing, the share is terrain", but the tilt
+ANISOTROPY on curved paths flips orientation under the fixed body-frame drift: arc/turn
+concentrate tilt into body-x (6.1 -> 8.0 mrad/m; body-y 7.9 -> 6.6). Straight rows are
+bit-identical (yaw=0 no-op check). The belief model finally has a producer
+(`sensing/fit_belief_model.py`, atomic --write, anti-circularity variance check); refit:
+plane share 0.24 (was 0.30), sigma_offset 1.16 cm (was 1.40), tilts/residual rho in band.
+
+**Clark chain (commit 0021b98).** Calibration UNTOUCHED: sd-ratio 0.927 (same to three
+digits), Jensen corr 0.786 (was 0.884; bar 0.7). Robustness keeps its shape: FOSM still
+collapses fan/sensor (clark beats it p=4e-11), bracket beaten in two regimes (p=0.021/
+0.017). WEAKENED: settle-only decisive superiority was partly the bug's — clark_cvar vs
+step p=8e-5 -> 0.079, vs bracket 0.0013 -> 0.24 (regret 0.077 vs 0.129 still first,
+picked-best 69%). clark_grad still fails the magnitude bars (46%/73% vs 10%/25%) — Clark
+stays a plan-level instrument; attribution tau 0.873 vs hard 0.637 (tau-b). FLIPPED: Gate H
+passes all four criteria on the design set (corr 0.957 vs bar 0.93; sd-ratio 0.827 vs old
+0.426) and stage 2 — same config as the twice-failed run — is decisive: clark_cvar 0.148 vs
+step 0.419 (p=3.1e-6), bracket p=4.7e-4. CAVEATS on the flip: the committed pre-fix gate
+json predates the config keys (its case set is ambiguous), the regenerated virgin-set json
+came back bit-identical (under investigation), and a same-seed rerun after a code fix is
+not a confirmation — hence:
+
+**PREREG_stage2_virgin.md (commit 7705708), committed BEFORE its run:** stage 2 on virgin
+seeds 5000-5099 (verified untouched repo-wide), criteria frozen (lowest mean regret; beats
+step p<0.05; beats bracket p<0.05), predictions recorded, one shot, reported alongside both
+prior results whatever it says.
+
+**Measured belief (commit 957f40b) — the result that matters most survived its own
+repair.** All three arms pass all four pre-registered criteria on the refit model:
+hybrid/all clark_cvar 0.045 vs step 0.214 (p=7.3e-7), bracket p=0.011, fosm p=4.3e-4,
+sd-ratio 0.886; hybrid/clean step p=1.6e-5; fan/sensor fosm p=6.8e-17. The held-out budget
+curve (in-sample scoring was one of the 13 bugs) STRENGTHENS the claim: MC bottoms at
+0.070 regret at 128 draws, above clark's 0.045 — n_star is None; the old N*=128 was the
+artifact. Where the invented-noise settle benchmark lost step-significance, the measured
+belief keeps clark decisive against every baseline: the paper's center of gravity moves
+here.
+
+**Sensing thread (commit 5f13dcb) — the retractions retract nothing new.** Under fixed
+masks and tau-b: entropy still loses to every informed policy (to p=4.5e-20), corridor
+still ties/beats the adjoint on realistic settings, real elites still compress every edge,
+motion-coupled holdout still null (p=0.57-1.00). Occlusion/localisation arms have correct
+masks for the first time. NOTE: clean/sensor ranking arms (C1's +0.691/+0.471 headline
+class) still carry gamma taus — rerunning in stage 5; every tau shrinks where costs tie.
+
+**In flight at write time:** hinge virgin gate (tagged rerun), the pre-registered virgin
+stage 2, stage 5 (DFL suite, risk/certify/bundled/order2/softgrad/observability/rare,
+run_bench, bag_belief, ranking clean/sensor arms). CLAIMS.md carries a correction banner
+until those land. Paper edit list: scratchpad paper_number_inventory.md (~85 claims, 21/27
+spot-checked numbers drifted; two framing flips: hinge verdict negative->positive pending
+the virgin run, and "STEP worse than the mean map" no longer holds — STEP 0.214 vs none
+0.313). Writing standard for the paper: clark_paper/CLAUDE.md (strict academic register,
+every claim proven or cited, independent reviewer panel before finalization).

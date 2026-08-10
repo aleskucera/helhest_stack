@@ -1,5 +1,20 @@
 # Paper claims — revision 2, post red-team and post holdout
 
+> **CORRECTION BANNER (2026-08-10, temporary until rev 3).** A code review found 13
+> number-corrupting defects (commit 8e0aef5; ledger in `RERUNS.md`, narrative in
+> `HANDOFF.md` §11). Two affect this document's numbers: (a) every occlusion/localisation/
+> all-noise number was computed on wrong observation masks (occlusion rays cast from the
+> grid corner, half-cell pose shift); (b) every Kendall tau in the repo was actually
+> Goodman-Kruskal gamma — true tau-b is smaller wherever believed costs tie. Stage-4
+> reruns (commit 5f13dcb) confirm every QUALITATIVE claim below survives (entropy still
+> loses decisively, corridor still ties/beats the adjoint on realistic settings, the
+> motion-coupled retraction stands, elites still compress edges), but the specific
+> all-noise/occlusion/localisation taus and p-values below are superseded by
+> `ranking_hybrid_{all,occlusion,localisation}.json` / `elites_*.json` /
+> `sensing/{sweep,holdout}.json` as committed 2026-08-10. Clean/sensor-arm numbers
+> (incl. C1's +0.691/+0.471) are being recomputed under tau-b; rev 3 replaces them
+> in-text. Do not quote a number from this file without checking the current json.
+
 Written 2026-08-06 (rev 2, same day). Revision 1 was adversarially reviewed by three
 independent referees (novelty / methodology / significance) and stress-tested by a
 pre-registered sweep + holdout and a clean-worktree reproduction. This revision records
