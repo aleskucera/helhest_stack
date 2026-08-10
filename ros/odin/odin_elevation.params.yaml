@@ -127,7 +127,21 @@
     # a_max caps lateral acceleration [m/s^2]; forward speed and turn differential are scaled
     # TOGETHER so the planned arc is unchanged, only slower. At plan_wmax 6 / k_turn 1 the
     # hardest arc the planner can command is ~1.5 m/s^2, so start around 0.6-1.2.
-    plan_turn_brake_a_max: 1.1
+    #
+    # 1.1 -> 0.4 after the field report of an abrupt evasive turn near obstacles. This is the ONLY
+    # knob measured to soften the turn without giving up clearance, because it scales mean and
+    # differential TOGETHER -- the robot tracks the same arc slower rather than turning less.
+    # scripts/overturn_eval.py, slalom world: yaw rate at closest approach 0.71 -> 0.43 rad/s,
+    # clearance 0.83 -> 0.84 m (flat), travel time +29%. Turning it off gives 0.97, so the cap
+    # DOES bind in tight terrain -- the earlier "does not bind" reading was flat open ground,
+    # where the planner never commands an arc hard enough to reach it.
+    #
+    # Damping the RESPONSE instead was tried and is worse. plan_max_slew 6 -> 3 -> 1.5 cuts jerk
+    # but walks clearance down 0.83 -> 0.75 -> 0.59 m and leaves the yaw rate untouched: reacting
+    # more slowly to a tight gap just means arriving closer before the turn takes effect. And
+    # plan_smooth does nothing (it penalises changes INSIDE a rollout; only the first step is ever
+    # executed, so it damps the plan's interior, not the command).
+    plan_turn_brake_a_max: 0.4
     # Pre-apply the tightest cap found this far ahead along the committed plan, so the robot is
     # already slow when it enters the corner. 0 = react to the current command only.
     plan_turn_brake_lookahead_s: 1.5
