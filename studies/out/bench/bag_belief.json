@@ -9,21 +9,21 @@
  "sigma_observed_median_cm": 1.5964585321154139,
  "policies": {
   "ground-referenced": {
-   "ms_per_plan": 3.136145687676617,
+   "ms_per_plan": 3.09571018749466,
    "n_nonfinite_or_raised": 0,
    "E_spread": 21.69104511314955,
    "E_median": -31.65202604619265,
    "sd_median": 3.3745332024358
   },
   "zero-filled (the old bug)": {
-   "ms_per_plan": 3.199309874617029,
+   "ms_per_plan": 3.2541120625069198,
    "n_nonfinite_or_raised": 0,
    "E_spread": 45.879552756903756,
    "E_median": -1.9319872096724566,
    "sd_median": 3.446374736783743
   },
   "raw (NaN left in)": {
-   "ms_per_plan": 0.006570937330252491,
+   "ms_per_plan": 0.006308937486210198,
    "n_nonfinite_or_raised": 16,
    "E_spread": NaN,
    "E_median": NaN,
