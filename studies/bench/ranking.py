@@ -97,18 +97,32 @@ def tau_within(a: np.ndarray, b: np.ndarray, groups: np.ndarray) -> float:
 
 
 def kendall_tau(a: np.ndarray, b: np.ndarray) -> float:
-    """Tau-b between two score vectors, via concordant/discordant pairs. K is small."""
+    """Tau-b between two score vectors, via concordant/discordant pairs. K is small.
+
+    Ties enter the denominator (tau_b = (C-D) / sqrt((C+D+T_a)(C+D+T_b))), unlike the naive
+    (C-D)/(C+D) -- that is Goodman-Kruskal gamma, which drops ties entirely and inflates the
+    reported tau whenever believed costs tie. A pair tied in BOTH a and b contributes to neither
+    C, D, T_a nor T_b, per the standard tau_b definition.
+    """
     n = len(a)
-    conc = disc = 0
+    conc = disc = tie_a = tie_b = 0
     for i in range(n):
         for j in range(i + 1, n):
-            s = np.sign(a[i] - a[j]) * np.sign(b[i] - b[j])
-            if s > 0:
-                conc += 1
-            elif s < 0:
-                disc += 1
-    total = conc + disc
-    return (conc - disc) / total if total else 0.0
+            da, db = a[i] - a[j], b[i] - b[j]
+            if da == 0 and db == 0:
+                continue
+            elif da == 0:
+                tie_a += 1
+            elif db == 0:
+                tie_b += 1
+            else:
+                s = np.sign(da) * np.sign(db)
+                if s > 0:
+                    conc += 1
+                else:
+                    disc += 1
+    denom = np.sqrt((conc + disc + tie_a) * (conc + disc + tie_b))
+    return (conc - disc) / denom if denom else 0.0
 
 
 def _plans_fan(rng: np.random.Generator) -> np.ndarray:
@@ -315,6 +329,8 @@ def p_corridor_sigma(ctx):
 def p_corridor_mi(ctx):
     """Corridor mask x mutual-information-shaped uncertainty, no derivative: same mask as
     `p_corridor_sigma`, but log-saturating in sigma rather than quadratic."""
+    # 0.05 m is a round mid-field noise floor, NOT the sensor's measured per-cell std -- that
+    # (bench/noise.py SENSOR_BASE/SENSOR_PER_M) ranges 0.010-0.046 m, range-dependent.
     return _proximity(ctx["dist"]).max(axis=0) * 0.5 * np.log1p(ctx["sigma"] ** 2 / 0.05**2)
 
 

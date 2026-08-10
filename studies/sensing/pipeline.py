@@ -86,8 +86,10 @@ OUT = BENCH_OUT.parent / "sensing"
 # --- the sensor: fixed to the chassis, so heading IS the look direction -------------------
 FOV_DEG = 120.0  # full width, i.e. +-60 deg about the heading
 LOOK_RANGE = 8.0  # [m] a reveal past this is not credited
-# Measurement noise floor entering the Gaussian MI form. 0.05 m is the sensor arm's per-cell
-# std in bench/noise.py, so a cell already at the noise floor is worth ~zero bits, as it should be.
+# Measurement noise floor entering the Gaussian MI form. The sensor arm's actual per-cell std in
+# bench/noise.py is range-dependent (SENSOR_BASE=0.010 m at zero range, growing to ~0.046 m at
+# MAX_RANGE=6 m); 0.05 m is a fixed single-number approximation of that, so a cell already at the
+# noise floor is worth ~zero bits, as it should be.
 SIGMA_MEASURE = 0.05  # [m]
 
 # --- the action set --------------------------------------------------------------------
@@ -599,7 +601,7 @@ def main() -> None:
 
     rows = []
     for seed in range(a.seeds):
-        rows.append(run_seed(seed, a.family, a.noise, want_dump=False)[0])
+        rows.append(run_seed(seed, a.family, a.noise, False, a.fov, a.look_range, a.looks)[0])
         if (seed + 1) % 10 == 0:
             print(f"  {seed + 1}/{a.seeds} seeds", flush=True)
     report(rows)
@@ -616,7 +618,7 @@ def main() -> None:
             r["policies"]["disagreement"]["tau"] - r["policies"]["entropy"]["tau"] for r in head
         ]
         dump_seed = head[int(np.argmax(gaps))]["seed"]
-    _, dump = run_seed(dump_seed, a.family, a.noise, want_dump=True)
+    _, dump = run_seed(dump_seed, a.family, a.noise, True, a.fov, a.look_range, a.looks)
     np.savez_compressed(OUT / f"case_seed{dump_seed}.npz", **dump)
     print(f"wrote {OUT / f'case_seed{dump_seed}.npz'}  (seed {dump_seed})")
 

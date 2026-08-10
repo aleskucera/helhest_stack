@@ -396,7 +396,16 @@ def from_returns(seed: int, n_coarse: int, n_probe: int, device: str, beta: floa
     rp = RobotParams()
     (cdy, cdx, ccap), (fdy, fdx, fcap) = footprint_tables(rp)
     k = len(cdy)
-    usable = (obs["count"] >= 3) & np.isfinite(obs["mean"])
+    # a count==0 hole is filled by nan_to_num above, faking a cliff at every neighbour the
+    # gradient stencil (+-1 in y or x) reads it from -- drop those neighbours from usable too,
+    # not just the hole itself, or var_slope zero-clamps tau_hat in a ring around every hole.
+    hole = obs["count"] == 0
+    touches_hole = hole.copy()
+    touches_hole[1:, :] |= hole[:-1, :]
+    touches_hole[:-1, :] |= hole[1:, :]
+    touches_hole[:, 1:] |= hole[:, :-1]
+    touches_hole[:, :-1] |= hole[:, 1:]
+    usable = (obs["count"] >= 3) & np.isfinite(obs["mean"]) & ~touches_hole
     rng = np.random.default_rng(seed + 7)
     margin = 6
     cand = np.argwhere(usable[margin:-margin, margin:-margin]) + margin

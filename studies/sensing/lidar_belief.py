@@ -261,9 +261,25 @@ class LidarSim:
         return self._out[:n]
 
     def _ground(self, x: float, y: float) -> float:
-        iy = int(np.clip(round((y - self.y0) / self.cell), 0, self.ny - 1))
-        ix = int(np.clip(round((x - self.x0) / self.cell), 0, self.nx - 1))
-        return float(self.truth.numpy()[iy, ix])
+        """Height under the sensor origin, bilinear with the SAME cell-center convention as
+        `_sample_height` in the ray-marcher (cell i spans [x0 + i*cell, x0 + (i+1)*cell), height
+        sample at its centre). A round()/node convention here would read a different height than
+        the marcher does everywhere else -- a ~2.6 cm sensor-height error on sloped terrain."""
+        truth = self.truth.numpy()
+        fx = (x - self.x0) / self.cell - 0.5
+        fy = (y - self.y0) / self.cell - 0.5
+        ix = int(np.clip(np.floor(fx), 0, self.nx - 2))
+        iy = int(np.clip(np.floor(fy), 0, self.ny - 2))
+        tx = float(np.clip(fx - ix, 0.0, 1.0))
+        ty = float(np.clip(fy - iy, 0.0, 1.0))
+        h00, h10 = truth[iy, ix], truth[iy, ix + 1]
+        h01, h11 = truth[iy + 1, ix], truth[iy + 1, ix + 1]
+        return float(
+            h00 * (1.0 - tx) * (1.0 - ty)
+            + h10 * tx * (1.0 - ty)
+            + h01 * (1.0 - tx) * ty
+            + h11 * tx * ty
+        )
 
 
 def simulate_belief(
@@ -295,7 +311,14 @@ def simulate_belief(
         c, sn = np.cos(drift[3]), np.sin(drift[3])
         rx = c * dxp - sn * dyp + x + drift[0]
         ry = sn * dxp + c * dyp + y + drift[1]
-        rz = arr[:, 2] + drift[2] - drift[4] * dxp + drift[5] * dyp
+        # Pitch/roll drift is fixed in the BODY frame (x-fwd, y-left, REP-103) -- it is an
+        # attitude error of the sensor itself -- so a curving path rotates its effect in world
+        # coordinates. Rotate the world-frame offset into the body frame by the scan's true yaw
+        # before applying it: R(-yaw), the inverse of the body->world rotation used for rx/ry.
+        cy, sy = np.cos(yaw), np.sin(yaw)
+        bx = cy * dxp + sy * dyp
+        by = -sy * dxp + cy * dyp
+        rz = arr[:, 2] + drift[2] - drift[4] * bx + drift[5] * by
         clouds.append(np.stack([rx, ry, rz], axis=1))
     cloud = np.concatenate(clouds, axis=0).astype(np.float32)
     layers = builder.build(cloud)

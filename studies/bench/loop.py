@@ -144,13 +144,17 @@ def _trace_route(V, cell, wx0, wy0, pose, n_steps: int = 60):
     """
     Vmin = V.min(axis=2)
     ny, nx = Vmin.shape
-    c = int(round((pose[0] - wx0) / cell))
-    r = int(round((pose[1] - wy0) / cell))
+    # world -> grid uses the CELL-CENTER convention (cell i's center is at wx0 + (i+0.5)*cell,
+    # see ranking.py's XX/YY build and helhest.heightmap.Heightmap), not a corner convention --
+    # using the corner offset the traced route ~0.17 m diagonally from the cells it claims to
+    # pass through.
+    c = int(round((pose[0] - wx0) / cell - 0.5))
+    r = int(round((pose[1] - wy0) / cell - 0.5))
     if not (0 <= r < ny and 0 <= c < nx):
         return None
     pts = []
     for _ in range(n_steps):
-        pts.append((wx0 + c * cell, wy0 + r * cell))
+        pts.append((wx0 + (c + 0.5) * cell, wy0 + (r + 0.5) * cell))
         best, br, bc = Vmin[r, c], r, c
         for dr in (-1, 0, 1):
             for dc in (-1, 0, 1):
@@ -323,7 +327,13 @@ def run(
                 np.where(mm.known, mm.elev, 0.0), mm.known.copy(), scene.x0, scene.y0, cell
             )
             routes = sample_routes(mm, (rx, ry), belief.sigma(), seed=1000 + f)
-            bearing = policy(belief, (rx, ry, yaw), bw, route, routes)
+            # Per-look rng, seeded from the episode's own seed and the frame it looks on --
+            # NOT global numpy state -- so cvar's Monte-Carlo draws vary across seeds, episodes,
+            # and looks within an episode (previously frozen to np.random.default_rng(0) inside
+            # the policy, since loop.py called policies positionally and never passed one) while
+            # staying reproducible for a repeated run with the same seed.
+            rng = np.random.default_rng([bw.seed, f])
+            bearing = policy(belief, (rx, ry, yaw), bw, route, routes, rng)
             if bearing is not None:
                 lobs, lknown = _scan(bw, (rx, ry, float(bearing)), W.LOOK_FOV, W.LOOK_RANGE)
                 fresh = lknown & ~mm.known

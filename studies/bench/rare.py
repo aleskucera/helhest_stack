@@ -388,17 +388,26 @@ def _attack_with_restarts4(
             }
         )
 
+    run_results: list[dict] = []  # one final outcome per start (excludes the pre-run placeholders
+    # added above), so the aggregate stall check below isn't fooled by a placeholder's k=K_CAP_RARE
+    # tying with -- and, by min()'s stability, masking -- a genuinely stalled real run
     for h0, k0, grad_h0, costs_h0, z0 in starts:
         remaining = max(forward_budget - n_forward_used, 1)
         r = _run_attack4(h4, h0, k0, a, sigma, temp, grad_h0, costs_h0, z0, remaining)
         n_forward_used += r["n_forward"]
         results.append(r)
+        run_results.append(r)
 
     best = min(results, key=lambda r: r["k"])
+    # a single restart's degenerate gradient (norm < 1e-12) says nothing about the others -- the
+    # whole attack only counts as a stall (its k is a budget artifact, not a boundary estimate)
+    # if EVERY restart's run stalled and none flipped; a run that merely exhausted its forward
+    # budget while still making progress is certify.py's own right-censored-at-cap convention.
+    stalled_overall = (not best["flipped"]) and all(r["stalled"] for r in run_results)
     return {
         "k": best["k"],
         "flipped": best["flipped"],
-        "stalled": best["stalled"],
+        "stalled": stalled_overall,
         "z": best["z"],
         "h_boundary": best["h_boundary"],
         "n_forward": sum(r["n_forward"] for r in results),
@@ -614,6 +623,8 @@ def method_form_and_is(state: SeedState, sigma_case: np.ndarray, case_id: int) -
         "k_star": attack["k"],
         "n_forward": attack["n_forward"],
         "wall_s": t_attack,
+        "stalled": attack["stalled"],  # see BUG 1 fix: k=K_CAP_RARE from a stall is a budget
+        # artifact, not a boundary estimate -- analyse() must censor it, not score it as finite
     }
 
     if not attack["flipped"]:
@@ -743,8 +754,10 @@ def run_case(state: SeedState, gain: float, case_id: int) -> dict:
 METHODS = ("mc_naive", "form", "attack_is", "subset")
 
 
-def _err(p_hat: float, p_ref: float) -> float:
-    if p_hat <= 0.0:
+def _err(p_hat: float, p_ref: float, stalled: bool) -> float:
+    if stalled or p_hat <= 0.0:
+        # a stalled attack's k is a budget artifact, not a boundary estimate (see BUG 1 in the
+        # module's fix history) -- censor it exactly like the existing p_hat<=0 (no-boundary) path
         return float("inf")
     return abs(np.log10(p_hat) - np.log10(p_ref))
 
@@ -755,7 +768,9 @@ def analyse(rows: list[dict]) -> dict:
     out: dict = {"n_cases": len(rows), "n_valid": len(valid)}
     for method in METHODS:
         p_hat = np.array([r[method]["p_hat"] for r in valid])
-        errs = np.array([_err(h, t) for h, t in zip(p_hat, p_ref)])
+        # `.get` tolerates records written before this flag existed (see BUG 1 fix note above)
+        stalled = [bool(r[method].get("stalled", False)) for r in valid]
+        errs = np.array([_err(h, t, s) for h, t, s in zip(p_hat, p_ref, stalled)])
         finite = errs[np.isfinite(errs)]
         lo_mask = p_ref < 1e-2
         hi_mask = ~lo_mask
@@ -875,7 +890,11 @@ def main() -> None:
                     "[timing] projected total exceeds 90 min -- truncating to 12 cases",
                     flush=True,
                 )
-                selected = selected[:12]
+                # in-place: `selected = selected[:12]` would rebind the name to a NEW list the
+                # running `for i, case in enumerate(selected)` iterator (bound to the OLD list
+                # object) can't see, so the loop would keep running past the cap -- `del` mutates
+                # the same object the iterator already holds, so it actually stops at 12.
+                del selected[12:]
 
     analysis = analyse(rows)
     report(rows, analysis)

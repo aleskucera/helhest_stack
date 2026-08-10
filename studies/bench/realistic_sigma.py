@@ -226,8 +226,9 @@ def _fosm_variance(
     return model.variance_of(grad * sigma, ny, nx, x0, y0)
 
 
-def run_seed(seed: int, device: str, model: BeliefModel) -> dict:
-    scene, _t, _m, _o, sigma, poses, omega, _g = build_case(seed, "hybrid", "all")
+def run_seed(seed: int, device: str, model: BeliefModel,
+             family: str = "hybrid", noise: str = "all") -> dict:
+    scene, _t, _m, _o, sigma, poses, omega, _g = build_case(seed, family, noise)
     belief = scene.elevation.astype(np.float32)
     ny, nx = belief.shape
     rp = RobotParams()
@@ -298,6 +299,7 @@ def run_seed(seed: int, device: str, model: BeliefModel) -> dict:
         samples[:, k] = _cost_settle(hd.forward(dilate=True))
     del hd
 
+    out_samples = samples.copy()
     mc_cvar = empirical_cvar(samples, ALPHA)
     best = int(np.argmin(mc_cvar))
     out = {"seed": seed, "arms": {}}
@@ -307,6 +309,7 @@ def run_seed(seed: int, device: str, model: BeliefModel) -> dict:
             "regret": float(mc_cvar[pick] - mc_cvar[best]),
             "picked_best": bool(pick == best),
         }
+    out["_samples"] = out_samples
     out["calib"] = {
         "sd_clark": sd_c.tolist(), "mc_sd": samples.std(axis=0).tolist(),
         "e_clark": e_c.tolist(), "mc_mean": samples.mean(axis=0).tolist(),
@@ -319,6 +322,8 @@ def main() -> None:
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--seeds", type=int, default=100)
     ap.add_argument("--gate", action="store_true")
+    ap.add_argument("--family", default="hybrid")
+    ap.add_argument("--noise", default="all")
     args = ap.parse_args()
     wp.init()
 
@@ -336,7 +341,7 @@ def main() -> None:
     rows = []
     t0 = time.perf_counter()
     for seed in range(args.seeds):
-        rows.append(run_seed(seed, args.device, model))
+        rows.append(run_seed(seed, args.device, model, args.family, args.noise))
         if (seed + 1) % 10 == 0:
             print(f"  {seed + 1}/{args.seeds} seeds, {(time.perf_counter() - t0) / 60:.1f} min")
 
@@ -360,6 +365,33 @@ def main() -> None:
         ])
         n, kk, p = sign_p(-d)
         tests[other] = {"mean_diff": float(d.mean()), "wins": kk, "n": n, "p": p}
+    # matched-budget curve under the SAME measured belief, so the paper does not quote a
+    # sample-count from one noise model beside regrets from another
+    clark_r = float(np.mean([r["arms"]["clark_cvar"]["regret"] for r in rows]))
+    curve = []
+    # Score the nd-draw pick against HELD-OUT draws. Scoring it against a "truth" built from
+    # the same N_DRAWS pool (old code: truth = empirical_cvar(sm), pick from sm[:nd]) let the
+    # pick grade its own homework -- at nd == N_DRAWS the pick pool and the truth pool were
+    # literally the same array, so regret was identically 0 there by construction, and every
+    # nd < N_DRAWS was biased down by the same overlap. Splitting N_DRAWS in half keeps the
+    # pick and the truth disjoint at every nd, at the cost of halving the top of the curve's
+    # n-axis (an independent fresh truth block would restore N_DRAWS but doubles the MC
+    # forward-pass cost of every seed, which this fix does not spend).
+    half = N_DRAWS // 2
+    for nd in (4, 8, 16, 32, 64, half):
+        reg = []
+        for r in rows:
+            sm = r["_samples"]
+            sm_pick, sm_truth = sm[:half], sm[half:]
+            true_c = empirical_cvar(sm_truth, ALPHA)
+            pick = int(np.argmin(empirical_cvar(sm_pick[:nd], ALPHA)))
+            reg.append(float(true_c[pick] - true_c[int(np.argmin(true_c))]))
+        curve.append({"n": nd, "mean_regret": float(np.mean(reg))})
+    n_star = next((c["n"] for c in curve if c["mean_regret"] <= clark_r), None)
+    print(f"  matched budget: MC needs N = {n_star} draws to match clark_cvar "
+          f"({clark_r:.4f}); curve " + ", ".join(f"{c['n']}:{c['mean_regret']:.3f}" for c in curve))
+    for r in rows:
+        r.pop("_samples")
     sd = np.concatenate([r["calib"]["sd_clark"] for r in rows])
     mc = np.concatenate([r["calib"]["mc_sd"] for r in rows])
     ratio = sd / np.maximum(mc, 1e-9)
@@ -369,7 +401,7 @@ def main() -> None:
         "iii_beats_step_p05": tests["step"]["p"] < 0.05 and tests["step"]["mean_diff"] < 0,
         "iv_sd_ratio_in_band": bool(0.7 <= float(np.median(ratio)) <= 1.4),
     }
-    print("\n=== hybrid/all under the MEASURED kernel ===")
+    print(f"\n=== {args.family}/{args.noise} under the MEASURED belief ===")
     for a, v in sorted(regret.items(), key=lambda kv: kv[1]):
         print(f"  {a:12s} {v:.4f}")
     for o, v in tests.items():
@@ -379,9 +411,10 @@ def main() -> None:
     for k, v in crit.items():
         print(f"    [{'PASS' if v else 'FAIL'}] {k}")
     print(f"  VERDICT: {'PASSED' if all(crit.values()) else 'FAILED'}")
-    path = OUT / "realistic_sigma.json"
+    path = OUT / f"realistic_sigma_{args.family}_{args.noise}.json"
     path.write_text(json.dumps(
         {"gate": g, "rows": rows, "mean_regret": regret, "tests": tests,
+         "budget_curve": curve, "n_star": n_star,
          "sd_ratio_median": float(np.median(ratio)), "criteria": crit,
          "passed": all(crit.values())}, indent=1))
     print(f"wrote {path}")

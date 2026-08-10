@@ -82,7 +82,7 @@ def _curvature(harness: Harness, cells: np.ndarray, deltas: np.ndarray, j0: np.n
 
 def run_seed(seed: int, family: str) -> dict:
     groups = PLAN_GROUPS[family]
-    scene, truth, observed, sigma, poses, omega, _ = build_case(seed, family)
+    scene, truth, measured, observed, sigma, poses, omega, _ = build_case(seed, family)
     harness = Harness(scene, poses, omega, device="cuda")
     belief = scene.elevation.astype(np.float32)
 
@@ -130,7 +130,7 @@ def run_seed(seed: int, family: str) -> dict:
         for m in BUDGETS:
             revealed = np.zeros(sigma.size, bool)
             revealed[order[:m]] = True
-            updated = np.where(observed | revealed.reshape(sigma.shape), truth, 0.0)
+            updated = np.where(observed | revealed.reshape(sigma.shape), measured, 0.0)
             j_new = _evaluate(harness, updated.astype(np.float32))
             rec[str(m)] = {
                 "tau": kendall_tau(j_new, j_true),
@@ -189,7 +189,7 @@ def validate_bias(n_seeds: int, offset: int, k_cells: int, family: str) -> None:
     groups = PLAN_GROUPS[family]
     before, after = [], []
     for seed in range(offset, offset + n_seeds):
-        scene, truth, observed, sigma, poses, omega, _ = build_case(seed, family)
+        scene, truth, _measured, observed, sigma, poses, omega, _ = build_case(seed, family)
         harness = Harness(scene, poses, omega, device="cuda")
         belief = scene.elevation.astype(np.float32)
         grads, _ = harness.adjoint(dilate=True, leaf="elevation")

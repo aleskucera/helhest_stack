@@ -19,7 +19,8 @@ schematic that disagrees with the code is a liability.
                         them, the spherical-cap offsets that lift each candidate, and the
                         tripod the settle rests on. Drawn from RobotParams, not by hand.
   budget_curve.png      Fig. 3. matched-budget MC regret vs number of draws, against the
-                        analytic estimator's regret (studies/out/bench/clark_full.json).
+                        analytic estimator's regret, under the measured belief
+                        (studies/out/bench/realistic_sigma_hybrid_all.json).
 """
 
 from __future__ import annotations
@@ -37,6 +38,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 from .clark import _norm_cdf  # noqa: E402
 from .clark import _norm_pdf  # noqa: E402
 from .clark import rho1_table  # noqa: E402
+from .clark_conv import cylinder_offsets  # noqa: E402
+from .clark_conv import WHEEL_HALF_WIDTH  # noqa: E402
 from .clark import rho_lookup  # noqa: E402
 from .ranking import CELL  # noqa: E402
 from .ranking import OUT  # noqa: E402
@@ -177,31 +180,35 @@ def fig_jensen(path: Path) -> None:
     ax_a.set_yticks([])
     ax_a.set_title(f"(a) one real footprint, $K={k}$", loc="left")
 
-    ax_b.plot(sig_axis * 100, np.array(gap_indep) * 100, "o-", color="#6baed6",
-              label="independent cells (MC)", ms=3)
-    ax_b.plot(sig_axis * 100, np.array(gap_corr) * 100, "o-", color="#cb181d",
-              label="correlated (MC truth)", ms=3)
-    ax_b.plot(sig_axis * 100, np.array(gap_clark) * 100, "k--", label="Clark, closed form")
-    # a linearised estimator has no Jensen term at all -- the honest comparison for panel (b)
-    # is not "Clark vs exact" but "Clark vs the zero that first-order propagation predicts".
-    ax_b.axhline(0.0, color="#525252", lw=1.0, ls="-.", label="first-order: no gap at all")
-    i_nom = int(np.argmin(np.abs(scales - 1.0)))
-    ax_b.axvline(sig_axis[i_nom] * 100, color="#969696", ls=":", lw=1.0)
-    ax_b.text(sig_axis[i_nom] * 100 * 1.03, max(gap_indep) * 100 * 0.15,
-              "this map's $\\sigma$", fontsize=6.5, color="#525252")
-    ax_b.set_xlabel("mean per-cell $\\sigma$ under the footprint [cm]")
-    ax_b.set_ylabel("$\\mathbb{E}[\\max] - \\max \\mathbb{E}$ [cm]")
-    ax_b.legend(frameon=False, loc="upper left")
-    ax_b.set_title("(b) averaged over 24 footprints", loc="left")
+    # (b) what the correlation actually is. The independent-vs-correlated point this panel
+    # used to make is subsumed: the measured kernel IS the answer to "does correlation matter".
+    import json as _json
+
+    rho_tot = np.load(OUT / "rho_measured.npy")
+    model = np.load(OUT / "belief_model.npz")
+    rho_s = model["rho_stationary"]
+    share = float(model["plane_share"])
+    mid = rho_tot.shape[0] // 2
+    lag = np.arange(mid + 1) * CELL
+    assumed = rho1_table(CORR_LEN, CELL)
+    ax_b.plot(lag, rho_tot[mid, mid:] / rho_tot[mid, mid], "-o", ms=2.5, color="#cb181d",
+              label="measured, total")
+    ax_b.plot(lag, rho_s[mid, mid:] / rho_s[mid, mid], "-o", ms=2.5, color="#2171b5",
+              label="measured, after removing the plane")
+    ax_b.plot(np.arange(len(assumed)) * CELL, assumed, "k--", label="assumed by prior work")
+    ax_b.axhline(0.0, color="#bdbdbd", lw=0.6)
+    ax_b.text(0.62, 0.42, f"a rank-3 plane\ncarries {share:.0%} of the\nvariance and never\ndecorrelates",
+              fontsize=6.3, color="#cb181d", va="center")
+    ax_b.set_xlabel("lag [m]")
+    ax_b.set_ylabel(r"$\rho$")
+    ax_b.set_xlim(0, 1.2)
+    ax_b.legend(frameon=False, loc="upper right")
+    ax_b.set_title("(b) the correlation the sensing produces", loc="left")
 
     fig.tight_layout(pad=0.35)
     fig.savefig(path, dpi=DPI, bbox_inches="tight")
     plt.close(fig)
-    ratio = np.array(gap_clark) / np.array(gap_corr)
     print(f"wrote {path}")
-    print("  Clark/MC gap ratio per sigma scale:", np.round(ratio, 3))
-    print("  independent/correlated inflation:",
-          np.round(np.array(gap_indep) / np.array(gap_corr), 2))
 
 
 def fig_geometry(path: Path) -> None:
@@ -213,56 +220,68 @@ def fig_geometry(path: Path) -> None:
     cell = CELL
     radius_cells = int(np.ceil(rp.wheel_radius / cell))
     off_dy, off_dx, off_cap = wheel_offset_table(radius_cells, cell, rp.wheel_radius)
+    off_dy, off_dx = np.asarray(off_dy), np.asarray(off_dx)
     wheels = np.array([[0.0, rp.half_track], [0.0, -rp.half_track], [-rp.rear_offset, 0.0]])
 
     fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(FIG_W * 2.06, 1.85))
 
-    # --- (a) plan view --------------------------------------------------------------------
+    # --- (a) plan view ------------------------------------------------------------------
+    # The wheels are drawn as RECTANGLES because that is what a cylinder looks like from
+    # above: 2R along travel by the tread width across. A circle of radius R here would be
+    # the SPHERE's silhouette, which is the envelope the experiments dilate with but not the
+    # shape of the wheel. Both candidate sets are shown, because the paper uses the sphere's
+    # for its results and the cylinder's for its cost figures.
+    cyl_dy, cyl_dx, _ = cylinder_offsets(cell, rp.wheel_radius, WHEEL_HALF_WIDTH, 0.0)
+    sphere_set = {(int(a), int(b)) for a, b in zip(off_dy, off_dx)}
+    cyl_set = {(int(a), int(b)) for a, b in zip(cyl_dy, cyl_dx)}
+
     lim_x, lim_y = (-1.25, 0.55), (-0.85, 0.85)
     for gx in np.arange(-1.3, 0.65, cell):
-        ax_a.axvline(gx, color="#e0e0e0", lw=0.3, zorder=0)
+        ax_a.axvline(gx, color="#e8e8e8", lw=0.3, zorder=0)
     for gy in np.arange(-0.9, 0.95, cell):
-        ax_a.axhline(gy, color="#e0e0e0", lw=0.3, zorder=0)
-    # chassis outline (the two belly boxes, plan view)
+        ax_a.axhline(gy, color="#e8e8e8", lw=0.3, zorder=0)
     for cx, hx, hy in ((-0.13, 0.24, 0.28), (-0.61, 0.24, 0.12)):
         ax_a.add_patch(
             plt.Rectangle((cx - hx, -hy), 2 * hx, 2 * hy, fill=False, ec="#737373", lw=0.9,
-                          ls="-", zorder=3)
+                          zorder=4)
         )
-    ax_a.plot([wheels[0, 0], wheels[1, 0]], [wheels[0, 1], wheels[1, 1]], color="#252525",
-              lw=0.8, ls=":", zorder=4)
-    ax_a.plot([wheels[0, 0], wheels[2, 0]], [wheels[0, 1], wheels[2, 1]], color="#252525",
-              lw=0.8, ls=":", zorder=4)
-    ax_a.plot([wheels[1, 0], wheels[2, 0]], [wheels[1, 1], wheels[2, 1]], color="#252525",
-              lw=0.8, ls=":", zorder=4)
+    for i, j in ((0, 1), (0, 2), (1, 2)):
+        ax_a.plot(wheels[[i, j], 0], wheels[[i, j], 1], color="#252525", lw=0.8, ls=":",
+                  zorder=5)
     for i, (wx, wy) in enumerate(wheels):
         highlight = i == 0
-        # the footprint is indexed off the wheel's NEAREST cell centre, so draw the wheel there
-        # too -- otherwise the picture shows an offset the code does not have
         wx = round(wx / cell) * cell
         wy = round(wy / cell) * cell
         for dyc, dxc in zip(off_dy, off_dx):
-            cx = wx + dxc * cell
-            cy = wy + dyc * cell
+            in_cyl = (int(dyc), int(dxc)) in cyl_set
+            if highlight:
+                fc = "#e6550d" if in_cyl else "#fdd0a2"
+            else:
+                fc = "#9ecae1" if in_cyl else "#deebf7"
             ax_a.add_patch(
-                plt.Rectangle((cx - cell / 2, cy - cell / 2), cell, cell,
-                              fc="#fdae6b" if highlight else "#deebf7",
-                              ec="#bdbdbd", lw=0.25, zorder=1)
+                plt.Rectangle((wx + dxc * cell - cell / 2, wy + dyc * cell - cell / 2),
+                              cell, cell, fc=fc, ec="#bdbdbd", lw=0.25, zorder=1)
             )
-        ax_a.add_patch(plt.Circle((wx, wy), rp.wheel_radius, fill=False, ec="#08519c", lw=1.1,
-                                  zorder=5))
-        ax_a.plot([wx], [wy], marker="o", ms=2.5, color="#08519c", zorder=6)
-    ax_a.annotate("$\\mathcal{F}(w,t)$: $K=37$ cells",
-                  xy=(0.20, 0.52), xytext=(-0.42, 0.70),
-                  fontsize=6.6, ha="center",
+        # the wheel itself: a cylinder seen from above. Outline only -- a filled patch
+        # would cover the cells the panel exists to show.
+        ax_a.add_patch(
+            plt.Rectangle((wx - rp.wheel_radius, wy - WHEEL_HALF_WIDTH),
+                          2 * rp.wheel_radius, 2 * WHEEL_HALF_WIDTH,
+                          fill=False, ec="#252525", lw=1.2, zorder=6)
+        )
+    ax_a.annotate("cylinder, $K=7$", xy=(0.12, 0.40), xytext=(-0.32, 0.72),
+                  fontsize=6.5, ha="center", color="#a63603",
                   arrowprops=dict(arrowstyle="->", color="#a63603", lw=0.7))
-    ax_a.text(-0.44, -0.06, "tripod", fontsize=6.6, color="#252525", ha="center")
+    ax_a.annotate("sphere envelope, $K=37$", xy=(0.22, 0.10), xytext=(0.02, -0.72),
+                  fontsize=6.5, ha="center", color="#8c6d31",
+                  arrowprops=dict(arrowstyle="->", color="#8c6d31", lw=0.7))
+    ax_a.text(-0.44, 0.14, "tripod", fontsize=6.5, color="#252525", ha="center")
     ax_a.set_xlim(*lim_x)
     ax_a.set_ylim(*lim_y)
     ax_a.set_aspect("equal")
     ax_a.set_xlabel("$x$ [m]")
     ax_a.set_ylabel("$y$ [m]")
-    ax_a.set_title("(a) three footprints on the belief grid", loc="left")
+    ax_a.set_title("(a) two contact elements on the belief grid", loc="left")
 
     # --- (b) section through the highlighted wheel ------------------------------------------
     mid = off_dy == 0
@@ -287,12 +306,12 @@ def fig_geometry(path: Path) -> None:
     ax_b.plot([xs[j]], [lifted[j]], marker="*", ms=8, color="#cb181d", zorder=5)
     ax_b.text(xs.min(), lifted[j] + 0.028, "$e_{w,t} = \\max_c\\,(h_c + \\kappa_c)$",
               fontsize=6.8, color="#cb181d", ha="left", va="bottom")
-    ax_b.set_xlabel("distance across the footprint [m]")
+    ax_b.set_xlabel("distance along travel [m]")
     ax_b.set_ylabel("height [m]")
     ax_b.set_ylim(min(ground.min(), lifted.min()) - 0.055, lifted[j] + 0.075)
     ax_b.legend(frameon=False, loc="upper right", ncol=1, handletextpad=0.4,
                 borderaxespad=0.2)
-    ax_b.set_title("(b) section: the cap offsets and the max", loc="left")
+    ax_b.set_title("(b) section along travel: identical for both", loc="left")
 
     fig.tight_layout(pad=0.35)
     fig.savefig(path, dpi=DPI, bbox_inches="tight")
@@ -301,10 +320,14 @@ def fig_geometry(path: Path) -> None:
 
 
 def fig_budget(path: Path) -> None:
-    data = json.loads((OUT / "clark_full.json").read_text())["budget"]
-    n = np.array([c["n"] for c in data["curve"]])
-    regret = np.array([c["mean_regret"] for c in data["curve"]])
-    clark = data["clark_cvar_regret"]
+    # clark_full.json's budget curve came from the old hand-built NoiseDraws kernel; the
+    # paper's regrets now come from realistic_sigma.py's measured belief (BeliefModel), so the
+    # figure has to read that file's budget_curve/n_star instead or the curve and the Clark
+    # line would be drawn from two different noise models.
+    data = json.loads((OUT / "realistic_sigma_hybrid_all.json").read_text())
+    n = np.array([c["n"] for c in data["budget_curve"]])
+    regret = np.array([c["mean_regret"] for c in data["budget_curve"]])
+    clark = data["mean_regret"]["clark_cvar"]
 
     fig, ax = plt.subplots(figsize=(FIG_W, 1.9))
     ax.plot(n, regret, "o-", color="#2171b5", label="Monte-Carlo with $N$ draws", ms=3.5)

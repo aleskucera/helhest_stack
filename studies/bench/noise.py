@@ -96,11 +96,15 @@ def visibility(truth: np.ndarray, XX: np.ndarray, YY: np.ndarray, cell: float) -
     """
     rng_field = np.hypot(XX, YY)
     seen = rng_field <= MAX_RANGE
-    # Sample the ray from the sensor to each cell at RAY_STEPS fractions of the way out.
+    # Sample the ray from the sensor (at world origin, per rng_field above) to each cell, at
+    # RAY_STEPS fractions of the way out. XX.min()/YY.min() are the CENTRES of cell (0, 0), so
+    # no half-cell offset -- and the ray must start at the SENSOR's index, not the map corner.
     frac = np.linspace(0.0, 1.0, RAY_STEPS + 1)[1:-1].reshape(-1, 1, 1)
-    gy = (YY - YY.min()) / cell - 0.5
-    gx = (XX - XX.min()) / cell - 0.5
-    h_along = _bilinear(truth, frac * gy, frac * gx)  # [S, ny, nx]
+    gy = (YY - YY.min()) / cell
+    gx = (XX - XX.min()) / cell
+    gy_s = (0.0 - YY.min()) / cell
+    gx_s = (0.0 - XX.min()) / cell
+    h_along = _bilinear(truth, gy_s + frac * (gy - gy_s), gx_s + frac * (gx - gx_s))  # [S, ny, nx]
     # Elevation angle of each sample and of the target, from the sensor.
     ang_along = (h_along - SENSOR_HEIGHT) / np.maximum(frac * rng_field, 1e-6)
     ang_target = (truth - SENSOR_HEIGHT) / np.maximum(rng_field, 1e-6)
@@ -134,7 +138,9 @@ def apply_pose_error(truth, XX, YY, cell, dx, dy, dyaw):
     """
     c, s = np.cos(dyaw), np.sin(dyaw)
     xs, ys = XX * c - YY * s + dx, XX * s + YY * c + dy
-    return _bilinear(truth, (ys - YY.min()) / cell - 0.5, (xs - XX.min()) / cell - 0.5)
+    # XX.min()/YY.min() are already the CENTRES of cell (0, 0) (see ranking.build_case), so the
+    # index of world x is (x - XX.min()) / cell exactly -- no half-cell offset.
+    return _bilinear(truth, (ys - YY.min()) / cell, (xs - XX.min()) / cell)
 
 
 def build_belief(

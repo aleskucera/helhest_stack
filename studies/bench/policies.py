@@ -81,6 +81,12 @@ def _best_bearing(belief, bw, pose, weight):
             best, best_b = gain, float(b)
     if total <= 0.0 or best < LOOK_THRESHOLD * total:
         return None
+    if best <= 0.0:
+        # Every candidate resolves nothing -- all gains tied at zero. The loop above then
+        # leaves best_b at the FIRST (maximally off-axis) candidate purely by iteration order,
+        # which burns an 8-frame look staring off to the side for no gain. Point forward
+        # instead: no candidate is better, so there is no reason to prefer the extreme one.
+        return float(pose[2])
     return best_b
 
 
@@ -179,11 +185,14 @@ def _sensitivity(belief, bw, pose, route=None) -> np.ndarray:
 
 
 # --- the policies ------------------------------------------------------------------------
-def none(belief, pose, bw, route=None, routes=None):
+# Every policy takes the same trailing `rng` slot, even the ones that don't use it, because
+# loop.py calls all six positionally with an identical arg list -- an inconsistent signature
+# would silently swallow the rng into some other parameter for whichever policy lacked it.
+def none(belief, pose, bw, route=None, routes=None, rng=None):
     return None
 
 
-def entropy(belief, pose, bw, route=None, routes=None):
+def entropy(belief, pose, bw, route=None, routes=None, rng=None):
     """Maximise expected information gain, sum of sigma^2 over the cells a look would resolve.
 
     The sigma-weighted form, not a raw cell count. Counting cells makes the objective nearly
@@ -195,13 +204,13 @@ def entropy(belief, pose, bw, route=None, routes=None):
     return _best_bearing(belief, bw, pose, belief.sigma() ** 2)
 
 
-def sigma(belief, pose, bw, route=None, routes=None):
+def sigma(belief, pose, bw, route=None, routes=None, rng=None):
     """Maximise revealed uncertainty INSIDE the plan corridor -- uncertainty-aware only."""
     corridor = _plan_corridor(belief, bw, pose)
     return _best_bearing(belief, bw, pose, np.where(corridor, belief.sigma() ** 2, 0.0))
 
 
-def attribution(belief, pose, bw, route=None, routes=None):
+def attribution(belief, pose, bw, route=None, routes=None, rng=None):
     """Maximise the FOSM variance a look would resolve: sum (dJ/dh * sigma)^2."""
     return _best_bearing(
         belief, bw, pose, (_sensitivity(belief, bw, pose, route) * belief.sigma()) ** 2
@@ -215,7 +224,11 @@ def cvar(belief, pose, bw, route=None, routes=None, rng=None):
     brute force -- which is exactly why section 6 says never to argue cost against it, only
     attribution.
     """
-    rng = rng or np.random.default_rng(0)
+    # `rng` comes from loop.py, spawned per-seed/per-frame so the 12 draws vary across
+    # episodes and looks instead of being frozen. Fall back to a fixed seed only for callers
+    # (tests, direct invocation) that don't thread one through.
+    if rng is None:
+        rng = np.random.default_rng(0)
     sig = belief.sigma()
     sens = _sensitivity(belief, bw, pose, route)
     # Per-cell spread of the plan's cost across sampled maps. With a linear cost the sample
@@ -227,7 +240,7 @@ def cvar(belief, pose, bw, route=None, routes=None, rng=None):
     return _best_bearing(belief, bw, pose, acc / CVAR_SAMPLES)
 
 
-def disagreement(belief, pose, bw, route=None, routes=None):
+def disagreement(belief, pose, bw, route=None, routes=None, rng=None):
     """OURS, corrected: look where the near-optimal routes DISAGREE.
 
     Single-plan attribution is confirmatory (see diagnose_confirmatory.py): it aims along the

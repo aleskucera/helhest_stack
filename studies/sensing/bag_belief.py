@@ -67,7 +67,15 @@ def read_bag(path: Path, n_clouds: int, stride: int) -> tuple[list[np.ndarray], 
                 stamps.append(t)
     odom_t = np.array(odom_t)
     odom_p = np.array(odom_p)
-    idx = np.clip(np.searchsorted(odom_t, np.array(stamps)), 0, len(odom_t) - 1)
+    # searchsorted gives the first odom AT-OR-AFTER the cloud stamp; compare it against the one
+    # just before to pick whichever is actually nearest in time (the docstring's promise).
+    after = np.clip(np.searchsorted(odom_t, np.array(stamps)), 0, len(odom_t) - 1)
+    before = np.clip(after - 1, 0, len(odom_t) - 1)
+    idx = np.where(
+        np.abs(odom_t[before] - np.array(stamps)) <= np.abs(odom_t[after] - np.array(stamps)),
+        before,
+        after,
+    )
     return clouds, odom_p[idx]
 
 
@@ -201,6 +209,7 @@ def run(bag: Path, n_clouds: int, stride: int, device: str) -> dict:
                 continue
             if not (np.isfinite(e) and np.isfinite(v)):
                 bad += 1
+                continue  # keep e=inf out of the spread stats; it still counts toward `bad`
             e_all.append(e)
             sd_all.append(np.sqrt(max(v, 0.0)))
         ms = (time.perf_counter() - t0) / plans.shape[1] * 1e3
