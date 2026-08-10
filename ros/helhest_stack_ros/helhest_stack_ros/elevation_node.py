@@ -674,7 +674,15 @@ class ElevationNode(Node):
         # information -- but the COMMAND can change faster, which is where the value is: finer slew
         # and goal-brake resolution, and the LLC stays fed if a cloud is dropped. It does NOT reduce
         # the ~175 ms actuator delay, which lives in the LLC velocity loop.
-        d("plan_command_rate", 0.0)
+        # Command timer: walk the committed plan on a fixed clock instead of publishing once
+        # per replan. 20 Hz is above the ~14.5 Hz Odin plan rate, so the plan is interpolated
+        # rather than held, and it is the clock the inner yaw loop runs on. 0 = off.
+        d("plan_command_rate", 20.0)
+        # How stale a committed plan may get before the timer stops the robot. MUST be short:
+        # plan_control_at CLAMPS past the horizon, so without this a starved or crashed planner
+        # would have the timer hold the plan's last control forever -- and keep feeding the
+        # LLC deadman, which is what would otherwise stop the robot. ~7 missed frames at 14.5 Hz.
+        d("plan_stale_s", 0.5)
         d("plan_command_delay", dynamics.COMMAND_DELAY)
         d("plan_turn_boost", 1.0)
         # OPTIONAL: self-tune plan_turn_boost online from gyro feedback (control/turn_adapt.py) so the
@@ -823,6 +831,7 @@ class ElevationNode(Node):
         self.plan_turn_boost: float = g("plan_turn_boost")
         self.plan_turn_boost_adapt: bool = g("plan_turn_boost_adapt")
         self.plan_turn_boost_tau: float = g("plan_turn_boost_tau")
+        self.plan_stale_s: float = g("plan_stale_s")
         self.plan_yaw_track: bool = g("plan_yaw_track")
         self.plan_yaw_track_kp: float = g("plan_yaw_track_kp")
         self.plan_yaw_track_ki: float = g("plan_yaw_track_ki")
@@ -1789,6 +1798,9 @@ class ElevationNode(Node):
             return
         nominal, made_at, goal_dist, turn_boost = plan
         elapsed = float(self.get_clock().now().nanoseconds) * 1e-9 - made_at
+        if self.plan_stale_s > 0.0 and elapsed > self.plan_stale_s:
+            self._stop_stale_plan()
+            return
         wl, wr = (float(v) for v in plan_control_at(nominal, elapsed, dynamics.DT))
         # The loop's REFERENCE is the uncorrected plan put through the same conditioner, so it is
         # the braked, slew-limited intent -- and, critically, independent of the loop's own output.
@@ -1822,6 +1834,34 @@ class ElevationNode(Node):
         self._publish_cmd(cmd)
         if self._yaw_track is not None and ref_cmd is not None:
             self._yaw_track_update(ref_cmd, cmd)
+
+    def _stop_stale_plan(self) -> None:
+        """The planner has stopped delivering: ramp to a stop rather than walk a stale plan.
+
+        `plan_control_at` clamps past the horizon, so a crashed or starved planner would otherwise
+        have this timer hold the last control indefinitely -- and, worse, keep the LLC deadman fed,
+        removing the very thing that stops the robot when the pipeline dies. Zero through the
+        conditioner decelerates at plan_max_decel instead of cutting; once at rest the timer goes
+        quiet and the deadman holds it there.
+        """
+        if self._yaw_track is not None:
+            self._yaw_track.reset()
+        cmd = condition_command(
+            0.0,
+            0.0,
+            self._prev_cmd,
+            max_omega=self.plan_max_omega,
+            max_slew=self.plan_max_slew,
+            max_decel=self.plan_max_decel,
+            dt=self._command_dt(self._command_period),
+        )
+        self._prev_cmd = cmd
+        self._publish_cmd(cmd)
+        if float(np.max(np.abs(cmd))) < 1e-3:
+            self._drive_plan = None  # at rest: stop publishing and let the deadman hold it
+            self.get_logger().warn(
+                f"no plan for {self.plan_stale_s:.2f} s -- command timer ramped the robot to a stop"
+            )
 
     def _conditioned(self, wl: float, wr: float, plan) -> np.ndarray:
         """Run the output conditioner without publishing. Pure, so it is safe to call twice a

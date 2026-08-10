@@ -169,7 +169,17 @@
     #   real mu     0.80    0.40    0.20
     #   open        0.0%   19.4%   32.1%   steady-state yaw error
     #   closed      0.4%    1.0%    1.1%   and peak yaw DROPS, 0.617 -> 0.597 at mu 0.4
-    plan_command_rate: 0.0    # [Hz] 0 = off (publish once per replan); 50 to run the loop
+    # ON: the command timer walks the committed plan at this rate instead of publishing once per
+    # replan, so the plan is interpolated rather than held between clouds (~14.5 Hz on Odin). It
+    # is also the clock the yaw loop below runs on. tau_motor 0.19 s puts the useful bandwidth
+    # near 1 Hz, so 20 is ample; 0 turns the timer off and reverts to publish-per-replan.
+    #
+    # plan_stale_s is NOT optional with this on. plan_control_at clamps past the horizon, so a
+    # starved or crashed planner would have the timer hold the last control forever AND keep the
+    # LLC deadman fed -- removing the thing that stops the robot when the pipeline dies. Past this
+    # age the timer ramps to a stop at plan_max_decel, then goes quiet.
+    plan_command_rate: 20.0
+    plan_stale_s: 0.5
     plan_yaw_track: false
     plan_yaw_track_kp: 0.4
     plan_yaw_track_ki: 1.0
