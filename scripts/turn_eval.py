@@ -84,7 +84,8 @@ def run(bearing_deg: float, turn_w: float, max_slew: float, smooth_w: float | No
     drv = WarpDriver(scene, mu_hm, init_pose=(0.0, 0.0, 0.0), device=device)
     prev = np.zeros(3, np.float32)
     path, yaws, reached, f = 0.0, [], False, 0
-    diffs, lat = [], []   # commanded differential per step, and lateral offset from the straight line
+    # commanded differential per step, and lateral offset from the straight goal line
+    diffs, lat = [], []
     px, py, pyaw = 0.0, 0.0, 0.0
     for f in range(max_frames):
         st = drv.render_state()
