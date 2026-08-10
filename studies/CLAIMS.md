@@ -11,8 +11,14 @@
 >   2026-08-10 jsons; the qualitative claims (entropy loses everywhere, corridor ties/beats
 >   the adjoint under realistic noise, elites compress every edge, the motion-coupled
 >   retraction) all reproduce on corrected masks.
-> - **C2 stands**; the rare-event number tightens to FORM missing by 1.99 dex (stalled
->   attacks now censored rather than reported as finite Φ(−4)) vs subset simulation's 0.107.
+> - **C2 stands with one member REVERSED.** The refutation count is now SIX plus one
+>   reversal: the bundled adjoint's matched-compute refutation does not reproduce on the
+>   corrected benchmark (pre-fix p=0.12 "never beats its own forwards"; post-fix it beats
+>   them at p=1.1e-4; the 5e10 blow-up and 0.60→0.83 catch-22 figures have no counterpart
+>   in the current json). The second-order refutation is STRONGER (paired Δτ −0.125,
+>   p=3.7e-7). The rare-event number is unchanged: FORM misses by 2.97 dex overall (1.99
+>   in the P<1e-2 regime; 0/16 attacks stalled, so the censoring fix is dormant here) vs
+>   subset simulation's 0.04.
 > - **The "Follow-up direction validated: decision-focused perception training" section
 >   below is RETRACTED (▼▼).** Under the corrected noise model the thread's one surviving
 >   positive REVERSES: the decision-loss-trained inpainter loses to MSE at p=3.9e-10

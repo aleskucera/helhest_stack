@@ -1,0 +1,62 @@
+{
+ "n_seeds": 16,
+ "n_plans": 256,
+ "separability": {
+  "raw_measured_kernel_worst_case_abs_err": 0.6689248413722344,
+  "stationary_kernel_worst_case_abs_err": 0.14345728625086696,
+  "threshold": 0.05,
+  "note": "worst-case |kernel - best rank-1 separable fit| over lags where the kernel itself exceeds `threshold`; raw = rho_measured.npy (plane still in it), stationary = belief_model.npz rho_stationary (plane removed, context only)"
+ },
+ "var_error": {
+  "assumed_single_term": {
+   "median": 1.484561518547977,
+   "mean": 1.4812354260712002,
+   "max": 2.3083106168693512,
+   "note": "the PRODUCTION assumption rho1_table(CORR_LEN, CELL) outer rho1_table -- what plan_moments_conv's own Var[J] already uses -- checked against the dense (no-approximation) quadratic form under the measured rho_stationary"
+  },
+  "rank_m_psd_projected": {
+   "1": {
+    "median": 0.07069231438358284,
+    "mean": 0.07051477813188023,
+    "max": 0.17269265475360698
+   },
+   "2": {
+    "median": 0.021388968119336015,
+    "mean": 0.021351673245724144,
+    "max": 0.05886598300565698
+   },
+   "3": {
+    "median": 0.01422069740540877,
+    "mean": 0.020254439376747965,
+    "max": 0.07083987910267951
+   },
+   "5": {
+    "median": 0.014154360146102097,
+    "mean": 0.020893246647695162,
+    "max": 0.06991087123238122
+   }
+  }
+ },
+ "psd_projection": {
+  "1": {
+   "min_spectrum_before": 0.08199867677077793,
+   "min_spectrum_after": 0.08199867677077774,
+   "psd_after": true
+  },
+  "2": {
+   "min_spectrum_before": 0.12728823305588124,
+   "min_spectrum_after": 0.1272882330558783,
+   "psd_after": true
+  },
+  "3": {
+   "min_spectrum_before": 0.12613554084418663,
+   "min_spectrum_after": 0.12613554084418796,
+   "psd_after": true
+  },
+  "5": {
+   "min_spectrum_before": 0.09641808418232933,
+   "min_spectrum_after": 0.09641808418236086,
+   "psd_after": true
+  }
+ }
+}

@@ -509,11 +509,33 @@ thread's single surviving positive (decision-loss training beats MSE, p=0.006) R
 under the fixed noise: decision-trained loses to MSE at p=3.9e-10 (9/68 wins); cost-space
 marginal (p=0.019). dfl_settle's rerun rc=1 by its own reproduction guard (retrained
 rung-2 regret 0.157 vs recorded 0.257) — the training landscape moved with the fix.
-CLAIMS.md rev 3 retracts the section. The refutations hold with cleaner numbers (FORM
-1.99 dex with stalls properly censored, vs subset 0.107; bag_belief zero-fill spread 45.9
-vs 11.5 ground-referenced). CONTROL: ranking hybrid/clean returned BYTE-IDENTICAL to the
-committed artifact — the clean arm never touches the fixed paths and tau-b equals gamma
-absent exact ties — so C1's clean-arm headline numbers stand unchanged. Paper edit list: scratchpad paper_number_inventory.md (~85 claims, 21/27
+CLAIMS.md rev 3 retracts the section. CONTROL: ranking hybrid/clean returned
+BYTE-IDENTICAL to the committed artifact — the clean arm never touches the fixed paths and
+tau-b equals gamma absent exact ties — so C1's clean-arm headline numbers stand unchanged.
+
+**Refutation-ledger triage (2026-08-11, correcting the stage-5 commit message's "keep
+their verdicts" line, which was wrong for one row):**
+- **BUNDLED ADJOINT: REVERSED.** Same arms, same protocol, recomputed from both jsons:
+  pre-fix bundled-vs-mc_small p=0.121 ("never beats its own forwards" — the refutation);
+  post-fix mean −0.32, 35/44, p=1.1e-4 — it decisively BEATS them. The 0.61→0.83 catch-22
+  and 5e10 blow-up figures have no counterpart in the current json (gradmass 0.052→0.062,
+  max cvar_err 3.76). The paper's ledger now counts SIX refutations plus one reversal;
+  a corrected-benchmark bundled-vs-Clark head-to-head has NOT been run (open item).
+- Second-order: refutation STRONGER — fosm2−fosm1 paired Δτ −0.125, better on 7/40,
+  p=3.7e-7 (was "does not improve, p=0.13"); ratio medians 0.78→1.54 (means outlier-blown
+  by one near-singular contact — quote medians).
+- Softened contact: direction holds (no temperature helps, all p≥0.27 vs hard) but the
+  old "−0.13 / ~50× too small" figures have no field in the current json — superseded.
+- rare/FORM: my stage-5 message said "1.99 dex with stalls censored" — imprecise. The
+  overall median miss is 2.97 dex (UNCHANGED); 1.985 is the P<1e-2-regime median; the
+  stall-censoring fix is real in code but dormant on this data (0/16 attacks stalled).
+- bag_belief: zero-fill spread 45.9 vs 11.5 ground-referenced (phantom-plateau confirmed);
+  NaN maps now refused.
+- separable_report.json (NEW artifact + bench/separable_report.py): the paper's separable-
+  kernel numbers finally persisted, measured on the refit kernel: worst-case separability
+  0.14 (was 0.48), single-term Var[J] error 7.1% (was 60%), rank-5 1.4% (was 0.57%); the
+  production assumed kernel (CORR_LEN=0.15) is 148% wrong against the measured stationary
+  kernel — noted for any future default change. Paper edit list: scratchpad paper_number_inventory.md (~85 claims, 21/27
 spot-checked numbers drifted; two framing flips: hinge verdict negative->positive pending
 the virgin run, and "STEP worse than the mean map" no longer holds — STEP 0.214 vs none
 0.313). Writing standard for the paper: clark_paper/CLAUDE.md (strict academic register,

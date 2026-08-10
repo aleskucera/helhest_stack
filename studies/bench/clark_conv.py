@@ -171,8 +171,14 @@ def plan_moments_conv(
     belief: np.ndarray, sigma: np.ndarray, controlled: np.ndarray, rp: RobotParams,
     x0: float, y0: float, cell: float, rho1: np.ndarray,
     element: str = "sphere", rho_kk_cache: dict | None = None,
-) -> tuple[float, float]:
-    """E[J_settle], Var[J_settle] for one plan, with no covariance matrix anywhere."""
+    return_patch: bool = False,
+) -> tuple[float, float] | tuple[float, float, np.ndarray, int, int]:
+    """E[J_settle], Var[J_settle] for one plan, with no covariance matrix anywhere.
+
+    `return_patch`, if set, additionally returns the scattered field `G` (the quantity
+    `_separable_quadratic` convolves) and its patch origin `(y_lo, x_lo)` in grid cells --
+    `separable_report.py` reuses this to re-evaluate the SAME plan corridor's Var[J] under a
+    different (measured, non-separable) correlation kernel."""
     ny, nx = belief.shape
     belief_flat, sigma_flat = belief.ravel(), sigma.ravel()
     # A real map has holes. Replaying a bag through this estimator showed every plan returning
@@ -246,7 +252,10 @@ def plan_moments_conv(
     patch = np.zeros((y_hi - y_lo, x_hi - x_lo))
     contrib = (c_w[:, None] * w * sigma_flat[cells_sorted]).ravel()
     np.add.at(patch, ((iy_all - y_lo).ravel(), (ix_all - x_lo).ravel()), contrib)
-    return e_j, max(_separable_quadratic(patch, rho1), 0.0)
+    var_j = max(_separable_quadratic(patch, rho1), 0.0)
+    if return_patch:
+        return e_j, var_j, patch, y_lo, x_lo
+    return e_j, var_j
 
 
 def run(device: str, n_seeds: int, element: str) -> dict:
