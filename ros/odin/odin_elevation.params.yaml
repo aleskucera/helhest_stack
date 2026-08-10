@@ -97,13 +97,13 @@
     #
     #   plan_smooth   straight: flips/s  jerk   max lat   90 deg   180 deg
     #   2e-3          0.60               0.042  0.09 m    13.7 s   15.5 s
-    #   4e-2          0.36               0.033  0.05 m    13.7 s   15.8 s   <- here
-    #   1e-1          0.12               0.043  0.09 m    16.4 s   17.8 s   over-damped
+    #   4e-2          0.36               0.033  0.05 m    13.7 s   15.8 s
+    #   1e-1          0.12               0.043  0.09 m    16.4 s   17.8 s   <- here (field 2026-08-10: smoothest straights, slower turns accepted)
     #
     # For comparison the old plan_turn 0.8 gave 0.32 / 0.027 / 0.03 m on straights -- so this
     # recovers nearly all of that smoothness while turning still works. Past 1e-1 it inverts:
     # corrections get deferred and come out larger, so jerk rises again AND turning degrades.
-    plan_smooth: 0.04
+    plan_smooth: 0.1
     # Accel cap on the published command [rad/s^2]. Raised 2.0 -> 6.0 (the node default). The
     # justification is the drivetrain's own lag: tau = 0.19 s means a 1 rad/s step is already
     # answered at only ~5.3 rad/s^2 by the motors, so a 2.0 clamp was TIGHTER THAN THE HARDWARE
@@ -145,10 +145,12 @@
     # command). plan_max_slew 6 -> 1.5 does help (yaw@closest 0.98 -> 0.34) and does NOT cost
     # clearance, but it only delays WHEN the turn happens -- peak yaw over the run stays 0.89 vs
     # 0.60 for a_max 0.4 -- and it undoes the slew raise that fixed the sluggish turning.
-    plan_turn_brake_a_max: 0.4
+    # Field call 2026-08-10: 0.4 -> 0.6 (less corner braking), with the lookahead OFF below.
+    plan_turn_brake_a_max: 0.6
     # Pre-apply the tightest cap found this far ahead along the committed plan, so the robot is
     # already slow when it enters the corner. 0 = react to the current command only.
-    plan_turn_brake_lookahead_s: 1.5
+    # Field call 2026-08-10: OFF (0.0) -- brake AT the corner, do not pre-slow on the approach.
+    plan_turn_brake_lookahead_s: 0.0
 
     # --- INNER YAW-RATE LOOP (control/yaw_track.py) -- OFF, needs a field trial ---
     # Everything downstream of MPPI is feedforward: the planner maps a differential to a yaw rate
@@ -180,7 +182,7 @@
     # age the timer ramps to a stop at plan_max_decel, then goes quiet.
     plan_command_rate: 20.0
     plan_stale_s: 0.5
-    plan_yaw_track: false
+    plan_yaw_track: true
     plan_yaw_track_kp: 0.4
     plan_yaw_track_ki: 1.0
     plan_yaw_track_deadband: 0.05   # [rad/s] idle band, so a straight line is not regulated
