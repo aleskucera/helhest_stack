@@ -66,6 +66,24 @@ def program(name: str) -> list[tuple[float, float, float]]:
                 out += [block(4.0, mean, 1.5), block(3.0, mean, 0.0),
                         block(4.0, mean, -1.5), block(3.0, mean, 0.0)]
             out.append(block(2.0, 0.0, 0.0))
+    elif name == "compact":
+        # `relax` needs a sports field: 41 x 29 m, measured by running it through the engine. This
+        # gets the same measurement on a patch, by SPINNING IN PLACE. What sets a tyre's relaxation
+        # is the speed its contact patch travels over the ground, R * mean|omega|, which is nonzero
+        # in a spin even though the body does not translate -- so the speed sweep survives and the
+        # footprint collapses to the robot's own turning circle. Contact speed spans 0.18-1.40 m/s
+        # here, a WIDER range than the driving version manages.
+        #
+        # The caveat is real: a spin has every wheel skidding laterally, which is not the regime
+        # the planner spends its time in, so sigma fitted here should be checked against a couple
+        # of driving steps before it is trusted. `--pause` stops between blocks so a short driving
+        # segment can be added by hand on whatever run-up the site allows.
+        for w in (0.5, 1.0, 2.0, 4.0):
+            hold = max(2.0, 8.0 * 0.15 / (0.35 * w))  # ~8 relaxation lengths of contact travel
+            out.append(block(2.0, 0.0, 0.0))
+            for _ in range(3):
+                out += [(hold, -w, w), block(2.0, 0.0, 0.0),
+                        (hold, w, -w), block(2.0, 0.0, 0.0)]
     elif name == "slope":
         # Driven ON a slope of 10 deg or more; the operator points the robot, this holds the
         # command steady. Across-slope is the case that matters -- zero lateral load transfer in
@@ -75,7 +93,7 @@ def program(name: str) -> list[tuple[float, float, float]]:
         out += [block(5.0, 1.5, 1.0), block(3.0, 0.0, 0.0),
                 block(5.0, 1.5, -1.0), block(3.0, 0.0, 0.0)]
     else:
-        raise SystemExit(f"unknown program '{name}' (calibrate | relax | slope)")
+        raise SystemExit(f"unknown program '{name}'")
     return out
 
 
@@ -106,13 +124,17 @@ class Driver(Node):
         m.velocity = [float(wl), float(0.5 * (wl + wr)), float(wr)]  # rear at the mean
         self.pub.publish(m)
 
-    def run(self) -> None:
+    def run(self, pause: bool = False) -> None:
         period = 1.0 / RATE_HZ
         t_start = time.monotonic()
         for i, (dur, wl, wr) in enumerate(self.blocks):
             t_end = time.monotonic() + dur
             print(f"  [{time.monotonic() - t_start:6.1f}s] block {i + 1}/{len(self.blocks)}: "
                   f"wL {wl:+5.2f}  wR {wr:+5.2f}  ({dur:.1f} s)", flush=True)
+            if pause and i > 0:
+                self.stop()
+                input("      [paused] reposition if needed, then press Enter...")
+                t_end = time.monotonic() + dur
             while time.monotonic() < t_end:
                 self.send(wl, wr)
                 rclpy.spin_once(self, timeout_sec=0.0)
@@ -126,17 +148,21 @@ class Driver(Node):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("program", choices=("calibrate", "relax", "slope"))
+    ap.add_argument("program", choices=("calibrate", "relax", "compact", "slope"))
     ap.add_argument("--go", action="store_true", help="actually publish (default is a dry run)")
     ap.add_argument("--max-omega", type=float, default=4.0, help="per-wheel clamp [rad/s]")
     ap.add_argument("--countdown", type=int, default=5)
+    ap.add_argument("--pause", action="store_true",
+                    help="wait for Enter between blocks, to reposition on a small patch")
     args = ap.parse_args()
 
     blocks = program(args.program)
     print(f"program '{args.program}':")
     total = describe(blocks, args.max_omega)
     if args.program == "relax":
-        print("  needs ~6x6 m of clear flat ground (it drives circles of ~1 m radius)")
+        print("  MEASURED footprint ~41 x 29 m -- use `compact` unless you have that")
+    if args.program == "compact":
+        print("  spins in place: footprint is about the robot's own turning circle")
     if not args.go:
         print("\ndry run -- nothing published. re-run with --go to drive.")
         return
@@ -149,7 +175,7 @@ def main() -> None:
     rclpy.init()
     node = Driver(blocks, args.max_omega)
     try:
-        node.run()
+        node.run(args.pause)
         print(f"  done, {total:.0f} s")
     except KeyboardInterrupt:
         print("\n  interrupted -- stopping", flush=True)

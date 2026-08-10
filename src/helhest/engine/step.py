@@ -847,8 +847,13 @@ def traction_twist(
         # 0.074 m) while both match the slow ones. Implicit, so stable at any dt.
         tau = solver.yaw_tau
         if solver.yaw_relax_len > 0.0:
-            # distance-keyed: tau = sigma / |v|, floored so a stationary robot cannot divide by 0
-            tau = solver.yaw_relax_len / wp.max(wp.abs(legacy[0]), 0.05)
+            # Distance-keyed: tau = sigma / v. The relevant v is the speed the CONTACT PATCH
+            # travels over the ground, R * mean|omega|, not the body's forward speed -- a robot
+            # spinning in place translates at zero while its wheels still cover ground, and using
+            # the body speed there would report an infinite relaxation. They agree when driving
+            # straight. Floored so a genuinely stopped robot cannot divide by zero.
+            roll_speed = robot.wheel_radius * 0.5 * (wp.abs(om[0]) + wp.abs(om[1]))
+            tau = solver.yaw_relax_len / wp.max(roll_speed, 0.05)
         if tau > 0.0:
             blend = solver.dt / (solver.dt + tau)
             yaw_rate = previous[2] + blend * (yaw_rate - previous[2])
