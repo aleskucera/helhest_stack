@@ -159,7 +159,7 @@
     # Field call 2026-08-10: OFF (0.0) -- brake AT the corner, do not pre-slow on the approach.
     plan_turn_brake_lookahead_s: 0.0
 
-    # --- INNER YAW-RATE LOOP (control/yaw_track.py) -- OFF, needs a field trial ---
+    # --- INNER YAW-RATE LOOP (control/yaw_track.py) -- ON since the 2026-08-10 field call ---
     # Everything downstream of MPPI is feedforward: the planner maps a differential to a yaw rate
     # through alpha = 1 + k_turn*plan_friction and publishes it. alpha DIVIDES the yaw rate, so
     # ground softer than plan_friction turns MORE than asked -- 19% at mu 0.4, 32% at mu 0.2 in
