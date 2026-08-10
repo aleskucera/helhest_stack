@@ -21,8 +21,18 @@ DT = 0.1  # control timestep -- the plan horizon step AND the driver frame step 
 #   indoor  alpha ~= 1.48  (experiment0 gyro fit, corr 0.95)        -> K_TURN 0.6
 #           (was 0.4 from rotate_in_place0 + arc_diff0 alpha~1.33; bumped after the experiment0 fit)
 #   outdoor alpha ~= 1.82  (manual_drive_outdoor0, turns ~0.72x)    -> K_TURN 1.0
+# A THIRD surface, 2026-08-10: flat PAVED outdoor (tilt under 5.3 deg) measures alpha ~= 1.50, so
+# k = 0.62 -- i.e. it behaves like the INDOOR preset, not the outdoor one. Three independent
+# estimates agree (steady arcs 1.52, spins 1.50-1.70, lag fit 1.55) over mean speeds 0.37-3.73
+# rad/s and both directions, and converged Project Chrono independently predicts ~1.6. See
+# CALIBRATION_RESULTS.md. Neither preset is changed by this: 0.6 gives 1.48 and is CONFIRMED, and
+# the outdoor 1.0 was calibrated on grass/dirt, which this is not. What it does mean is that
+# "outdoor" is about the SURFACE, not about being out of doors -- ros/odin/odin_elevation.params
+# .yaml pins k_turn 1.0, which over-predicts turn resistance by 20% on tarmac, so the robot yaws
+# more than the planner expects and overshoots turns.
 # Pick per environment via k_turn_for(); a single constant can't be right for both. (Forward gain
-# measured ~0.95-0.97 both -> wheel_radius unchanged; /cmd_joints is all-positive-forward, no flip.)
+# measured ~0.95-0.97 both -> wheel_radius unchanged; /cmd_joints is all-positive-forward, no flip.
+# The 2026-08-10 bags put forward gain at 0.932, consistent with the 0.906-0.925 on record.)
 # TODO: online K_TURN/friction estimation would remove this manual switch. See
 # wheel_sign_convention_calibration memory.
 K_TURN_INDOOR = 0.6
