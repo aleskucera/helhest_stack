@@ -978,6 +978,20 @@ class ElevationNode(Node):
             )
         else:
             self._turn_adapt = None
+        # Lateral-accel constant for the turn brake: a_lat = lat_gain * mean * diff, from
+        # v = R*mean and wz = R*diff/(2*half_track*alpha). alpha = 1 + k_turn*grip/(m*g) is the
+        # model's turn resistance; on flat ground with the wheels carrying the full weight that
+        # is 1 + k_turn, which is the value the planner itself is tuned against.
+        _rp = dynamics.robot_params(self.plan_wheel_width)
+        self._lat_gain = _rp.wheel_radius**2 / (2.0 * _rp.half_track * (1.0 + kt))
+        # Yaw rate per unit differential, for the inner yaw loop. NOT _lat_gain / R: the turn
+        # brake deliberately uses alpha = 1 + k_turn (the mu = 1 worst case) because it is a
+        # SAFETY cap and over-braking is harmless. A yaw REFERENCE has to be the planner's own
+        # model, alpha = 1 + k_turn*plan_friction, or the loop would steer the robot away from
+        # what MPPI actually planned -- about 8% less yaw at the deployed mu 0.8.
+        self._yaw_per_diff = _rp.wheel_radius / (
+            2.0 * _rp.half_track * (1.0 + kt * self.plan_friction)
+        )
         if self.plan_yaw_track:
             self._yaw_track = YawRateTracker(
                 yaw_per_diff=self._yaw_per_diff,
@@ -1012,20 +1026,6 @@ class ElevationNode(Node):
             device=self.device,
         )
         self.planner.cw.lattice_cap = self.ctg._vcap
-        # Lateral-accel constant for the turn brake: a_lat = lat_gain * mean * diff, from
-        # v = R*mean and wz = R*diff/(2*half_track*alpha). alpha = 1 + k_turn*grip/(m*g) is the
-        # model's turn resistance; on flat ground with the wheels carrying the full weight that
-        # is 1 + k_turn, which is the value the planner itself is tuned against.
-        _rp = dynamics.robot_params(self.plan_wheel_width)
-        self._lat_gain = _rp.wheel_radius**2 / (2.0 * _rp.half_track * (1.0 + kt))
-        # Yaw rate per unit differential, for the inner yaw loop. NOT _lat_gain / R: the turn
-        # brake deliberately uses alpha = 1 + k_turn (the mu = 1 worst case) because it is a
-        # SAFETY cap and over-braking is harmless. A yaw REFERENCE has to be the planner's own
-        # model, alpha = 1 + k_turn*plan_friction, or the loop would steer the robot away from
-        # what MPPI actually planned -- about 8% less yaw at the deployed mu 0.8.
-        self._yaw_per_diff = _rp.wheel_radius / (
-            2.0 * _rp.half_track * (1.0 + kt * self.plan_friction)
-        )
         # Routing field expressed in the PLANNING window's frame: both windows are robot-centered,
         # so their origins differ by a constant cell offset.
         self.sgrid = GridParams(
