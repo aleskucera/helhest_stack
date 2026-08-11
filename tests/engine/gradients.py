@@ -249,6 +249,7 @@ def _fwd(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, grad=Fals
     controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
     derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
     cur_omega = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev)  # lagged omega (non-diff)
+    body_vel = wp.zeros((T + 1, 1), dtype=float, device=dev)  # momentum state (non-diff)
     mu_scale = wp.full(1, 1.0, dtype=float, device=dev)
     loads = wp.zeros((T, 1), dtype=wp.vec3, device=dev)
     turn = wp.zeros((T, 1), dtype=wp.vec2, device=dev)
@@ -278,11 +279,13 @@ def _fwd(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, grad=Fals
                     sp,
                     omega[t],
                     cur_omega[t],
+                    body_vel[t],
                     controlled[t],
                     derived[t],
                 ],
                 outputs=[
                     cur_omega[t + 1],
+                    body_vel[t + 1],
                     controlled[t + 1],
                     derived[t + 1],
                     loads[t],
@@ -377,6 +380,7 @@ def _fwd_h(rawH, muH, g, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, grad=
     controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
     derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
     cur_omega = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev)  # lagged omega (non-diff)
+    body_vel = wp.zeros((T + 1, 1), dtype=float, device=dev)  # momentum state (non-diff)
     mu_scale = wp.full(1, 1.0, dtype=float, device=dev)
     loads = wp.zeros((T, 1), dtype=wp.vec3, device=dev)
     turn = wp.zeros((T, 1), dtype=wp.vec2, device=dev)
@@ -407,11 +411,13 @@ def _fwd_h(rawH, muH, g, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, grad=
                     sp,
                     omega[t],
                     cur_omega[t],
+                    body_vel[t],
                     controlled[t],
                     derived[t],
                 ],
                 outputs=[
                     cur_omega[t + 1],
+                    body_vel[t + 1],
                     controlled[t + 1],
                     derived[t + 1],
                     loads[t],
@@ -501,6 +507,7 @@ def _fwd_batch(envH, rawH, muH, g, robot, sp, omega_np, poses, wpv, wtv, grad=Fa
     controlled = wp.zeros((T + 1, B), dtype=wp.vec3, device=dev, requires_grad=grad)
     derived = wp.zeros((T + 1, B), dtype=wp.vec3, device=dev, requires_grad=grad)
     cur_omega = wp.zeros((T + 1, B), dtype=wp.vec3, device=dev)  # lagged omega (non-diff)
+    body_vel = wp.zeros((T + 1, B), dtype=float, device=dev)  # momentum state (non-diff)
     mu_scale = wp.full(B, 1.0, dtype=float, device=dev)
     loads = wp.zeros((T, B), dtype=wp.vec3, device=dev)
     turn = wp.zeros((T, B), dtype=wp.vec2, device=dev)
@@ -530,11 +537,13 @@ def _fwd_batch(envH, rawH, muH, g, robot, sp, omega_np, poses, wpv, wtv, grad=Fa
                     sp,
                     omega[t],
                     cur_omega[t],
+                    body_vel[t],
                     controlled[t],
                     derived[t],
                 ],
                 outputs=[
                     cur_omega[t + 1],
+                    body_vel[t + 1],
                     controlled[t + 1],
                     derived[t + 1],
                     loads[t],

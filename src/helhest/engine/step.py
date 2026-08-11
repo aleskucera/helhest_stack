@@ -58,6 +58,9 @@ class Solver:
     dt: wp.float32
     k_turn: wp.float32
     tau_motor: wp.float32  # first-order actuator lag time constant [s]; 0 = no lag
+    # body-momentum flag (0/1): forward speed becomes a STATE whose change is capped by the grip
+    # budget and pulled by gravity along the slope, instead of jumping to the commanded speed.
+    momentum: wp.int32
 
 
 @dataclass
@@ -72,6 +75,11 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     tilt_clamp: float = 1.05  # clamp |pitch|, |roll| to ~60 deg
     k_turn: float = 2.0
     tau_motor: float = 0.0  # actuator lag [s]; 0 = instantaneous (no lag)
+    # BODY MOMENTUM: forward speed is a state; traction can change it by at most
+    # (total_grip/m)*dt per step and gravity adds g*sin(pitch) along the body x-axis. Makes
+    # braking/launch distances mu-dependent (you cannot stop on ice; steeper than atan(mu) slides)
+    # -- the behavior that matters from ~1.5 m/s up. False = legacy instantaneous speed.
+    momentum: bool = False
 
     def build(self) -> Solver:
         s = Solver()
@@ -82,6 +90,7 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
         s.dt = self.dt
         s.k_turn = self.k_turn
         s.tau_motor = self.tau_motor
+        s.momentum = 1 if self.momentum else 0
         return s
 
 
@@ -445,11 +454,13 @@ def step_predict(
     om: wp.vec3,  # (wL, wR, w_rear) this step
     pc: wp.vec3,  # (x, y, yaw) current state
     tc: wp.vec3,  # (z, pitch, roll) current state
+    v_in: float,  # body forward speed entering this step [m/s] (momentum state; unused if off)
     tid: int,
     turn_out: wp.array(dtype=wp.vec2),  # [B] (alpha, x_icr) -> written at tid
-) -> wp.vec3:
+):
     """Grip-weighted ICR + turn resistance from the CURRENT pose, then Euler integrate. Write
-    turn_out[tid]=(alpha, x_icr); return the predicted (pre-settle) pose (xn, yn, yawn)."""
+    turn_out[tid]=(alpha, x_icr); return the predicted (pre-settle) pose (xn, yn, yawn) and the
+    body forward speed used this step."""
     x = pc[0]
     y = pc[1]
     yaw = pc[2]
@@ -476,11 +487,19 @@ def step_predict(
     alpha = 1.0 + solver.k_turn * total_grip / (robot.gravity * robot.mass)  # turn resistance
 
     vx = robot.wheel_radius * (om[0] + om[1]) / 2.0
+    if solver.momentum == 1:
+        # BODY MOMENTUM: traction can change v by at most (grip/m)*dt; gravity pulls g*sin(pitch)
+        # along body x (climbing = pitch < 0 = decelerates). Traction fights gravity first, so on
+        # a slope steeper than atan(mu) the clamp binds and the robot slides regardless of command.
+        a_lim = total_grip / robot.mass
+        a_grav = robot.gravity * wp.sin(tc[1])
+        a_trac = wp.clamp((vx - v_in) / solver.dt - a_grav, -a_lim, a_lim)
+        vx = v_in + (a_trac + a_grav) * solver.dt
     wz = robot.wheel_radius * (om[1] - om[0]) / (2.0 * robot.half_track * alpha)
     vy = -x_icr * wz
     vw = R * wp.vec3(vx, vy, 0.0)
     turn_out[tid] = wp.vec2(alpha, x_icr)
-    return wp.vec3(x + vw[0] * solver.dt, y + vw[1] * solver.dt, yaw + wz * solver.dt)
+    return wp.vec3(x + vw[0] * solver.dt, y + vw[1] * solver.dt, yaw + wz * solver.dt), vx
 
 
 @wp.func
@@ -562,9 +581,11 @@ def step_kernel(
     solver: Solver,
     target_wheel_omega: wp.array(dtype=wp.vec3),  # [B] commanded (wL, wR, w_rear) this step
     current_wheel_omega_in: wp.array(dtype=wp.vec3),  # [B] lagged omega entering this step
+    body_vel_in: wp.array(dtype=float),  # [B] body forward speed entering this step
     controlled: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) current state
     derived: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) current state
     current_wheel_omega_out: wp.array(dtype=wp.vec3),  # [B] lagged omega after this step -> written
+    body_vel_out: wp.array(dtype=float),  # [B] body forward speed used this step -> written
     controlled_next: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) settled NEW state -> written
     derived_next: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) NEW state -> written
     loads_out: wp.array(dtype=wp.vec3),  # [B] N_i of the NEW state
@@ -578,7 +599,7 @@ def step_kernel(
         current_wheel_omega_in[tid], target_wheel_omega[tid], solver.dt, solver.tau_motor
     )
     current_wheel_omega_out[tid] = omega
-    pose_next = step_predict(
+    pose_next, v_used = step_predict(
         envelope,
         friction,
         grid,
@@ -588,9 +609,11 @@ def step_kernel(
         omega,
         controlled[tid],
         tc,
+        body_vel_in[tid],
         tid,
         turn_out,
     )
+    body_vel_out[tid] = v_used
     settled = settle(envelope, grid, robot, solver, pose_next, tc)
     step_finalize(
         envelope,
@@ -619,9 +642,11 @@ def step_kernel_bt(
     solver: Solver,
     target_wheel_omega: wp.array(dtype=wp.vec3),  # [B] commanded (wL, wR, w_rear) this step
     current_wheel_omega_in: wp.array(dtype=wp.vec3),  # [B] lagged omega entering this step
+    body_vel_in: wp.array(dtype=float),  # [B] body forward speed entering this step
     controlled: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) current state
     derived: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) current state
     current_wheel_omega_out: wp.array(dtype=wp.vec3),  # [B] lagged omega after this step -> written
+    body_vel_out: wp.array(dtype=float),  # [B] body forward speed used this step -> written
     controlled_next: wp.array(dtype=wp.vec3),  # [B] -> written
     derived_next: wp.array(dtype=wp.vec3),
     loads_out: wp.array(dtype=wp.vec3),
@@ -636,7 +661,7 @@ def step_kernel_bt(
         current_wheel_omega_in[tid], target_wheel_omega[tid], solver.dt, solver.tau_motor
     )
     current_wheel_omega_out[tid] = omega
-    pose_next = step_predict(
+    pose_next, v_used = step_predict(
         envelope[tid],
         friction[tid],
         grid,
@@ -646,9 +671,11 @@ def step_kernel_bt(
         omega,
         controlled[tid],
         tc,
+        body_vel_in[tid],
         tid,
         turn_out,
     )
+    body_vel_out[tid] = v_used
     settled = settle_bt(envelope, tid, grid, robot, solver, pose_next, tc)
     step_finalize(
         envelope[tid],
@@ -684,6 +711,7 @@ def rollout_kernel(
     controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] (x, y, yaw)
     derived: wp.array2d(dtype=wp.vec3),  # [T+1, B] (z, pitch, roll)
     current_wheel_omega_out: wp.array2d(dtype=wp.vec3),  # [T+1, B] realized omega after lag
+    body_vel_out: wp.array2d(dtype=float),  # [T+1, B] body forward speed (row t+1 drove step t)
     loads_out: wp.array2d(dtype=wp.vec3),  # [T, B]
     turn_out: wp.array2d(dtype=wp.vec2),  # [T, B]
     clear_out: wp.array2d(dtype=float),  # [T, B]
@@ -706,9 +734,12 @@ def rollout_kernel(
     z0 = sample_field(envelope, grid, pc[0], pc[1]) + robot.wheel_radius
     tc = settle(envelope, grid, robot, solver, pc, wp.vec3(z0, 0.0, 0.0))
     current = init_current_wheel_omega[b]  # initial lagged omega carried in registers
+    # body speed enters at the realized wheel speed (encoder); == commanded speed with momentum off
+    v_body = robot.wheel_radius * (current[0] + current[1]) / 2.0
     controlled[0, b] = pc
     derived[0, b] = tc
     current_wheel_omega_out[0, b] = current
+    body_vel_out[0, b] = v_body
 
     for t in range(n_steps):
         x = pc[0]
@@ -739,6 +770,15 @@ def rollout_kernel(
         current = motor_lag_step(current, target_wheel_omega[t, b], solver.dt, solver.tau_motor)
         current_wheel_omega_out[t + 1, b] = current
         vx = robot.wheel_radius * (current[0] + current[1]) / 2.0
+        if solver.momentum == 1:
+            # BODY MOMENTUM (same as step_predict -- keep bit-identical): traction-capped accel
+            # plus gravity along body x; steeper than atan(mu) slides regardless of command.
+            a_lim = total_grip / robot.mass
+            a_grav = robot.gravity * wp.sin(tc[1])
+            a_trac = wp.clamp((vx - v_body) / solver.dt - a_grav, -a_lim, a_lim)
+            vx = v_body + (a_trac + a_grav) * solver.dt
+        v_body = vx
+        body_vel_out[t + 1, b] = v_body
         wz = robot.wheel_radius * (current[1] - current[0]) / (2.0 * robot.half_track * alpha)
         vy = -x_icr * wz
         vw = R * wp.vec3(vx, vy, 0.0)

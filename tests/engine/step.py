@@ -68,6 +68,7 @@ def rollout_device(
     controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
     derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
     current_wheel_omega = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
+    body_vel = wp.zeros((T + 1, 1), dtype=float, device=device)
     loads = wp.zeros((T, 1), dtype=wp.vec3, device=device)
     turn = wp.zeros((T, 1), dtype=wp.vec2, device=device)
     clear = wp.zeros((T, 1), dtype=float, device=device)
@@ -94,11 +95,13 @@ def rollout_device(
                 sp,
                 omega[t],
                 current_wheel_omega[t],
+                body_vel[t],
                 controlled[t],
                 derived[t],
             ],
             outputs=[
                 current_wheel_omega[t + 1],
+                body_vel[t + 1],
                 controlled[t + 1],
                 derived[t + 1],
                 loads[t],
@@ -311,10 +314,13 @@ def selftest_rollout_kernel():
     mu_scale = wp.full(B, 1.0, dtype=float, device="cpu")
 
     def buffers():
+        # fused-output order: controlled, derived, current_wheel_omega, body_vel, loads, turning,
+        # clearance, residual
         return [
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros((T + 1, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
@@ -351,17 +357,19 @@ def selftest_rollout_kernel():
                 sp,
                 omega[t],
                 perstep[2][t],
+                perstep[3][t],
                 perstep[0][t],
                 perstep[1][t],
             ],
             outputs=[
                 perstep[2][t + 1],
+                perstep[3][t + 1],
                 perstep[0][t + 1],
                 perstep[1][t + 1],
-                perstep[3][t],
                 perstep[4][t],
                 perstep[5][t],
                 perstep[6][t],
+                perstep[7][t],
             ],
             device="cpu",
         )
@@ -401,6 +409,7 @@ def selftest_mu_scale():
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros((T + 1, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
@@ -444,6 +453,7 @@ def selftest_mu_zero():
         wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
         wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
         wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+        wp.zeros((T + 1, B), dtype=float, device="cpu"),
         wp.zeros((T, B), dtype=wp.vec3, device="cpu"),
         wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
         wp.zeros((T, B), dtype=float, device="cpu"),
@@ -458,6 +468,33 @@ def selftest_mu_zero():
     )
     finite = all(np.isfinite(a.numpy()).all() for a in out)
     print(f"mu=0 rollout finite  {'OK' if finite else 'REVIEW'}")
+
+
+def selftest_momentum():
+    """Body momentum: braking from v0 on flat ground at grip-limited decel mu*g must stop in
+    ~v0^2/(2*mu*g) meters (analytic; explicit Euler undershoots by ~v0*dt/2)."""
+    wp.init()
+    from helhest.engine import ForwardSimulator
+
+    scene = hmmod.flat()
+    mu, dt, T = 0.5, 0.05, 40
+    sim = ForwardSimulator(
+        RobotParams(),
+        SolverParams(newton_iters=12, dt=dt, k_turn=2.0, momentum=True),
+        GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
+        1,
+        T,
+        "cpu",
+    )
+    sim.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device="cpu"))
+    sim.set_uniform_friction(mu)
+    v0 = 4.0 * RobotParams().wheel_radius  # init wheels at 4 rad/s -> 1.4 m/s
+    ctrl = np.zeros((T, 1, 3), np.float32)  # command a stop
+    controlled, _, _, _ = sim.rollout(ctrl, (0.0, 0.0, 0.0), init_wheel_omega=[4.0, 4.0, 4.0])
+    stop_x = float(controlled[-1, 0, 0])
+    expected = v0**2 / (2.0 * mu * 9.81)  # 0.2 m
+    ok = abs(stop_x - expected) < 0.06 and abs(float(sim.body_vel.numpy()[-1, 0])) < 1e-3
+    print(f"momentum stop: x={stop_x:.3f} m expected~{expected:.3f}  {'OK' if ok else 'REVIEW'}")
 
 
 def selftest_motor_lag():
@@ -490,6 +527,7 @@ def selftest_motor_lag():
     controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
     derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
     current_wheel_omega = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
+    body_vel = wp.zeros((T + 1, 1), dtype=float, device="cpu")
     loads = wp.zeros((T, 1), dtype=wp.vec3, device="cpu")
     turn = wp.zeros((T, 1), dtype=wp.vec2, device="cpu")
     clear = wp.zeros((T, 1), dtype=float, device="cpu")
@@ -516,11 +554,13 @@ def selftest_motor_lag():
                 sp,
                 omega[t],
                 current_wheel_omega[t],
+                body_vel[t],
                 controlled[t],
                 derived[t],
             ],
             outputs=[
                 current_wheel_omega[t + 1],
+                body_vel[t + 1],
                 controlled[t + 1],
                 derived[t + 1],
                 loads[t],
@@ -565,4 +605,5 @@ if __name__ == "__main__":
     selftest_rollout_kernel()
     selftest_mu_scale()
     selftest_mu_zero()
+    selftest_momentum()
     selftest_motor_lag()

@@ -199,6 +199,8 @@ class CostToGo:
         robust_margin_deg: float = 0.0,  # heading disturbance tube (orientation-aware erosion)
         obstacle_step_m: float = 0.0,  # hard-block cells with a local step taller than this [m];
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
+        pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives so
+        # a goal behind the robot routes as pivot-then-drive instead of a wide loop. 0 = OFF.
         profile: bool = False,  # opt-in per-stage CUDA-event timing (tiny event nodes + per-call sync)
         device: wp.Device | str | None = None,
     ) -> None:
@@ -253,6 +255,7 @@ class CostToGo:
             n_theta=n_theta,
             turn_radius=self.robot.min_turn_radius,
             step=step,
+            pivot_cost=pivot_cost,
             device=self.device,
         )
 

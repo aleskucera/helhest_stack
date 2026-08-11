@@ -40,6 +40,18 @@ DILATE_TILE = 16  # output tile size for the batched tiled dilation (Differentia
 
 
 @wp.kernel
+def _seed_body_vel_kernel(
+    init_current_wheel_omega: wp.array(dtype=wp.vec3),
+    wheel_radius: float,
+    body_vel0: wp.array(dtype=float),
+):
+    """Row-0 body speed = realized wheel speed (the momentum state's boundary condition)."""
+    b = wp.tid()
+    om = init_current_wheel_omega[b]
+    body_vel0[b] = wheel_radius * (om[0] + om[1]) / 2.0
+
+
+@wp.kernel
 def _final_x_loss(controlled: wp.array2d(dtype=wp.vec3), step: int, loss: wp.array(dtype=float)):
     b = wp.tid()
     wp.atomic_add(loss, 0, controlled[step, b][0])
@@ -111,6 +123,9 @@ class BaseSimulator:
             self.init_current_wheel_omega = wp.zeros(B, dtype=wp.vec3f)  # like start_pose
             # per-rollout friction multiplier (robust-MPPI mu samples); 1 = nominal, never grad
             self.mu_scale = wp.full(B, 1.0, dtype=wp.float32)
+            # body forward speed [m/s]; row t+1 is the speed that drove step t (momentum state;
+            # equals the commanded speed when solver.momentum is off). Never differentiated.
+            self.body_vel = wp.zeros((T + 1, B), dtype=wp.float32)
 
     def _dilate(
         self,
@@ -212,6 +227,7 @@ class ForwardSimulator(BaseSimulator):
                 self.controlled,
                 self.derived,
                 self.current_wheel_omega,
+                self.body_vel,
                 self.loads,
                 self.turning,
                 self.clearance,
@@ -399,6 +415,13 @@ class DifferentiableSimulator(BaseSimulator):
         wp.copy(
             self.current_wheel_omega[0], self.init_current_wheel_omega
         )  # seed current_wheel_omega[0] off-tape: boundary condition, not differentiated.
+        wp.launch(  # seed body_vel[0] off-tape (same boundary condition, from the realized omega)
+            _seed_body_vel_kernel,
+            self.batch_size,
+            inputs=[self.init_current_wheel_omega, self.wheel_radius],
+            outputs=[self.body_vel[0]],
+            device=self.device,
+        )
         self.tape = wp.Tape()
         with self.tape:
             self._gather()  # on-tape: envelope = elev[contact] + cap; scatter adjoint -> d/d elevation
@@ -423,11 +446,13 @@ class DifferentiableSimulator(BaseSimulator):
                         self.solver,
                         self.target_wheel_omega[t],
                         self.current_wheel_omega[t],
+                        self.body_vel[t],
                         self.controlled[t],
                         self.derived[t],
                     ],
                     outputs=[
                         self.current_wheel_omega[t + 1],
+                        self.body_vel[t + 1],
                         self.controlled[t + 1],
                         self.derived[t + 1],
                         self.loads[t],

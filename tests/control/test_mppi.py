@@ -65,22 +65,46 @@ def _cw(explore_fallback=0.0, lattice_cap=1e9, out_of_bounds=0.0):
     return cw
 
 
-def _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, field_val, goal, cw, T, B):
+def _launch_cost(
+    device, sim, poses, tilts, clear, resid, ctrl, field_val, goal, cw, T, B,
+    cur_om=None, vel=None, turning=None, loads=None, measured_val=1.0,
+):
     """Fabricate a rollout (poses/tilts/violations/controls we CHOSE) and run the GPU cost kernel on
-    it -> J[B]. Nothing is settled, so every input is known and J is hand-computable."""
+    it -> J[B]. Nothing is settled, so every input is known and J is hand-computable. The physics
+    diagnostics default to INERT values: wheels at rest (v = 0 -> forward branch, no accel demand),
+    alpha = 1 (zero recovered grip -- saturation needs cw.inv_k_turn > 0 anyway), all wheel loads
+    positive (no tip), everything measured."""
+    rp = RobotParams()
     controlled = wp.array(np.ascontiguousarray(poses, np.float32), dtype=wp.vec3, device=device)
     derived = wp.array(np.ascontiguousarray(tilts, np.float32), dtype=wp.vec3, device=device)
     clearance = wp.array(np.ascontiguousarray(clear, np.float32), dtype=float, device=device)
     residual = wp.array(np.ascontiguousarray(resid, np.float32), dtype=float, device=device)
     twom = wp.array(np.ascontiguousarray(ctrl, np.float32), dtype=wp.vec3, device=device)
+    if cur_om is None:
+        cur_om = np.zeros((T + 1, B, 3), np.float32)
+    if vel is None:
+        vel = np.zeros((T + 1, B), np.float32)
+    if turning is None:
+        turning = np.zeros((T, B, 2), np.float32)
+        turning[..., 0] = 1.0  # alpha
+    if loads is None:
+        loads = np.full((T, B, 3), rp.mass * rp.gravity / 3.0, np.float32)
+    cur_om_d = wp.array(np.ascontiguousarray(cur_om, np.float32), dtype=wp.vec3, device=device)
+    vel_d = wp.array(np.ascontiguousarray(vel, np.float32), dtype=wp.float32, device=device)
+    turning_d = wp.array(np.ascontiguousarray(turning, np.float32), dtype=wp.vec2, device=device)
+    loads_d = wp.array(np.ascontiguousarray(loads, np.float32), dtype=wp.vec3, device=device)
     cy, cx = sim.grid.cells_y, sim.grid.cells_x
+    measured = wp.full((cy, cx), float(measured_val), dtype=wp.float32, device=device)
     field = wp.full((cy, cx, 16), float(field_val), dtype=float, device=device)
     goal_d = wp.array(np.asarray(goal, np.float32), dtype=float, device=device)
     Jg = wp.zeros(B, dtype=float, device=device)
     wp.launch(
         mg._cost_kernel,
         B,
-        inputs=[controlled, derived, clearance, residual, twom, goal_d, sim.grid, field, 16, cw, sim.robot, T],
+        inputs=[
+            controlled, derived, clearance, residual, twom, cur_om_d, vel_d, turning_d, loads_d,
+            measured, sim.grid, goal_d, sim.grid, field, 16, cw, sim.robot, T,
+        ],
         outputs=[Jg],
         device=device,
     )
@@ -236,11 +260,156 @@ def selftest_cost_terms(device="cuda"):
 
     eff = float((wl**2 + wr**2).sum())
     smooth = float((np.diff(wl) ** 2 + np.diff(wr) ** 2).sum())
-    oob = (T + 1) * d  # each of the T+1 poses is d past the wall
+    oob = T * d  # each of the T evaluated poses is d past the wall (pose 0 is shared -> skipped)
     exp = _W["effort"] * eff + _W["smoothness"] * smooth + oob_w * oob
     rel = abs(J[0] - exp) / abs(exp)
     print(f"  cost terms: J={J[0]:.4f} expected={exp:.4f} (eff={eff:.1f} smooth={smooth:.2f} oob={oob:.1f}) rel={rel:.2e}")
     print(f"cost terms  {'OK' if rel < 1e-4 else 'REVIEW'}")
+
+
+def selftest_saturation(device="cuda"):
+    """ANALYTIC: the friction-saturation certificate. Station-holding on a pitch slope theta with
+    grip budget mu*m*g*cos(theta) (encoded via alpha = 1 + k_turn*mu*cos(theta)) demands
+    m*g*sin(theta), so saturation = tan(theta)/mu -- the term must be EXACTLY zero below
+    tan(theta) = mu and exactly (tan/mu - 1) * early-sum * weight above it."""
+    B, T = 1, 4
+    sim = _build_sim(device, B, T)
+    rp = RobotParams()
+    k_turn, mu, w_sat = 2.0, 0.5, 300.0
+
+    def J_at(theta):
+        cw = _cw()
+        cw.saturation, cw.inv_k_turn, cw.dt = w_sat, 1.0 / k_turn, 0.1
+        cw.infeasible = 0.0  # the test slope exceeds max_pitch_down; isolate the certificate
+        poses = np.zeros((T + 1, B, 3), np.float32)
+        poses[..., 0], poses[..., 1] = 2.0, 2.0
+        tilts = np.zeros((T + 1, B, 3), np.float32)
+        tilts[..., 1] = theta  # pitch; sign irrelevant (|sin| in the demand)
+        clear = np.full((T, B), rp.clear_margin + 1.0, np.float32)
+        resid = np.zeros((T, B), np.float32)
+        ctrl = np.zeros((T, B, 3), np.float32)
+        turning = np.zeros((T, B, 2), np.float32)
+        turning[..., 0] = 1.0 + k_turn * mu * np.cos(theta)  # grip = mu*m*g*cos(theta)
+        # field val 0 -> goal term 0; v = 0 -> no accel/centripetal demand
+        return _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, 0.0, [3.0, 1.0],
+                            cw, T, B, turning=turning)[0]
+
+    th_lo = np.arctan(mu) - 0.05  # below the crossing -> certificate silent
+    th_hi = np.arctan(mu) + 0.10  # above -> exact overshoot
+    sum_early = sum((T - t) / T for t in range(T))
+    exp_hi = w_sat * (np.tan(th_hi) / mu - 1.0) * sum_early
+    j_lo, j_hi = J_at(th_lo), J_at(th_hi)
+    rel = abs(j_hi - exp_hi) / abs(exp_hi)
+    ok = j_lo == 0.0 and rel < 1e-3
+    print(f"  saturation: below-crossing J={j_lo:.4f} (exp 0), above J={j_hi:.3f} exp={exp_hi:.3f} rel={rel:.2e}")
+    print(f"saturation certificate  {'OK' if ok else 'REVIEW'}")
+
+
+def selftest_tip(device="cuda"):
+    """ANALYTIC: a negative wheel load costs tip * early-sum * deficit/(m*g); positive loads cost 0."""
+    B, T = 1, 4
+    sim = _build_sim(device, B, T)
+    rp = RobotParams()
+    w_tip, deficit = 2e4, 50.0  # [N] negative load on one wheel
+    cw = _cw()
+    cw.tip = w_tip
+    poses = np.zeros((T + 1, B, 3), np.float32)
+    poses[..., 0], poses[..., 1] = 2.0, 2.0
+    tilts = np.zeros((T + 1, B, 3), np.float32)
+    clear = np.full((T, B), rp.clear_margin + 1.0, np.float32)
+    resid = np.zeros((T, B), np.float32)
+    ctrl = np.zeros((T, B, 3), np.float32)
+    loads = np.full((T, B, 3), rp.mass * rp.gravity / 3.0, np.float32)
+    loads[..., 2] = -deficit
+    J = _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, 0.0, [3.0, 1.0],
+                     cw, T, B, loads=loads)[0]
+    sum_early = sum((T - t) / T for t in range(T))
+    exp = w_tip * sum_early * deficit / (rp.mass * rp.gravity)
+    rel = abs(J - exp) / abs(exp)
+    print(f"  tip: J={J:.3f} expected={exp:.3f} rel={rel:.2e}")
+    print(f"tip margin  {'OK' if rel < 1e-4 else 'REVIEW'}")
+
+
+def selftest_reverse(device="cuda"):
+    """ANALYTIC, three claims about a REVERSING step (v < 0):
+    (a) the goal cost samples V at yaw+pi (a heading-index field must read the opposite bin),
+    (b) blind cells cost unknown * early-sum (measured=0 map) and measured ones don't,
+    (c) the per-meter shaping charges reverse * |v| * dt * T."""
+    B, T = 1, 4
+    sim = _build_sim(device, B, T)
+    rp = RobotParams()
+    w_unk, w_rev = 1e4, 5.0
+    v_back = -0.5  # m/s
+    om = v_back / rp.wheel_radius  # wl = wr = om -> v = R*om
+    cur_om = np.full((T + 1, B, 3), om, np.float32)
+    vel = np.full((T + 1, B), v_back, np.float32)  # realized body speed (drives the v<0 branches)
+    poses = np.zeros((T + 1, B, 3), np.float32)
+    poses[..., 0], poses[..., 1] = 2.0, 2.0  # yaw = 0
+    tilts = np.zeros((T + 1, B, 3), np.float32)
+    clear = np.full((T, B), rp.clear_margin + 1.0, np.float32)
+    resid = np.zeros((T, B), np.float32)
+    ctrl = np.zeros((T, B, 3), np.float32)
+    sum_early = sum((T - t) / T for t in range(T))
+
+    # (a) heading-index field: nt=16 bins; yaw=0 reversing -> samples bin at pi = index 8.
+    cw = _cw()
+    cw.dt = 0.1
+    cy, cx = sim.grid.cells_y, sim.grid.cells_x
+    hd = np.broadcast_to(np.arange(16, dtype=np.float32)[None, None, :], (cy, cx, 16)).copy()
+    controlled = wp.array(poses, dtype=wp.vec3, device=device)
+    derived = wp.array(tilts, dtype=wp.vec3, device=device)
+    clearance = wp.array(clear, dtype=float, device=device)
+    residual = wp.array(resid, dtype=float, device=device)
+    twom = wp.array(ctrl, dtype=wp.vec3, device=device)
+    cur_om_d = wp.array(cur_om, dtype=wp.vec3, device=device)
+    vel_d = wp.array(vel, dtype=wp.float32, device=device)
+    turning = np.zeros((T, B, 2), np.float32)
+    turning[..., 0] = 1.0
+    turning_d = wp.array(turning, dtype=wp.vec2, device=device)
+    loads_d = wp.array(np.full((T, B, 3), rp.mass * rp.gravity / 3.0, np.float32),
+                       dtype=wp.vec3, device=device)
+    measured = wp.full((cy, cx), 1.0, dtype=wp.float32, device=device)
+    field = wp.array(np.ascontiguousarray(hd), dtype=float, device=device)
+    goal_d = wp.array(np.asarray([3.0, 1.0], np.float32), dtype=float, device=device)
+    Jg = wp.zeros(B, dtype=float, device=device)
+    cw_a = _cw()
+    cw_a.dt = 0.1  # rev shaping off (reverse=0), unknown off; goal terms only
+    wp.launch(
+        mg._cost_kernel, B,
+        inputs=[controlled, derived, clearance, residual, twom, cur_om_d, vel_d, turning_d, loads_d,
+                measured, sim.grid, goal_d, sim.grid, field, 16, cw_a, sim.robot, T],
+        outputs=[Jg], device=device,
+    )
+    exp_a = (_W["goal_terminal"] + _W["goal_running"]) * 8.0**2  # V = heading index 8 (pi)
+    rel_a = abs(Jg.numpy()[0] - exp_a) / exp_a
+    # (b)+(c) constant-zero field, blind map, shaping on
+    cw_bc = _cw()
+    cw_bc.unknown, cw_bc.reverse, cw_bc.dt = w_unk, w_rev, 0.1
+    J_bc = _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, 0.0, [3.0, 1.0],
+                        cw_bc, T, B, cur_om=cur_om, vel=vel, measured_val=0.0)[0]
+    exp_bc = w_unk * sum_early + w_rev * (-v_back) * 0.1 * T
+    rel_bc = abs(J_bc - exp_bc) / exp_bc
+    J_meas = _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, 0.0, [3.0, 1.0],
+                          cw_bc, T, B, cur_om=cur_om, vel=vel, measured_val=1.0)[0]
+    exp_meas = w_rev * (-v_back) * 0.1 * T  # measured map -> only the shaping remains
+    rel_m = abs(J_meas - exp_meas) / exp_meas
+    ok = rel_a < 1e-4 and rel_bc < 1e-4 and rel_m < 1e-4
+    print(f"  reverse: V(yaw+pi) rel={rel_a:.2e}; blind rel={rel_bc:.2e}; measured rel={rel_m:.2e}")
+    print(f"reverse semantics  {'OK' if ok else 'REVIEW'}")
+
+
+def selftest_robust_reduce(device="cuda"):
+    """The robust reduce takes the WORST replica per candidate (replica k of candidate c sits at
+    rollout k*n_cand + c)."""
+    n_cand, n_mu = 5, 3
+    rng = np.random.default_rng(3)
+    J = rng.uniform(0.0, 100.0, n_cand * n_mu).astype(np.float32)
+    Jd = wp.array(J, dtype=float, device=device)
+    Jc = wp.zeros(n_cand, dtype=float, device=device)
+    wp.launch(mg._robust_j_kernel, n_cand, inputs=[Jd, n_cand, n_mu], outputs=[Jc], device=device)
+    exp = J.reshape(n_mu, n_cand).max(0)
+    err = np.abs(Jc.numpy() - exp).max()
+    print(f"robust reduce (worst replica)  max|err|={err:.2e}  {'OK' if err == 0.0 else 'REVIEW'}")
 
 
 def selftest_robust_margin(device="cuda"):
@@ -313,10 +482,11 @@ def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
             mg._bisect_step_kernel, 1, inputs=[count, float(target_k), lo, hi, tau], device=device
         )
     wp.launch(mg._count_below_kernel, B, inputs=[Jd, tau, count], device=device)
+    wlo = wp.array([-_WMAX], dtype=float, device=device)
     wp.launch(
         mg._elite_u_kernel,
         (T, 2),
-        inputs=[Jd, tau, count, target_wheel_omega, -_WMAX, _WMAX, B, Ud],
+        inputs=[Jd, tau, count, target_wheel_omega, wlo, _WMAX, B, Ud],
         device=device,
     )
     U_gpu = Ud.numpy()
@@ -335,5 +505,9 @@ if __name__ == "__main__":
     selftest_fallback(dev)
     selftest_cost_terms(dev)
     selftest_sample_lattice(dev)
+    selftest_saturation(dev)
+    selftest_tip(dev)
+    selftest_reverse(dev)
+    selftest_robust_reduce(dev)
     selftest_robust_margin(dev)
     selftest_reweight_parity(dev)

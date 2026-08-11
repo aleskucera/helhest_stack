@@ -23,6 +23,67 @@ replanning loop.
 from __future__ import annotations
 
 
+class TurnGainEstimator:
+    """Online estimate of the EFFECTIVE friction the turn model should use, from commanded
+    differential vs measured yaw rate -- the model-side counterpart of AdaptiveTurnBoost (which
+    compensates at the command). Each valid sample inverts the turn model for the effective mu:
+
+        yaw = R*diff / (2b * alpha_real)  ->  alpha_real = R*diff / (2b*yaw)
+        alpha = 1 + k_turn*mu_eff (flat ground, full load)  ->  mu_eff = (alpha_real - 1) / k_turn
+
+    and EMA-tracks mu_eff's mean and spread. The planner consumes `band()` as a friction-scale
+    band (center, span) relative to its nominal mu: MppiGpu.set_mu_band(center, span) recenters
+    every rollout's dynamics on the REALIZED turn gain (fixing both understeer and oversteer --
+    unlike the boost, this moves in both directions) and sizes the robust-mu replicas by how noisy
+    the estimate is. Same guardrails as AdaptiveTurnBoost: only updates while genuinely turning,
+    skips sign disagreements, slow EMA, hard clamps."""
+
+    def __init__(
+        self,
+        *,
+        k_turn: float,  # the planner solver's friction->alpha gain (must match the sim)
+        mu_nominal: float,  # the planner's uniform friction value (plan_friction)
+        wheel_radius: float,
+        half_track: float,
+        dt: float,
+        tau_s: float = 5.0,  # EMA time constant [s]; slow, so it can't fight the replanning loop
+        clamp: tuple[float, float] = (0.2, 3.0),  # bounds on the mu-scale CENTER
+        span_floor: float = 0.15,  # never report less uncertainty than this (model error exists)
+        span_ceil: float = 0.8,
+        min_diff: float = 1.0,  # only adapt when |wR - wL| exceeds this [rad/s]
+        min_yaw: float = 0.05,  # ...and |yaw_meas| exceeds this [rad/s]
+    ):
+        self._k_turn = float(k_turn)
+        self._mu_nom = float(mu_nominal)
+        self._c = wheel_radius / (2.0 * half_track)  # yaw per unit differential at alpha = 1
+        self._beta = min(1.0, dt / max(tau_s, 1e-6))
+        self._lo, self._hi = clamp
+        self._span_floor, self._span_ceil = span_floor, span_ceil
+        self._min_diff = min_diff
+        self._min_yaw = min_yaw
+        self.center = 1.0  # mu-scale center (1 = trust the nominal mu)
+        self._var = 0.0  # EMA variance of the per-sample center estimate
+
+    def band(self) -> tuple[float, float]:
+        """(center, span) for MppiGpu.set_mu_band: mu-scale band the robust replicas should cover."""
+        span = min(max(2.0 * float(self._var**0.5), self._span_floor), self._span_ceil)
+        return self.center, span
+
+    def update(self, diff_cmd: float, yaw_meas: float) -> tuple[float, float]:
+        """diff_cmd: the differential actually commanded (wR - wL) [rad/s]; yaw_meas: measured yaw
+        rate [rad/s]. Returns band(). Holds the last estimate on straights (gain unobservable)."""
+        if abs(diff_cmd) < self._min_diff or abs(yaw_meas) < self._min_yaw:
+            return self.band()
+        if self._c * diff_cmd * yaw_meas <= 0.0:  # sign disagreement -> transient/noise, skip
+            return self.band()
+        alpha_real = self._c * diff_cmd / yaw_meas
+        mu_eff = max(alpha_real - 1.0, 0.0) / self._k_turn
+        sample = min(max(mu_eff / self._mu_nom, self._lo), self._hi)
+        self.center += self._beta * (sample - self.center)
+        self._var += self._beta * ((sample - self.center) ** 2 - self._var)
+        return self.band()
+
+
 class AdaptiveTurnBoost:
     """Slow yaw-feedback estimate of the turn_boost that makes realized yaw match the plan."""
 

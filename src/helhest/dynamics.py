@@ -40,11 +40,15 @@ def robot_params():
     return RobotParams()
 
 
-def planning_solver(dt=DT, k_turn=K_TURN):
-    """Solver for the MPPI rollouts (B in the thousands): shallow + loose settle, for speed."""
-    return SolverParams(dt=dt, k_turn=k_turn, newton_iters=6, atol=1e-4)
+def planning_solver(dt=DT, k_turn=K_TURN, momentum=True):
+    """Solver for the MPPI rollouts (B in the thousands): shallow + loose settle, for speed.
+
+    momentum=True (default): body speed is grip-limited (see SolverParams.momentum) so the plan's
+    braking/launch distances are mu-dependent -- required for the 1.5-2.5 m/s regime. Both solvers
+    share the flag so the plan and the driven robot stay the same vehicle."""
+    return SolverParams(dt=dt, k_turn=k_turn, newton_iters=6, atol=1e-4, momentum=momentum)
 
 
-def execution_solver(dt=DT, k_turn=K_TURN):
+def execution_solver(dt=DT, k_turn=K_TURN, momentum=True):
     """Solver for the single driven / settled robot: deeper settle for fidelity."""
-    return SolverParams(dt=dt, k_turn=k_turn, newton_iters=12, tilt_clamp=1.2)
+    return SolverParams(dt=dt, k_turn=k_turn, newton_iters=12, tilt_clamp=1.2, momentum=momentum)

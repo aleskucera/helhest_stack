@@ -23,6 +23,7 @@ def dock_control(
     wmax=4.0,
     turn_gain=3.0,
     turn_width=0.5,
+    wmin=0.0,
 ):
     """state (x, y, yaw), goal (x, y) -> wheel command (wL, wR, rear) for one step.
 
@@ -30,7 +31,10 @@ def dock_control(
     is only the last metre or two and should be a gentle glide, not a charge. slow_radius: distance
     over which forward speed ramps from dock_speed down to a stop (>= the handoff radius so it
     decelerates the WHOLE approach). turn_gain/turn_width: how hard to steer toward the goal (the
-    turn can still use the full wmax, so alignment stays crisp while the approach is slow)."""
+    turn can still use the full wmax, so alignment stays crisp while the approach is slow).
+    wmin: lower wheel-speed clip. 0 keeps the forward-only dock (a big bearing error stalls into a
+    sharp arc); < 0 lets the dock PIVOT in place toward the goal (footprint stays put -- safe on
+    the already-driven ground) so an off-to-the-side goal is re-aimed instead of orbited."""
     x, y, yaw = float(state[0]), float(state[1]), float(state[2])
     dx, dy = float(goal[0]) - x, float(goal[1]) - y
     dist = np.hypot(dx, dy)
@@ -39,6 +43,6 @@ def dock_control(
     v = dock_speed * min(1.0, dist / slow_radius)  # gentle, decelerating-to-stop approach
     v *= max(0.0, np.cos(bearing))  # only drive forward when ~facing the goal
     turn = turn_gain * bearing
-    wl = float(np.clip(v - turn * turn_width, 0.0, wmax))
-    wr = float(np.clip(v + turn * turn_width, 0.0, wmax))
+    wl = float(np.clip(v - turn * turn_width, wmin, wmax))
+    wr = float(np.clip(v + turn * turn_width, wmin, wmax))
     return np.array([wl, wr, 0.5 * (wl + wr)], np.float32)
