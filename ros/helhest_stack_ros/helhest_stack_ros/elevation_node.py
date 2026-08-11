@@ -1630,10 +1630,14 @@ class ElevationNode(Node):
                 self.planner.set_nominal(U)
             self._prev_plan_U = U.copy()
         # candidate 0 is the committed nominal rollout; window-local -> map coords.
-        ctrl = self.planner.sim.controlled.numpy()  # [T+1, B, 3] = (x, y, yaw)
+        # Rollout 0 ONLY -- it is the nominal (mppi.py: "candidate 0 keeps the nominal"), and the
+        # published path is the only consumer. Reading the whole [T+1, B] tensor pulled 1.2 MB to
+        # the host every frame to use 312 bytes of it. Warp copies the strided column directly, so
+        # this is a device-side slice rather than a host-side one: 0.63 -> 0.17 ms, same values.
+        nominal_xy = self.planner.sim.controlled[:, 0].numpy()  # [T+1, 3] = (x, y, yaw)
         self._ck("plan:readback")
         origin = np.array([mf.lxmin, mf.lymin], np.float32)
-        self._publish_path(ctrl[:, 0, :2] + origin, ez, stamp)
+        self._publish_path(nominal_xy[:, :2] + origin, ez, stamp)
         self._ck("plan:pub_path")
 
         # --- ACTUATION: turn the plan into a conditioned /cmd_joints command (default OFF) ---
