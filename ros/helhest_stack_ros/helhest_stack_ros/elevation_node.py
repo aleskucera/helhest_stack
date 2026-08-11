@@ -77,6 +77,7 @@ from helhest.control.mppi import MppiGpu
 from helhest.control.mppi import SamplingConfig
 from helhest.control.terminal import dock_control
 from helhest.control.turn_adapt import AdaptiveTurnBoost
+from helhest.control.turn_adapt import TurnGainEstimator
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 from helhest.planning.costtogo import CostToGo
@@ -107,6 +108,7 @@ def _rodrigues(omega: np.ndarray) -> np.ndarray:
     k = omega / theta
     kx = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
     return np.eye(3) + np.sin(theta) * kx + (1.0 - np.cos(theta)) * (kx @ kx)
+
 
 # Construction-time params: a change to any rebuilds the owning object.
 _ICP_BUILD = frozenset(
@@ -161,8 +163,15 @@ _PLAN_BUILD = frozenset(
         "plan_effort",
         "plan_turn",
         "plan_wmax",
+        "plan_wmin",
         "plan_straight_frac",
         "plan_elite_frac",
+        "plan_n_mu",
+        "plan_mu_adapt",
+        "plan_mu_span",
+        "plan_mu_tau",
+        "plan_saturation",
+        "plan_pivot_cost",
         "plan_turn_boost_adapt",
         "plan_turn_boost_tau",
         "device",
@@ -223,12 +232,25 @@ class ElevationNode(Node):
         self._map_T_odom: np.ndarray | None = None
         self._beam_dirs: np.ndarray | None = None  # per-beam unit dirs, built once for the frontier
         self.goal_xy: tuple[float, float] | None = None  # planning goal in map frame
-        self._prev_cmd = np.zeros(3, np.float32)  # last published /cmd_joints [L, rear, R] (slew ref)
-        self._d_hist: deque[float] = deque(maxlen=15)  # recent robot->goal distances (progress check)
-        self._prev_plan_U: np.ndarray | None = None  # last frame's nominal plan (for plan-consistency EMA)
-        self._turn_adapt: AdaptiveTurnBoost | None = None  # optional online turn_boost (gyro feedback)
-        self._last_diff_out: float | None = None  # last commanded (wR-wL), paired with the yaw it caused
-        self._goal_reached = False  # latched at the goal -> idle (no planning) until the goal changes
+        self._prev_cmd = np.zeros(
+            3, np.float32
+        )  # last published /cmd_joints [L, rear, R] (slew ref)
+        self._d_hist: deque[float] = deque(
+            maxlen=15
+        )  # recent robot->goal distances (progress check)
+        self._prev_plan_U: np.ndarray | None = (
+            None  # last frame's nominal plan (for plan-consistency EMA)
+        )
+        self._turn_adapt: AdaptiveTurnBoost | None = (
+            None  # optional online turn_boost (gyro feedback)
+        )
+        self._last_diff_out: float | None = (
+            None  # last commanded (wR-wL), paired with the yaw it caused
+        )
+        self._rev_open = False  # reverse gate state last frame (for transition logging)
+        self._goal_reached = (
+            False  # latched at the goal -> idle (no planning) until the goal changes
+        )
         self._holding = False  # walled-off hold active -> planned-path marker drawn red
         self.planner: MppiGpu | None = None
         self.plan_sim: ForwardSimulator | None = None
@@ -241,7 +263,9 @@ class ElevationNode(Node):
         # (t_sec, quaternion xyzw, angular_velocity xyz) history so the deskew and the
         # rotation prior can read the gyro rate at the *cloud* stamp (not whatever arrived
         # last). The quaternion is buffered for gravity/debug only — the prior uses the gyro.
-        self._imu_buffer: deque[tuple[float, np.ndarray, np.ndarray]] = deque(maxlen=_IMU_BUFFER_LEN)
+        self._imu_buffer: deque[tuple[float, np.ndarray, np.ndarray]] = deque(
+            maxlen=_IMU_BUFFER_LEN
+        )
         # Running gyro-integrated world_R_base + the stamp it is integrated to (rotation prior).
         self._gyro_R_base: np.ndarray | None = None
         self._gyro_t: float | None = None
@@ -267,7 +291,9 @@ class ElevationNode(Node):
         # (`/imu/data`) and a best-effort one (`/ouster/imu`); a reliable sub gets nothing from
         # the latter.
         self.create_subscription(Imu, self.imu_topic, self._imu_callback, qos_profile_sensor_data)
-        self.create_subscription(PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10)
+        self.create_subscription(
+            PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10
+        )
         self.create_subscription(
             PoseStamped, self.get_parameter("follow_topic").value, self._follow_callback, 10
         )
@@ -295,7 +321,9 @@ class ElevationNode(Node):
         self.pub_frame = self.create_publisher(Marker, "frame_marker", 1)
         self.pub_cmd = self.create_publisher(JointState, self.get_parameter("cmd_topic").value, 10)
         self.pub_holding = self.create_publisher(Bool, "plan_holding", 10)  # True = walled-off hold
-        self.pub_turn_boost = self.create_publisher(Float32, "turn_boost", 10)  # turn_boost in effect (debug)
+        self.pub_turn_boost = self.create_publisher(
+            Float32, "turn_boost", 10
+        )  # turn_boost in effect (debug)
         self.add_on_set_parameters_callback(self._on_parameters_changed)
 
         self.get_logger().info(
@@ -398,7 +426,9 @@ class ElevationNode(Node):
         # wheel-occlusion shadows off to the sides. Near+front confines it to the path specks.
         # 4 (was 8): age out the trail's between-beam specks faster, matching the aggressive persist=5.
         d("carve_gap_frames", 4)
-        d("carve_gap_max_range_m", 10.0)  # only gap-carve within this range (0 = no range gate); 10 (was
+        d(
+            "carve_gap_max_range_m", 10.0
+        )  # only gap-carve within this range (0 = no range gate); 10 (was
         #                                   2.5) ages out the person's between-beam specks further out
         # Only gap-carve within this half-cone (deg) of the robot heading; excludes the wheel
         # shadows (~55-87° off heading) and the rear. 0 = no forward gate (carve all around).
@@ -466,9 +496,13 @@ class ElevationNode(Node):
         # On a REJECTED registration the pose fell back to raw odom, so the old
         # accumulated map would smear against it — drop it and re-seed from this scan.
         d("reset_map_on_reject", True)
-        d("reset_after_rejects", 5)  # wipe only after this many CONSECUTIVE rejects (sustained loss)
+        d(
+            "reset_after_rejects", 5
+        )  # wipe only after this many CONSECUTIVE rejects (sustained loss)
         d("debug_frames", False)  # INFO-log each frame's registration metrics (debugging)
-        d("profile_stages", False)  # GPU-synced per-stage timing, logged every 30 frames (debugging)
+        d(
+            "profile_stages", False
+        )  # GPU-synced per-stage timing, logged every 30 frames (debugging)
         # Gravity prior (IMU anchors ICP roll/pitch)
         d("gravity_enable", True)
         d("gravity_weight", 2000.0)
@@ -524,7 +558,9 @@ class ElevationNode(Node):
         # 'indoor' (K_TURN 0.4, alpha~1.33) or 'outdoor' (K_TURN 1.0, alpha~1.82 -- grass/dirt grips
         # harder so it understeers). ICP-calibrated per environment; see dynamics.k_turn_for.
         d("terrain", "outdoor")
-        d("k_turn", -1.0)  # explicit turn-gain override (e.g. from calibrate_turn.sh); <0 = use terrain
+        d(
+            "k_turn", -1.0
+        )  # explicit turn-gain override (e.g. from calibrate_turn.sh); <0 = use terrain
         d("plan_robust_margin_m", 0.3)  # cost-to-go safety tube: lateral (m) ~ robot half-width;
         # keeps the routed center a footprint-width off berms (validated in the Tier-C closed loop:
         # 0 belly contacts). Tighten in narrow spaces -- it erodes the feasible set both sides.
@@ -550,7 +586,9 @@ class ElevationNode(Node):
         # MPPI speed knobs (rebuild the planner on change): the robot drives slow because the cost
         # balance prefers it. Raise goal_running (reward progress) and/or lower effort (penalty on
         # wheel-speed^2) to drive faster. plan_max_omega is only the output SAFETY clamp, not speed.
-        d("plan_goal_running", 0.3)  # cost-to-go V^2 per step -> higher = faster (more progress pull)
+        d(
+            "plan_goal_running", 0.3
+        )  # cost-to-go V^2 per step -> higher = faster (more progress pull)
         d("plan_effort", 1e-3)  # penalize wheel-speed^2 -> lower = faster (less speed penalty)
         # TURN penalty: cost on the wheel differential (wr - wl)^2 -> a real gradient toward STRAIGHT
         # where the goal cost is flat w.r.t. heading (free-heading goal). Cut straight-line wander ~70%
@@ -572,6 +610,42 @@ class ElevationNode(Node):
         # recorded at this 4.0 default and never commanded above 4.00. 4.0 is kept as the
         # conservative default; raise it per-robot via a params file once the ceiling is measured.
         d("plan_wmax", 4.0)  # max per-wheel omega the planner may command [rad/s]
+        # REVERSE / POINT-TURN: lower edge of the sampling box. 0.0 = forward-only (the shipped
+        # behaviour). NEGATIVE (e.g. -2.5) lets MPPI command reverse arcs and point turns -- but
+        # only while the map BEHIND the robot is measured (plan_reverse_clear_m below); with blind
+        # ground behind, the effective floor snaps back to 0 for that frame. SAFETY: before enabling
+        # on the real robot, verify the LLC drives a small NEGATIVE /cmd_joints backward -- only
+        # all-positive-forward has been verified live (control/command.py header).
+        d("plan_wmin", 0.0)
+        # Reverse gate: this much ground straight behind base_link (m) must be MEASURED (accumulated
+        # map) for reverse to unlock this frame. Checked over a robot-width strip each frame.
+        d("plan_reverse_clear_m", 1.5)
+        # POINT-TURN routing: cost-to-go pivot primitive cost [m-equivalent per heading bin]; > 0
+        # lets the router plan pivot-then-drive for goals behind/beside the robot (a skid-steer can
+        # rotate in place; the forward-arc-only lattice pretended it can't). 0 = off. At n_theta 24,
+        # a half-turn costs 12*pivot_cost m-equivalent -- 0.3 makes pivots win whenever they save
+        # ~4 m of looping. Pairs naturally with plan_wmin < 0 but is useful alone.
+        d("plan_pivot_cost", 0.0)
+        # ROBUST-MU replicas: each MPPI candidate is rolled out under this many friction hypotheses
+        # spanning the current uncertainty band and ranked by its WORST outcome, so the winner is a
+        # plan that works whether the ground grips or slips (the over/understeer sim-to-real gap).
+        # Must divide plan_batch. Cost: candidates = plan_batch / n_mu (the rollout wall-time is
+        # latency-bound, so 3 replicas cost ~nothing at B=4096). 1 = off.
+        d("plan_n_mu", 1)
+        # Friction-uncertainty band half-width (as a FRACTION of plan_friction) the replicas cover
+        # when the online estimator is off (or hasn't locked yet). Live-tunable.
+        d("plan_mu_span", 0.25)
+        # ONLINE mu estimation: invert the turn model on (commanded differential, measured gyro yaw)
+        # each frame and slow-EMA the effective friction the planner should use -- fixes BOTH
+        # understeer and oversteer (the turn-boost hotfix could only fix understeer), and its
+        # residual noise sizes the robust-mu band. See control/turn_adapt.TurnGainEstimator.
+        d("plan_mu_adapt", False)
+        d("plan_mu_tau", 5.0)  # estimator EMA time constant [s]
+        # FRICTION-SATURATION certificate weight (0 = off): penalize rollouts whose demanded
+        # slope-hold + centripetal + side-slope force exceeds the friction budget. This is the
+        # "drive slow where grip is short, fast where it isn't" term -- the model alone gets MORE
+        # optimistic as mu drops, so without it low-grip terrain reads as easy.
+        d("plan_saturation", 300.0)
         # STRAIGHT sampling prior: fraction of MPPI candidates drawn as zero-differential (straight
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
@@ -589,7 +663,9 @@ class ElevationNode(Node):
         # left-wheel sign flip, rear-follower, magnitude clamp, slew limit) is in control/command.py.
         d("plan_actuate", True)  # publish /cmd_joints wheel commands
         d("cmd_topic", "/cmd_joints")  # JointState wheel-velocity command topic (to the LLC)
-        d("plan_max_omega", 5.0)  # hard cap on |wheel velocity| [rad/s] -- the motor safe max (~5, see plan_wmax)
+        d(
+            "plan_max_omega", 5.0
+        )  # hard cap on |wheel velocity| [rad/s] -- the motor safe max (~5, see plan_wmax)
         # hard cap on |d(cmd)/dt| per wheel [rad/s^2]. At DT=0.1s the command may change by
         # max_slew*0.1 per step; 50 let it jump 0->cruise in ONE step (harsh launch, ~5 m/s^2). 6.0
         # ramps 0->~1.3 m/s cruise over ~0.65s (ground ~2.1 m/s^2) -- softer start/stop, still responsive.
@@ -611,7 +687,9 @@ class ElevationNode(Node):
         d("plan_turn_boost_adapt", False)
         d("plan_turn_boost_tau", 3.0)
         d("plan_dock_radius", 1.5)  # within this range of the goal: dock (if enabled) or just stop
-        d("plan_dock_enable", True)  # True = terminal dock; False = just STOP when within dock_radius
+        d(
+            "plan_dock_enable", True
+        )  # True = terminal dock; False = just STOP when within dock_radius
         d("plan_reach_radius", 0.3)  # goal reached -> command a (ramped) stop within this range (m)
         # GOAL BRAKE: scale MPPI's forward speed to 0 over the last brake_dist m so the forward-only
         # robot noses in slow and settles AT the goal instead of overshooting/orbiting past it. Cruise
@@ -633,7 +711,9 @@ class ElevationNode(Node):
         # AND the committed plan reduces distance-to-goal by less than this, the robot is walled off
         # -> stop instead of the explore-fallback nosing into the obstacle. Keep it below a horizon's
         # worth of forward progress so genuine exploration down an open corridor is NOT stopped.
-        d("plan_progress_min", 0.3)  # min plan progress toward the goal to keep driving when saturated (m)
+        d(
+            "plan_progress_min", 0.3
+        )  # min plan progress toward the goal to keep driving when saturated (m)
         d("plan_path_width", 0.08)  # intended-path line marker width (m)
 
     def _cache_params(self) -> None:
@@ -724,6 +804,14 @@ class ElevationNode(Node):
         self.plan_straight_frac: float = g("plan_straight_frac")
         self.plan_elite_frac: float = g("plan_elite_frac")
         self.plan_wmax: float = g("plan_wmax")
+        self.plan_wmin: float = g("plan_wmin")
+        self.plan_reverse_clear_m: float = g("plan_reverse_clear_m")
+        self.plan_pivot_cost: float = g("plan_pivot_cost")
+        self.plan_n_mu: int = g("plan_n_mu")
+        self.plan_mu_span: float = g("plan_mu_span")
+        self.plan_mu_adapt: bool = g("plan_mu_adapt")
+        self.plan_mu_tau: float = g("plan_mu_tau")
+        self.plan_saturation: float = g("plan_saturation")
         self.plan_actuate: bool = g("plan_actuate")
         self.plan_max_omega: float = g("plan_max_omega")
         self.plan_max_slew: float = g("plan_max_slew")
@@ -841,15 +929,48 @@ class ElevationNode(Node):
         self.plan_sim.set_uniform_friction(self.plan_friction)
         self.planner = MppiGpu(
             self.plan_sim,
-            CostParams(goal_running=self.plan_goal_running, effort=self.plan_effort, turn=self.plan_turn),
-            sampling=SamplingConfig(wmax=self.plan_wmax, straight_frac=self.plan_straight_frac,
-                                    elite_frac=self.plan_elite_frac),
+            CostParams(
+                goal_running=self.plan_goal_running,
+                effort=self.plan_effort,
+                turn=self.plan_turn,
+                saturation=self.plan_saturation,
+            ),
+            # wmin here is only the box the planner MAY use; the effective floor is gated per
+            # frame on map coverage behind the robot (see the reverse gate in _plan).
+            sampling=SamplingConfig(
+                wmax=self.plan_wmax,
+                wmin=min(0.0, self.plan_wmin),
+                straight_frac=self.plan_straight_frac,
+                pivot_frac=0.05 if self.plan_wmin < 0.0 else 0.0,
+                elite_frac=self.plan_elite_frac,
+                n_mu=max(1, int(self.plan_n_mu)),
+            ),
             n_theta=int(self.plan_n_theta),
         )
         self.planner.reset_nominal(self.plan_nominal_reset)
+        self.planner.set_mu_band(1.0, self.plan_mu_span if self.plan_n_mu > 1 else 0.0)
+        if self.plan_wmin < 0.0:
+            self.planner.set_wmin(0.0)  # reverse stays locked until the gate in _plan opens it
+        # ONLINE mu estimation: recenter the planner's friction on the realized turn gain (both
+        # directions) and size the robust band from the estimator's noise.
+        rp = dynamics.robot_params()
+        if self.plan_mu_adapt:
+            self._mu_est = TurnGainEstimator(
+                k_turn=kt,
+                mu_nominal=self.plan_friction,
+                wheel_radius=rp.wheel_radius,
+                half_track=rp.half_track,
+                dt=dynamics.DT,
+                tau_s=self.plan_mu_tau,
+            )
+            self.get_logger().info(
+                f"online mu estimation ON (k_turn={kt}, nominal mu={self.plan_friction}, "
+                f"tau={self.plan_mu_tau}s)"
+            )
+        else:
+            self._mu_est = None
         # optional online turn_boost from gyro feedback: alpha = 1 + k_turn*mu matches the plan model.
         if self.plan_turn_boost_adapt:
-            rp = dynamics.robot_params()
             self._turn_adapt = AdaptiveTurnBoost(
                 alpha_model=1.0 + kt * self.plan_friction,
                 wheel_radius=rp.wheel_radius,
@@ -867,11 +988,14 @@ class ElevationNode(Node):
         self.ctg = CostToGo(
             GridParams(rcnx, rcny, rccell, 0.0, 0.0),
             dynamics.robot_params(),
-            dynamics.planning_solver(k_turn=kt),  # static settle ignores k_turn; passed for consistency
+            dynamics.planning_solver(
+                k_turn=kt
+            ),  # static settle ignores k_turn; passed for consistency
             n_theta=int(self.plan_n_theta),
             robust_margin_m=self.plan_robust_margin_m,
             robust_margin_deg=self.plan_robust_margin_deg,
             obstacle_step_m=self.plan_obstacle_step_m,
+            pivot_cost=self.plan_pivot_cost,
             device=self.device,
         )
         self.planner.cw.lattice_cap = self.ctg._vcap
@@ -1096,7 +1220,11 @@ class ElevationNode(Node):
             sensor_origin = world_T_sensor[:3, 3].copy()
             # Carve against the free-space frontier (no-return beams = free space) so ghosts
             # with no background behind them are removed; returns-only if unavailable.
-            carve_scan = self._frontier_world(cloud_msg, world_T_sensor) if self.dynamic_frontier_enable else None
+            carve_scan = (
+                self._frontier_world(cloud_msg, world_T_sensor)
+                if self.dynamic_frontier_enable
+                else None
+            )
             if carve_scan is None:
                 carve_scan = world_scan
             if streak_mode:
@@ -1112,8 +1240,14 @@ class ElevationNode(Node):
                 # in front of the robot, so it can't erode the wheel shadows off to the sides.
                 fwd_az = float(np.arctan2(world_T_base[1, 0], world_T_base[0, 0]))
                 carve, streak_out = self.dynamic_filter.carve_streak(
-                    self.map_wp, carve_scan, sensor_origin, streak_in, persist,
-                    self.carve_gap_frames, self.carve_gap_max_range_m, fwd_az,
+                    self.map_wp,
+                    carve_scan,
+                    sensor_origin,
+                    streak_in,
+                    persist,
+                    self.carve_gap_frames,
+                    self.carve_gap_max_range_m,
+                    fwd_az,
                     self.carve_gap_fwd_rad,
                 )
             elif self.dynamic_recency_enable and self.map_ages is not None:
@@ -1138,15 +1272,29 @@ class ElevationNode(Node):
         center = (world_T_base[0, 3], world_T_base[1, 3])
         if streak_mode:
             # Seed streaks at 0 on frames with no prior map (bootstrap / just reset).
-            streak_arg = streak_out if streak_out is not None else wp.zeros(0, dtype=wp.int32, device=self.device)
+            streak_arg = (
+                streak_out
+                if streak_out is not None
+                else wp.zeros(0, dtype=wp.int32, device=self.device)
+            )
             self.map_wp, self.map_streak = self.acc.step(
-                self.map_wp, carve, world_scan, valid, center, map_streak=streak_arg,
+                self.map_wp,
+                carve,
+                world_scan,
+                valid,
+                center,
+                map_streak=streak_arg,
             )
             self.map_ages = None
         elif self.dynamic_recency_enable:
             self.map_wp, self.map_ages = self.acc.step(
-                self.map_wp, carve, world_scan, valid, center,
-                map_ages=self.map_ages, frame=self._frame,
+                self.map_wp,
+                carve,
+                world_scan,
+                valid,
+                center,
+                map_ages=self.map_ages,
+                frame=self._frame,
             )
             self.map_streak = None
         else:
@@ -1166,10 +1314,14 @@ class ElevationNode(Node):
         if self.profile_stages:
             self._prof_n += 1
             if self._prof_n % 30 == 0:
-                parts = " ".join(f"{k}={1000 * v / self._prof_n:.1f}"
-                                 for k, v in sorted(self._prof.items(), key=lambda kv: -kv[1]))
+                parts = " ".join(
+                    f"{k}={1000 * v / self._prof_n:.1f}"
+                    for k, v in sorted(self._prof.items(), key=lambda kv: -kv[1])
+                )
                 total = 1000 * sum(self._prof.values()) / self._prof_n
-                self.get_logger().info(f"PROFILE avg ms/frame (n={self._prof_n}) total={total:.1f} | {parts}")
+                self.get_logger().info(
+                    f"PROFILE avg ms/frame (n={self._prof_n}) total={total:.1f} | {parts}"
+                )
 
     # ------------------------------------------------------------------
     # Dual elevation map (mirrors demos/pipeline_sim's heightmap stage)
@@ -1379,6 +1531,24 @@ class ElevationNode(Node):
     # MPPI planning (visualization only)
     # ------------------------------------------------------------------
 
+    def _reverse_clear(self, mf: _MapFrame, yaw: float) -> bool:
+        """True when a robot-width strip straight behind base_link (0.3 .. plan_reverse_clear_m)
+        is >= 95% MEASURED in the accumulated map -- the map-knowledge gate for reverse driving.
+        Out-of-window samples count as blind."""
+        cell = mf.cell
+        meas = mf.relev_measured
+        ds = np.arange(0.3, self.plan_reverse_clear_m + 1e-6, cell)
+        lats = np.arange(-0.6, 0.6 + 1e-6, cell)
+        # p = base - d*fwd + lat*left, fwd = (cos, sin), left = (-sin, cos)
+        px = mf.ex - np.cos(yaw) * ds[:, None] - np.sin(yaw) * lats[None, :]
+        py = mf.ey - np.sin(yaw) * ds[:, None] + np.cos(yaw) * lats[None, :]
+        cols = np.floor((px - mf.rxmin) / cell).astype(int)
+        rows = np.floor((py - mf.rymin) / cell).astype(int)
+        inb = (rows >= 0) & (rows < meas.shape[0]) & (cols >= 0) & (cols < meas.shape[1])
+        hit = np.zeros(px.shape, bool)
+        hit[inb] = meas[rows[inb], cols[inb]]
+        return bool(hit.mean() >= 0.95)
+
     def _turn_brake_lookahead(self, turn_boost: float) -> float:
         """Tightest turn-brake speed scale over the next `plan_turn_brake_lookahead_s` of the plan.
 
@@ -1438,8 +1608,13 @@ class ElevationNode(Node):
         if self._goal_reached:
             if self.plan_actuate:
                 cmd = condition_command(
-                    0.0, 0.0, self._prev_cmd, max_omega=self.plan_max_omega,
-                    max_slew=self.plan_max_slew, max_decel=self.plan_max_decel, dt=dynamics.DT,
+                    0.0,
+                    0.0,
+                    self._prev_cmd,
+                    max_omega=self.plan_max_omega,
+                    max_slew=self.plan_max_slew,
+                    max_decel=self.plan_max_decel,
+                    dt=dynamics.DT,
                     turn_boost=self.plan_turn_boost,
                 )
                 self._prev_cmd = cmd
@@ -1451,6 +1626,24 @@ class ElevationNode(Node):
                 wp.array(np.ascontiguousarray(mf.elev_local), dtype=wp.float32, device=self.device)
             )
             self._ck("plan:set_terrain")
+            # REVERSE gate (only when plan_wmin < 0): give the cost kernel this frame's observed-
+            # cell mask (reversing over blind cells is penalized) and unlock the negative sampling
+            # floor only while a robot-width strip behind base_link is measured in the accumulated
+            # map -- no rear sensor, so reverse may only use REMEMBERED ground.
+            if self.plan_wmin < 0.0:
+                ww, wh, rww, rwh, _, _ = self._plan_dims
+                oy, ox = (rwh - wh) // 2, (rww - ww) // 2
+                self.planner.set_measured(
+                    np.ascontiguousarray(mf.relev_measured[oy : oy + wh, ox : ox + ww], np.float32)
+                )
+                rev_open = self._reverse_clear(mf, eyaw)
+                self.planner.set_wmin(self.plan_wmin if rev_open else 0.0)
+                if rev_open != self._rev_open:
+                    self.get_logger().info(
+                        f"reverse {'UNLOCKED' if rev_open else 'locked'} "
+                        f"(map behind {'measured' if rev_open else 'blind'})"
+                    )
+                self._rev_open = rev_open
             relev = mf.relev_mem  # (rwh, rww), blind cells inpainted from measured neighbours
             rmeas = mf.relev_measured
             if kr > 1:
@@ -1506,7 +1699,13 @@ class ElevationNode(Node):
         if d < self.plan_reach_radius:
             wl, wr = 0.0, 0.0  # reached -> stop (the slew limiter ramps the command down)
         elif self.plan_dock_enable and d < self.plan_dock_radius:
-            u = dock_control(state_l, goal_l, wmax=self.plan_max_omega)  # terminal dock
+            # terminal dock; with reverse unlocked it may also PIVOT toward an off-axis goal
+            u = dock_control(
+                state_l,
+                goal_l,
+                wmax=self.plan_max_omega,
+                wmin=self.plan_wmin if self._rev_open else 0.0,
+            )
             wl, wr = float(u[0]), float(u[1])
         else:
             # MPPI drives; the goal brake (in condition_command) bleeds off speed on the final
@@ -1533,16 +1732,24 @@ class ElevationNode(Node):
                 holding = True
                 self.get_logger().warning(
                     f"goal unreachable (walled off, no progress in {self._d_hist.maxlen} frames) "
-                    f"-> holding [d={d:.1f}]", throttle_duration_sec=2.0
+                    f"-> holding [d={d:.1f}]",
+                    throttle_duration_sec=2.0,
                 )
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
-        turn_boost = self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
+        turn_boost = (
+            self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
+        )
         cmd = condition_command(
-            wl, wr, self._prev_cmd,
-            max_omega=self.plan_max_omega, max_slew=self.plan_max_slew,
-            max_decel=self.plan_max_decel, dt=dynamics.DT,
+            wl,
+            wr,
+            self._prev_cmd,
+            max_omega=self.plan_max_omega,
+            max_slew=self.plan_max_slew,
+            max_decel=self.plan_max_decel,
+            dt=dynamics.DT,
             turn_boost=turn_boost,
-            goal_dist=d, brake_dist=self.plan_goal_brake_dist,
+            goal_dist=d,
+            brake_dist=self.plan_goal_brake_dist,
             turn_brake_a_max=self.plan_turn_brake_a_max,
             lat_gain=self._lat_gain,
             turn_brake_scale=self._turn_brake_lookahead(turn_boost),
@@ -1551,13 +1758,24 @@ class ElevationNode(Node):
         self._publish_cmd(cmd)
         self.pub_holding.publish(Bool(data=holding))  # True = walled-off hold, False = driving
         self._holding = holding  # colors the planned-path marker red next frame (see _publish_path)
-        self.pub_turn_boost.publish(Float32(data=float(turn_boost)))  # turn_boost in effect (debug/monitor)
-        # ADAPTIVE turn_boost (optional): pair the PREVIOUS command's differential with the yaw it
-        # produced (this frame's gyro) and slow-update the boost -- only while genuinely turning.
-        if self._turn_adapt is not None and self._imu_buffer:
+        self.pub_turn_boost.publish(
+            Float32(data=float(turn_boost))
+        )  # turn_boost in effect (debug/monitor)
+        # ONLINE ADAPTATION (optional): pair the PREVIOUS command's differential with the yaw it
+        # produced (this frame's gyro) and slow-update -- only while genuinely turning.
+        # _turn_adapt compensates at the COMMAND (boost); _mu_est recenters the MODEL (both
+        # directions) and sizes the robust-mu band from its residual noise.
+        if (self._turn_adapt is not None or self._mu_est is not None) and self._imu_buffer:
+            yaw_meas = float(self._imu_buffer[-1][2][2])
             if self._last_diff_out is not None:
-                self._turn_adapt.update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
-            self._last_diff_out = float(cmd[2] - cmd[0])  # condition_command [L, rear, R] -> (wR - wL)
+                if self._turn_adapt is not None:
+                    self._turn_adapt.update(self._last_diff_out, yaw_meas)
+                if self._mu_est is not None:
+                    center, span = self._mu_est.update(self._last_diff_out, yaw_meas)
+                    self.planner.set_mu_band(center, span)
+            self._last_diff_out = float(
+                cmd[2] - cmd[0]
+            )  # condition_command [L, rear, R] -> (wR - wL)
 
     def _publish_cmd(self, cmd: np.ndarray) -> None:
         """Publish the conditioned [left, rear, right] wheel command to /cmd_joints.
@@ -1603,7 +1821,9 @@ class ElevationNode(Node):
         if self._holding:
             m.color = ColorRGBA(r=1.0, g=0.1, b=0.1, a=1.0)
         else:
-            m.color = ColorRGBA(r=1.0, g=0.0, b=1.0, a=1.0)  # magenta: reads over the green height map
+            m.color = ColorRGBA(
+                r=1.0, g=0.0, b=1.0, a=1.0
+            )  # magenta: reads over the green height map
         m.pose.orientation.w = 1.0
         m.points = [Point(x=float(x), y=float(y), z=z) for x, y in xy]
         self.pub_path_marker.publish(m)
@@ -1635,9 +1855,7 @@ class ElevationNode(Node):
             n = float(np.linalg.norm(a))
             if n < 1e-6:  # no accel either -> give up gracefully
                 if not self._imu_warned:
-                    self.get_logger().warning(
-                        "IMU has no orientation and no accel — gravity off."
-                    )
+                    self.get_logger().warning("IMU has no orientation and no accel — gravity off.")
                     self._imu_warned = True
                 return None
             up_imu = a / n  # accelerometer measures -g -> points up when static
@@ -1775,9 +1993,6 @@ class ElevationNode(Node):
         # device gate kernel, so casting to float64 here would only double the upload.
         return np.ascontiguousarray(points, dtype=np.float32), point_times, base_T_sensor
 
-
-
-
     def _denoise(self, scan_wp: wp.array, base_T_sensor: np.ndarray) -> wp.array:
         """GPU-native statistical outlier removal on the base-frame scan (device in/out).
 
@@ -1830,7 +2045,9 @@ class ElevationNode(Node):
         self._beam_dirs = beam.reshape(n, 3).astype(np.float32)
         return self._beam_dirs
 
-    def _frontier_world(self, cloud_msg: PointCloud2, world_T_sensor: np.ndarray) -> wp.array | None:
+    def _frontier_world(
+        self, cloud_msg: PointCloud2, world_T_sensor: np.ndarray
+    ) -> wp.array | None:
         """Free-space frontier as a device cloud in the world frame, for ray-carving.
 
         Hits keep their measured point; no-return beams become a far point along the beam

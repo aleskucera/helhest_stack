@@ -52,6 +52,32 @@
     plan_goal_running: 0.3    # progress pull -> higher = faster toward goal
     plan_effort: 0.001        # wheel-speed^2 penalty -> lower = faster
 
+    # --- ROBUSTNESS to unknown friction (over/understeer sim-to-real gap) ---
+    # Every MPPI candidate rolls out under 3 friction hypotheses spanning the current uncertainty
+    # band and is ranked by its WORST outcome; the online estimator (gyro yaw vs commanded
+    # differential) recenters the band on the REALIZED turn gain -- fixes both understeer and
+    # oversteer -- and its residual noise sizes the band. Rollouts are latency-bound, so the 3
+    # replicas cost ~nothing; candidates drop 4096 -> 1365 (still plenty).
+    plan_n_mu: 3
+    plan_mu_adapt: true
+    plan_mu_span: 0.25        # band half-width until the estimator locks (fraction of plan_friction)
+    # Friction-saturation certificate (speed governor): rollouts whose slope-hold + centripetal +
+    # side-slope demand exceeds the grip budget are penalized -> slow into low-grip corners, full
+    # speed on flat known ground. 0 = off.
+    plan_saturation: 300.0
+
+    # --- POINT TURNS + REVERSE (the map behind is known; there is no rear sensor) ---
+    # Pivot routing: the cost-to-go can plan turn-in-place, so a goal behind the robot becomes
+    # pivot-then-drive instead of a wide loop. [m-equivalent per heading bin; half-turn = 12 bins]
+    plan_pivot_cost: 0.3
+    # Reverse driving: set plan_wmin negative (e.g. -2.5) to let MPPI back up / pivot -- gated per
+    # frame: unlocks ONLY while a robot-width strip behind base_link is measured in the accumulated
+    # map (plan_reverse_clear_m), and reversing over blind cells is heavily penalized regardless.
+    # !! SAFETY: before first enabling, verify the LLC drives a small NEGATIVE /cmd_joints
+    # backward -- only all-positive-forward has been verified on the robot (control/command.py).
+    plan_wmin: 0.0
+    plan_reverse_clear_m: 1.5
+
     # --- TURN BRAKE: slow into a corner, then accelerate out (both knobs 0 = off) ---
     # Live-tunable, no node restart:
     #   ros2 param set /elevation plan_turn_brake_a_max 0.8
