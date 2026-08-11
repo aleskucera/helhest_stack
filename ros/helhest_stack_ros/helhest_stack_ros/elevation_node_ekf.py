@@ -59,7 +59,6 @@ from sensor_msgs.msg import JointState
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs.msg import PointField
 from sensor_msgs_py.point_cloud2 import read_points_numpy
-from std_msgs.msg import Bool
 from std_msgs.msg import ColorRGBA
 from std_msgs.msg import Float32
 from visualization_msgs.msg import Marker
@@ -301,9 +300,6 @@ class ElevationNode(Node):
             3, np.float32
         )  # last published /cmd_joints [L, rear, R] (slew ref)
         self._last_cmd_time: float | None = None  # clock of the last /cmd_joints publish
-        self._d_hist: deque[float] = deque(
-            maxlen=15
-        )  # recent robot->goal distances (progress check)
         self._prev_plan_U: np.ndarray | None = (
             None  # last frame's nominal plan (for plan-consistency EMA)
         )
@@ -317,7 +313,6 @@ class ElevationNode(Node):
         self._goal_reached = (
             False  # latched at the goal -> idle (no planning) until the goal changes
         )
-        self._holding = False  # walled-off hold active -> planned-path marker drawn red
         self.planner: MppiGpu | None = None
         self.plan_sim: ForwardSimulator | None = None
         self.ctg: CostToGo | None = None
@@ -404,7 +399,6 @@ class ElevationNode(Node):
         self.pub_path_marker = self.create_publisher(Marker, "planned_path_marker", 10)
         self.pub_frame = self.create_publisher(Marker, "frame_marker", 1)
         self.pub_cmd = self.create_publisher(JointState, self.get_parameter("cmd_topic").value, 10)
-        self.pub_holding = self.create_publisher(Bool, "plan_holding", 10)  # True = walled-off hold
         self.pub_turn_boost = self.create_publisher(
             Float32, "turn_boost", 10
         )  # turn_boost in effect (debug)
@@ -744,13 +738,6 @@ class ElevationNode(Node):
         # the robot brakes BEFORE the corner rather than in it. 0 = reactive only (cap the current
         # command). The plan is plan_horizon * DT long, so this saturates at 2.5 s by default.
         d("plan_turn_brake_lookahead_s", 0.0)
-        # UNREACHABLE-GOAL STOP: when the cost-to-go at the robot is saturated (no route to the goal)
-        # AND the committed plan reduces distance-to-goal by less than this, the robot is walled off
-        # -> stop instead of the explore-fallback nosing into the obstacle. Keep it below a horizon's
-        # worth of forward progress so genuine exploration down an open corridor is NOT stopped.
-        d(
-            "plan_progress_min", 0.3
-        )  # min plan progress toward the goal to keep driving when saturated (m)
         d("plan_path_width", 0.08)  # intended-path line marker width (m)
 
     def _cache_params(self) -> None:
@@ -856,7 +843,6 @@ class ElevationNode(Node):
         self.plan_goal_brake_dist: float = g("plan_goal_brake_dist")
         self.plan_turn_brake_a_max: float = g("plan_turn_brake_a_max")
         self.plan_turn_brake_lookahead_s: float = g("plan_turn_brake_lookahead_s")
-        self.plan_progress_min: float = g("plan_progress_min")
         self.plan_path_width: float = g("plan_path_width")
 
     @staticmethod
@@ -1048,7 +1034,6 @@ class ElevationNode(Node):
                 "set the RViz Fixed Frame to the map frame."
             )
         self.goal_xy = (msg.pose.position.x, msg.pose.position.y)
-        self._d_hist.clear()  # fresh progress history for the new goal
         self._prev_plan_U = None  # new goal -> don't smooth against the old goal's plan
         self._goal_reached = False  # new goal -> resume planning
         self.get_logger().info(f"goal set: ({self.goal_xy[0]:.2f}, {self.goal_xy[1]:.2f})")
@@ -1702,7 +1687,6 @@ class ElevationNode(Node):
                 )
                 self._prev_cmd = cmd
                 self._publish_cmd(cmd)
-                self.pub_holding.publish(Bool(data=False))
             return
         with wp.ScopedDevice(self.device):
             self.plan_sim.set_terrain(
@@ -1759,8 +1743,6 @@ class ElevationNode(Node):
         if not self.plan_actuate:
             return
         d = float(np.hypot(gx - mf.ex, gy - mf.ey))  # robot -> goal distance
-        self._d_hist.append(d)
-        holding = False  # walled-off hold this frame -> published on /plan_holding
         if d < self.plan_reach_radius:
             wl, wr = 0.0, 0.0  # reached -> stop (the slew limiter ramps the command down)
         elif self.plan_dock_enable and d < self.plan_dock_radius:
@@ -1772,28 +1754,6 @@ class ElevationNode(Node):
             # the whole reach_radius..inf band -- the continuous brake replaces the hard stop-radius.
             u0 = self.planner.nominal()[0]  # first committed step (wL, wR), model convention
             wl, wr = float(u0[0]), float(u0[1])
-            # UNREACHABLE-GOAL STOP: the robot sits at the routing-window CENTER, so the cost-to-go
-            # there is V at the robot. If it is SATURATED (no route to the goal) AND the committed
-            # plan reduces distance-to-goal by less than plan_progress_min, the robot is walled off
-            # -> stop, instead of the explore-fallback nosing straight into the obstacle. (While the
-            # corridor ahead is still open the plan DOES make progress, so this does not fire.)
-            v_robot = float(self.ctg.V.numpy()[rcny // 2, rcnx // 2].min())
-            saturated = v_robot >= 0.9 * self.ctg._vcap
-            # actual progress over the recent window (plan shape is an unreliable signal -- the blind
-            # far horizon stretches toward the goal even when the near path is walled; measure whether
-            # the robot is really getting closer). Full window + < plan_progress_min gained = stuck.
-            stuck = (
-                len(self._d_hist) >= self._d_hist.maxlen
-                and self._d_hist[0] - d < self.plan_progress_min
-            )
-            if saturated and stuck:
-                wl, wr = 0.0, 0.0  # walled off + no real progress -> hold
-                holding = True
-                self.get_logger().warn(
-                    f"goal unreachable (walled off, no progress in {self._d_hist.maxlen} frames) "
-                    f"-> holding [d={d:.1f}]",
-                    throttle_duration_sec=2.0,
-                )
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
         turn_boost = (
             self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
@@ -1814,8 +1774,6 @@ class ElevationNode(Node):
         )
         self._prev_cmd = cmd
         self._publish_cmd(cmd)
-        self.pub_holding.publish(Bool(data=holding))  # True = walled-off hold, False = driving
-        self._holding = holding  # colors the planned-path marker red next frame (see _publish_path)
         self.pub_turn_boost.publish(
             Float32(data=float(turn_boost))
         )  # turn_boost in effect (debug/monitor)
@@ -1901,14 +1859,7 @@ class ElevationNode(Node):
         m.type = Marker.LINE_STRIP
         m.action = Marker.ADD
         m.scale.x = float(self.plan_path_width)
-        # Magenta while driving; RED when the planner is HOLDING (goal walled off, no viable path)
-        # -- the path shown is the rejected explore-fallback, so red flags "not being driven".
-        if self._holding:
-            m.color = ColorRGBA(r=1.0, g=0.1, b=0.1, a=1.0)
-        else:
-            m.color = ColorRGBA(
-                r=1.0, g=0.0, b=1.0, a=1.0
-            )  # magenta: reads over the green height map
+        m.color = ColorRGBA(r=1.0, g=0.0, b=1.0, a=1.0)  # magenta: reads over the green height map
         m.pose.orientation.w = 1.0
         m.points = [Point(x=float(x), y=float(y), z=z) for x, y in xy]
         self.pub_path_marker.publish(m)
