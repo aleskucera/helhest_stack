@@ -20,6 +20,11 @@
     # --- Odin pipeline: no ICP, no EKF, no deskew, no gyro prior ---
     icp_enable: false                   # trust the Odin pose directly (dead-reckoning)
     deskew_enable: false                # Odin per-point time is seconds; deskew assumes ns
+    # Odin names the per-point time field 'offset_time', not the Ouster's 't'. Set here so
+    # flipping deskew_enable actually finds it -- on a name miss the parse silently returns
+    # times=None and the deskew is skipped. Measured on in_speed_odin0/out_odin0: the field
+    # runs 0 .. 0.0668 s, i.e. SECONDS over one 14.5 Hz sweep (the ns assumption above).
+    deskew_time_field: offset_time
     imu_rotation_prior: false           # gyro prior + identity IMU TF rolls the map ~40 deg
     publish_map_tf: true                # elevation owns map -> odom_odin ...
     publish_odom_tf: true               # ... and odom_odin -> odin1_base_link

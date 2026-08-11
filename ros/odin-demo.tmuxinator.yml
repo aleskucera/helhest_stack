@@ -1,6 +1,6 @@
 # tmuxinator project for the helhest_stack_ros elevation_node driven by Odin
 # (Odin dTOF cloud + on-device SLAM pose, no ICP, no EKF -- see
-# ros/odin/odin_elevation.launch.py).
+# ros/odin/odin_elevation.params.yaml).
 #
 # Symlinked into ~/.config/tmuxinator/odin-demo.yml so it can be launched
 # from anywhere with:
@@ -8,6 +8,7 @@
 #   BAG=/path/to/bag tmuxinator start odin-demo
 #   BAG=/path/to/bag RATE=0.5 tmuxinator start odin-demo
 #   BAG=/path/to/bag FULL_REPLAY=1 tmuxinator start odin-demo
+#   BAG=/path/to/bag EXTRA='-p plan_actuate:=false' tmuxinator start odin-demo
 #
 # BAG is required. EXEC_SH defaults to ~/projects/helhest-singularity/exec.sh;
 # override locally, e.g. export EXEC_SH=~/exec.sh in .bashrc.
@@ -15,11 +16,10 @@
 # Default replays ONLY the bag's sensor/odom inputs so the live node regenerates
 # all outputs (no duplicate /frame_marker etc.). FULL_REPLAY=1 replays every topic.
 #
-# The node pane runs `python3 -m helhest_stack_ros.elevation_node` directly (NOT
-# `ros2 launch ros/odin/odin_elevation.launch.py`) so no colcon-built/installed
-# workspace is required -- same PYTHONPATH-only pattern as elevation-demo/ekf-demo.
-# Its --ros-args mirror odin_elevation.launch.py's Node parameters verbatim; keep
-# them in sync if that launch file changes.
+# The node pane runs `python3 -m helhest_stack_ros.elevation_node` directly so no
+# colcon-built/installed workspace is required -- same PYTHONPATH-only pattern as
+# elevation-demo/ekf-demo. It loads the SAME params file the robot runs, so a replay
+# reproduces the live tuning instead of drifting from it; EXTRA overrides on top.
 #
 # Panes: bag (start-paused -- hit <space> to play once the node is up),
 # elevation_node, rviz2 (odin_elevation.rviz), traj_logger.
@@ -40,27 +40,11 @@
   )
   rate    = ENV['RATE'] || '0.25'
 
-  # elevation_node params mirrored verbatim from ros/odin/odin_elevation.launch.py.
-  node_params = %w[
-    lidar_topic:=/odin1/cloud_raw
-    odom_topic:=/odin1/odometry
-    imu_topic:=/odin1/imu
-    icp_enable:=false
-    deskew_enable:=false
-    imu_rotation_prior:=false
-    base_frame:=odin1_base_link
-    self_filter_enable:=true
-    self_x_min:=-0.05
-    self_x_max:=0.55
-    self_y_min:=-0.75
-    self_y_max:=0.75
-    footprint_robot_height:=0.49
-    map_frame:=map
-    publish_map_tf:=true
-    publish_odom_tf:=true
-    plan_actuate:=true
-  ].map { |kv| "-p #{kv}" }.join(' ')
-  args = "--ros-args #{node_params}"
+  # The robot's own params file is the single source of truth -- an inline copy of these
+  # values silently went stale (footprint height, and every tuned planner knob).
+  # EXTRA='-p k:=v ...' overrides it; inline -p wins over --params-file.
+  params = "#{repo}/ros/odin/odin_elevation.params.yaml"
+  args   = "--ros-args --params-file #{params} #{ENV['EXTRA']}".strip
 
   full_replay = ENV['FULL_REPLAY'] && !ENV['FULL_REPLAY'].empty?
   # Default: replay ONLY the bag's sensor/odom inputs (+ static TF + recorded goals) and let the

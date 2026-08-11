@@ -679,12 +679,14 @@ class ElevationNode(Node):
         # NEVER commands above this regardless of the cost. This is the real top-speed knob.
         # ~1.4 m/s at 4.0; ~1.75 m/s at 5.0 (r=0.35). plan_wmax maps to the REAL wheel speed -- the
         # LLC consumes /cmd_joints as wheel rad/s (see _publish_cmd).
-        # TURNING HEADROOM (2026-07-15): the motor ceiling is ~5.3 rad/s. Post-fix bags showed the
-        # turn differential is realized ~1:1 BELOW the ceiling but collapses as the wheels approach it
-        # (the outer wheel mean+diff/2 pegs). So keep plan_wmax a notch BELOW the ceiling (4.0) -- both
-        # wheels then stay <5.3 even in a turn, so the differential survives. Trades ~0.35 m/s of top
-        # speed for reliable turning. (The turn "defect" was mostly this saturation, not a fixed gain.)
-        d("plan_wmax", 4.0)  # max per-wheel omega the planner may command [rad/s] -- below the ceiling
+        # TURNING HEADROOM: the turn differential is realized ~1:1 while the wheels have headroom,
+        # but collapses as they approach the motor ceiling (the outer wheel, mean+diff/2, pegs). So
+        # keep plan_wmax a notch BELOW whatever that ceiling is -- the differential then survives a
+        # turn. (The turn "defect" was mostly this saturation, not a fixed drivetrain gain.)
+        # WHERE THE CEILING IS, is unsettled -- see the same block in elevation_node.py: the
+        # "~5.3 rad/s" figure predates the /cmd_joints unit fix (f056dcc), so it is not in
+        # today's units.
+        d("plan_wmax", 4.0)  # max per-wheel omega the planner may command [rad/s]
         # STRAIGHT sampling prior: fraction of MPPI candidates drawn as zero-differential (straight
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on

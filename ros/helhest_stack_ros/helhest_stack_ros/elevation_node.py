@@ -533,11 +533,18 @@ class ElevationNode(Node):
         # vertical obstacles (sticks/poles) that the robot's settle STRADDLES between its wheel/belly
         # contacts -- those read traversable for most headings, so the router drives through them.
         # 0 = off (settle-only). ~0.2 blocks a stick the robot can't drive over. See costtogo _step_gate.
-        # OPT-IN (default off) until the blind-cell interaction is fixed: relev_mem fills unmeasured
-        # cells with 0.0 while the ground sits at -footprint_robot_height, so every blind/measured
-        # frontier reads as a ~0.4 m step and hard-blocks -- a closed ring around the robot whenever
-        # the map does not fill the routing window. Set 0.2 AT LAUNCH to re-enable -- a runtime
-        # `param set` does NOT take: not in _PLAN_BUILD, and the gate is baked into the CUDA graph.
+        # OPT-IN (default off) -- but the reason it was turned off (fae8640) has since been FIXED
+        # and this default has not been revisited. It was: relev_mem filled unmeasured cells with
+        # 0.0 while the ground sat lower, so every blind/measured frontier read as a step and
+        # hard-blocked (a closed ring around the robot). Two days later 7020fd6 replaced that
+        # constant fill with an inpaint from measured neighbours, so blind cells now inherit local
+        # ground height and the phantom step is gone. Re-enabling (0.2) is probably safe and is the
+        # fix for thin obstacles the settle straddles -- VERIFY on a bag first. Note what this
+        # relies on: the gate is a LOCAL difference (see costtogo _step_gate), so a map z-origin far
+        # from ground -- e.g. Odin, which bootstraps world from its own odom and can start at
+        # z = -1.5 m -- does not by itself trip it; only an absolute-height FILL does.
+        # Set AT LAUNCH -- a runtime `param set` does NOT take: not in _PLAN_BUILD, and the gate is
+        # baked into the CUDA graph.
         d("plan_obstacle_step_m", 0.0)
         d("plan_nominal_reset", 1.5)  # nominal wheel speed the planner seeds from
         # MPPI speed knobs (rebuild the planner on change): the robot drives slow because the cost
@@ -554,12 +561,17 @@ class ElevationNode(Node):
         # NEVER commands above this regardless of the cost. This is the real top-speed knob.
         # ~1.4 m/s at 4.0; ~1.75 m/s at 5.0 (r=0.35). plan_wmax maps to the REAL wheel speed -- the
         # LLC consumes /cmd_joints as wheel rad/s (see _publish_cmd).
-        # TURNING HEADROOM (2026-07-15): the motor ceiling is ~5.3 rad/s. Post-fix bags showed the
-        # turn differential is realized ~1:1 BELOW the ceiling but collapses as the wheels approach it
-        # (the outer wheel mean+diff/2 pegs). So keep plan_wmax a notch BELOW the ceiling (4.0) -- both
-        # wheels then stay <5.3 even in a turn, so the differential survives. Trades ~0.35 m/s of top
-        # speed for reliable turning. (The turn "defect" was mostly this saturation, not a fixed gain.)
-        d("plan_wmax", 4.0)  # max per-wheel omega the planner may command [rad/s] -- below the ceiling
+        # TURNING HEADROOM: the turn differential is realized ~1:1 while the wheels have headroom,
+        # but collapses as they approach the motor ceiling (the outer wheel, mean+diff/2, pegs). So
+        # keep plan_wmax a notch BELOW whatever that ceiling is -- the differential then survives a
+        # turn. (The turn "defect" was mostly this saturation, not a fixed drivetrain gain.)
+        # WHERE THE CEILING IS, is unsettled. The "~5.3 rad/s" measured 2026-07-15 predates the
+        # /cmd_joints unit fix (f056dcc, 2026-07-27) that made plan_wmax map to REAL wheel rad/s, so
+        # it is not in today's units; the operator puts the motor limit at ~15 rad/s and the Odin
+        # params file runs plan_wmax 6.0 on that basis. The Odin bags don't settle it -- they were
+        # recorded at this 4.0 default and never commanded above 4.00. 4.0 is kept as the
+        # conservative default; raise it per-robot via a params file once the ceiling is measured.
+        d("plan_wmax", 4.0)  # max per-wheel omega the planner may command [rad/s]
         # STRAIGHT sampling prior: fraction of MPPI candidates drawn as zero-differential (straight
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
@@ -588,8 +600,8 @@ class ElevationNode(Node):
         # amplify the commanded turn differential. 1.0 = off. REVISED 2026-07-15: post-fix bags showed
         # the differential is realized ~1:1 below the motor ceiling -- the earlier "~half" was SATURATION
         # (over-commanded wheels), not a real drivetrain gain. So boosting over-turns below the limit and
-        # worsens saturation at it. Keep at 1.0 now that plan_wmax leaves turning headroom; the fixed-2.0
-        # story in docs/turn_differential_hotfix.md is superseded.
+        # worsens saturation at it. Keep at 1.0 while plan_wmax leaves turning headroom (see that
+        # param); the fixed-2.0 story in docs/turn_differential_hotfix.md is superseded.
         d("plan_turn_boost", 1.0)
         # OPTIONAL: self-tune plan_turn_boost online from gyro feedback (control/turn_adapt.py) so the
         # realized yaw matches the plan across terrains + the drivetrain defect -- makes the fixed
