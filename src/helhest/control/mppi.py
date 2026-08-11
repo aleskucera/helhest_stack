@@ -59,6 +59,11 @@ class SamplingConfig:
     # (MppiGpu.set_mu_band) and ranked by its WORST replica cost -- a candidate must survive the
     # whole mu band to win. n_mu must divide the batch; 1 = nominal (no robustness).
     n_mu: int = 1
+    # turn-mode deadband [rad/s per step]: a candidate whose |mean net differential| stays below
+    # this is "straight" (neutral); above it, it is a committed left/right maneuver, and the
+    # elite mean only mixes candidates on the best candidate's side (obstacle dead ahead ->
+    # commit early instead of averaging left- and right-passers into a straight-at-it mean).
+    turn_mode_th: float = 0.5
 
 
 @wp.struct
@@ -533,18 +538,32 @@ def _bisect_step_kernel(
 def _cand_dir_kernel(
     target_wheel_omega: wp.array2d(dtype=wp.vec3),
     horizon: int,
+    turn_th: float,  # net-differential deadband; below it a candidate is "straight" (neutral)
     dir_out: wp.array(dtype=float),  # [n_cand] net direction: +1 forward-ish, -1 reverse-ish
+    turn_out: wp.array(dtype=float),  # [n_cand] net turn mode: -1 right / 0 neutral / +1 left
 ):
-    """Net commanded direction per candidate (sign of the summed mean wheel speed). With reverse
-    enabled the candidate set is BIMODAL (back up vs pivot-and-drive); a plain elite mean of the
-    two modes is ~zero velocity and the robot creeps. The elite mean is therefore restricted to
-    the best candidate's direction (see _elite_u_kernel)."""
+    """Per-candidate maneuver mode keys. The elite is MULTIMODAL in two ways and a plain mean
+    averages the modes into the worst of both worlds:
+      - direction (reverse enabled): back-up vs pivot-and-drive -> mean is ~zero velocity;
+      - turn side (obstacle dead ahead): pass-left vs pass-right -> mean aims AT the obstacle,
+        and under slew-limited (smooth) actuation the robot then cannot dodge late.
+    dir = sign of the summed mean wheel speed; turn = sign of the summed differential with a
+    deadband (cruise noise stays neutral). The elite mean is restricted to candidates compatible
+    with the best candidate's keys (see _elite_u_kernel)."""
     b = wp.tid()
     s = float(0.0)
+    dsum = float(0.0)
     for t in range(horizon):
         w = target_wheel_omega[t, b]
         s += w[0] + w[1]
+        dsum += w[1] - w[0]
     dir_out[b] = wp.where(s < 0.0, -1.0, 1.0)
+    tk = float(0.0)
+    if dsum > turn_th:
+        tk = 1.0
+    elif dsum < -turn_th:
+        tk = -1.0
+    turn_out[b] = tk
 
 
 @wp.kernel
@@ -552,13 +571,17 @@ def _best_dir_kernel(
     J: wp.array(dtype=float),  # [n_cand] robust per-candidate cost
     jmin: wp.array(dtype=float),
     dirs: wp.array(dtype=float),
+    turns: wp.array(dtype=float),
     n_cand: int,
     best_dir: wp.array(dtype=float),  # [1] direction of the lowest-cost candidate
+    best_turn: wp.array(dtype=float),  # [1] turn mode of the lowest-cost candidate
 ):
     best_dir[0] = 1.0
+    best_turn[0] = 0.0
     for b in range(n_cand):
         if J[b] <= jmin[0]:
             best_dir[0] = dirs[b]
+            best_turn[0] = turns[b]
             return
 
 
@@ -567,7 +590,9 @@ def _elite_u_kernel(
     J: wp.array(dtype=float),  # [n_cand] robust per-candidate cost
     tau: wp.array(dtype=float),
     dirs: wp.array(dtype=float),  # [n_cand] net direction per candidate
+    turns: wp.array(dtype=float),  # [n_cand] net turn mode per candidate
     best_dir: wp.array(dtype=float),  # [1] direction of the best candidate
+    best_turn: wp.array(dtype=float),  # [1] turn mode of the best candidate
     target_wheel_omega: wp.array2d(
         dtype=wp.vec3
     ),  # replicas share controls -> read columns < n_cand
@@ -577,14 +602,18 @@ def _elite_u_kernel(
     U: wp.array2d(dtype=float),
 ):
     t, wheel = wp.tid()  # (timestep, wheel: 0=L, 1=R)
-    # DIRECTION-COHERENT elite mean: average only elites moving the best candidate's way.
-    # Forward-only sampling makes every dir +1, so this reduces to the plain elite mean.
+    # MODE-COHERENT elite mean: average only elites compatible with the best candidate's
+    # maneuver mode -- same direction, and same turn side (a NEUTRAL/straight candidate is
+    # compatible with either side; if the best is neutral, sided candidates are excluded so a
+    # left/right split can't pull the mean off the straight line). Forward-only cruising makes
+    # every key (+1, 0), which reduces to the plain elite mean.
     elite_sum = float(0.0)
     elite_n = float(0.0)
     for b in range(n_cand):
         if J[b] <= tau[0] and dirs[b] == best_dir[0]:
-            elite_sum += target_wheel_omega[t, b][wheel]
-            elite_n += 1.0
+            if turns[b] == best_turn[0] or turns[b] == 0.0:
+                elite_sum += target_wheel_omega[t, b][wheel]
+                elite_n += 1.0
     U[t, wheel] = wp.clamp(elite_sum / wp.max(elite_n, 1.0), wlo[0], wmax)
 
 
@@ -653,7 +682,9 @@ class MppiGpu:
             self.tau = wp.zeros(1, dtype=wp.float32)
             self.count = wp.zeros(1, dtype=wp.float32)
             self.dirs = wp.zeros(self.n_cand, dtype=wp.float32)  # per-candidate net direction
+            self.turns = wp.zeros(self.n_cand, dtype=wp.float32)  # per-candidate net turn mode
             self.best_dir = wp.zeros(1, dtype=wp.float32)  # best candidate's direction
+            self.best_turn = wp.zeros(1, dtype=wp.float32)  # best candidate's turn mode
             self.seed = wp.array([int(seed)], dtype=wp.int32)
             self.goal = wp.zeros(2, dtype=wp.float32)
             # effective lower wheel-speed bound, device-side so the node can gate reverse per frame
@@ -845,15 +876,19 @@ class MppiGpu:
         wp.launch(
             _cand_dir_kernel,
             self.n_cand,
-            inputs=[self.sim.target_wheel_omega, self.horizon],
-            outputs=[self.dirs],
+            inputs=[
+                self.sim.target_wheel_omega,
+                self.horizon,
+                self.sampling.turn_mode_th * float(self.horizon),
+            ],
+            outputs=[self.dirs, self.turns],
             device=self.device,
         )
         wp.launch(
             _best_dir_kernel,
             1,
-            inputs=[self.Jc, self.jmin, self.dirs, self.n_cand],
-            outputs=[self.best_dir],
+            inputs=[self.Jc, self.jmin, self.dirs, self.turns, self.n_cand],
+            outputs=[self.best_dir, self.best_turn],
             device=self.device,
         )
         wp.launch(
@@ -863,7 +898,9 @@ class MppiGpu:
                 self.Jc,
                 self.tau,
                 self.dirs,
+                self.turns,
                 self.best_dir,
+                self.best_turn,
                 self.sim.target_wheel_omega,
                 self.wlo,
                 self.sampling.wmax,
