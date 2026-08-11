@@ -124,12 +124,13 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # unmeasured-cell occupancy while REVERSING (forward motion into unknown stays allowed -- the
     # sensor sees it before arrival; backward there is no sensor, so unknown must hard-lose).
     unknown: float = 1e4
-    # per-meter shaping against reverse. Both "reverse the whole way" and "pivot then drive" cost
-    # ~linearly in route length (the pivot's V-surcharge is 2*V*pivot_cost*goal_terminal-ish), so
-    # this weight is a threshold: at ~5 the robot happily backs up 10+ m (and creeps through
-    # narrow passages backward); at ~25 the pivot route wins any long haul and reverse stays what
-    # it should be with no rear sensor -- a short-range escape over remembered ground.
-    reverse: float = 25.0
+    # per-meter shaping against reverse -- sized so reverse is an ESCAPE, not a route. A pivot's
+    # V-surcharge is small (the router blends turning into arcs) and a pi pivot eats most of the
+    # horizon, so myopic backward progress outbids pivot-then-forward at low weights: measured, at
+    # 5 the robot backs up 11 m and creeps through a gap backward; at 25 it still reverses whole
+    # routes. ~75 makes any forward-capable route win while a genuinely stuck robot (forward
+    # progress impossible, V flat ahead) still backs out over remembered ground.
+    reverse: float = 75.0
 
     def build(self) -> CostWeights:
         cw = CostWeights()
