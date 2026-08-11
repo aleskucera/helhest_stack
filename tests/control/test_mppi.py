@@ -60,14 +60,33 @@ def _build_sim(device, B, T):
 def _cw(explore_fallback=0.0, lattice_cap=1e9, out_of_bounds=0.0):
     cw = mg.CostWeights()
     cw.goal_terminal, cw.goal_running = _W["goal_terminal"], _W["goal_running"]
-    cw.explore_fallback, cw.lattice_cap, cw.out_of_bounds = explore_fallback, lattice_cap, out_of_bounds
+    cw.explore_fallback, cw.lattice_cap, cw.out_of_bounds = (
+        explore_fallback,
+        lattice_cap,
+        out_of_bounds,
+    )
     cw.effort, cw.smoothness, cw.infeasible = _W["effort"], _W["smoothness"], _W["infeasible"]
     return cw
 
 
 def _launch_cost(
-    device, sim, poses, tilts, clear, resid, ctrl, field_val, goal, cw, T, B,
-    cur_om=None, vel=None, turning=None, loads=None, measured_val=1.0,
+    device,
+    sim,
+    poses,
+    tilts,
+    clear,
+    resid,
+    ctrl,
+    field_val,
+    goal,
+    cw,
+    T,
+    B,
+    cur_om=None,
+    vel=None,
+    turning=None,
+    loads=None,
+    measured_val=1.0,
 ):
     """Fabricate a rollout (poses/tilts/violations/controls we CHOSE) and run the GPU cost kernel on
     it -> J[B]. Nothing is settled, so every input is known and J is hand-computable. The physics
@@ -102,8 +121,24 @@ def _launch_cost(
         mg._cost_kernel,
         B,
         inputs=[
-            controlled, derived, clearance, residual, twom, cur_om_d, vel_d, turning_d, loads_d,
-            measured, sim.grid, goal_d, sim.grid, field, 16, cw, sim.robot, T,
+            controlled,
+            derived,
+            clearance,
+            residual,
+            twom,
+            cur_om_d,
+            vel_d,
+            turning_d,
+            loads_d,
+            measured,
+            sim.grid,
+            goal_d,
+            sim.grid,
+            field,
+            16,
+            cw,
+            sim.robot,
+            T,
         ],
         outputs=[Jg],
         device=device,
@@ -129,12 +164,15 @@ def selftest_cost_assembly(device="cuda"):
     resid = np.full((T, B), rp.resid_tol + d_resid, np.float32)  # above tol -> resid_viol
     ctrl = np.full((T, B, 3), 1.0, np.float32)  # constant -> effort = T*2, smoothness = 0
 
-    J = _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, _LAT_CONST, [3.0, 1.0], _cw(), T, B)
+    J = _launch_cost(
+        device, sim, poses, tilts, clear, resid, ctrl, _LAT_CONST, [3.0, 1.0], _cw(), T, B
+    )
 
     per_viol = d_clear + d_resid + d_roll + d_climb  # descend stays 0 (pitch is negative)
     sum_early = sum((T - t) / T for t in range(T))  # earlier violations weigh more
     exp = (
-        (_W["goal_terminal"] + _W["goal_running"]) * _LAT_CONST**2  # goal: V^2, run mean == terminal
+        (_W["goal_terminal"] + _W["goal_running"])
+        * _LAT_CONST**2  # goal: V^2, run mean == terminal
         + _W["effort"] * (T * 2.0)  # effort = sum wL^2+wR^2 = T*(1+1)
         + per_viol * sum_early * _W["infeasible"]
     )
@@ -160,8 +198,18 @@ def selftest_fallback(device="cuda"):
     ctrl = np.zeros((T, B, 3), np.float32)  # no effort/smoothness
 
     J = _launch_cost(
-        device, sim, poses, tilts, clear, resid, ctrl, V, [gx, gy],
-        _cw(explore_fallback=fb, lattice_cap=cap), T, B,
+        device,
+        sim,
+        poses,
+        tilts,
+        clear,
+        resid,
+        ctrl,
+        V,
+        [gx, gy],
+        _cw(explore_fallback=fb, lattice_cap=cap),
+        T,
+        B,
     )
     goal_cost = cap**2 + fb * ((px - gx) ** 2 + (py - gy) ** 2)
     exp = (_W["goal_terminal"] + _W["goal_running"]) * goal_cost
@@ -200,7 +248,9 @@ def selftest_sample_lattice(device="cuda"):
             _probe_sample,
             len(xs),
             inputs=[
-                field, grid, nt,
+                field,
+                grid,
+                nt,
                 wp.array(np.asarray(xs, np.float32), dtype=float, device=device),
                 wp.array(np.asarray(ys, np.float32), dtype=float, device=device),
                 wp.array(np.asarray(yaws, np.float32), dtype=float, device=device),
@@ -212,7 +262,12 @@ def selftest_sample_lattice(device="cuda"):
 
     # field[r, c, t] = c -> sample returns the fractional column = clamp(x - 0.5, col in [0, nx-1])
     col = np.broadcast_to(np.arange(nx)[None, :, None], (ny, nx, nt))
-    xs = [3.3, 0.5, -2.0, 100.0]  # in-cell, cell edge, off-grid low (clamp 0), off-grid high (clamp)
+    xs = [
+        3.3,
+        0.5,
+        -2.0,
+        100.0,
+    ]  # in-cell, cell edge, off-grid low (clamp 0), off-grid high (clamp)
     exp_x = [2.8, 0.0, 0.0, 9.0]
     got_x = _probe(col, xs, [5.0] * 4, [0.0] * 4)
 
@@ -226,7 +281,9 @@ def selftest_sample_lattice(device="cuda"):
     ex = float(np.abs(got_x - exp_x).max())
     et = float(np.abs(got_t - exp_t).max())
     print(f"  sample_lattice x: got={np.round(got_x, 4).tolist()} exp={exp_x} max|err|={ex:.2e}")
-    print(f"  sample_lattice theta(+wrap): got={np.round(got_t, 4).tolist()} exp={exp_t} max|err|={et:.2e}")
+    print(
+        f"  sample_lattice theta(+wrap): got={np.round(got_t, 4).tolist()} exp={exp_t} max|err|={et:.2e}"
+    )
     print(f"sample_lattice  {'OK' if max(ex, et) < 1e-4 else 'REVIEW'}")
 
 
@@ -240,9 +297,15 @@ def selftest_cost_terms(device="cuda"):
     sim = _build_sim(device, B, T)
     rp = RobotParams()
     g = sim.grid
-    edge, d, oob_w = 0.4, 0.5, 1.0  # edge is hard-coded in the kernel; d = depth past the low-x wall
+    edge, d, oob_w = (
+        0.4,
+        0.5,
+        1.0,
+    )  # edge is hard-coded in the kernel; d = depth past the low-x wall
     x_lo = g.origin_x + edge
-    y_mid = g.origin_y + 0.5 * g.cells_y * g.cell_size  # in-bounds in y -> only the x wall contributes
+    y_mid = (
+        g.origin_y + 0.5 * g.cells_y * g.cell_size
+    )  # in-bounds in y -> only the x wall contributes
 
     poses = np.zeros((T + 1, B, 3), np.float32)
     poses[..., 0], poses[..., 1] = x_lo - d, y_mid
@@ -255,15 +318,29 @@ def selftest_cost_terms(device="cuda"):
     ctrl[:, 0, 0], ctrl[:, 0, 1] = wl, wr
 
     # field_val = 0 -> V = 0 everywhere -> the goal term drops out, leaving only the small terms
-    J = _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, 0.0, [3.0, 1.0],
-                     _cw(out_of_bounds=oob_w), T, B)
+    J = _launch_cost(
+        device,
+        sim,
+        poses,
+        tilts,
+        clear,
+        resid,
+        ctrl,
+        0.0,
+        [3.0, 1.0],
+        _cw(out_of_bounds=oob_w),
+        T,
+        B,
+    )
 
     eff = float((wl**2 + wr**2).sum())
     smooth = float((np.diff(wl) ** 2 + np.diff(wr) ** 2).sum())
     oob = T * d  # each of the T evaluated poses is d past the wall (pose 0 is shared -> skipped)
     exp = _W["effort"] * eff + _W["smoothness"] * smooth + oob_w * oob
     rel = abs(J[0] - exp) / abs(exp)
-    print(f"  cost terms: J={J[0]:.4f} expected={exp:.4f} (eff={eff:.1f} smooth={smooth:.2f} oob={oob:.1f}) rel={rel:.2e}")
+    print(
+        f"  cost terms: J={J[0]:.4f} expected={exp:.4f} (eff={eff:.1f} smooth={smooth:.2f} oob={oob:.1f}) rel={rel:.2e}"
+    )
     print(f"cost terms  {'OK' if rel < 1e-4 else 'REVIEW'}")
 
 
@@ -291,8 +368,21 @@ def selftest_saturation(device="cuda"):
         turning = np.zeros((T, B, 2), np.float32)
         turning[..., 0] = 1.0 + k_turn * mu * np.cos(theta)  # grip = mu*m*g*cos(theta)
         # field val 0 -> goal term 0; v = 0 -> no accel/centripetal demand
-        return _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, 0.0, [3.0, 1.0],
-                            cw, T, B, turning=turning)[0]
+        return _launch_cost(
+            device,
+            sim,
+            poses,
+            tilts,
+            clear,
+            resid,
+            ctrl,
+            0.0,
+            [3.0, 1.0],
+            cw,
+            T,
+            B,
+            turning=turning,
+        )[0]
 
     th_lo = np.arctan(mu) - 0.05  # below the crossing -> certificate silent
     th_hi = np.arctan(mu) + 0.10  # above -> exact overshoot
@@ -301,7 +391,9 @@ def selftest_saturation(device="cuda"):
     j_lo, j_hi = J_at(th_lo), J_at(th_hi)
     rel = abs(j_hi - exp_hi) / abs(exp_hi)
     ok = j_lo == 0.0 and rel < 1e-3
-    print(f"  saturation: below-crossing J={j_lo:.4f} (exp 0), above J={j_hi:.3f} exp={exp_hi:.3f} rel={rel:.2e}")
+    print(
+        f"  saturation: below-crossing J={j_lo:.4f} (exp 0), above J={j_hi:.3f} exp={exp_hi:.3f} rel={rel:.2e}"
+    )
     print(f"saturation certificate  {'OK' if ok else 'REVIEW'}")
 
 
@@ -321,8 +413,9 @@ def selftest_tip(device="cuda"):
     ctrl = np.zeros((T, B, 3), np.float32)
     loads = np.full((T, B, 3), rp.mass * rp.gravity / 3.0, np.float32)
     loads[..., 2] = -deficit
-    J = _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, 0.0, [3.0, 1.0],
-                     cw, T, B, loads=loads)[0]
+    J = _launch_cost(
+        device, sim, poses, tilts, clear, resid, ctrl, 0.0, [3.0, 1.0], cw, T, B, loads=loads
+    )[0]
     sum_early = sum((T - t) / T for t in range(T))
     exp = w_tip * sum_early * deficit / (rp.mass * rp.gravity)
     rel = abs(J - exp) / abs(exp)
@@ -366,8 +459,9 @@ def selftest_reverse(device="cuda"):
     turning = np.zeros((T, B, 2), np.float32)
     turning[..., 0] = 1.0
     turning_d = wp.array(turning, dtype=wp.vec2, device=device)
-    loads_d = wp.array(np.full((T, B, 3), rp.mass * rp.gravity / 3.0, np.float32),
-                       dtype=wp.vec3, device=device)
+    loads_d = wp.array(
+        np.full((T, B, 3), rp.mass * rp.gravity / 3.0, np.float32), dtype=wp.vec3, device=device
+    )
     measured = wp.full((cy, cx), 1.0, dtype=wp.float32, device=device)
     field = wp.array(np.ascontiguousarray(hd), dtype=float, device=device)
     goal_d = wp.array(np.asarray([3.0, 1.0], np.float32), dtype=float, device=device)
@@ -375,22 +469,72 @@ def selftest_reverse(device="cuda"):
     cw_a = _cw()
     cw_a.dt = 0.1  # rev shaping off (reverse=0), unknown off; goal terms only
     wp.launch(
-        mg._cost_kernel, B,
-        inputs=[controlled, derived, clearance, residual, twom, cur_om_d, vel_d, turning_d, loads_d,
-                measured, sim.grid, goal_d, sim.grid, field, 16, cw_a, sim.robot, T],
-        outputs=[Jg], device=device,
+        mg._cost_kernel,
+        B,
+        inputs=[
+            controlled,
+            derived,
+            clearance,
+            residual,
+            twom,
+            cur_om_d,
+            vel_d,
+            turning_d,
+            loads_d,
+            measured,
+            sim.grid,
+            goal_d,
+            sim.grid,
+            field,
+            16,
+            cw_a,
+            sim.robot,
+            T,
+        ],
+        outputs=[Jg],
+        device=device,
     )
     exp_a = (_W["goal_terminal"] + _W["goal_running"]) * 8.0**2  # V = heading index 8 (pi)
     rel_a = abs(Jg.numpy()[0] - exp_a) / exp_a
     # (b)+(c) constant-zero field, blind map, shaping on
     cw_bc = _cw()
     cw_bc.unknown, cw_bc.reverse, cw_bc.dt = w_unk, w_rev, 0.1
-    J_bc = _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, 0.0, [3.0, 1.0],
-                        cw_bc, T, B, cur_om=cur_om, vel=vel, measured_val=0.0)[0]
+    J_bc = _launch_cost(
+        device,
+        sim,
+        poses,
+        tilts,
+        clear,
+        resid,
+        ctrl,
+        0.0,
+        [3.0, 1.0],
+        cw_bc,
+        T,
+        B,
+        cur_om=cur_om,
+        vel=vel,
+        measured_val=0.0,
+    )[0]
     exp_bc = w_unk * sum_early + w_rev * (-v_back) * 0.1 * T
     rel_bc = abs(J_bc - exp_bc) / exp_bc
-    J_meas = _launch_cost(device, sim, poses, tilts, clear, resid, ctrl, 0.0, [3.0, 1.0],
-                          cw_bc, T, B, cur_om=cur_om, vel=vel, measured_val=1.0)[0]
+    J_meas = _launch_cost(
+        device,
+        sim,
+        poses,
+        tilts,
+        clear,
+        resid,
+        ctrl,
+        0.0,
+        [3.0, 1.0],
+        cw_bc,
+        T,
+        B,
+        cur_om=cur_om,
+        vel=vel,
+        measured_val=1.0,
+    )[0]
     exp_meas = w_rev * (-v_back) * 0.1 * T  # measured map -> only the shaping remains
     rel_m = abs(J_meas - exp_meas) / exp_meas
     ok = rel_a < 1e-4 and rel_bc < 1e-4 and rel_m < 1e-4
@@ -439,17 +583,29 @@ def selftest_robust_margin(device="cuda"):
     margins = [0.0, 0.2, 0.4]
     approach = []
     for m in margins:
-        ctg = CostToGo(gp, RobotParams(), SolverParams(dt=0.1, k_turn=2.0, newton_iters=6, atol=1e-4),
-                       n_theta=nth, robust_margin_m=m, device=device)
+        ctg = CostToGo(
+            gp,
+            RobotParams(),
+            SolverParams(dt=0.1, k_turn=2.0, newton_iters=6, atol=1e-4),
+            n_theta=nth,
+            robust_margin_m=m,
+            device=device,
+        )
         V = ctg.compute(Hd, goal).numpy()
         reach = V.min(2) < ctg._vcap * 0.9  # cells the plan can route through
-        approach.append(float(dcell[reach].min()))  # closest the plan lets the robot get to the block
+        approach.append(
+            float(dcell[reach].min())
+        )  # closest the plan lets the robot get to the block
 
     a0, a1, a2 = approach
     mono = a2 > a1 > a0
-    keeps = (a1 >= a0 + 0.2 - cell) and (a2 >= a0 + 0.4 - cell)  # each margin adds >= itself (1 cell slack)
-    print(f"  robust margin: closest-approach  m=0:{a0:.2f}  +0.2:{a1:.2f}  +0.4:{a2:.2f}  "
-          f"(gained {a1 - a0:+.2f}, {a2 - a0:+.2f} m)")
+    keeps = (a1 >= a0 + 0.2 - cell) and (
+        a2 >= a0 + 0.4 - cell
+    )  # each margin adds >= itself (1 cell slack)
+    print(
+        f"  robust margin: closest-approach  m=0:{a0:.2f}  +0.2:{a1:.2f}  +0.4:{a2:.2f}  "
+        f"(gained {a1 - a0:+.2f}, {a2 - a0:+.2f} m)"
+    )
     print(f"robust margin  {'OK' if (mono and keeps) else 'REVIEW'}")
 
 

@@ -12,6 +12,7 @@ Kernels (all suffixed _kernel):
   _minmax/_bisect_*/_count_below/_elite_u   CEM reweight (top-k elite mean) of U, on device
   _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
 """
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -216,7 +217,9 @@ def _sample_target_wheel_omega_kernel(
     U: wp.array2d(dtype=float),
     sigma: float,
     sigma_knot: float,
-    wlo: wp.array(dtype=float),  # [1] effective lower wheel-speed bound (device -> live reverse gate)
+    wlo: wp.array(
+        dtype=float
+    ),  # [1] effective lower wheel-speed bound (device -> live reverse gate)
     wmax: float,
     n_cand: int,  # candidates; rollouts r = k*n_cand + c are mu replicas SHARING candidate c's controls
     n_wide: int,
@@ -292,7 +295,9 @@ def _sample_target_wheel_omega_kernel(
         wheel_l += sigma * wp.randn(jitter)
         wheel_r += sigma * wp.randn(jitter)
     # clamp to the wheel-speed box (effective wmin >= 0 -> no reverse)
-    target_wheel_omega[t, r] = wp.vec3(wp.clamp(wheel_l, wmin, wmax), wp.clamp(wheel_r, wmin, wmax), 0.0)
+    target_wheel_omega[t, r] = wp.vec3(
+        wp.clamp(wheel_l, wmin, wmax), wp.clamp(wheel_r, wmin, wmax), 0.0
+    )
 
 
 @wp.kernel
@@ -525,7 +530,9 @@ def _elite_u_kernel(
     J: wp.array(dtype=float),  # [n_cand] robust per-candidate cost
     tau: wp.array(dtype=float),
     count: wp.array(dtype=float),
-    target_wheel_omega: wp.array2d(dtype=wp.vec3),  # replicas share controls -> read columns < n_cand
+    target_wheel_omega: wp.array2d(
+        dtype=wp.vec3
+    ),  # replicas share controls -> read columns < n_cand
     wlo: wp.array(dtype=float),  # [1] effective lower wheel-speed bound
     wmax: float,
     n_cand: int,
@@ -577,7 +584,9 @@ class MppiGpu:
         self.n_bisect = _n_bisect(self.n_cand)  # CEM threshold bisection steps (scales with n_cand)
         self.sampling = sampling
         self.n_wide = int(sampling.wide_frac * self.n_cand)  # candidates drawn from the WIDE prior
-        self.n_straight = int(sampling.straight_frac * self.n_cand)  # candidates from the STRAIGHT prior
+        self.n_straight = int(
+            sampling.straight_frac * self.n_cand
+        )  # candidates from the STRAIGHT prior
         self.n_pivot = int(sampling.pivot_frac * self.n_cand)  # candidates from the PIVOT prior
 
         # CEM elite count (over candidates)

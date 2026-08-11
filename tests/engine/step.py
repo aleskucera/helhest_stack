@@ -426,9 +426,7 @@ def selftest_mu_scale():
 
     scaled_field = run(0.4, 1.0)
     scaled_rollout = run(0.8, 0.5)
-    worst = max(
-        np.abs(a.numpy() - b.numpy()).max() for a, b in zip(scaled_field, scaled_rollout)
-    )
+    worst = max(np.abs(a.numpy() - b.numpy()).max() for a, b in zip(scaled_field, scaled_rollout))
     print(f"mu_scale == scaled friction  worst={worst:.2e}  {'OK' if worst < 1e-6 else 'REVIEW'}")
 
 
@@ -486,7 +484,9 @@ def selftest_momentum():
         T,
         "cpu",
     )
-    sim.set_terrain(wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device="cpu"))
+    sim.set_terrain(
+        wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device="cpu")
+    )
     sim.set_uniform_friction(mu)
     v0 = 4.0 * RobotParams().wheel_radius  # init wheels at 4 rad/s -> 1.4 m/s
     ctrl = np.zeros((T, 1, 3), np.float32)  # command a stop

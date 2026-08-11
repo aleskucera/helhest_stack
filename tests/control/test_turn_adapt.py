@@ -1,4 +1,5 @@
 """Contract tests for the adaptive turn-boost yaw-feedback estimator."""
+
 from helhest.control.turn_adapt import AdaptiveTurnBoost
 from helhest.control.turn_adapt import TurnGainEstimator
 

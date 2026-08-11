@@ -130,7 +130,8 @@ def _step_gate_kernel(
     """OR a hard block (ALL headings) onto any pose whose footprint (radius foot_r cells) contains a
     STEP taller than step_gate -- a vertical obstacle the body would hit but the settle straddles.
     Heading-independent: the robot cannot be centred within foot_r cells of a tall pole in ANY
-    orientation. Only ever SETS blocked=1 (never clears), so it composes with the settle feasibility."""
+    orientation. Only ever SETS blocked=1 (never clears), so it composes with the settle feasibility.
+    """
     r, c, t = wp.tid()
     ny = step.shape[0]
     nx = step.shape[1]

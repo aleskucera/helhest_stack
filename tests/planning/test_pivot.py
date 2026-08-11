@@ -3,6 +3,7 @@ forward-arc U-turn must be unreachable without pivots and routable with them.
 
 Run:  python -m tests.planning.test_pivot   (also collected by pytest)
 """
+
 from __future__ import annotations
 
 import numpy as np
