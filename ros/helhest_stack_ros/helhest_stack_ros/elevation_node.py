@@ -1737,7 +1737,7 @@ class ElevationNode(Node):
         self._prev_cmd = cmd
         self._publish_cmd(cmd)
         if ref_cmd is not None:
-            self._yaw_track_update(ref_cmd, cmd)
+            self._yaw_track_update(ref_cmd, cmd, turn_boost)
         self.pub_holding.publish(Bool(data=holding))  # True = walled-off hold, False = driving
         self._holding = holding  # colors the planned-path marker red next frame (see _publish_path)
         self.pub_turn_boost.publish(
@@ -1772,7 +1772,7 @@ class ElevationNode(Node):
             turn_brake_scale=self._turn_brake_lookahead(turn_boost),
         )
 
-    def _yaw_track_update(self, ref_cmd: np.ndarray, cmd: np.ndarray) -> None:
+    def _yaw_track_update(self, ref_cmd: np.ndarray, cmd: np.ndarray, turn_boost: float) -> None:
         """Close the yaw loop: reference from the uncorrected intent, saturation from what went out.
 
         Both are post-turn-brake, so the loop tracks the braked arc rather than fighting the brake
@@ -1794,7 +1794,16 @@ class ElevationNode(Node):
             dt = max(now - self._last_yaw_track_time, 1e-4)
         self._last_yaw_track_time = now
         # /cmd_joints order is (left, rear, right), so the differential is [2] - [0].
-        yaw_ref = float(ref_cmd[2] - ref_cmd[0]) * self._yaw_per_diff
+        #
+        # DIVIDE OUT turn_boost. condition_command multiplies the differential by it, so a
+        # reference read straight off its output scales with the boost -- and the boost then
+        # cancels from the loop's error, since the measurement scales with it too. That makes the
+        # loop blind to exactly the correction turn_boost was set to apply. It is worse than
+        # useless at boost != 1: the reference would sit turn_boost x above the yaw the planner
+        # asked for, so the loop would drive the robot to over-turn by that factor. The planner's
+        # intent is the UNBOOSTED differential; the boost is compensation for a drivetrain loss,
+        # not part of the plan.
+        yaw_ref = float(ref_cmd[2] - ref_cmd[0]) / max(turn_boost, 1e-3) * self._yaw_per_diff
         yaw_meas = float(w_base[2])  # base-frame gyro z; /odin1/imu carries yaw on +z
         corr = self._yaw_track.update(
             yaw_ref,
