@@ -81,7 +81,21 @@
     # mistaken for turn resistance: the deficit is present well BELOW the ~5.3 rad/s ceiling
     # (alpha 1.68 in the 3.5-4.5 band), and worsens at it (2.36 above 5.3) -- two separate effects.
     # 1.0 is this file's own outdoor preset and lands mid-band; these were outdoor runs.
-    k_turn: 1.0
+    #
+    # 1.0 -> 1.27 from motors0 (2026-08-11), which finally SEPARATES the two losses that every
+    # earlier estimate had lumped together. Regressing the gyro on the MEASURED wheel differential
+    # gives the vehicle's own turn resistance; regressing the measured differential on the
+    # COMMANDED one gives what the drivetrain fails to deliver. They are independent and they
+    # multiply:
+    #
+    #     drivetrain realises      0.74x commanded differential  -> plan_turn_boost 1.36
+    #     vehicle alpha (measured wheels)   2.02                 -> k_turn 1.27  <- this
+    #     combined alpha (from the command) 2.67                 (1.36 x 2.02 = 2.74, within 3%)
+    #
+    # k_turn belongs to the VEHICLE only. Folding the drivetrain loss into it -- k_turn 2.09 would
+    # have matched the combined figure -- would model a transmission defect as turn resistance,
+    # and the MPPI rollouts use this same constant as physics, so the plan itself would go wrong.
+    k_turn: 1.27
     # Wheel-differential penalty. THE knob for how willing the planner is to turn, and 0.8 was
     # far too high: measured closed-loop on flat open ground (scripts/turn_eval.py), a goal at 90
     # or 180 deg was NEVER REACHED in 70 s, because a differential of 2 rad/s costs 0.8*25*4 = 80
@@ -154,6 +168,20 @@
     # 0.60 for a_max 0.4 -- and it undoes the slew raise that fixed the sluggish turning.
     # Field call 2026-08-10: 0.4 -> 0.6 (less corner braking), with the lookahead OFF below.
     plan_turn_brake_a_max: 0.6
+
+    # Drivetrain differential loss, the OTHER half of the k_turn decomposition above. The two
+    # motors equalise a commanded differential under load, so the wheels realise only 0.74x what
+    # /cmd_joints asks for (motors0, 14539 turning samples, measured wheels vs command). This
+    # amplifies the differential to compensate; forward speed is untouched.
+    #
+    # 1.0 -> 1.36 = 1 / 0.74. Note the loop could not see this until d9c7716: condition_command
+    # applies the boost, and the yaw loop's reference was read off its output, so the boost
+    # cancelled from the error. With that fixed the reference is the UNBOOSTED planned
+    # differential and this knob does what it says.
+    #
+    # docs/turn_differential_hotfix.md calls this a stopgap for a drivetrain defect, and it still
+    # is -- but it is now a MEASURED stopgap on the right quantity rather than a hand-picked one.
+    plan_turn_boost: 1.36
     # Pre-apply the tightest cap found this far ahead along the committed plan, so the robot is
     # already slow when it enters the corner. 0 = react to the current command only.
     # Field call 2026-08-10: OFF (0.0) -- brake AT the corner, do not pre-slow on the approach.
