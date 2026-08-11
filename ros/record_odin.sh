@@ -44,6 +44,11 @@ TOPICS=(
 # the UWB two-way-ranging estimates + per-anchor distances, and the bluetooth AoA stack.
 TOPIC_REGEX="^/(radio|uwb|bluetooth)/"
 
+# Motor identification needs NONE of the above except the drivetrain. cloud_raw alone is ~13 MB/s
+# (fast_experiment0 came to 8.5 GB), and the fit reads only the command, the wheel response and
+# the gyro -- so the steps_* scenarios record just those three and land in the tens of MB.
+MOTOR_TOPICS=(/cmd_joints /joint_setpoints /joint_states /odin1/imu)
+
 # Standard scenarios: name -> maneuver to perform while recording.
 declare -A SCENARIOS=(
   [static]="hold still -- baseline: floor plane, self-filter, specular-reflection check"
@@ -61,13 +66,21 @@ is the measurement that confirms or kills it on the real robot."
 of driving arcs. Same measurement, 1.9 x 1.8 m instead of 41 x 29 m, because what sets a tyre's
 relaxation is the speed the CONTACT travels over the ground and that is nonzero in a spin. Drive
 it with ros/calibrate_drive.py compact --go."
+  [steps_air]="WHEELS OFF THE GROUND, robot chocked or strapped down. Drive it with
+ros/calibrate_drive.py steps --go (98 s). No breakaway, no load, no slip, so the response IS the
+motor plus wheel inertia -- the only clean look at the actuator this robot can give. Records the
+drivetrain topics only, no lidar."
+  [steps_ground]="THE SAME program on the ground, needs ~4.2 m of run-out (steps alternate
+forward/reverse, so it nets to zero displacement). The pair air+ground is the measurement: the
+difference between them is load, breakaway and slip, which is what separates the motor model from
+the traction model. Fit both with scripts/fit_motor_steps.py."
   [slope]="drive a slope of 10 deg or more: straight up, straight down, and ACROSS it in both
 directions, 4-5 s each, plus a turn while on the cross-slope. Nothing in the archive exceeds 5.4
 deg of tilt, so the load-transfer fix (normal_loads, validated only against Chrono) has never been
 seen on real data. The across-slope runs are the ones that matter -- that is where the old model
 predicted zero lateral transfer and Chrono predicts 0.4 m g."
 )
-ORDER=(static spin translate drive_goal dynamic calibrate relax compact slope)
+ORDER=(static spin translate drive_goal dynamic calibrate relax compact steps_air steps_ground slope)
 
 list_scenarios() {
   echo "scenarios:"
@@ -103,6 +116,13 @@ mkdir -p ~/bags
 
 # QoS override so the 400 Hz /odin1/imu is not silently dropped on the recorder side.
 QOS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/odin/rosbag2_qos.yaml"
+
+# steps_* are actuator identification: drivetrain topics only, and no --regex (the tracking
+# namespaces are irrelevant here and only add size).
+if [[ "$NAME" == steps_* ]]; then
+  echo "recording -> ~/bags/$NAME   drivetrain only, no lidar   (Ctrl-C to stop)"
+  exec ros2 bag record -o "$DEST" --qos-profile-overrides-path "$QOS" "${MOTOR_TOPICS[@]}"
+fi
 
 echo "recording -> ~/bags/$NAME   (Ctrl-C to stop)"
 exec ros2 bag record -o "$DEST" --qos-profile-overrides-path "$QOS" "${TOPICS[@]}" --regex "$TOPIC_REGEX"

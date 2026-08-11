@@ -117,23 +117,42 @@ Gaps, stops, obstacles and traffic cost nothing — the fits segment on the hold
 
 **In the air first, then on the ground. The pair is the measurement; either one alone is not.**
 
-```bash
-# 1. WHEELS OFF THE GROUND -- chock or strap the robot down first
-./ros/record_odin.sh steps_air &          # or the minimal recording below
-python3 ros/calibrate_drive.py steps      # dry run: prints the program
-python3 ros/calibrate_drive.py steps --go # 98 s
+Two terminals. `record_odin.sh steps_air` / `steps_ground` record the drivetrain topics ONLY --
+no lidar, so these are tens of MB rather than the 8.5 GB `fast_experiment0` came to.
 
-# 2. SAME PROGRAM, ON THE GROUND. Needs ~4.2 m of run-out; steps alternate
-#    forward/reverse so it nets to zero displacement and stays near the start.
-./ros/record_odin.sh steps_ground &
-python3 ros/calibrate_drive.py steps --go
+**Before either run:** `plan_actuate` must be OFF, or the planner and the script both publish on
+`/cmd_joints` and the manoeuvre is not what you drove. Either do not run elevation_node, or:
+
+```bash
+ros2 param set /elevation plan_actuate false
+ros2 topic hz /joint_states     # must be live -- with no measured wheels nothing is fittable
 ```
 
-The lidar is useless here and dominates the file (8.5 GB for 5 min). Record only what the fit
-reads:
+**Run 1, wheels OFF the ground.** Chock or strap the robot: the rim reaches 1.4 m/s at 4 rad/s.
 
 ```bash
-ros2 bag record -o ~/bags/steps_air /cmd_joints /joint_states /odin1/imu
+# terminal 1
+./ros/record_odin.sh steps_air
+# terminal 2
+python3 ros/calibrate_drive.py steps        # DRY RUN first -- prints the program, publishes nothing
+python3 ros/calibrate_drive.py steps --go   # 98 s, then Ctrl-C terminal 1
+```
+
+**Run 2, the same program on the ground.** Needs ~4.2 m of run-out; the steps alternate
+forward/reverse so it nets to zero displacement and finishes where it started.
+
+```bash
+# terminal 1
+./ros/record_odin.sh steps_ground
+# terminal 2
+python3 ros/calibrate_drive.py steps --go   # 98 s, then Ctrl-C terminal 1
+```
+
+Note the surface in your notes -- mu changes the ground run and nothing else.
+
+```bash
+bags/fetch_bag.sh steps_air
+bags/fetch_bag.sh steps_ground
 ```
 
 **Why two runs.** Every actuator number we have is confounded. `MOTOR_TAU = 0.19 s` was fitted from
