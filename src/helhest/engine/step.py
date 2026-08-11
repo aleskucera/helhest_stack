@@ -43,6 +43,7 @@ wp.set_module_options({"optimization_level": 2})
 # contact would otherwise report an enormous ratio while transmitting almost nothing.
 
 _TWO_PI = wp.constant(2.0 * float(np.pi))
+_PI = wp.constant(float(np.pi))
 
 # Finite-difference step for the shear twist Jacobian [m/s and rad/s]. Small enough that the
 # secant tracks the tangent, large enough to stay clear of float32 cancellation.
@@ -553,16 +554,21 @@ def yaw_bin(yaw: float, n_yaw: int) -> int:
     constant 0 -- the default path never touches the float math below. A CYLINDER wheel
     (RobotParams.wheel_width) is not yaw-invariant and gets one dilated slice per bin.
 
+    The stack spans [0, PI), NOT [0, 2*PI): a capsule footprint at yaw and yaw+PI is the SAME
+    shape (verified -- cylinder_offset_table returns bit-identical tables for the pair), so a
+    2*PI stack recomputes and stores its own second half. Half the slices at the same angular
+    resolution; the bin width is PI/n_yaw.
+
     COUPLED CONSTRAINT (IMPROVEMENTS.md section 7): with a yaw-dependent envelope, `psi_dot * dt`
-    must stay inside one bin or the rollout aliases across slices. At 32 bins (11.25 deg) and
-    dt = 0.1 s that holds up to psi_dot ~ 2 rad/s, which spin-in-place reaches at roughly
-    omega_max = 4.5 rad/s. omega_max is not recorded anywhere in this repo; if it is near
-    8 rad/s the cylinder and a finer step have to land together. Not solved here -- documented.
+    must stay inside one bin or the rollout aliases across slices. At 32 bins over PI (5.6 deg)
+    and dt = 0.1 s that holds up to psi_dot ~ 1 rad/s. omega_max is not recorded anywhere in this
+    repo; if it is near 8 rad/s the cylinder and a finer step have to land together. Not solved
+    here -- documented.
     """
     if n_yaw == 1:
         return 0
     bins = float(n_yaw)
-    k = int(wp.floor(yaw / (_TWO_PI / bins) + 0.5))
+    k = int(wp.floor(yaw / (_PI / bins) + 0.5))
     return ((k % n_yaw) + n_yaw) % n_yaw
 
 

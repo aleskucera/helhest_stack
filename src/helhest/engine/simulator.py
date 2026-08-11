@@ -43,7 +43,10 @@ DILATE_TILE = 16  # output tile size for the batched tiled dilation (Differentia
 # contact by more than a cell: R * dpsi <= cell -> dpsi <= 0.1/0.35 = 0.29 rad = 16 deg, so >= 22
 # bins over the circle; 32 rounds that up. Costs n_yaw x the envelope grid (1.6 MB at the real
 # 0.1 m cell) and n_yaw dilations per perception frame, nothing per rollout.
-YAW_BINS = 64
+# Slices span [0, PI): a capsule at yaw and yaw+PI is the same shape, so a 2*PI stack is
+# half redundant. 32 here is PI/32 = 5.6 deg -- the same resolution the previous 64-over-2*PI
+# gave, at half the dilation cost and half the memory. See step.yaw_bin.
+YAW_BINS = 32
 
 
 @wp.kernel
@@ -198,7 +201,7 @@ class ForwardSimulator(BaseSimulator):
                     self.cell_size,
                     self.wheel_radius,
                     0.5 * self.wheel_width,
-                    k * 2.0 * np.pi / n_yaw,
+                    k * np.pi / n_yaw,
                 )
                 self._yaw_offsets.append(
                     (

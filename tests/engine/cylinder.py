@@ -186,8 +186,8 @@ def selftest_lateral_ridge() -> None:
 def selftest_yaw_binning() -> None:
     """Head-on, the same ridge IS along travel -- so the cylinder must climb it like the sphere.
 
-    Exercises bin 8 of 32 (90 deg); if every bin held the yaw = 0 table this world would report
-    the cylinder driving through the ridge.
+    Exercises bin 16 of 32 (the stack spans [0, PI), so 90 deg is the midpoint); if every bin
+    held the yaw = 0 table this world would report the cylinder driving through the ridge.
     """
     rp = RobotParams()
     ridge_edge = rp.half_track + RIDGE_GAP
@@ -203,7 +203,7 @@ def selftest_yaw_binning() -> None:
     )
     assert abs(sphere["pitch"]) > np.radians(1.0), "the head-on ridge should tilt the robot"
     assert d_state < 1e-6, "head-on, the cylinder must match the sphere (wrong yaw bin?)"
-    print("yaw binning  OK (bin 8 = 90 deg is the along-travel element)")
+    print("yaw binning  OK (bin 16 = 90 deg is the along-travel element)")
 
 
 if __name__ == "__main__":
