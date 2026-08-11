@@ -159,6 +159,7 @@ _PLAN_BUILD = frozenset(
         "plan_robust_margin_m",
         "plan_robust_margin_deg",
         "plan_nominal_reset",
+        "plan_tau_motor",
         "plan_goal_running",
         "plan_effort",
         "plan_turn",
@@ -583,6 +584,16 @@ class ElevationNode(Node):
         # baked into the CUDA graph.
         d("plan_obstacle_step_m", 0.0)
         d("plan_nominal_reset", 1.5)  # nominal wheel speed the planner seeds from
+        # MODELED ACTUATION LAG [s]: first-order wheel-speed lag inside the MPPI rollouts
+        # (SolverParams.tau_motor). Smoothness belongs in the MODEL, not an output filter: an
+        # external slew limiter executes something the planner never simulated, and the induced
+        # tracking lag (~0.2-0.4 m at 1.4 m/s under heavy filtering) is exactly the graze depth
+        # measured against obstacles. With the lag modeled, candidates that need late dodges rank
+        # poorly by themselves and the executed motion matches the plan (sim: the pocket trap at
+        # 2.1 m/s goes from mass contacts under output filtering to clean in 17 s). Set this to
+        # the MEASURED real wheel-response time constant; 0 = instantaneous (legacy). When > 0,
+        # relax plan_max_slew toward a safety backstop rather than the smoothness mechanism.
+        d("plan_tau_motor", 0.0)
         # MPPI speed knobs (rebuild the planner on change): the robot drives slow because the cost
         # balance prefers it. Raise goal_running (reward progress) and/or lower effort (penalty on
         # wheel-speed^2) to drive faster. plan_max_omega is only the output SAFETY clamp, not speed.
@@ -798,6 +809,7 @@ class ElevationNode(Node):
         self.plan_robust_margin_deg: float = g("plan_robust_margin_deg")
         self.plan_obstacle_step_m: float = g("plan_obstacle_step_m")
         self.plan_nominal_reset: float = g("plan_nominal_reset")
+        self.plan_tau_motor: float = g("plan_tau_motor")
         self.plan_goal_running: float = g("plan_goal_running")
         self.plan_effort: float = g("plan_effort")
         self.plan_turn: float = g("plan_turn")
@@ -918,9 +930,11 @@ class ElevationNode(Node):
         else:
             kt = dynamics.k_turn_for(self.terrain)
             self.get_logger().info(f"planner terrain='{self.terrain}' -> K_TURN={kt}")
+        plan_solver = dynamics.planning_solver(k_turn=kt)
+        plan_solver.tau_motor = self.plan_tau_motor  # modeled actuation lag (0 = instantaneous)
         self.plan_sim = ForwardSimulator(
             dynamics.robot_params(),
-            dynamics.planning_solver(k_turn=kt),
+            plan_solver,
             win_grid,
             int(self.plan_batch),
             int(self.plan_horizon),
