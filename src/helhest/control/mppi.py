@@ -124,9 +124,12 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # unmeasured-cell occupancy while REVERSING (forward motion into unknown stays allowed -- the
     # sensor sees it before arrival; backward there is no sensor, so unknown must hard-lose).
     unknown: float = 1e4
-    # per-meter shaping against reverse; big enough to break ties toward forward, small enough
-    # that a genuinely shorter reverse maneuver still wins.
-    reverse: float = 5.0
+    # per-meter shaping against reverse. Both "reverse the whole way" and "pivot then drive" cost
+    # ~linearly in route length (the pivot's V-surcharge is 2*V*pivot_cost*goal_terminal-ish), so
+    # this weight is a threshold: at ~5 the robot happily backs up 10+ m (and creeps through
+    # narrow passages backward); at ~25 the pivot route wins any long haul and reverse stays what
+    # it should be with no rear sensor -- a short-range escape over remembered ground.
+    reverse: float = 25.0
 
     def build(self) -> CostWeights:
         cw = CostWeights()
@@ -526,10 +529,44 @@ def _bisect_step_kernel(
 
 
 @wp.kernel
+def _cand_dir_kernel(
+    target_wheel_omega: wp.array2d(dtype=wp.vec3),
+    horizon: int,
+    dir_out: wp.array(dtype=float),  # [n_cand] net direction: +1 forward-ish, -1 reverse-ish
+):
+    """Net commanded direction per candidate (sign of the summed mean wheel speed). With reverse
+    enabled the candidate set is BIMODAL (back up vs pivot-and-drive); a plain elite mean of the
+    two modes is ~zero velocity and the robot creeps. The elite mean is therefore restricted to
+    the best candidate's direction (see _elite_u_kernel)."""
+    b = wp.tid()
+    s = float(0.0)
+    for t in range(horizon):
+        w = target_wheel_omega[t, b]
+        s += w[0] + w[1]
+    dir_out[b] = wp.where(s < 0.0, -1.0, 1.0)
+
+
+@wp.kernel
+def _best_dir_kernel(
+    J: wp.array(dtype=float),  # [n_cand] robust per-candidate cost
+    jmin: wp.array(dtype=float),
+    dirs: wp.array(dtype=float),
+    n_cand: int,
+    best_dir: wp.array(dtype=float),  # [1] direction of the lowest-cost candidate
+):
+    best_dir[0] = 1.0
+    for b in range(n_cand):
+        if J[b] <= jmin[0]:
+            best_dir[0] = dirs[b]
+            return
+
+
+@wp.kernel
 def _elite_u_kernel(
     J: wp.array(dtype=float),  # [n_cand] robust per-candidate cost
     tau: wp.array(dtype=float),
-    count: wp.array(dtype=float),
+    dirs: wp.array(dtype=float),  # [n_cand] net direction per candidate
+    best_dir: wp.array(dtype=float),  # [1] direction of the best candidate
     target_wheel_omega: wp.array2d(
         dtype=wp.vec3
     ),  # replicas share controls -> read columns < n_cand
@@ -539,11 +576,15 @@ def _elite_u_kernel(
     U: wp.array2d(dtype=float),
 ):
     t, wheel = wp.tid()  # (timestep, wheel: 0=L, 1=R)
+    # DIRECTION-COHERENT elite mean: average only elites moving the best candidate's way.
+    # Forward-only sampling makes every dir +1, so this reduces to the plain elite mean.
     elite_sum = float(0.0)
+    elite_n = float(0.0)
     for b in range(n_cand):
-        if J[b] <= tau[0]:  # elite candidate
+        if J[b] <= tau[0] and dirs[b] == best_dir[0]:
             elite_sum += target_wheel_omega[t, b][wheel]
-    U[t, wheel] = wp.clamp(elite_sum / count[0], wlo[0], wmax)  # unweighted elite mean
+            elite_n += 1.0
+    U[t, wheel] = wp.clamp(elite_sum / wp.max(elite_n, 1.0), wlo[0], wmax)
 
 
 @wp.kernel
@@ -610,6 +651,8 @@ class MppiGpu:
             self.tau_hi = wp.zeros(1, dtype=wp.float32)
             self.tau = wp.zeros(1, dtype=wp.float32)
             self.count = wp.zeros(1, dtype=wp.float32)
+            self.dirs = wp.zeros(self.n_cand, dtype=wp.float32)  # per-candidate net direction
+            self.best_dir = wp.zeros(1, dtype=wp.float32)  # best candidate's direction
             self.seed = wp.array([int(seed)], dtype=wp.int32)
             self.goal = wp.zeros(2, dtype=wp.float32)
             # effective lower wheel-speed bound, device-side so the node can gate reverse per frame
@@ -799,19 +842,27 @@ class MppiGpu:
                 device=self.device,
             )
         wp.launch(
-            _count_below_kernel,
+            _cand_dir_kernel,
             self.n_cand,
-            inputs=[self.Jc, self.tau, self.count],
+            inputs=[self.sim.target_wheel_omega, self.horizon],
+            outputs=[self.dirs],
             device=self.device,
-        )  # final elite count
-
+        )
+        wp.launch(
+            _best_dir_kernel,
+            1,
+            inputs=[self.Jc, self.jmin, self.dirs, self.n_cand],
+            outputs=[self.best_dir],
+            device=self.device,
+        )
         wp.launch(
             _elite_u_kernel,
             (self.horizon, 2),
             inputs=[
                 self.Jc,
                 self.tau,
-                self.count,
+                self.dirs,
+                self.best_dir,
                 self.sim.target_wheel_omega,
                 self.wlo,
                 self.sampling.wmax,

@@ -610,15 +610,19 @@ def selftest_robust_margin(device="cuda"):
 
 
 def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
-    """GPU CEM (bisection top-k threshold -> elite mean) vs an EXACT numpy top-k mean. Different
-    algorithm, same spec -- a genuine oracle, not a transcription."""
+    """GPU CEM (bisection top-k threshold -> DIRECTION-COHERENT elite mean) vs an EXACT numpy
+    top-k mean under the same spec: elites are filtered to the best candidate's net direction
+    (sign of the summed mean wheel speed), which prevents the bimodal forward/reverse elite from
+    averaging to zero velocity. Different algorithm, same spec -- a genuine oracle."""
     rng = np.random.default_rng(1)
     Ub = np.clip(rng.normal(1.5, _WMAX, (B, T, 2)), -_WMAX, _WMAX).astype(np.float32)
     J = rng.uniform(0.0, 5.0e4, B).astype(np.float32)
     target_k = int(elite_frac * B)
 
+    dirs_np = np.where(Ub.sum(axis=(1, 2)) < 0.0, -1.0, 1.0).astype(np.float32)
     tau_np = np.partition(J, target_k)[target_k]
-    U_np = np.clip(Ub[J <= tau_np].mean(0), -_WMAX, _WMAX).astype(np.float32)
+    keep = (J <= tau_np) & (dirs_np == dirs_np[int(np.argmin(J))])
+    U_np = np.clip(Ub[keep].mean(0), -_WMAX, _WMAX).astype(np.float32)
 
     Jd = wp.array(J, dtype=float, device=device)
     target_wheel_omega = wp.array(_to_target_wheel_omega(Ub), dtype=wp.vec3, device=device)
@@ -628,6 +632,8 @@ def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
     hi = wp.zeros(1, dtype=float, device=device)
     tau = wp.zeros(1, dtype=float, device=device)
     count = wp.zeros(1, dtype=float, device=device)
+    dirs = wp.zeros(B, dtype=float, device=device)
+    best_dir = wp.zeros(1, dtype=float, device=device)
     Ud = wp.zeros((T, 2), dtype=float, device=device)
     wp.launch(mg._reset_minmax_kernel, 1, inputs=[jmin, jmax, count], device=device)
     wp.launch(mg._minmax_kernel, B, inputs=[Jd, jmin, jmax], device=device)
@@ -637,17 +643,18 @@ def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
         wp.launch(
             mg._bisect_step_kernel, 1, inputs=[count, float(target_k), lo, hi, tau], device=device
         )
-    wp.launch(mg._count_below_kernel, B, inputs=[Jd, tau, count], device=device)
+    wp.launch(mg._cand_dir_kernel, B, inputs=[target_wheel_omega, T], outputs=[dirs], device=device)
+    wp.launch(mg._best_dir_kernel, 1, inputs=[Jd, jmin, dirs, B], outputs=[best_dir], device=device)
     wlo = wp.array([-_WMAX], dtype=float, device=device)
     wp.launch(
         mg._elite_u_kernel,
         (T, 2),
-        inputs=[Jd, tau, count, target_wheel_omega, wlo, _WMAX, B, Ud],
+        inputs=[Jd, tau, dirs, best_dir, target_wheel_omega, wlo, _WMAX, B, Ud],
         device=device,
     )
     U_gpu = Ud.numpy()
 
-    n_gpu = int((J <= float(tau.numpy()[0])).sum())
+    n_gpu = int(((J <= float(tau.numpy()[0])) & (dirs.numpy() == float(best_dir.numpy()[0]))).sum())
     err = np.abs(U_gpu - U_np).max()
     print(f"  CEM reweight B={B} T={T}: target_k={target_k} gpu_elite={n_gpu} max|dU|={err:.2e}")
     print(f"reweight parity  {'OK' if err < 5e-2 else 'REVIEW'}")
