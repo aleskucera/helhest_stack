@@ -113,7 +113,57 @@ Over the drive, get all of:
 
 Gaps, stops, obstacles and traffic cost nothing — the fits segment on the holds.
 
-### 3.3 `slope` — if you can find one
+### 3.3 `steps` — the motor identification, run TWICE
+
+**In the air first, then on the ground. The pair is the measurement; either one alone is not.**
+
+```bash
+# 1. WHEELS OFF THE GROUND -- chock or strap the robot down first
+./ros/record_odin.sh steps_air &          # or the minimal recording below
+python3 ros/calibrate_drive.py steps      # dry run: prints the program
+python3 ros/calibrate_drive.py steps --go # 98 s
+
+# 2. SAME PROGRAM, ON THE GROUND. Needs ~4.2 m of run-out; steps alternate
+#    forward/reverse so it nets to zero displacement and stays near the start.
+./ros/record_odin.sh steps_ground &
+python3 ros/calibrate_drive.py steps --go
+```
+
+The lidar is useless here and dominates the file (8.5 GB for 5 min). Record only what the fit
+reads:
+
+```bash
+ros2 bag record -o ~/bags/steps_air /cmd_joints /joint_states /odin1/imu
+```
+
+**Why two runs.** Every actuator number we have is confounded. `MOTOR_TAU = 0.19 s` was fitted from
+planner-driven bags where the command is never held. `compact` has 72 held steps but they all start
+from rest **in a spin**, so every one begins with breakaway: the wheel creeps under 30% of command
+for ~600 ms, breaks loose to 175%, then rings. That is not a first-order lag at any parameter,
+which is why the tau fitted from it (0.26-0.37 s) should not be believed. Off the ground there is
+no breakaway, no load and no slip, so the response IS the motor plus wheel inertia. The ground run
+adds those back, and the difference is attributable.
+
+The program sweeps amplitude (1/2/3/4 rad/s, both directions) to test linearity, steps
+**level-to-level** (2 -> 4 -> 2) where the wheels are already rolling and breakaway is out of the
+way, and steps small (0.3/0.6/1.0) to find where it fails to break loose on the ground -- a number
+the 2 rad/s spin floor only bracketed.
+
+```bash
+python scripts/fit_motor_steps.py ~/bags/steps_air ~/bags/steps_ground --plot /tmp/motors.png
+```
+
+Reports dead time, tau, 10-90% rise, peak/step (overshoot -- a first-order lag *cannot* exceed 1,
+so a peak well above it means the model is the wrong shape rather than mistuned), realised gain and
+median `|effort|`, split by step size and by joint. `/joint_states` carries effort on this robot
+(+-1353, units unknown but monotonic in torque), so air-vs-ground effort at matched speed prices
+the terrain load directly.
+
+**What it settles:** whether `COMMAND_DELAY` (0.04 s) and `MOTOR_TAU` (0.19 s) are right, whether a
+first-order lag is the right *shape* at all, whether the left/right asymmetry extends to the
+dynamics, and where breakaway actually sits.
+
+### 3.4 `slope` — if you can find one
 
 ```bash
 ./ros/record_odin.sh slope

@@ -86,6 +86,37 @@ def program(name: str) -> list[tuple[float, float, float]]:
             for _ in range(3):
                 out += [(hold, -w, w), block(2.0, 0.0, 0.0),
                         (hold, w, -w), block(2.0, 0.0, 0.0)]
+    elif name == "steps":
+        # MOTOR IDENTIFICATION. Run this program TWICE -- wheels OFF the ground, then ON it -- and
+        # the pair separates the actuator from everything the terrain adds. In the air there is no
+        # breakaway, no load and no slip, so the response IS the motor plus wheel inertia; on the
+        # ground the same steps pick up stiction, load and traction. Subtracting the two is the
+        # only way to know which of the three the planner's tau_motor / COMMAND_DELAY should model.
+        #
+        # This exists because `compact` cannot answer it. Its steps all start from rest in a SPIN,
+        # so every one begins with breakaway: measured 2026-08-10, the wheel creeps under 30% of
+        # command for ~600 ms, then breaks loose and overshoots to 175%, then rings. That is not a
+        # first-order lag at any parameter, and it is why the tau fitted from that bag is junk.
+        #
+        # Steps are STRAIGHT (diff = 0) and alternate forward/reverse, so on the ground the robot
+        # oscillates about its start instead of driving away -- the footprint is one step's travel,
+        # ~2.8 m at the largest amplitude, not the sum of them.
+        for amp in (1.0, 2.0, 3.0, 4.0):  # amplitude sweep: is the response even linear?
+            for _ in range(2):
+                out += [block(2.0, amp, 0.0), block(2.0, 0.0, 0.0),
+                        block(2.0, -amp, 0.0), block(2.0, 0.0, 0.0)]
+        for sign in (1.0, -1.0):
+            # LEVEL TO LEVEL, wheels already rolling. The cleanest actuator data on the ground:
+            # breakaway is out of the way, so what is left is the motor answering a step. Mirrored
+            # so the pair nets to zero displacement; each half runs out ~4 m and comes back.
+            out += [block(1.5, sign * 2.0, 0.0), block(1.5, sign * 4.0, 0.0),
+                    block(1.5, sign * 2.0, 0.0), block(2.0, 0.0, 0.0)]
+        for amp in (0.3, 0.6, 1.0):
+            # SMALL steps: in the air every one of these should move the wheel. On the ground the
+            # ones below breakaway will not, which puts a number on the threshold that the 2 rad/s
+            # spin floor only bracketed. Mirrored, so these cost no ground either.
+            out += [block(2.0, amp, 0.0), block(1.5, 0.0, 0.0),
+                    block(2.0, -amp, 0.0), block(1.5, 0.0, 0.0)]
     elif name == "slope":
         # Driven ON a slope of 10 deg or more; the operator points the robot, this holds the
         # command steady. Across-slope is the case that matters -- zero lateral load transfer in
@@ -150,7 +181,7 @@ class Driver(Node):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("program", choices=("calibrate", "relax", "compact", "slope"))
+    ap.add_argument("program", choices=("calibrate", "relax", "compact", "slope", "steps"))
     ap.add_argument("--go", action="store_true", help="actually publish (default is a dry run)")
     ap.add_argument("--max-omega", type=float, default=4.0, help="per-wheel clamp [rad/s]")
     ap.add_argument("--countdown", type=int, default=5)
@@ -165,6 +196,11 @@ def main() -> None:
         print("  MEASURED footprint ~41 x 29 m -- use `compact` unless you have that")
     if args.program == "compact":
         print("  spins in place: footprint is about the robot's own turning circle")
+    if args.program == "steps":
+        print("  RUN TWICE: once with the wheels OFF the ground, once ON it -- the pair is the")
+        print("  measurement. Steps alternate forward/reverse, so the ground run stays put:")
+        print("  footprint is one step's travel, about 2.8 m, not the sum.")
+        print("  IN THE AIR: chock or strap the robot down. The wheels reach 1.4 m/s at the rim.")
     if not args.go:
         print("\ndry run -- nothing published. re-run with --go to drive.")
         return
