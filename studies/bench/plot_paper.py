@@ -153,7 +153,7 @@ def fig_jensen(path: Path) -> None:
     draws = _mc_max(mu, sd, chol, 60_000)
     e_clark = clark_max_moments(mu, np.outer(sd, sd) * rho)[0]
 
-    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(FIG_W * 2.06, 1.75))
+    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(FIG_W * 2.06, 1.58))
 
     ax_a.hist(draws, bins=70, color="#c6dbef", edgecolor="none", density=True)
     top = ax_a.get_ylim()[1]
@@ -223,7 +223,7 @@ def fig_geometry(path: Path) -> None:
     off_dy, off_dx = np.asarray(off_dy), np.asarray(off_dx)
     wheels = np.array([[0.0, rp.half_track], [0.0, -rp.half_track], [-rp.rear_offset, 0.0]])
 
-    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(FIG_W * 2.06, 1.85))
+    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(FIG_W * 2.06, 1.65))
 
     # --- (a) plan view ------------------------------------------------------------------
     # The wheels are drawn as RECTANGLES because that is what a cylinder looks like from
