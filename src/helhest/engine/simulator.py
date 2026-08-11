@@ -109,6 +109,8 @@ class BaseSimulator:
             self.target_wheel_omega = wp.zeros((T, B), dtype=wp.vec3f, requires_grad=control_grad)
             self.start_pose = wp.zeros(B, dtype=wp.vec3f, requires_grad=control_grad)
             self.init_current_wheel_omega = wp.zeros(B, dtype=wp.vec3f)  # like start_pose
+            # per-rollout friction multiplier (robust-MPPI mu samples); 1 = nominal, never grad
+            self.mu_scale = wp.full(B, 1.0, dtype=wp.float32)
 
     def _dilate(
         self,
@@ -144,6 +146,15 @@ class BaseSimulator:
         """Per-cell friction from a numpy Heightmap matching the grid (copied in place). 2D only --
         `DifferentiableSimulator` overrides this to take a [B, ny, nx] device `wp.array`."""
         self.friction.assign(np.ascontiguousarray(friction_hm.H, np.float32))
+
+    def set_mu_scale(self, scales: np.ndarray | float) -> None:
+        """Per-rollout friction multiplier [B] (or a scalar for all rollouts). Rollout b sees
+        `mu_scale[b] * friction`; robust MPPI uses this to evaluate one candidate under several
+        mu hypotheses. 1.0 = nominal."""
+        if np.isscalar(scales):
+            self.mu_scale.fill_(float(scales))
+        else:
+            self.mu_scale.assign(np.ascontiguousarray(scales, np.float32))
 
 
 class ForwardSimulator(BaseSimulator):
@@ -189,6 +200,7 @@ class ForwardSimulator(BaseSimulator):
                 self.envelope,
                 self.elevation,
                 self.friction,
+                self.mu_scale,
                 self.grid,
                 self.robot,
                 self.solver,
@@ -405,6 +417,7 @@ class DifferentiableSimulator(BaseSimulator):
                         self.envelope,
                         self.elevation,
                         self.friction,
+                        self.mu_scale,
                         self.grid,
                         self.robot,
                         self.solver,

@@ -64,6 +64,7 @@ def rollout_device(
 
     omega = wp.array(setpoints.reshape(T, 1, 3), dtype=wp.vec3, device=device)
     pose0 = wp.array(np.asarray([init_pose], np.float32), dtype=wp.vec3, device=device)
+    mu_scale = wp.full(1, 1.0, dtype=float, device=device)
     controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
     derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
     current_wheel_omega = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
@@ -87,6 +88,7 @@ def rollout_device(
                 te,
                 tr,
                 tm,
+                mu_scale,
                 g,
                 robot,
                 sp,
@@ -306,6 +308,7 @@ def selftest_rollout_kernel():
         np.tile([-1.0, 0.0, 0.0], (B, 1)).astype(np.float32), dtype=wp.vec3, device="cpu"
     )
     init_oa = wp.zeros(B, dtype=wp.vec3, device="cpu")
+    mu_scale = wp.full(B, 1.0, dtype=float, device="cpu")
 
     def buffers():
         return [
@@ -322,7 +325,7 @@ def selftest_rollout_kernel():
     wp.launch(
         rollout_kernel,
         B,
-        inputs=[T, te, tr, tm, g, robot, sp, pose0, init_oa, omega],
+        inputs=[T, te, tr, tm, mu_scale, g, robot, sp, pose0, init_oa, omega],
         outputs=fused,
         device="cpu",
     )
@@ -342,6 +345,7 @@ def selftest_rollout_kernel():
                 te,
                 tr,
                 tm,
+                mu_scale,
                 g,
                 robot,
                 sp,
@@ -365,6 +369,95 @@ def selftest_rollout_kernel():
     print(
         f"fused rollout_kernel == per-step  worst={worst:.2e}  {'OK' if worst == 0.0 else 'REVIEW'}"
     )
+
+
+def selftest_mu_scale():
+    """mu_scale is a pure friction multiplier: rollout(friction*s, mu_scale=1) must equal
+    rollout(friction, mu_scale=s). Uniform fields make the two float paths land on the same
+    values (bilinear is linear), so the tolerance is tight."""
+    wp.init()
+    scene = hmmod.box_scene()
+    robot_params = RobotParams()
+    robot = robot_params.build("cpu")
+    sp = SolverParams(newton_iters=12, dt=0.05, k_turn=2.0).build()
+    te, g = _upload(hmmod.wheel_envelope(scene, robot_params.wheel_radius), "cpu")
+    tr, _ = _upload(scene, "cpu")
+    B, T = 4, 20
+    rng = np.random.default_rng(2)
+    omega = wp.array(
+        np.clip(2.0 + rng.normal(0, 1.0, (T, B, 3)), -4, 4).astype(np.float32),
+        dtype=wp.vec3,
+        device="cpu",
+    )
+    pose0 = wp.array(
+        np.tile([-1.0, 0.0, 0.0], (B, 1)).astype(np.float32), dtype=wp.vec3, device="cpu"
+    )
+    init_oa = wp.zeros(B, dtype=wp.vec3, device="cpu")
+
+    def run(mu_value, scale):
+        tm, _ = _upload(friction.uniform(mu_value), "cpu")
+        ms = wp.full(B, float(scale), dtype=float, device="cpu")
+        out = [
+            wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros((T, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
+            wp.zeros((T, B), dtype=float, device="cpu"),
+            wp.zeros((T, B), dtype=float, device="cpu"),
+        ]
+        wp.launch(
+            rollout_kernel,
+            B,
+            inputs=[T, te, tr, tm, ms, g, robot, sp, pose0, init_oa, omega],
+            outputs=out,
+            device="cpu",
+        )
+        return out
+
+    scaled_field = run(0.4, 1.0)
+    scaled_rollout = run(0.8, 0.5)
+    worst = max(
+        np.abs(a.numpy() - b.numpy()).max() for a, b in zip(scaled_field, scaled_rollout)
+    )
+    print(f"mu_scale == scaled friction  worst={worst:.2e}  {'OK' if worst < 1e-6 else 'REVIEW'}")
+
+
+def selftest_mu_zero():
+    """mu = 0 everywhere must degrade gracefully (grip-sum guard), never NaN."""
+    wp.init()
+    scene = hmmod.box_scene()
+    robot_params = RobotParams()
+    robot = robot_params.build("cpu")
+    sp = SolverParams(newton_iters=12, dt=0.05, k_turn=2.0).build()
+    te, g = _upload(hmmod.wheel_envelope(scene, robot_params.wheel_radius), "cpu")
+    tr, _ = _upload(scene, "cpu")
+    tm, _ = _upload(friction.uniform(0.0), "cpu")
+    B, T = 2, 10
+    omega = wp.array(np.full((T, B, 3), 2.0, np.float32), dtype=wp.vec3, device="cpu")
+    pose0 = wp.array(
+        np.tile([-1.0, 0.0, 0.0], (B, 1)).astype(np.float32), dtype=wp.vec3, device="cpu"
+    )
+    init_oa = wp.zeros(B, dtype=wp.vec3, device="cpu")
+    ms = wp.full(B, 1.0, dtype=float, device="cpu")
+    out = [
+        wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+        wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+        wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
+        wp.zeros((T, B), dtype=wp.vec3, device="cpu"),
+        wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
+        wp.zeros((T, B), dtype=float, device="cpu"),
+        wp.zeros((T, B), dtype=float, device="cpu"),
+    ]
+    wp.launch(
+        rollout_kernel,
+        B,
+        inputs=[T, te, tr, tm, ms, g, robot, sp, pose0, init_oa, omega],
+        outputs=out,
+        device="cpu",
+    )
+    finite = all(np.isfinite(a.numpy()).all() for a in out)
+    print(f"mu=0 rollout finite  {'OK' if finite else 'REVIEW'}")
 
 
 def selftest_motor_lag():
@@ -392,6 +485,7 @@ def selftest_motor_lag():
     omega = wp.array(omega_np, dtype=wp.vec3, device="cpu")
     pose0 = wp.array(np.asarray([[0.0, 0.0, 0.0]], np.float32), dtype=wp.vec3, device="cpu")
     init_oa = wp.zeros(1, dtype=wp.vec3, device="cpu")
+    mu_scale = wp.full(1, 1.0, dtype=float, device="cpu")
 
     controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
     derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
@@ -416,6 +510,7 @@ def selftest_motor_lag():
                 te,
                 tr,
                 tm,
+                mu_scale,
                 g,
                 robot,
                 sp,
@@ -468,4 +563,6 @@ if __name__ == "__main__":
     selftest_loads()
     selftest_step()
     selftest_rollout_kernel()
+    selftest_mu_scale()
+    selftest_mu_zero()
     selftest_motor_lag()

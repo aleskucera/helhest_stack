@@ -441,6 +441,7 @@ def step_predict(
     grid: Grid,
     robot: Robot,
     solver: Solver,
+    mu_scale: float,  # per-rollout friction multiplier (robust-MPPI mu samples; 1 = nominal)
     om: wp.vec3,  # (wL, wR, w_rear) this step
     pc: wp.vec3,  # (x, y, yaw) current state
     tc: wp.vec3,  # (z, pitch, roll) current state
@@ -464,9 +465,13 @@ def step_predict(
         wheel_center = p + R * wheel_pos
         n = sample_normal(env_i, grid, wheel_center[0], wheel_center[1])
         ct = wheel_center - robot.wheel_radius * n  # contact point
-        grip = sample_field(fric_i, grid, ct[0], ct[1]) * loads[st_i]  # grip_i = mu_i * N_i
+        # grip_i = mu_scale * mu_i * N_i
+        grip = mu_scale * sample_field(fric_i, grid, ct[0], ct[1]) * loads[st_i]
         total_grip += grip
         grip_x += grip * wheel_pos[0]
+    # floor the grip sum: as mu -> 0 the ratio below is 0/0 (NaN poisons the whole rollout);
+    # 1e-6 N is far below any physical grip, so the guard is inert away from the singularity
+    total_grip = wp.max(total_grip, 1.0e-6)
     x_icr = grip_x / total_grip  # grip-weighted ICR offset
     alpha = 1.0 + solver.k_turn * total_grip / (robot.gravity * robot.mass)  # turn resistance
 
@@ -551,6 +556,7 @@ def step_kernel(
     envelope: wp.array2d(dtype=wp.float32),  # [ny, nx] shared across the batch
     elevation: wp.array2d(dtype=wp.float32),
     friction: wp.array2d(dtype=wp.float32),
+    mu_scale: wp.array(dtype=float),  # [B] per-rollout friction multiplier (1 = nominal)
     grid: Grid,
     robot: Robot,
     solver: Solver,
@@ -578,6 +584,7 @@ def step_kernel(
         grid,
         robot,
         solver,
+        mu_scale[tid],
         omega,
         controlled[tid],
         tc,
@@ -606,6 +613,7 @@ def step_kernel_bt(
     envelope: wp.array3d(dtype=wp.float32),  # [B, ny, nx] per-rollout terrain
     elevation: wp.array3d(dtype=wp.float32),
     friction: wp.array3d(dtype=wp.float32),
+    mu_scale: wp.array(dtype=float),  # [B] per-rollout friction multiplier (1 = nominal)
     grid: Grid,
     robot: Robot,
     solver: Solver,
@@ -634,6 +642,7 @@ def step_kernel_bt(
         grid,
         robot,
         solver,
+        mu_scale[tid],
         omega,
         controlled[tid],
         tc,
@@ -663,6 +672,7 @@ def rollout_kernel(
     envelope: wp.array2d(dtype=wp.float32),
     elevation: wp.array2d(dtype=wp.float32),
     friction: wp.array2d(dtype=wp.float32),
+    mu_scale: wp.array(dtype=float),  # [B] per-rollout friction multiplier (1 = nominal)
     grid: Grid,
     robot: Robot,
     solver: Solver,
@@ -692,6 +702,7 @@ def rollout_kernel(
     b = wp.tid()
     # init_state: settle the start pose -> row 0
     pc = start_pose[b]
+    ms = mu_scale[b]  # per-rollout friction multiplier (constant over the rollout)
     z0 = sample_field(envelope, grid, pc[0], pc[1]) + robot.wheel_radius
     tc = settle(envelope, grid, robot, solver, pc, wp.vec3(z0, 0.0, 0.0))
     current = init_current_wheel_omega[b]  # initial lagged omega carried in registers
@@ -715,9 +726,12 @@ def rollout_kernel(
             wheel_center = p + R * wheel_pos
             n = sample_normal(envelope, grid, wheel_center[0], wheel_center[1])
             ct = wheel_center - robot.wheel_radius * n  # contact point
-            grip = sample_field(friction, grid, ct[0], ct[1]) * loads[st_i]  # grip_i = mu_i * N_i
+            # grip_i = mu_scale * mu_i * N_i
+            grip = ms * sample_field(friction, grid, ct[0], ct[1]) * loads[st_i]
             total_grip += grip
             grip_x += grip * wheel_pos[0]
+        # same 0/0 guard as step_predict (keep the two paths bit-identical)
+        total_grip = wp.max(total_grip, 1.0e-6)
         x_icr = grip_x / total_grip  # grip-weighted ICR offset
         alpha = 1.0 + solver.k_turn * total_grip / (robot.gravity * robot.mass)  # turn resistance
 
