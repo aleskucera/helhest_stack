@@ -117,8 +117,10 @@ Gaps, stops, obstacles and traffic cost nothing — the fits segment on the hold
 
 **In the air first, then on the ground. The pair is the measurement; either one alone is not.**
 
-Two terminals. `record_odin.sh steps_air` / `steps_ground` record the drivetrain topics ONLY --
-no lidar, so these are tens of MB rather than the 8.5 GB `fast_experiment0` came to.
+Two terminals, and a different recorder: `record_motors.sh`, not `record_odin.sh`. The odin
+script captures the elevation pipeline's inputs, which means `/odin1/cloud_raw` at ~13 MB/s --
+`fast_experiment0` came to 8.5 GB. The motor fit reads none of it, so this one records the
+drivetrain topics only and a 98 s run lands in tens of MB.
 
 **Before either run:** `plan_actuate` must be OFF, or the planner and the script both publish on
 `/cmd_joints` and the manoeuvre is not what you drove. Either do not run elevation_node, or:
@@ -132,7 +134,7 @@ ros2 topic hz /joint_states     # must be live -- with no measured wheels nothin
 
 ```bash
 # terminal 1
-./ros/record_odin.sh steps_air
+./ros/record_motors.sh steps_air
 # terminal 2
 python3 ros/calibrate_drive.py steps        # DRY RUN first -- prints the program, publishes nothing
 python3 ros/calibrate_drive.py steps --go   # 98 s, then Ctrl-C terminal 1
@@ -143,7 +145,7 @@ forward/reverse so it nets to zero displacement and finishes where it started.
 
 ```bash
 # terminal 1
-./ros/record_odin.sh steps_ground
+./ros/record_motors.sh steps_ground
 # terminal 2
 python3 ros/calibrate_drive.py steps --go   # 98 s, then Ctrl-C terminal 1
 ```

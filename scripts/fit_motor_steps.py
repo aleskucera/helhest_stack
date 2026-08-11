@@ -1,5 +1,6 @@
 """Identify the drive motors from `calibrate_drive.py steps`, in the air and on the ground.
 
+    ./ros/record_motors.sh steps_air     # then: calibrate_drive.py steps --go
     python scripts/fit_motor_steps.py ~/bags/steps_air
     python scripts/fit_motor_steps.py ~/bags/steps_air ~/bags/steps_ground --plot /tmp/motors.png
 
