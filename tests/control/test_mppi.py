@@ -117,6 +117,7 @@ def _launch_cost(
     field = wp.full((cy, cx, 16), float(field_val), dtype=float, device=device)
     goal_d = wp.array(np.asarray(goal, np.float32), dtype=float, device=device)
     Jg = wp.zeros(B, dtype=float, device=device)
+    Jsafe = wp.zeros(B, dtype=float, device=device)
     wp.launch(
         mg._cost_kernel,
         B,
@@ -140,7 +141,7 @@ def _launch_cost(
             sim.robot,
             T,
         ],
-        outputs=[Jg],
+        outputs=[Jg, Jsafe],
         device=device,
     )
     return Jg.numpy()
@@ -466,6 +467,7 @@ def selftest_reverse(device="cuda"):
     field = wp.array(np.ascontiguousarray(hd), dtype=float, device=device)
     goal_d = wp.array(np.asarray([3.0, 1.0], np.float32), dtype=float, device=device)
     Jg = wp.zeros(B, dtype=float, device=device)
+    Jsafe_a = wp.zeros(B, dtype=float, device=device)
     cw_a = _cw()
     cw_a.dt = 0.1  # rev shaping off (reverse=0), unknown off; goal terms only
     wp.launch(
@@ -491,7 +493,7 @@ def selftest_reverse(device="cuda"):
             sim.robot,
             T,
         ],
-        outputs=[Jg],
+        outputs=[Jg, Jsafe_a],
         device=device,
     )
     exp_a = (_W["goal_terminal"] + _W["goal_running"]) * 8.0**2  # V = heading index 8 (pi)
@@ -543,17 +545,22 @@ def selftest_reverse(device="cuda"):
 
 
 def selftest_robust_reduce(device="cuda"):
-    """The robust reduce takes the WORST replica per candidate (replica k of candidate c sits at
-    rollout k*n_cand + c)."""
+    """The robust reduce is WORST-replica safety + MEAN-replica rest (replica k of candidate c
+    sits at rollout k*n_cand + c)."""
     n_cand, n_mu = 5, 3
     rng = np.random.default_rng(3)
-    J = rng.uniform(0.0, 100.0, n_cand * n_mu).astype(np.float32)
+    Jsafe = rng.uniform(0.0, 100.0, n_cand * n_mu).astype(np.float32)
+    Jrest = rng.uniform(0.0, 50.0, n_cand * n_mu).astype(np.float32)
+    J = Jsafe + Jrest
     Jd = wp.array(J, dtype=float, device=device)
+    Jsafe_d = wp.array(Jsafe, dtype=float, device=device)
     Jc = wp.zeros(n_cand, dtype=float, device=device)
-    wp.launch(mg._robust_j_kernel, n_cand, inputs=[Jd, n_cand, n_mu], outputs=[Jc], device=device)
-    exp = J.reshape(n_mu, n_cand).max(0)
+    wp.launch(
+        mg._robust_j_kernel, n_cand, inputs=[Jd, Jsafe_d, n_cand, n_mu], outputs=[Jc], device=device
+    )
+    exp = Jsafe.reshape(n_mu, n_cand).max(0) + Jrest.reshape(n_mu, n_cand).mean(0)
     err = np.abs(Jc.numpy() - exp).max()
-    print(f"robust reduce (worst replica)  max|err|={err:.2e}  {'OK' if err == 0.0 else 'REVIEW'}")
+    print(f"robust reduce (worst safe + mean rest)  max|err|={err:.2e}  {'OK' if err < 1e-5 else 'REVIEW'}")
 
 
 def selftest_robust_margin(device="cuda"):

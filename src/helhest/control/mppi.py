@@ -332,6 +332,7 @@ def _cost_kernel(
     robot: Robot,  # envelope + feasibility thresholds (shared with the cost-to-go feasibility)
     horizon: int,
     Jout: wp.array(dtype=float),
+    Jsafe: wp.array(dtype=float),  # the SAFETY share of Jout (see _robust_j_kernel)
 ):
     r = wp.tid()  # rollout
     run_sum = float(0.0)
@@ -440,35 +441,52 @@ def _cost_kernel(
     # horizon) -- the weights are tuned to that, mind it if the horizon changes. (Reaching + stopping at
     # the goal, and the right approach heading, are the cost-to-go + dock controller's job -- no
     # heading/endgame term.)
-    Jout[r] = (
-        cw.goal_terminal * terminal_cost
-        + cw.goal_running * (run_sum / float(horizon))
-        + cw.out_of_bounds * oob_sum
-        + cw.effort * effort_sum
-        + cw.smoothness * smooth_sum
-        + cw.turn * turn_sum
+    # SAFETY share: the terms that must hold under EVERY mu hypothesis (worst-case reduce).
+    # The goal/effort/shaping terms are averaged instead -- worst-casing the goal punishes
+    # trajectory divergence per se and degenerates toward "slow is safest".
+    safe = (
+        cw.out_of_bounds * oob_sum
         + penalty_sum * cw.infeasible
         + cw.saturation * sat_sum
         + cw.tip * tip_sum
         + cw.unknown * unk_sum
+    )
+    Jsafe[r] = safe
+    Jout[r] = (
+        cw.goal_terminal * terminal_cost
+        + cw.goal_running * (run_sum / float(horizon))
+        + cw.effort * effort_sum
+        + cw.smoothness * smooth_sum
+        + cw.turn * turn_sum
         + cw.reverse * rev_sum
+        + safe
     )
 
 
 @wp.kernel
 def _robust_j_kernel(
-    J: wp.array(dtype=float),  # [B] per-rollout cost; rollouts k*n_cand + c replicate candidate c
+    J: wp.array(dtype=float),  # [B] per-rollout TOTAL cost (rollouts k*n_cand + c share controls)
+    Jsafe: wp.array(dtype=float),  # [B] the safety share of J
     n_cand: int,
     n_mu: int,
     Jc: wp.array(dtype=float),  # [n_cand] robust per-candidate cost -> written
 ):
-    """Per-candidate robust cost = WORST replica (CVaR at 1/n_mu): a candidate must be acceptable
-    under every mu hypothesis in the band to rank well. n_mu = 1 reduces to a copy."""
+    """Per-candidate robust cost = WORST-replica safety + MEAN-replica everything else.
+
+    Worst-casing only the safety terms (collision/tip/saturation/unknown/bounds) keeps the
+    guarantee -- no mu hypothesis may crash -- while the averaged goal term stops the CVaR
+    degeneracy where trajectory divergence across hypotheses makes "slow (or still)" look
+    safest: measured, pure worst-case cost +53% traversal time on turny ground at a +-40% band
+    and +232% at +-80%; the split removes the tax without touching the safety semantics.
+    n_mu = 1 reduces to a copy."""
     c = wp.tid()
-    worst = J[c]
+    worst_safe = Jsafe[c]
+    mean_rest = J[c] - Jsafe[c]
     for k in range(1, n_mu):
-        worst = wp.max(worst, J[k * n_cand + c])
-    Jc[c] = worst
+        r = k * n_cand + c
+        worst_safe = wp.max(worst_safe, Jsafe[r])
+        mean_rest += J[r] - Jsafe[r]
+    Jc[c] = worst_safe + mean_rest / float(n_mu)
 
 
 # --- CEM reweight (option B): elite = top-k lowest-cost candidates; U = their mean. Rank-based,
@@ -674,6 +692,7 @@ class MppiGpu:
         with wp.ScopedDevice(self.device):
             self.U = wp.zeros((self.horizon, 2), dtype=wp.float32)
             self.J = wp.zeros(self.n_rollouts, dtype=wp.float32)  # cost per rollout (all replicas)
+            self.Jsafe = wp.zeros(self.n_rollouts, dtype=wp.float32)  # safety share of J
             self.Jc = wp.zeros(self.n_cand, dtype=wp.float32)  # robust per-candidate cost
             self.jmin = wp.zeros(1, dtype=wp.float32)  # CEM bisection scalars
             self.jmax = wp.zeros(1, dtype=wp.float32)
@@ -815,14 +834,14 @@ class MppiGpu:
                 self.robot,
                 self.horizon,
             ],
-            outputs=[self.J],
+            outputs=[self.J, self.Jsafe],
             device=self.device,
         )
-        # collapse the mu replicas: per-candidate robust cost = worst replica
+        # collapse the mu replicas: worst-replica safety + mean-replica goal/shaping
         wp.launch(
             _robust_j_kernel,
             self.n_cand,
-            inputs=[self.J, self.n_cand, self.n_mu],
+            inputs=[self.J, self.Jsafe, self.n_cand, self.n_mu],
             outputs=[self.Jc],
             device=self.device,
         )
