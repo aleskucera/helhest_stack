@@ -515,7 +515,35 @@ def normal_loads(
         st_i = wp.static(i)
         wheel_center = p + R * robot.wheel_pos[st_i]
         n = sample_normal(envelope, grid, wheel_center[0], wheel_center[1])
-        r = (wheel_center - robot.wheel_radius * n) - com_world  # contact point, then moment arm
+        # Contact point: the wheel's support point in direction -n. A SPHERE's is one radius down
+        # the normal -- the default (wheel_half_width == 0), left bit-identical. A CYLINDER of
+        # half-tread w is a different body; maximising (-n).q over its surface gives
+        #     ct = c - R n_perp/|n_perp| - w sgn(n . a) a,   n_perp = n - (n.a) a
+        # with a the spin axis (body +y). On a side slope this matters: the sphere's contact
+        # slides R|n.a| off the mid-plane (6.9 cm at 11 deg lateral tilt on this robot, outside
+        # the real 5 cm tread), while the cylinder's radial term stays in the wheel's own plane
+        # and its axial term saturates at the rim, w. The rim term is discontinuous at n.a = 0 by
+        # construction (a rigid cylinder tips onto one rim the instant the ground tilts sideways);
+        # sgn must be exactly 0 there (a LINE contact across the tread, centred), so wp.sign
+        # (which returns +1 at 0) would be wrong.
+        ct = wheel_center - robot.wheel_radius * n
+        if robot.wheel_half_width > 0.0:
+            axis = R * wp.vec3(0.0, 1.0, 0.0)
+            n_ax = wp.dot(n, axis)
+            n_perp = n - n_ax * axis
+            len_perp = wp.length(n_perp)
+            if len_perp > 1.0e-6:
+                sgn = float(0.0)
+                if n_ax > 0.0:
+                    sgn = 1.0
+                elif n_ax < 0.0:
+                    sgn = -1.0
+                ct = (
+                    wheel_center
+                    - robot.wheel_radius * (n_perp / len_perp)
+                    - robot.wheel_half_width * sgn * axis
+                )
+        r = ct - com_world  # contact point, then moment arm
         for k in range(wp.static(3)):
             st_k = wp.static(k)
             normals[st_i, st_k] = n[st_k]

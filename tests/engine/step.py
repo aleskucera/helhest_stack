@@ -51,7 +51,11 @@ def rollout_device(
     clear_margin=0.0,
 ):
     """Single-rollout (B=1) device rollout. Returns numpy logs to match the oracle."""
-    robot_params = robot_params or RobotParams()
+    # The numpy oracle (helhest.reference.placement) only ever models a SPHERE contact point
+    # (and this harness's own `te` envelope is built from the numpy sphere envelope too, bypassing
+    # the device's yaw-binned cylinder machinery) -- wheel_width=None keeps wheel_half_width at 0
+    # so normal_loads' cylinder-rim contact point stays off, matching what the oracle can check.
+    robot_params = robot_params or RobotParams(wheel_width=None)
     robot = robot_params.build(device)
     sp = params.build()
     Rw = robot_params.wheel_radius
@@ -179,7 +183,9 @@ def _loads_probe(
 
 
 def _build_test(device="cpu", iters=12):
-    robot = RobotParams().build(device)
+    # sphere: the numpy oracle (helhest.reference.placement) doesn't model the cylinder rim
+    # contact point, so normal_loads' wheel_half_width must stay 0 here too (see rollout_device).
+    robot = RobotParams(wheel_width=None).build(device)
     sp = SolverParams(newton_iters=iters, tilt_clamp=1.2).build()
     return robot, sp
 
