@@ -584,6 +584,8 @@ def main() -> None:
         help="first stage-2 seed; virgin confirmation uses 5000 (PREREG_stage2_virgin.md)",
     )
     ap.add_argument("--element", default="sphere", choices=("sphere", "cylinder"))
+    ap.add_argument("--family", default="hybrid", help="stage-2 plan family")
+    ap.add_argument("--noise", default="all", help="stage-2 noise arm")
     args = ap.parse_args()
     wp.init()
 
@@ -618,10 +620,10 @@ def main() -> None:
                 else "confirmatory: Gate H passed"
             )
             out["stage2"] = run_stage2(
-                args.device, args.seeds, "hybrid", "all", args.seed_offset, args.element
+                args.device, args.seeds, args.family, args.noise, args.seed_offset, args.element
             )
             s = out["stage2"]
-            print("\n=== STAGE 2: full cost (settle + clear_soft), hybrid/all ===")
+            print(f"\n=== STAGE 2: full cost (settle + clear_soft), {args.family}/{args.noise} ===")
             for a, v in sorted(s["mean_regret"].items(), key=lambda kv: kv[1]):
                 print(f"  {a:12s} {v:.4f}")
             for k, v in s["tests"].items():
