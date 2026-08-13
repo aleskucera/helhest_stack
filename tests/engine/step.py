@@ -68,11 +68,11 @@ def rollout_device(
     controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
     derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
     current_wheel_omega = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
-    body_vel = wp.zeros((T + 1, 1), dtype=float, device=device)
     loads = wp.zeros((T, 1), dtype=wp.vec3, device=device)
     turn = wp.zeros((T, 1), dtype=wp.vec2, device=device)
     clear = wp.zeros((T, 1), dtype=float, device=device)
     resid = wp.zeros((T, 1), dtype=float, device=device)
+    twist = wp.zeros((T + 1, 1), dtype=wp.vec3, device=device)
 
     wp.launch(
         init_state_kernel,
@@ -95,19 +95,19 @@ def rollout_device(
                 sp,
                 omega[t],
                 current_wheel_omega[t],
-                body_vel[t],
                 controlled[t],
                 derived[t],
+                twist[t],
             ],
             outputs=[
                 current_wheel_omega[t + 1],
-                body_vel[t + 1],
                 controlled[t + 1],
                 derived[t + 1],
                 loads[t],
                 turn[t],
                 clear[t],
                 resid[t],
+                twist[t + 1],
             ],
             device=device,
         )
@@ -314,24 +314,40 @@ def selftest_rollout_kernel():
     mu_scale = wp.full(B, 1.0, dtype=float, device="cpu")
 
     def buffers():
-        # fused-output order: controlled, derived, current_wheel_omega, body_vel, loads, turning,
-        # clearance, residual
+        # positional, in the kernels' own output order: controlled, derived,
+        # current_wheel_omega, loads, turning, clearance, residual, twist
         return [
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
-            wp.zeros((T + 1, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
+            wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
         ]
 
     fused = buffers()
     wp.launch(
         rollout_kernel,
         B,
-        inputs=[T, te, tr, tm, mu_scale, g, robot, sp, pose0, init_oa, omega],
+        # rollout_kernel takes the yaw-binned envelope STACK; the spherical wheel is one slice.
+        # command_history is unread at command_delay 0, but must still be a valid array.
+        inputs=[
+            T,
+            te.reshape((1,) + te.shape),
+            tr,
+            tm,
+            mu_scale,
+            g,
+            robot,
+            sp,
+            pose0,
+            init_oa,
+            omega,
+            wp.zeros((1, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros(B, dtype=wp.vec3, device="cpu"),
+        ],
         outputs=fused,
         device="cpu",
     )
@@ -357,19 +373,19 @@ def selftest_rollout_kernel():
                 sp,
                 omega[t],
                 perstep[2][t],
-                perstep[3][t],
                 perstep[0][t],
                 perstep[1][t],
+                perstep[7][t],
             ],
             outputs=[
                 perstep[2][t + 1],
-                perstep[3][t + 1],
                 perstep[0][t + 1],
                 perstep[1][t + 1],
+                perstep[3][t],
                 perstep[4][t],
                 perstep[5][t],
                 perstep[6][t],
-                perstep[7][t],
+                perstep[7][t + 1],
             ],
             device="cpu",
         )
@@ -409,16 +425,31 @@ def selftest_mu_scale():
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
-            wp.zeros((T + 1, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=wp.vec3, device="cpu"),
             wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
             wp.zeros((T, B), dtype=float, device="cpu"),
+            wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
         ]
         wp.launch(
             rollout_kernel,
             B,
-            inputs=[T, te, tr, tm, ms, g, robot, sp, pose0, init_oa, omega],
+            # rollout_kernel takes the yaw-binned envelope STACK; the spherical wheel is one slice.
+            inputs=[
+                T,
+                te.reshape((1,) + te.shape),
+                tr,
+                tm,
+                ms,
+                g,
+                robot,
+                sp,
+                pose0,
+                init_oa,
+                omega,
+                wp.zeros((1, B), dtype=wp.vec3, device="cpu"),
+                wp.zeros(B, dtype=wp.vec3, device="cpu"),
+            ],
             outputs=out,
             device="cpu",
         )
@@ -451,16 +482,31 @@ def selftest_mu_zero():
         wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
         wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
         wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
-        wp.zeros((T + 1, B), dtype=float, device="cpu"),
         wp.zeros((T, B), dtype=wp.vec3, device="cpu"),
         wp.zeros((T, B), dtype=wp.vec2, device="cpu"),
         wp.zeros((T, B), dtype=float, device="cpu"),
         wp.zeros((T, B), dtype=float, device="cpu"),
+        wp.zeros((T + 1, B), dtype=wp.vec3, device="cpu"),
     ]
     wp.launch(
         rollout_kernel,
         B,
-        inputs=[T, te, tr, tm, ms, g, robot, sp, pose0, init_oa, omega],
+        # rollout_kernel takes the yaw-binned envelope STACK; the spherical wheel is one slice.
+        inputs=[
+            T,
+            te.reshape((1,) + te.shape),
+            tr,
+            tm,
+            ms,
+            g,
+            robot,
+            sp,
+            pose0,
+            init_oa,
+            omega,
+            wp.zeros((1, B), dtype=wp.vec3, device="cpu"),
+            wp.zeros(B, dtype=wp.vec3, device="cpu"),
+        ],
         outputs=out,
         device="cpu",
     )
@@ -493,7 +539,7 @@ def selftest_momentum():
     controlled, _, _, _ = sim.rollout(ctrl, (0.0, 0.0, 0.0), init_wheel_omega=[4.0, 4.0, 4.0])
     stop_x = float(controlled[-1, 0, 0])
     expected = v0**2 / (2.0 * mu * 9.81)  # 0.2 m
-    ok = abs(stop_x - expected) < 0.06 and abs(float(sim.body_vel.numpy()[-1, 0])) < 1e-3
+    ok = abs(stop_x - expected) < 0.06 and abs(float(sim.twist.numpy()[-1, 0, 0])) < 1e-3
     print(f"momentum stop: x={stop_x:.3f} m expected~{expected:.3f}  {'OK' if ok else 'REVIEW'}")
 
 
@@ -527,11 +573,11 @@ def selftest_motor_lag():
     controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
     derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
     current_wheel_omega = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
-    body_vel = wp.zeros((T + 1, 1), dtype=float, device="cpu")
     loads = wp.zeros((T, 1), dtype=wp.vec3, device="cpu")
     turn = wp.zeros((T, 1), dtype=wp.vec2, device="cpu")
     clear = wp.zeros((T, 1), dtype=float, device="cpu")
     resid = wp.zeros((T, 1), dtype=float, device="cpu")
+    twist = wp.zeros((T + 1, 1), dtype=wp.vec3, device="cpu")
 
     wp.launch(
         init_state_kernel,
@@ -554,19 +600,19 @@ def selftest_motor_lag():
                 sp,
                 omega[t],
                 current_wheel_omega[t],
-                body_vel[t],
                 controlled[t],
                 derived[t],
+                twist[t],
             ],
             outputs=[
                 current_wheel_omega[t + 1],
-                body_vel[t + 1],
                 controlled[t + 1],
                 derived[t + 1],
                 loads[t],
                 turn[t],
                 clear[t],
                 resid[t],
+                twist[t + 1],
             ],
             device="cpu",
         )
@@ -574,7 +620,7 @@ def selftest_motor_lag():
     oa_dev = current_wheel_omega.numpy()[:, 0, 0]  # left-wheel channel [T+1]
     # current_wheel_omega[0] = init (zeros); current_wheel_omega[t+1] = effective speed used at step t.
     # After a step command, the effective speed should converge: current[t+1] ≈ 2*(1 - exp(-t*dt/tau)).
-    alpha = min(dt / max(tau, 1e-6), 1.0)
+    alpha = 1.0 - np.exp(-dt / max(tau, 1e-6))  # exact first-order step, as the engine uses
     oa_expected = np.array([2.0 * (1.0 - (1.0 - alpha) ** t) for t in range(1, T + 1)], np.float64)
 
     d_oa = np.abs(oa_dev[1:] - oa_expected).max()

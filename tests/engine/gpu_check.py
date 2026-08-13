@@ -143,7 +143,13 @@ def check_vjp():
 
     def build():
         sim = DifferentiableSimulator(
-            dynamics.robot_params(), dynamics.execution_solver(), grid, B, T, "cuda"
+            # sphere: the taped settle cannot carry a yaw-binned envelope
+            dynamics.robot_params(wheel_width=None),
+            dynamics.execution_solver(),
+            grid,
+            B,
+            T,
+            "cuda",
         )
         sim.set_terrain(
             wp.array(

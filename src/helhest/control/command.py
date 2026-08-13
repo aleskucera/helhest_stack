@@ -14,6 +14,7 @@ This is the single place all actuator-safety logic lives, so it is auditable and
   2. asymmetric accel/decel rate limit  (a jumpy MPPI step can't shock the drivetrain)
   3. a hard per-joint magnitude clamp               (final backstop below the motor's safe max)
 """
+
 from __future__ import annotations
 
 import math
@@ -106,3 +107,54 @@ def condition_command(
     cmd = prev + np.clip(target - prev, -lim, lim)  # rate limit
     cmd = np.clip(cmd, -float(max_omega), float(max_omega))  # hard magnitude backstop
     return cmd.astype(np.float32)
+
+
+def to_engine_order(cmd: np.ndarray) -> np.ndarray:
+    """/cmd_joints order (left, rear, right) -> the engine's wheel vec3 (wL, wR, w_rear).
+
+    JOINT_NAMES puts the REAR wheel in the middle; every kernel expects it last. One place for the
+    swap so a caller can't get it silently backwards.
+    """
+    cmd = np.asarray(cmd, dtype=np.float32)
+    return np.array([cmd[0], cmd[2], cmd[1]], dtype=np.float32)
+
+
+def in_flight_history(commands, steps: int, batch: int) -> np.ndarray:
+    """[steps, batch, 3] buffer for `ForwardSimulator.command_history`, oldest first.
+
+    `commands` are the wheel commands already published but not yet acted on, in ENGINE order and
+    oldest first; row k acts on rollout step k. Fewer than `steps` of them (at startup, or after a
+    delay change) repeats the oldest, i.e. the robot is assumed to have been holding it; none at
+    all gives zeros, i.e. standing still.
+    """
+    rows = [np.asarray(c, dtype=np.float32) for c in commands]
+    if not rows:
+        rows = [np.zeros(3, dtype=np.float32)]
+    while len(rows) < steps:
+        rows.insert(0, rows[0])
+    stacked = np.asarray(rows[-steps:], dtype=np.float32)[:, None, :]
+    return np.ascontiguousarray(np.repeat(stacked, batch, axis=1), dtype=np.float32)
+
+
+def plan_control_at(nominal: np.ndarray, elapsed: float, plan_dt: float) -> np.ndarray:
+    """The committed (wL, wR) at `elapsed` seconds into a plan sampled every `plan_dt`.
+
+    A plan is a trajectory, not a single command, so a controller ticking faster than the planner
+    should WALK it rather than hold its first step. Linear interpolation between plan steps: at
+    dt = 0.1 s and a 50 ms tick that is the difference between two distinct commands per plan and
+    the same one twice.
+
+    Clamped at both ends -- before the start it gives the first step, past the horizon the last, so
+    a stale plan degrades to holding its final command rather than indexing off the end.
+    """
+    nominal = np.asarray(nominal, dtype=np.float32)
+    if nominal.ndim != 2 or nominal.shape[1] < 2:
+        raise ValueError(f"nominal must be [T, >=2], got {nominal.shape}")
+    if len(nominal) == 1:
+        return nominal[0, :2].astype(np.float32)
+    position = float(np.clip(elapsed / plan_dt, 0.0, len(nominal) - 1))
+    step = int(np.floor(position))
+    if step >= len(nominal) - 1:
+        return nominal[-1, :2].astype(np.float32)
+    frac = position - step
+    return ((1.0 - frac) * nominal[step, :2] + frac * nominal[step + 1, :2]).astype(np.float32)

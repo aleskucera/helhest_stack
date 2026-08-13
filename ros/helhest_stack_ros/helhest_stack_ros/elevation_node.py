@@ -36,6 +36,7 @@ import rclpy
 import tf2_ros
 import warp as wp
 from geometry_msgs.msg import Point
+from geometry_msgs.msg import Vector3
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import TransformStamped
 from message_filters import ApproximateTimeSynchronizer
@@ -50,7 +51,6 @@ from sensor_msgs.msg import JointState
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs.msg import PointField
 from sensor_msgs_py.point_cloud2 import read_points_numpy
-from std_msgs.msg import Bool
 from std_msgs.msg import ColorRGBA
 from std_msgs.msg import Float32
 from visualization_msgs.msg import Marker
@@ -71,13 +71,16 @@ from helhest.perception import transform_points
 from helhest.perception.dynamic.frontier import frontier_from_organized
 from helhest import dynamics
 from helhest.control.command import condition_command
+from helhest.control.command import in_flight_history
 from helhest.control.command import JOINT_NAMES
+from helhest.control.command import to_engine_order
 from helhest.control.mppi import CostParams
 from helhest.control.mppi import MppiGpu
 from helhest.control.mppi import SamplingConfig
 from helhest.control.terminal import dock_control
 from helhest.control.turn_adapt import AdaptiveTurnBoost
 from helhest.control.turn_adapt import TurnGainEstimator
+from helhest.control.yaw_track import YawRateTracker
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 from helhest.planning.costtogo import CostToGo
@@ -175,6 +178,7 @@ _PLAN_BUILD = frozenset(
         "plan_pivot_cost",
         "plan_turn_boost_adapt",
         "plan_turn_boost_tau",
+        "plan_yaw_track",
         "device",
     }
 )
@@ -236,9 +240,10 @@ class ElevationNode(Node):
         self._prev_cmd = np.zeros(
             3, np.float32
         )  # last published /cmd_joints [L, rear, R] (slew ref)
-        self._d_hist: deque[float] = deque(
-            maxlen=15
-        )  # recent robot->goal distances (progress check)
+        # Commands already in flight, ENGINE order (wL, wR, w_rear), oldest first. Length = the
+        # delay in whole rollout steps; empty (and unused) when plan_command_delay is 0.
+        self._cmd_in_flight: deque[np.ndarray] = deque(maxlen=1)
+        self._last_cmd_time: float | None = None  # clock of the last /cmd_joints publish
         self._prev_plan_U: np.ndarray | None = (
             None  # last frame's nominal plan (for plan-consistency EMA)
         )
@@ -249,10 +254,12 @@ class ElevationNode(Node):
             None  # last commanded (wR-wL), paired with the yaw it caused
         )
         self._rev_open = False  # reverse gate state last frame (for transition logging)
+        self._last_turn_adapt_time: float | None = None  # clock of the last turn_boost EMA update
+        self._yaw_track: YawRateTracker | None = None  # optional fast inner yaw-rate loop
+        self._last_yaw_track_time: float | None = None  # clock of the last yaw-loop update
         self._goal_reached = (
             False  # latched at the goal -> idle (no planning) until the goal changes
         )
-        self._holding = False  # walled-off hold active -> planned-path marker drawn red
         self.planner: MppiGpu | None = None
         self.plan_sim: ForwardSimulator | None = None
         self.ctg: CostToGo | None = None
@@ -321,10 +328,13 @@ class ElevationNode(Node):
         self.pub_path_marker = self.create_publisher(Marker, "planned_path_marker", 10)
         self.pub_frame = self.create_publisher(Marker, "frame_marker", 1)
         self.pub_cmd = self.create_publisher(JointState, self.get_parameter("cmd_topic").value, 10)
-        self.pub_holding = self.create_publisher(Bool, "plan_holding", 10)  # True = walled-off hold
         self.pub_turn_boost = self.create_publisher(
             Float32, "turn_boost", 10
         )  # turn_boost in effect (debug)
+        # Inner yaw loop, as (reference, measured, correction). The correction is the ONLY
+        # one not reconstructible from a bag: /cmd_joints carries the CORRECTED differential,
+        # so without this there is no way to tell what the loop did -- or whether it ran.
+        self.pub_yaw_track = self.create_publisher(Vector3, "yaw_track", 10)
         self.add_on_set_parameters_callback(self._on_parameters_changed)
 
         self.get_logger().info(
@@ -556,6 +566,12 @@ class ElevationNode(Node):
         d("plan_lat_coarsen", 4)  # routing/cost-to-go grid coarsening vs the map cell
         d("plan_n_refine", 3)  # MPPI refine iterations per frame
         d("plan_friction", 0.8)  # uniform rollout friction
+        # Wheel envelope half-width [m]. DEFAULT 0.10 = the measured tread, as a yaw-binned
+        # CYLINDER: honest laterally, where the sphere reached 0.35 m sideways and refused gaps the
+        # robot can straddle. 0.0 = back to the sphere. Costs ~3.9 ms per perception frame to
+        # dilate (64 yaw slices) against 0.06 for the sphere. Widen it (0.15, 0.20) to buy lateral
+        # margin back without the sphere's fixed 0.35.
+        d("plan_wheel_width", 0.10)
         # 'indoor' (K_TURN 0.4, alpha~1.33) or 'outdoor' (K_TURN 1.0, alpha~1.82 -- grass/dirt grips
         # harder so it understeers). ICP-calibrated per environment; see dynamics.k_turn_for.
         d("terrain", "outdoor")
@@ -661,6 +677,12 @@ class ElevationNode(Node):
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
         # a clear shot, no cost when a turn is actually needed. 0 = off.
+        # Wheel-speed CHANGE penalty: the anti-jerk knob. plan_turn penalises the SIZE of a turn
+        # and so cannot tell a deliberate repositioning from a wobble; this penalises CHANGING
+        # your mind, which is what wobble is. Raised from the 2e-3 library default -- measured
+        # closed-loop, it cuts turn-direction flips 0.60 -> 0.36 /s and lateral wander 0.09 ->
+        # 0.05 m on a straight shot while leaving the 90 deg turn time unchanged.
+        d("plan_smooth", 0.04)
         d("plan_straight_frac", 0.2)
         # CEM elite fraction: MPPI commits the MEAN of the top-k lowest-cost candidates. Because the
         # goal heading is free, small turns near the goal barely change cost -> the elite fills with
@@ -689,6 +711,19 @@ class ElevationNode(Node):
         # (over-commanded wheels), not a real drivetrain gain. So boosting over-turns below the limit and
         # worsens saturation at it. Keep at 1.0 while plan_wmax leaves turning headroom (see that
         # param); the fixed-2.0 story in docs/turn_differential_hotfix.md is superseded.
+        # Transport delay [s] between publishing /cmd_joints and the wheels acting on it. MEASURED
+        # at 149-199 ms (scripts/fit_actuator_lag.py); the rollout then plans against commands that
+        # land ~2 ticks late instead of instantly. 0.0 = off. Note this makes the planner turn
+        # SOONER, not more: it no longer expects a command to bite instantly. If plan_turn_boost is
+        # ever raised above 1.0 to compensate for under-turning, re-check it after changing this --
+        # the two corrections overlap.
+        # Publish /cmd_joints on a TIMER at this rate [Hz] instead of once per point cloud, walking
+        # the committed plan between replans. 0 = off (publish once per cloud, as before).
+        # Replanning stays at the sensor rate -- a new plan on a 66 ms-old map is barely new
+        # information -- but the COMMAND can change faster, which is where the value is: finer slew
+        # and goal-brake resolution, and the LLC stays fed if a cloud is dropped. It does NOT reduce
+        # the ~175 ms actuator delay, which lives in the LLC velocity loop.
+        d("plan_command_delay", dynamics.COMMAND_DELAY)
         d("plan_turn_boost", 1.0)
         # OPTIONAL: self-tune plan_turn_boost online from gyro feedback (control/turn_adapt.py) so the
         # realized yaw matches the plan across terrains + the drivetrain defect -- makes the fixed
@@ -697,6 +732,14 @@ class ElevationNode(Node):
         # fight replanning). Only adapts while turning; clamps to [1, 3].
         d("plan_turn_boost_adapt", False)
         d("plan_turn_boost_tau", 3.0)
+        # OPTIONAL fast inner yaw-rate loop (control/yaw_track.py): correct the commanded
+        # differential so the REALIZED yaw matches the command actually published. Needs
+        # Off by default; see the module docstring for the gains.
+        d("plan_yaw_track", False)
+        d("plan_yaw_track_kp", 0.4)
+        d("plan_yaw_track_ki", 1.0)
+        d("plan_yaw_track_deadband", 0.05)  # [rad/s] straight-running idle band
+        d("plan_yaw_track_max", 1.5)  # [rad/s] hard clamp on the differential correction
         d("plan_dock_radius", 1.5)  # within this range of the goal: dock (if enabled) or just stop
         d(
             "plan_dock_enable", True
@@ -718,13 +761,6 @@ class ElevationNode(Node):
         # the robot brakes BEFORE the corner rather than in it. 0 = reactive only (cap the current
         # command). The plan is plan_horizon * DT long, so this saturates at 2.5 s by default.
         d("plan_turn_brake_lookahead_s", 0.0)
-        # UNREACHABLE-GOAL STOP: when the cost-to-go at the robot is saturated (no route to the goal)
-        # AND the committed plan reduces distance-to-goal by less than this, the robot is walled off
-        # -> stop instead of the explore-fallback nosing into the obstacle. Keep it below a horizon's
-        # worth of forward progress so genuine exploration down an open corridor is NOT stopped.
-        d(
-            "plan_progress_min", 0.3
-        )  # min plan progress toward the goal to keep driving when saturated (m)
         d("plan_path_width", 0.08)  # intended-path line marker width (m)
 
     def _cache_params(self) -> None:
@@ -803,6 +839,8 @@ class ElevationNode(Node):
         self.plan_lat_coarsen: int = g("plan_lat_coarsen")
         self.plan_n_refine: int = g("plan_n_refine")
         self.plan_friction: float = g("plan_friction")
+        _ww = float(g("plan_wheel_width"))
+        self.plan_wheel_width: float | None = _ww if _ww > 0.0 else None
         self.terrain: str = g("terrain")
         self.k_turn_override: float = g("k_turn")
         self.plan_robust_margin_m: float = g("plan_robust_margin_m")
@@ -813,6 +851,7 @@ class ElevationNode(Node):
         self.plan_goal_running: float = g("plan_goal_running")
         self.plan_effort: float = g("plan_effort")
         self.plan_turn: float = g("plan_turn")
+        self.plan_smooth: float = g("plan_smooth")
         self.plan_straight_frac: float = g("plan_straight_frac")
         self.plan_elite_frac: float = g("plan_elite_frac")
         self.plan_wmax: float = g("plan_wmax")
@@ -828,16 +867,21 @@ class ElevationNode(Node):
         self.plan_max_omega: float = g("plan_max_omega")
         self.plan_max_slew: float = g("plan_max_slew")
         self.plan_max_decel: float = g("plan_max_decel")
+        self.plan_command_delay: float = g("plan_command_delay")
         self.plan_turn_boost: float = g("plan_turn_boost")
         self.plan_turn_boost_adapt: bool = g("plan_turn_boost_adapt")
         self.plan_turn_boost_tau: float = g("plan_turn_boost_tau")
+        self.plan_yaw_track: bool = g("plan_yaw_track")
+        self.plan_yaw_track_kp: float = g("plan_yaw_track_kp")
+        self.plan_yaw_track_ki: float = g("plan_yaw_track_ki")
+        self.plan_yaw_track_deadband: float = g("plan_yaw_track_deadband")
+        self.plan_yaw_track_max: float = g("plan_yaw_track_max")
         self.plan_dock_radius: float = g("plan_dock_radius")
         self.plan_dock_enable: bool = g("plan_dock_enable")
         self.plan_reach_radius: float = g("plan_reach_radius")
         self.plan_goal_brake_dist: float = g("plan_goal_brake_dist")
         self.plan_turn_brake_a_max: float = g("plan_turn_brake_a_max")
         self.plan_turn_brake_lookahead_s: float = g("plan_turn_brake_lookahead_s")
-        self.plan_progress_min: float = g("plan_progress_min")
         self.plan_path_width: float = g("plan_path_width")
 
     @staticmethod
@@ -930,10 +974,10 @@ class ElevationNode(Node):
         else:
             kt = dynamics.k_turn_for(self.terrain)
             self.get_logger().info(f"planner terrain='{self.terrain}' -> K_TURN={kt}")
-        plan_solver = dynamics.planning_solver(k_turn=kt)
+        plan_solver = dynamics.planning_solver(k_turn=kt, command_delay=self.plan_command_delay)
         plan_solver.tau_motor = self.plan_tau_motor  # modeled actuation lag (0 = instantaneous)
         self.plan_sim = ForwardSimulator(
-            dynamics.robot_params(),
+            dynamics.robot_params(self.plan_wheel_width),
             plan_solver,
             win_grid,
             int(self.plan_batch),
@@ -941,12 +985,17 @@ class ElevationNode(Node):
             self.device,
         )
         self.plan_sim.set_uniform_friction(self.plan_friction)
+        # size the in-flight ring to the delay the rollout actually models
+        self._cmd_in_flight = deque(
+            self._cmd_in_flight, maxlen=max(self.plan_sim.command_delay_steps, 1)
+        )
         self.planner = MppiGpu(
             self.plan_sim,
             CostParams(
                 goal_running=self.plan_goal_running,
                 effort=self.plan_effort,
                 turn=self.plan_turn,
+                smoothness=self.plan_smooth,
                 saturation=self.plan_saturation,
             ),
             # wmin here is only the box the planner MAY use; the effective floor is gated per
@@ -967,7 +1016,7 @@ class ElevationNode(Node):
             self.planner.set_wmin(0.0)  # reverse stays locked until the gate in _plan opens it
         # ONLINE mu estimation: recenter the planner's friction on the realized turn gain (both
         # directions) and size the robust band from the estimator's noise.
-        rp = dynamics.robot_params()
+        rp = dynamics.robot_params(self.plan_wheel_width)
         if self.plan_mu_adapt:
             self._mu_est = TurnGainEstimator(
                 k_turn=kt,
@@ -985,6 +1034,7 @@ class ElevationNode(Node):
             self._mu_est = None
         # optional online turn_boost from gyro feedback: alpha = 1 + k_turn*mu matches the plan model.
         if self.plan_turn_boost_adapt:
+            rp = dynamics.robot_params(self.plan_wheel_width)
             self._turn_adapt = AdaptiveTurnBoost(
                 alpha_model=1.0 + kt * self.plan_friction,
                 wheel_radius=rp.wheel_radius,
@@ -999,9 +1049,37 @@ class ElevationNode(Node):
             )
         else:
             self._turn_adapt = None
+        # Lateral-accel constant for the turn brake: a_lat = lat_gain * mean * diff, from
+        # v = R*mean and wz = R*diff/(2*half_track*alpha). alpha = 1 + k_turn*grip/(m*g) is the
+        # model's turn resistance; on flat ground with the wheels carrying the full weight that
+        # is 1 + k_turn, which is the value the planner itself is tuned against.
+        _rp = dynamics.robot_params(self.plan_wheel_width)
+        self._lat_gain = _rp.wheel_radius**2 / (2.0 * _rp.half_track * (1.0 + kt))
+        # Yaw rate per unit differential, for the inner yaw loop. NOT _lat_gain / R: the turn
+        # brake deliberately uses alpha = 1 + k_turn (the mu = 1 worst case) because it is a
+        # SAFETY cap and over-braking is harmless. A yaw REFERENCE has to be the planner's own
+        # model, alpha = 1 + k_turn*plan_friction, or the loop would steer the robot away from
+        # what MPPI actually planned -- about 8% less yaw at the deployed mu 0.8.
+        self._yaw_per_diff = _rp.wheel_radius / (
+            2.0 * _rp.half_track * (1.0 + kt * self.plan_friction)
+        )
+        if self.plan_yaw_track:
+            self._yaw_track = YawRateTracker(
+                yaw_per_diff=self._yaw_per_diff,
+                kp=self.plan_yaw_track_kp,
+                ki=self.plan_yaw_track_ki,
+                deadband=self.plan_yaw_track_deadband,
+                max_correction=self.plan_yaw_track_max,
+            )
+            self.get_logger().info(
+                f"yaw-rate loop ON at the plan rate (kp={self.plan_yaw_track_kp}, "
+                f"ki={self.plan_yaw_track_ki}, deadband={self.plan_yaw_track_deadband} rad/s)"
+            )
+        else:
+            self._yaw_track = None
         self.ctg = CostToGo(
             GridParams(rcnx, rcny, rccell, 0.0, 0.0),
-            dynamics.robot_params(),
+            dynamics.robot_params(self.plan_wheel_width),
             dynamics.planning_solver(
                 k_turn=kt
             ),  # static settle ignores k_turn; passed for consistency
@@ -1013,12 +1091,6 @@ class ElevationNode(Node):
             device=self.device,
         )
         self.planner.cw.lattice_cap = self.ctg._vcap
-        # Lateral-accel constant for the turn brake: a_lat = lat_gain * mean * diff, from
-        # v = R*mean and wz = R*diff/(2*half_track*alpha). alpha = 1 + k_turn*grip/(m*g) is the
-        # model's turn resistance; on flat ground with the wheels carrying the full weight that
-        # is 1 + k_turn, which is the value the planner itself is tuned against.
-        _rp = dynamics.robot_params()
-        self._lat_gain = _rp.wheel_radius**2 / (2.0 * _rp.half_track * (1.0 + kt))
         # Routing field expressed in the PLANNING window's frame: both windows are robot-centered,
         # so their origins differ by a constant cell offset.
         self.sgrid = GridParams(
@@ -1038,7 +1110,6 @@ class ElevationNode(Node):
                 "set the RViz Fixed Frame to the map frame."
             )
         self.goal_xy = (msg.pose.position.x, msg.pose.position.y)
-        self._d_hist.clear()  # fresh progress history for the new goal
         self._prev_plan_U = None  # new goal -> don't smooth against the old goal's plan
         self._goal_reached = False  # new goal -> resume planning
         self.get_logger().info(f"goal set: ({self.goal_xy[0]:.2f}, {self.goal_xy[1]:.2f})")
@@ -1046,9 +1117,9 @@ class ElevationNode(Node):
     def _follow_callback(self, msg: PoseStamped) -> None:
         """Follow-me target (e.g. the radio locator on /radio/estimate_pose). Active only while
         goal_source == 'follow': the pose is transformed into map_frame via TF and becomes the live
-        goal on every update, so a MOVING tag is continuously chased. Warm-start (_prev_plan_U) and
-        progress history (_d_hist) are deliberately NOT reset here -- the target drifts smoothly, so
-        the last plan is still a good seed. The reach latch is handled per-frame in the plan loop
+        goal on every update, so a MOVING tag is continuously chased. The warm start (_prev_plan_U)
+        is deliberately NOT reset here -- the target drifts smoothly, so the last plan is still a
+        good seed. The reach latch is handled per-frame in the plan loop
         (stop within plan_reach_radius, resume when the tag moves away). Ignored in 'click' mode."""
         if self.goal_source != "follow":
             return
@@ -1620,6 +1691,8 @@ class ElevationNode(Node):
                 f"REACHED goal (d={d_goal:.2f} m) -- stopping; idle until a new goal is set."
             )
         if self._goal_reached:
+            if self._yaw_track is not None:
+                self._yaw_track.reset()  # at rest: a held integrator is a lurch on the next goal
             if self.plan_actuate:
                 cmd = condition_command(
                     0.0,
@@ -1628,12 +1701,11 @@ class ElevationNode(Node):
                     max_omega=self.plan_max_omega,
                     max_slew=self.plan_max_slew,
                     max_decel=self.plan_max_decel,
-                    dt=dynamics.DT,
+                    dt=self._command_dt(dynamics.DT),
                     turn_boost=self.plan_turn_boost,
                 )
                 self._prev_cmd = cmd
                 self._publish_cmd(cmd)
-                self.pub_holding.publish(Bool(data=False))
             return
         with wp.ScopedDevice(self.device):
             self.plan_sim.set_terrain(
@@ -1684,6 +1756,7 @@ class ElevationNode(Node):
             )
             self._ck("plan:ctg")
             self.planner.set_lattice(V, self.sgrid)
+            self._load_command_history()
             self.planner.replan(state_l, goal_l, int(self.plan_n_refine))
             self._ck("plan:replan")
         # PLAN CONSISTENCY: EMA the nominal toward last frame's plan, shifted one step forward (the
@@ -1698,18 +1771,21 @@ class ElevationNode(Node):
                 self.planner.set_nominal(U)
             self._prev_plan_U = U.copy()
         # candidate 0 is the committed nominal rollout; window-local -> map coords.
-        ctrl = self.planner.sim.controlled.numpy()  # [T+1, B, 3] = (x, y, yaw)
+        # Rollout 0 ONLY -- it is the nominal (mppi.py: "candidate 0 keeps the nominal"), and the
+        # published path is the only consumer. Reading the whole [T+1, B] tensor pulled 1.2 MB to
+        # the host every frame to use 312 bytes of it. Warp copies the strided column directly, so
+        # this is a device-side slice rather than a host-side one: 0.63 -> 0.17 ms, same values.
+        nominal_xy = self.planner.sim.controlled[:, 0].numpy()  # [T+1, 3] = (x, y, yaw)
         self._ck("plan:readback")
         origin = np.array([mf.lxmin, mf.lymin], np.float32)
-        self._publish_path(ctrl[:, 0, :2] + origin, ez, stamp)
+        self._publish_path(nominal_xy[:, :2] + origin, ez, stamp)
         self._ck("plan:pub_path")
 
         # --- ACTUATION: turn the plan into a conditioned /cmd_joints command (default OFF) ---
         if not self.plan_actuate:
             return
         d = float(np.hypot(gx - mf.ex, gy - mf.ey))  # robot -> goal distance
-        self._d_hist.append(d)
-        holding = False  # walled-off hold this frame -> published on /plan_holding
+        from_plan = False  # True only on the MPPI branch, whose command IS a plan to walk
         if d < self.plan_reach_radius:
             wl, wr = 0.0, 0.0  # reached -> stop (the slew limiter ramps the command down)
         elif self.plan_dock_enable and d < self.plan_dock_radius:
@@ -1725,34 +1801,35 @@ class ElevationNode(Node):
             # MPPI drives; the goal brake (in condition_command) bleeds off speed on the final
             # approach so it settles instead of orbiting. With the dock disabled this branch covers
             # the whole reach_radius..inf band -- the continuous brake replaces the hard stop-radius.
+            from_plan = True
             u0 = self.planner.nominal()[0]  # first committed step (wL, wR), model convention
             wl, wr = float(u0[0]), float(u0[1])
-            # UNREACHABLE-GOAL STOP: the robot sits at the routing-window CENTER, so the cost-to-go
-            # there is V at the robot. If it is SATURATED (no route to the goal) AND the committed
-            # plan reduces distance-to-goal by less than plan_progress_min, the robot is walled off
-            # -> stop, instead of the explore-fallback nosing straight into the obstacle. (While the
-            # corridor ahead is still open the plan DOES make progress, so this does not fire.)
-            v_robot = float(self.ctg.V.numpy()[rcny // 2, rcnx // 2].min())
-            saturated = v_robot >= 0.9 * self.ctg._vcap
-            # actual progress over the recent window (plan shape is an unreliable signal -- the blind
-            # far horizon stretches toward the goal even when the near path is walled; measure whether
-            # the robot is really getting closer). Full window + < plan_progress_min gained = stuck.
-            stuck = (
-                len(self._d_hist) >= self._d_hist.maxlen
-                and self._d_hist[0] - d < self.plan_progress_min
-            )
-            if saturated and stuck:
-                wl, wr = 0.0, 0.0  # walled off + no real progress -> hold
-                holding = True
-                self.get_logger().warning(
-                    f"goal unreachable (walled off, no progress in {self._d_hist.maxlen} frames) "
-                    f"-> holding [d={d:.1f}]",
-                    throttle_duration_sec=2.0,
-                )
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
         turn_boost = (
             self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
         )
+        if from_plan:
+            # The adaptive turn_boost pairs a commanded differential with the yaw it produced, so
+            # it belongs on the PLAN cadence -- once per committed plan, not per publish.
+            if (
+                self._turn_adapt is not None
+                and self._imu_buffer
+                and self._last_diff_out is not None
+            ):
+                self._turn_adapt_update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
+            self._last_diff_out = float(self._prev_cmd[2] - self._prev_cmd[0])
+        # INNER YAW LOOP. The reference is the UNCORRECTED plan through the same conditioner:
+        # post-turn-brake and post-slew, but free of the loop's own output. Referencing the
+        # corrected command makes reference and measurement both scale with the correction, so the
+        # error has no fixed point and the loop inflates the turn even at zero model error
+        # (measured: peak yaw 0.517 -> 0.575 rad/s on correctly-modelled ground).
+        ref_cmd = None
+        if self._yaw_track is not None and from_plan:
+            ref_cmd = self._conditioned(wl, wr, d, turn_boost)
+            half = 0.5 * self._yaw_track.correction  # differential only; the planner owns speed
+            wl, wr = wl - half, wr + half
+        elif self._yaw_track is not None:
+            self._yaw_track.reset()  # stopping, docking or held: do not carry an integrator over
         cmd = condition_command(
             wl,
             wr,
@@ -1760,7 +1837,7 @@ class ElevationNode(Node):
             max_omega=self.plan_max_omega,
             max_slew=self.plan_max_slew,
             max_decel=self.plan_max_decel,
-            dt=dynamics.DT,
+            dt=self._command_dt(dynamics.DT),
             turn_boost=turn_boost,
             goal_dist=d,
             brake_dist=self.plan_goal_brake_dist,
@@ -1770,8 +1847,8 @@ class ElevationNode(Node):
         )
         self._prev_cmd = cmd
         self._publish_cmd(cmd)
-        self.pub_holding.publish(Bool(data=holding))  # True = walled-off hold, False = driving
-        self._holding = holding  # colors the planned-path marker red next frame (see _publish_path)
+        if ref_cmd is not None:
+            self._yaw_track_update(ref_cmd, cmd, turn_boost)
         self.pub_turn_boost.publish(
             Float32(data=float(turn_boost))
         )  # turn_boost in effect (debug/monitor)
@@ -1783,13 +1860,129 @@ class ElevationNode(Node):
             yaw_meas = float(self._imu_buffer[-1][2][2])
             if self._last_diff_out is not None:
                 if self._turn_adapt is not None:
-                    self._turn_adapt.update(self._last_diff_out, yaw_meas)
+                    self._turn_adapt_update(self._last_diff_out, yaw_meas)
                 if self._mu_est is not None:
                     center, span = self._mu_est.update(self._last_diff_out, yaw_meas)
                     self.planner.set_mu_band(center, span)
             self._last_diff_out = float(
                 cmd[2] - cmd[0]
             )  # condition_command [L, rear, R] -> (wR - wL)
+
+    def _conditioned(self, wl: float, wr: float, goal_dist: float, turn_boost: float):
+        """Run the output conditioner without publishing. Pure, so the yaw loop can call it on the
+        uncorrected plan to get its reference, and the caller then runs it again with the
+        correction folded in."""
+        return condition_command(
+            wl,
+            wr,
+            self._prev_cmd,
+            max_omega=self.plan_max_omega,
+            max_slew=self.plan_max_slew,
+            max_decel=self.plan_max_decel,
+            dt=self._command_dt(dynamics.DT),
+            turn_boost=turn_boost,
+            goal_dist=goal_dist,
+            brake_dist=self.plan_goal_brake_dist,
+            turn_brake_a_max=self.plan_turn_brake_a_max,
+            lat_gain=self._lat_gain,
+            turn_brake_scale=self._turn_brake_lookahead(turn_boost),
+        )
+
+    def _yaw_track_update(self, ref_cmd: np.ndarray, cmd: np.ndarray, turn_boost: float) -> None:
+        """Close the yaw loop: reference from the uncorrected intent, saturation from what went out.
+
+        Both are post-turn-brake, so the loop tracks the braked arc rather than fighting the brake
+        to recover the yaw the brake deliberately removed.
+        """
+        assert self._yaw_track is not None
+        if not self._imu_buffer:
+            return
+        self._yaw_track.set_gains(  # live-tunable: these are not in _PLAN_BUILD
+            self.plan_yaw_track_kp,
+            self.plan_yaw_track_ki,
+            self.plan_yaw_track_deadband,
+            self.plan_yaw_track_max,
+        )
+        t_imu, _, w_base = self._imu_buffer[-1]
+        now = float(self.get_clock().now().nanoseconds) * 1e-9
+        dt = dynamics.DT
+        if self._last_yaw_track_time is not None:
+            dt = max(now - self._last_yaw_track_time, 1e-4)
+        self._last_yaw_track_time = now
+        # /cmd_joints order is (left, rear, right), so the differential is [2] - [0].
+        #
+        # DIVIDE OUT turn_boost. condition_command multiplies the differential by it, so a
+        # reference read straight off its output scales with the boost -- and the boost then
+        # cancels from the loop's error, since the measurement scales with it too. That makes the
+        # loop blind to exactly the correction turn_boost was set to apply. It is worse than
+        # useless at boost != 1: the reference would sit turn_boost x above the yaw the planner
+        # asked for, so the loop would drive the robot to over-turn by that factor. The planner's
+        # intent is the UNBOOSTED differential; the boost is compensation for a drivetrain loss,
+        # not part of the plan.
+        yaw_ref = float(ref_cmd[2] - ref_cmd[0]) / max(turn_boost, 1e-3) * self._yaw_per_diff
+        yaw_meas = float(w_base[2])  # base-frame gyro z; /odin1/imu carries yaw on +z
+        corr = self._yaw_track.update(
+            yaw_ref,
+            yaw_meas,
+            dt,
+            age=now - t_imu,
+            saturated=bool(np.max(np.abs(cmd)) >= self.plan_max_omega - 1e-3),
+        )
+        self.pub_yaw_track.publish(Vector3(x=yaw_ref, y=yaw_meas, z=float(corr)))
+
+    def _load_command_history(self) -> None:
+        """Copy the commands still in flight into the rollout buffer, oldest first.
+
+        Row k acts on rollout step k while k < command_delay_steps, so this is what makes the plan
+        start from what the wheels are ABOUT to do rather than from what we are about to ask.
+        Written in place into the buffer the captured MPPI graph already reads, so no re-capture.
+        Before enough commands exist (startup) the oldest entry is repeated, i.e. the robot is
+        assumed to have been holding it.
+        """
+        n = int(self.plan_sim.command_delay_steps)
+        if n <= 0:
+            return
+        self.plan_sim.command_history.assign(
+            in_flight_history(self._cmd_in_flight, n, int(self.plan_sim.batch_size))
+        )
+
+    def _command_dt(self, expected: float) -> float:
+        """Seconds since the last /cmd_joints publish, for the rate limiter.
+
+        `condition_command` sizes its slew and decel caps as rate * dt, so handing it a NOMINAL
+        period that does not match the real publish interval scales every cap by the ratio. On
+        Odin the cloud arrives every ~69 ms while dynamics.DT is 0.1, which made every limit ~45%
+        looser than its parameter said -- plan_max_slew 2.0 was really acting as 2.9 rad/s^2.
+
+        Clamped to [0.25x, 2x] of `expected`. A long gap is not a licence to jump: after a stalled
+        frame the command should still ramp over the next few ticks rather than stepping by
+        whatever the elapsed time would allow.
+        """
+        if self._last_cmd_time is None:
+            return expected
+        now = float(self.get_clock().now().nanoseconds) * 1e-9
+        return float(np.clip(now - self._last_cmd_time, 0.25 * expected, 2.0 * expected))
+
+    def _turn_adapt_update(self, diff_cmd: float, yaw_meas: float) -> None:
+        """Feed the adaptive turn_boost, timed by the ACTUAL interval between updates.
+
+        `tau_s` is a wall-clock time constant, so handing the EMA a nominal period that does not
+        match the real update rate scales the constant by the ratio. This runs at the PLAN rate,
+        ~69 ms on Odin rather than the nominal dynamics.DT of 0.1, which would otherwise make the
+        loop ~31% faster than its parameter says.
+
+        Clamped to [0.25x, 4x] of nominal. Unlike the command rate limiter, a long gap here is
+        legitimately worth a bigger blend -- more time really has passed -- so the upper bound is
+        loose and only guards against a stalled-frame outlier.
+        """
+        assert self._turn_adapt is not None
+        now = float(self.get_clock().now().nanoseconds) * 1e-9
+        dt = None
+        if self._last_turn_adapt_time is not None:
+            gap = now - self._last_turn_adapt_time
+            dt = float(np.clip(gap, 0.25 * dynamics.DT, 4.0 * dynamics.DT))
+        self._last_turn_adapt_time = now
+        self._turn_adapt.update(diff_cmd, yaw_meas, dt=dt)
 
     def _publish_cmd(self, cmd: np.ndarray) -> None:
         """Publish the conditioned [left, rear, right] wheel command to /cmd_joints.
@@ -1808,6 +2001,8 @@ class ElevationNode(Node):
         m.name = list(JOINT_NAMES)
         m.velocity = [float(v) for v in cmd]
         self.pub_cmd.publish(m)
+        self._cmd_in_flight.append(to_engine_order(cmd))
+        self._last_cmd_time = float(self.get_clock().now().nanoseconds) * 1e-9
 
     def _publish_path(self, xy: np.ndarray, z: float, stamp) -> None:
         path = Path()
@@ -1830,14 +2025,7 @@ class ElevationNode(Node):
         m.type = Marker.LINE_STRIP
         m.action = Marker.ADD
         m.scale.x = float(self.plan_path_width)
-        # Magenta while driving; RED when the planner is HOLDING (goal walled off, no viable path)
-        # -- the path shown is the rejected explore-fallback, so red flags "not being driven".
-        if self._holding:
-            m.color = ColorRGBA(r=1.0, g=0.1, b=0.1, a=1.0)
-        else:
-            m.color = ColorRGBA(
-                r=1.0, g=0.0, b=1.0, a=1.0
-            )  # magenta: reads over the green height map
+        m.color = ColorRGBA(r=1.0, g=0.0, b=1.0, a=1.0)  # magenta: reads over the green height map
         m.pose.orientation.w = 1.0
         m.points = [Point(x=float(x), y=float(y), z=z) for x, y in xy]
         self.pub_path_marker.publish(m)

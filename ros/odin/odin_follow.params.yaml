@@ -1,0 +1,21 @@
+# Follow-me OVERLAY for the Odin elevation_node. Not standalone -- layer it OVER the base file,
+# and this one wins on the keys it sets (later --params-file takes precedence):
+#
+#   ros2 run helhest_stack_ros elevation_node --ros-args \
+#     --params-file <repo>/ros/odin/odin_elevation.params.yaml \
+#     --params-file <repo>/ros/odin/odin_follow.params.yaml
+#
+# The base file stays click-default; this flips it to follow-me only when you add it.
+#
+# SAFETY: the base file has plan_actuate TRUE, so in follow mode the robot DRIVES toward the tag
+# the moment a pose arrives on follow_topic. Watch it plan without driving by also passing
+# -p plan_actuate:=false. follow_topic must be in a frame with a TF to map_frame or updates drop.
+/**:
+  ros__parameters:
+    # "follow" -> continuously chase follow_topic (a live PoseStamped, e.g. the radio locator);
+    # every update re-targets and the reach latch never sticks, so a MOVING tag is tracked.
+    goal_source: follow
+    follow_topic: /radio/estimate_pose  # PoseStamped to chase
+    # Aim this far SHORT of the tag, back along the robot->tag line [m], so the person's own body is
+    # not walled off as untraversable. 0 = target the tag exactly (walls off on a person).
+    follow_standoff: 1.5

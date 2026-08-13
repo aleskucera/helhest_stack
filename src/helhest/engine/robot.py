@@ -4,6 +4,7 @@
 of read-only constants passed into the kernels). The numpy geometry/mass also live
 in the top-level `model.py` for the reference/viz paths; these are the device twin.
 """
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -21,6 +22,27 @@ _MASSES = np.array(
 )
 DEFAULT_MASS = float(_MASSES[:, 3].sum())  # 106.2 kg
 DEFAULT_COM = (_MASSES[:, :3] * _MASSES[:, 3:4]).sum(0) / DEFAULT_MASS  # x≈-0.198
+# Own yaw inertia of each body about its OWN centre: the two chassis boxes as uniform slabs
+# m(a^2+b^2)/12 at 0.48x0.56 and 0.48x0.24, and each wheel as a cylinder about a vertical axis
+# (the transverse inertia, m(3r^2+h^2)/12 = 0.173 for r=0.35, h=0.10, m=5.5).
+_OWN_YAW_INERTIA = np.array(
+    [
+        78.8375 * (0.48**2 + 0.56**2) / 12.0,
+        10.8625 * (0.48**2 + 0.24**2) / 12.0,
+        0.173021,
+        0.173021,
+        0.173021,
+    ]
+)
+# I_zz about the CoM: each body's own inertia plus its parallel-axis term. ~10.1 kg m^2. Derived
+# from the same table the mass and CoM come from, so it cannot drift away from them.
+DEFAULT_YAW_INERTIA = float(
+    (
+        _OWN_YAW_INERTIA
+        + _MASSES[:, 3]
+        * ((_MASSES[:, 0] - DEFAULT_COM[0]) ** 2 + (_MASSES[:, 1] - DEFAULT_COM[1]) ** 2)
+    ).sum()
+)
 
 
 @wp.struct
@@ -39,6 +61,7 @@ class Robot:
     half_track: wp.float32
     com: wp.vec3
     mass: wp.float32
+    yaw_inertia: wp.float32  # [kg m^2] about the CoM; only the momentum traction model reads it
     gravity: wp.float32
     # --- planning capabilities (mirror of the RobotParams fields; the dynamics kernels don't read
     # these, but carrying them on the built struct lets the planner read one object). ---
@@ -55,10 +78,29 @@ class Robot:
 @dataclass(frozen=True)
 class RobotParams:  # host-side robot knobs — what you nudge
     wheel_radius: float = 0.35
+    # Wheel WIDTH [m]. None keeps the spherical wheel envelope, which reaches a full wheel_radius
+    # sideways and so lifts the robot over rocks it would really straddle; a float switches
+    # ForwardSimulator to the yaw-binned cylinder envelope. The REAL wheel is 0.10 m wide
+    # (ruler-measured; ostrich examples/helhest_junior/robot_parameters.md section 6, collision
+    # cylinder r = 0.35, half-height 0.05) -- so the sphere over-reaches sideways by 7x. Left at
+    # DEFAULT since 2026-08-10: the CYLINDER envelope at the ruler-measured 0.10 m tread. The
+    # sphere reaches the full 0.35 m radius sideways, so a rock 0.3 m beside the wheel lifts and
+    # tilts the robot when in reality it is straddled -- systematically pessimistic in tight and
+    # rocky places. Set to None for the sphere.
+    #
+    # This half-width is also the SAFETY-MARGIN dial, and a far better one than the sphere: the
+    # sphere's 0.35 m of lateral margin is fixed and unavoidable, whereas 0.10 is honest, 0.15
+    # keeps 5 cm of margin per side and 0.20 keeps 10 cm -- all still far tighter than the sphere.
+    # Prefer widening this, or clear_margin / max_roll, over going back to the sphere.
+    #
+    # NOT usable with DifferentiableSimulator: the taped settle would need a yaw index threaded
+    # through it, so the gradient paths pass wheel_width=None explicitly.
+    wheel_width: float | None = 0.10
     half_track: float = 0.365
     rear_offset: float = 0.75
     gravity: float = 9.81
     mass: float = DEFAULT_MASS
+    yaw_inertia: float = DEFAULT_YAW_INERTIA  # [kg m^2] derived from the mass table, not measured
     com: tuple = (float(DEFAULT_COM[0]), 0.0, 0.0)  # full vec3, independent of mass
     chassis_nx: int = 3
     chassis_ny: int = 3
@@ -92,6 +134,7 @@ class RobotParams:  # host-side robot knobs — what you nudge
         r.half_track = self.half_track
         r.com = wp.vec3(*self.com)
         r.mass = self.mass
+        r.yaw_inertia = self.yaw_inertia
         r.gravity = self.gravity
         r.min_turn_radius = self.min_turn_radius
         r.max_roll = self.max_roll

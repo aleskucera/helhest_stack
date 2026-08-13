@@ -51,6 +51,15 @@ class SamplingConfig:
     # fraction drawn from the STRAIGHT prior (zero differential, wl == wr): straight-ahead is usually
     # near-optimal, so seeding it explicitly stops the sampling-noise wobble on a clear shot. 0 = off.
     straight_frac: float = 0.0
+    # Fraction drawn from the SPIN prior: zero mean, pure differential (wl = -v, wr = +v), i.e.
+    # turning on the spot. Nothing else in the sampler can express this, because wmin >= 0 forbids
+    # a negative wheel speed and the tightest sampleable turn is one wheel STOPPED -- a 0.54 m
+    # radius, not zero. Without this a goal behind the robot can only be reached by driving a
+    # forward loop. 0 = off.
+    spin_frac: float = 0.0
+    # Minimum |wheel speed| for a spin candidate. MEASURED on the robot 2026-08-10: below about
+    # 2 rad/s it will not break loose on the spot at all, so a smaller command just strains.
+    spin_min: float = 2.0
     # fraction drawn from the PIVOT prior (wl == -wr, turn in place). Only useful with reverse
     # enabled (effective wmin < 0); with wmin >= 0 the clamp degrades these to sharp arcs. 0 = off.
     pivot_frac: float = 0.0
@@ -233,6 +242,8 @@ def _sample_target_wheel_omega_kernel(
     n_cand: int,  # candidates; rollouts r = k*n_cand + c are mu replicas SHARING candidate c's controls
     n_wide: int,
     n_straight: int,
+    n_spin: int,
+    spin_min: float,
     n_pivot: int,
     n_knots: int,
     seed: wp.array(dtype=int),
@@ -240,9 +251,10 @@ def _sample_target_wheel_omega_kernel(
 ):
     # Candidate index c keys ALL randomness, so the n_mu replicas of a candidate get identical
     # controls (their costs differ only through mu_scale). Candidate 0 keeps the nominal; the next
-    # n_wide draw from the WIDE global-search prior; then n_straight from the STRAIGHT prior
-    # (wl == wr); then n_pivot from the PIVOT prior (wl == -wr); the rest jitter around the
-    # nominal (NARROW local refine).
+    # n_wide draw from the WIDE global-search prior; then n_spin from the SPIN prior (wl = -wr,
+    # magnitude floored); then n_straight from the STRAIGHT prior (wl == wr); then n_pivot from the
+    # PIVOT prior (wl == -wr, one signed rate per knot); the rest jitter around the nominal (NARROW
+    # local refine).
     t, r = wp.tid()
     b = r % n_cand  # candidate this rollout replicates
     wmin = wlo[0]
@@ -267,7 +279,17 @@ def _sample_target_wheel_omega_kernel(
         )
         wheel_l = (1.0 - frac) * left_lo + frac * left_hi
         wheel_r = (1.0 - frac) * right_lo + frac * right_hi
-    elif b < n_wide + n_straight:
+    elif b < n_wide + n_spin:
+        # SPIN prior: zero mean, pure differential -- turn on the spot. One speed per candidate,
+        # held across the horizon, because a spin that changes its mind mid-rollout is not a spin.
+        # Magnitude is floored at spin_min: the real robot will not break loose below ~2 rad/s.
+        u_spin = wp.randf(wp.rand_init(seed[0] + 5150, b))
+        mag = spin_min + (wmax - spin_min) * u_spin
+        if wp.randf(wp.rand_init(seed[0] + 6271, b)) < 0.5:
+            mag = -mag
+        wheel_l = -mag
+        wheel_r = mag
+    elif b < n_wide + n_spin + n_straight:
         # STRAIGHT prior: zero differential (wl == wr -> drives straight ahead). One common forward
         # speed per knot (so it can ramp/decelerate along the horizon while staying straight). Straight
         # is usually the near-optimal path, so seeding it explicitly lets the elite collapse onto a
@@ -279,7 +301,7 @@ def _sample_target_wheel_omega_kernel(
         v = (1.0 - frac) * v_lo + frac * v_hi
         wheel_l = v
         wheel_r = v
-    elif b < n_wide + n_straight + n_pivot:
+    elif b < n_wide + n_spin + n_straight + n_pivot:
         # PIVOT prior: opposite wheels (wl == -wr -> turn in place), one signed rate per knot so a
         # pivot can ease in/out. With reverse disabled (wmin >= 0) the clamp below degrades these
         # to sharp forward arcs -- harmless, just redundant with WIDE.
@@ -303,10 +325,15 @@ def _sample_target_wheel_omega_kernel(
         jitter = wp.rand_init(seed[0] + 9176, t * n_cand + b)
         wheel_l += sigma * wp.randn(jitter)
         wheel_r += sigma * wp.randn(jitter)
-    # clamp to the wheel-speed box (effective wmin >= 0 -> no reverse)
-    target_wheel_omega[t, r] = wp.vec3(
-        wp.clamp(wheel_l, wmin, wmax), wp.clamp(wheel_r, wmin, wmax), 0.0
-    )
+    # Clamp to the effective wheel-speed box (wmin >= 0 -> no reverse) -- EXCEPT the spin band,
+    # whose whole point is one reversed wheel. Clamping it to wmin would silently zero that wheel
+    # and turn every spin candidate into a one-wheel-stopped arc, which is the thing the prior
+    # exists to get past. The pivot band gets no such escape: it is symmetric (wl == -wr), so with
+    # reverse disabled it degrades harmlessly to a forward arc instead of collapsing to zero.
+    lo = wmin
+    if b >= n_wide and b < n_wide + n_spin:
+        lo = -wmax
+    target_wheel_omega[t, r] = wp.vec3(wp.clamp(wheel_l, lo, wmax), wp.clamp(wheel_r, lo, wmax), 0.0)
 
 
 @wp.kernel
@@ -317,7 +344,7 @@ def _cost_kernel(
     residual: wp.array2d(dtype=float),
     target_wheel_omega: wp.array2d(dtype=wp.vec3),  # Ub in components [0], [1]
     current_wheel_omega: wp.array2d(dtype=wp.vec3),  # [T+1, B] realized omega; row t+1 drove step t
-    body_vel: wp.array2d(dtype=wp.float32),  # [T+1, B] realized body speed; row t+1 drove step t
+    twist: wp.array2d(dtype=wp.vec3),  # [T+1, B] solved body twist (vx, vy, yaw_rate); row t+1 drove step t
     turning: wp.array2d(dtype=wp.vec2),  # [T, B] (alpha, x_icr) used at step t
     loads: wp.array2d(dtype=wp.vec3),  # [T, B] wheel normal loads at the post-step pose
     measured: wp.array2d(dtype=wp.float32),  # [ny, nx] 1 = real data (sim grid); gates reverse
@@ -357,7 +384,7 @@ def _cost_kernel(
     for t in range(horizon):
         pose = controlled[t + 1, r]  # (x, y, yaw) after step t (pose 0 is shared by all candidates)
         om = current_wheel_omega[t + 1, r]  # realized (lagged) omega that drove step t
-        v = body_vel[t + 1, r]  # realized body forward speed [m/s]; < 0 = reversing
+        v = twist[t + 1, r][0]  # realized body forward speed [m/s]; < 0 = reversing
         alpha = turning[t, r][0]
         wz = robot.wheel_radius * (om[1] - om[0]) / (2.0 * robot.half_track * alpha)
         if cw.out_of_bounds > 0.0:
@@ -676,6 +703,7 @@ class MppiGpu:
         self.n_straight = int(
             sampling.straight_frac * self.n_cand
         )  # candidates from the STRAIGHT prior
+        self.n_spin = int(sampling.spin_frac * self.n_cand)  # candidates from the SPIN prior
         self.n_pivot = int(sampling.pivot_frac * self.n_cand)  # candidates from the PIVOT prior
 
         # CEM elite count (over candidates)
@@ -801,6 +829,8 @@ class MppiGpu:
                 self.n_cand,
                 self.n_wide,
                 self.n_straight,
+                self.n_spin,
+                self.sampling.spin_min,
                 self.n_pivot,
                 self.sampling.n_knots,
                 self.seed,
@@ -821,7 +851,7 @@ class MppiGpu:
                 self.sim.residual,
                 self.sim.target_wheel_omega,
                 self.sim.current_wheel_omega,
-                self.sim.body_vel,
+                self.sim.twist,
                 self.sim.turning,
                 self.sim.loads,
                 self.measured,

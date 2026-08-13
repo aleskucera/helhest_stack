@@ -83,11 +83,36 @@ def turning_of(state, mu_field, k, alpha=1.0, x_icr=0.0):
     return turning.turning_params(mu_i, state.loads, k)
 
 
+def _integrate_pose(x, y, yaw, v_world, wz, dt):
+    """Exact constant-twist (arc) pose update -- the oracle twin of engine.step.integrate_pose.
+
+    Forward Euler takes the chord instead of the arc and is only first order in dt; the twist is
+    constant within a step, so the arc has a closed form that is exact at any dt. Kept in lockstep
+    with the device version, since this module is the finite-difference oracle for it.
+    """
+    cos_yaw, sin_yaw = np.cos(yaw), np.sin(yaw)
+    u_x = cos_yaw * v_world[0] + sin_yaw * v_world[1]
+    u_y = -sin_yaw * v_world[0] + cos_yaw * v_world[1]
+    theta = wz * dt
+    if abs(theta) > 1.0e-6:
+        integral_cos = np.sin(theta) / wz
+        integral_sin = (1.0 - np.cos(theta)) / wz
+    else:
+        integral_cos, integral_sin = dt, 0.5 * theta * dt
+    local_x = integral_cos * u_x - integral_sin * u_y
+    local_y = integral_sin * u_x + integral_cos * u_y
+    return (
+        x + cos_yaw * local_x - sin_yaw * local_y,
+        y + sin_yaw * local_x + cos_yaw * local_y,
+        yaw + theta,
+    )
+
+
 def _motor_lag_step(
     current_wheel_omega: np.ndarray, target_wheel_omega: np.ndarray, dt: float, tau: float
 ) -> np.ndarray:
     """First-order actuator lag: mirrors the device motor_lag_step @wp.func exactly."""
-    alpha = min(dt / max(tau, 1e-6), 1.0)
+    alpha = 1.0 - np.exp(-dt / max(tau, 1e-6))  # exact first-order step; see engine.motor_lag_step
     return current_wheel_omega + alpha * (target_wheel_omega - current_wheel_omega)
 
 
@@ -117,12 +142,10 @@ def step(
     # preserving backward compatibility with the original instantaneous-tracking model.
     current_wheel_omega_eff = _motor_lag_step(current_wheel_omega, omega, dt, tau_motor)
 
-    # Predict: project the body velocity through the CURRENT orientation, step.
+    # Predict: project the body velocity through the CURRENT orientation, step along the arc.
     vx, vy, wz = twist.wheel_twist(current_wheel_omega_eff, alpha_t, xicr_t, R, b)
     v_world = state.place["R"] @ np.array([vx, vy, 0.0])
-    x = state.x + v_world[0] * dt
-    y = state.y + v_world[1] * dt
-    yaw = state.yaw + wz * dt
+    x, y, yaw = _integrate_pose(state.x, state.y, state.yaw, v_world, wz, dt)
 
     # Project: settle the new pose -> next valid State (warm-started).
     # current_wheel_omega_eff is the filter state for the next step (carry-through for the lag chain).
