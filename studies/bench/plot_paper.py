@@ -38,8 +38,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 from .clark import _norm_cdf  # noqa: E402
 from .clark import _norm_pdf  # noqa: E402
 from .clark import rho1_table  # noqa: E402
-from .clark_conv import cylinder_offsets  # noqa: E402
-from .clark_conv import WHEEL_HALF_WIDTH  # noqa: E402
+from .element import cylinder_offsets  # noqa: E402
+from .element import WHEEL_HALF_WIDTH  # noqa: E402
 from .clark import rho_lookup  # noqa: E402
 from .ranking import CELL  # noqa: E402
 from .ranking import OUT  # noqa: E402

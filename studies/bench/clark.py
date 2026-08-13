@@ -73,6 +73,8 @@ from ..adjoint.sigma import _gauss_kernel
 from ..adjoint.sigma import fosm_variance
 from ..adjoint.sigma import NoiseDraws
 from .bundled import BRACKET_C
+from .element import broadcast_cap
+from .element import element_offsets
 from .ranking import build_case
 from .ranking import CELL
 from .ranking import N_PLANS
@@ -88,7 +90,6 @@ from helhest.engine import GridParams
 from helhest.engine import init_state_kernel_bt
 from helhest.engine import RobotParams
 from helhest.engine import SolverParams
-from helhest.engine.envelope import wheel_offset_table
 
 RNG_SEED = 12345  # every internal, non-case random draw (gate 0/1/2 case selection) is fixed here
 SETTLE_IDX = TERM_NAMES.index("settle")
@@ -355,11 +356,16 @@ def _footprint_cells(
     wx: np.ndarray, wy: np.ndarray, off_dy: np.ndarray, off_dx: np.ndarray, grid_x0: float,
     grid_y0: float, cell: float, ny: int, nx: int,
 ) -> np.ndarray:
-    """Absolute [ny*nx]-flat cell index of every candidate, for every (node) in wx/wy. [N, K]."""
+    """Absolute [ny*nx]-flat cell index of every candidate, for every (node) in wx/wy. [N, K].
+
+    `off_dy`/`off_dx` are [K] (one element shared by every node, e.g. the yaw-invariant sphere)
+    or [N, K] (one element per node, e.g. the yaw-dependent cylinder from `element.py`)."""
     iy0 = np.round((wy - grid_y0) / cell).astype(np.int64)
     ix0 = np.round((wx - grid_x0) / cell).astype(np.int64)
-    iy = np.clip(iy0[:, None] + off_dy[None, :], 0, ny - 1)
-    ix = np.clip(ix0[:, None] + off_dx[None, :], 0, nx - 1)
+    dy = off_dy if off_dy.ndim == 2 else off_dy[None, :]
+    dx = off_dx if off_dx.ndim == 2 else off_dx[None, :]
+    iy = np.clip(iy0[:, None] + dy, 0, ny - 1)
+    ix = np.clip(ix0[:, None] + dx, 0, nx - 1)
     return iy * nx + ix
 
 
@@ -377,7 +383,7 @@ def build_env_nodes(
     dy = u_iy[:, None] - u_iy[None, :]
     dx = u_ix[:, None] - u_ix[None, :]
     cov_u = sigma_flat[u][:, None] * sigma_flat[u][None, :] * rho_lookup(corr_table, dy, dx)
-    means = belief_flat[cell_flat] + off_cap[None, :]
+    means = belief_flat[cell_flat] + broadcast_cap(off_cap)
     sigmas = sigma_flat[cell_flat]
     cov_self = cov_u[u_idx[:, :, None], u_idx[:, None, :]]
     cov_to_u = cov_u[u_idx]  # [N, K, |U|]
@@ -390,15 +396,14 @@ def build_env_nodes(
 
 def clark_plan_moments(
     belief: np.ndarray, sigma: np.ndarray, controlled: np.ndarray, rp: RobotParams,
-    x0: float, y0: float, cell: float, corr_table: np.ndarray,
+    x0: float, y0: float, cell: float, corr_table: np.ndarray, element: str = "sphere",
 ) -> tuple[float, float]:
     """E[J_settle], Var[J_settle] for ONE plan via the closed-form settle map + Clark envelope
     moments/covariance. `controlled`: [T+1, 3] (x, y, yaw) frozen belief-rollout trajectory for
-    this plan (declared approximation (a))."""
+    this plan (declared approximation (a)). `element` selects the contact candidate table
+    (`element.py`): sphere (default, yaw-invariant disk) or cylinder (yaw-dependent tread)."""
     ny, nx = belief.shape
     belief_flat, sigma_flat = belief.ravel(), sigma.ravel()
-    env_radius = int(np.ceil(rp.wheel_radius / cell))
-    off_dy, off_dx, off_cap = wheel_offset_table(env_radius, cell, rp.wheel_radius)
     wheel_xy = np.array([[0.0, rp.half_track], [0.0, -rp.half_track], [-rp.rear_offset, 0.0]])
 
     t_idx = np.arange(1, controlled.shape[0])  # the `settle` functional sums t=1..T
@@ -408,6 +413,7 @@ def clark_plan_moments(
     wy = np.stack([y + wheel_xy[w, 0] * s + wheel_xy[w, 1] * c for w in range(3)])  # [3, T]
     wx_flat, wy_flat = wx.ravel(), wy.ravel()  # node order: wheel-major, then time
 
+    off_dy, off_dx, off_cap = element_offsets(element, cell, rp, np.tile(yaw, 3))
     cell_flat = _footprint_cells(wx_flat, wy_flat, off_dy, off_dx, x0, y0, cell, ny, nx)
     mean_n, var_n, cov_to_u_final, u_idx_sorted, phi, phineg = build_env_nodes(
         cell_flat, belief_flat, sigma_flat, off_cap, nx, corr_table
@@ -472,15 +478,20 @@ def _mc_env_stats(
     return env_samples
 
 
-def gate2_clark_vs_mc(device: str) -> dict:
+def gate2_clark_vs_mc(device: str, element: str = "sphere") -> dict:
     """20 random single-timestep, real-belief-map, real-footprint cases: Clark's per-wheel
-    E[env]/sd[env] and cov(env_L, env_R) against 20k-draw brute-force MC."""
+    E[env]/sd[env] and cov(env_L, env_R) against 20k-draw brute-force MC.
+
+    `element` selects the contact candidate table (`element.py`). The offset table is built
+    PER CASE (not hoisted above the loop) because the cylinder table depends on that case's
+    sampled yaw -- a sphere-only cache here would silently reuse case 0's cylinder table for
+    every other heading. `cand_abs` is built from that SAME table for both Clark and the MC
+    patch below, so a cylinder run validates the cylinder estimator against truth rather than
+    measuring physics drift against the sphere (contrast `clark_conv.py`'s cylinder arm, which
+    only ever compares itself to the sphere)."""
     rp = RobotParams()
     corr_table = rho1_table(CORR_LEN, CELL)
     rng = np.random.default_rng(RNG_SEED)
-    off_dy, off_dx, off_cap = wheel_offset_table(
-        int(np.ceil(rp.wheel_radius / CELL)), CELL, rp.wheel_radius
-    )
     wheel_xy = np.array([[0.0, rp.half_track], [0.0, -rp.half_track], [-rp.rear_offset, 0.0]])
 
     rows = []
@@ -507,10 +518,16 @@ def gate2_clark_vs_mc(device: str) -> dict:
                 break
         wx_ = np.array([x + px * c - py * s for px, py in wheel_xy])
         wy_ = np.array([y + px * s + py * c for px, py in wheel_xy])
+        # all 3 wheels share the body's single yaw at this timestep -- `np.full(3, yaw)` is the
+        # single-timestep analog of `clark_plan_moments`' `np.tile(yaw, 3)` over a T-length plan.
+        off_dy, off_dx, off_cap = element_offsets(element, CELL, rp, np.full(3, yaw))
         cell_flat = _footprint_cells(
             wx_, wy_, off_dy, off_dx, scene.origin_x, scene.origin_y, CELL, ny, nx
         )
-        cand_abs = {w: (cell_flat[w] // nx, cell_flat[w] % nx, off_cap) for w in range(3)}
+        # cand_abs[w]'s cap must be the WHEEL-SPECIFIC row for the cylinder ([3, K], since a
+        # rotated rectangle is not radially symmetric like the sphere's cap is).
+        cap_rows = off_cap if off_cap.ndim == 2 else np.tile(off_cap, (3, 1))
+        cand_abs = {w: (cell_flat[w] // nx, cell_flat[w] % nx, cap_rows[w]) for w in range(3)}
         belief_flat, sigma_flat = belief.ravel(), sigma.ravel()
         mean_n, var_n, cov_to_u_final, u_idx_sorted, phi, phineg = build_env_nodes(
             cell_flat, belief_flat, sigma_flat, off_cap, nx, corr_table
@@ -569,7 +586,7 @@ def gate2_clark_vs_mc(device: str) -> dict:
 
 
 # --- the risk.py-protocol comparison ------------------------------------------------------------
-def run_seed(seed: int, family: str, noise: str, device: str) -> dict:
+def run_seed(seed: int, family: str, noise: str, device: str, element: str = "sphere") -> dict:
     scene, _truth, _meas, _obs, sigma, poses, omega, grid = build_case(seed, family, noise)
     belief = scene.elevation.astype(np.float32)
     ny, nx = belief.shape
@@ -597,11 +614,18 @@ def run_seed(seed: int, family: str, noise: str, device: str) -> dict:
         [max(fosm_variance(grad[k], sigma, CELL, CORR_LEN), 0.0) for k in range(N_PLANS)]
     )
 
+    # NOTE (Stage A caveat): the MC truth below always runs the real Warp settle, which is
+    # sphere-contact only (trajectory generation is unchanged, per this stage's scope). Under
+    # `element="cylinder"` the clark_* arms therefore price a DIFFERENT contact model than the
+    # ground truth they are scored against -- the regret/decision numbers stop being meaningful,
+    # same caveat `clark_conv.py` states for its cylinder timing arm. Only GATE 2
+    # (`gate2_clark_vs_mc`) validates the cylinder estimator against matched-element MC truth.
     e_clark = np.empty(N_PLANS)
     sd_clark = np.empty(N_PLANS)
     for k in range(N_PLANS):
         e_j, var_j = clark_plan_moments(
-            belief, sigma, controlled[:, k, :], rp, scene.origin_x, scene.origin_y, CELL, corr_table
+            belief, sigma, controlled[:, k, :], rp, scene.origin_x, scene.origin_y, CELL,
+            corr_table, element=element,
         )
         e_clark[k], sd_clark[k] = e_j, np.sqrt(var_j)
     del h
@@ -783,6 +807,7 @@ def main() -> None:
     ap.add_argument("--noise", default="all")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--skip-gates", action="store_true")
+    ap.add_argument("--element", default="sphere", choices=("sphere", "cylinder"))
     a = ap.parse_args()
 
     wp.init()
@@ -790,7 +815,7 @@ def main() -> None:
 
     gate0 = gate0_correlation(a.device)
     gate1 = gate1_linear_map(a.device)
-    gate2 = gate2_clark_vs_mc(a.device) if not a.skip_gates else {
+    gate2 = gate2_clark_vs_mc(a.device, a.element) if not a.skip_gates else {
         "rows": [], "median_rel_err_mean": float("nan"), "median_rel_err_sd": float("nan"),
         "median_err_mean_over_sd": float("nan"), "median_rel_err_cov_lr": float("nan"),
         "median_corr_lr_abs_diff": float("nan"), "passed": False,
@@ -798,12 +823,13 @@ def main() -> None:
 
     rows = []
     for seed in range(a.seeds):
-        rows.append(run_seed(seed, a.family, a.noise, a.device))
+        rows.append(run_seed(seed, a.family, a.noise, a.device, a.element))
         if (seed + 1) % 10 == 0:
             print(f"  {seed + 1}/{a.seeds} seeds", flush=True)
 
     report(gate0, gate1, gate2, rows)
-    path = OUT / "clark.json"
+    # element-tagged filename for cylinder runs -- never overwrites the committed sphere baseline.
+    path = OUT / ("clark.json" if a.element == "sphere" else f"clark_{a.element}.json")
     path.write_text(
         json.dumps(
             {
@@ -812,6 +838,7 @@ def main() -> None:
                 "gate2": gate2,
                 "family": a.family,
                 "noise": a.noise,
+                "element": a.element,
                 "rows": rows,
             },
             indent=2,

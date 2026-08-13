@@ -32,10 +32,9 @@ import json
 import numpy as np
 import warp as wp
 
-from helhest.engine.envelope import wheel_offset_table
-
 from ..adjoint.harness import Harness
 from ..adjoint.sigma import NoiseDraws
+from .element import element_offsets_single
 from .ranking import _cost
 from .ranking import build_case
 from .ranking import CELL
@@ -56,7 +55,7 @@ from .softgrad import soft_gradient
 SHORTLIST = 400  # cells the curvature probe is spent on
 
 
-def run_seed(seed: int, family: str, noise: str) -> dict:
+def run_seed(seed: int, family: str, noise: str, element: str = "sphere") -> dict:
     scene, _t, _m, _o, sigma, poses, omega, grid = build_case(seed, family, noise)
     belief = scene.elevation.astype(np.float32)
     ny, nx = belief.shape
@@ -65,7 +64,9 @@ def run_seed(seed: int, family: str, noise: str) -> dict:
     g_env, g_direct, g_hard, terms = _split_gradients(h)
     j_bel = _cost(terms)
     traj = h.sim.controlled.numpy()[:, :, :2].copy()
-    dy, dx, cap = wheel_offset_table(h.sim.env_radius, CELL, h.robot_params.wheel_radius)
+    # soft_gradient applies ONE table uniformly to the whole grid (no per-cell pose), so the
+    # cylinder table is taken at a single reference heading -- see `element_offsets_single`.
+    dy, dx, cap = element_offsets_single(element, CELL, h.robot_params)
     g_soft = soft_gradient(g_env, belief, dy, dx, cap, sigma) + g_direct
 
     # Shortlist: inside the contact support of ANY plan, largest sigma first. Chosen by support
@@ -179,15 +180,17 @@ def main() -> None:
     ap.add_argument("--seeds", type=int, default=40)
     ap.add_argument("--family", default="hybrid")
     ap.add_argument("--noise", default="all")
+    ap.add_argument("--element", default="sphere", choices=("sphere", "cylinder"))
     a = ap.parse_args()
     wp.init()
     rows = []
     for seed in range(a.seeds):
-        rows.append(run_seed(seed, a.family, a.noise))
+        rows.append(run_seed(seed, a.family, a.noise, a.element))
         if (seed + 1) % 10 == 0:
             print(f"  {seed + 1}/{a.seeds} seeds", flush=True)
     report(rows)
-    path = OUT / f"order2_{a.family}_{a.noise}.json"
+    tag = "" if a.element == "sphere" else f"_{a.element}"
+    path = OUT / f"order2_{a.family}_{a.noise}{tag}.json"
     path.write_text(json.dumps({"rows": rows}, indent=2))
     print(f"\nwrote {path}")
 

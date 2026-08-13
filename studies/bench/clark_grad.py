@@ -47,6 +47,7 @@ from .clark import clark_plan_moments
 from .clark import rho1_table
 from .clark import RNG_SEED
 from .clark import SETTLE_IDX
+from .element import element_offsets
 from .ranking import build_case
 from .ranking import CELL
 from .ranking import kendall_tau
@@ -54,7 +55,6 @@ from .ranking import N_PLANS
 from .ranking import OUT
 from .risk import CORR_LEN
 from helhest.engine import RobotParams
-from helhest.engine.envelope import wheel_offset_table
 
 N_SEEDS = 10
 N_PER_STRATUM = 4  # -> up to 5 * 4 = 20 test cells per seed, per the task's design
@@ -81,7 +81,10 @@ RP = RobotParams()
 
 
 # --- reuse: the same footprint the wheel envelope's Clark nodes are built from ------------------
-def _plan_universe(controlled_k: np.ndarray, cell: float, x0: float, y0: float, ny: int, nx: int) -> np.ndarray:
+def _plan_universe(
+    controlled_k: np.ndarray, cell: float, x0: float, y0: float, ny: int, nx: int,
+    element: str = "sphere",
+) -> np.ndarray:
     """Absolute flat cell indices that ANY wheel-envelope Clark node of this plan can see.
 
     Perturbing a belief cell outside this set changes E[J_settle] by EXACTLY zero (it never
@@ -90,14 +93,13 @@ def _plan_universe(controlled_k: np.ndarray, cell: float, x0: float, y0: float, 
     """
     from .clark import _footprint_cells  # local import: private helper, used nowhere else here
 
-    env_radius = int(np.ceil(RP.wheel_radius / cell))
-    off_dy, off_dx, _off_cap = wheel_offset_table(env_radius, cell, RP.wheel_radius)
     wheel_xy = np.array([[0.0, RP.half_track], [0.0, -RP.half_track], [-RP.rear_offset, 0.0]])
     t_idx = np.arange(1, controlled_k.shape[0])
     x, y, yaw = controlled_k[t_idx, 0], controlled_k[t_idx, 1], controlled_k[t_idx, 2]
     c, s = np.cos(yaw), np.sin(yaw)
     wx = np.stack([x + wheel_xy[w, 0] * c - wheel_xy[w, 1] * s for w in range(3)])
     wy = np.stack([y + wheel_xy[w, 0] * s + wheel_xy[w, 1] * c for w in range(3)])
+    off_dy, off_dx, _off_cap = element_offsets(element, cell, RP, np.tile(yaw, 3))
     cell_flat = _footprint_cells(wx.ravel(), wy.ravel(), off_dy, off_dx, x0, y0, cell, ny, nx)
     return np.unique(cell_flat)
 
@@ -149,34 +151,46 @@ def select_test_cells(
 
 
 # --- Clark-side: function difference, and its own gradient (central FD at mm scale) -----------
-def clark_e(belief: np.ndarray, sigma: np.ndarray, controlled_k, cell, x0, y0, corr_table) -> float:
-    e_j, _var_j = clark_plan_moments(belief, sigma, controlled_k, RP, x0, y0, cell, corr_table)
+def clark_e(
+    belief: np.ndarray, sigma: np.ndarray, controlled_k, cell, x0, y0, corr_table,
+    element: str = "sphere",
+) -> float:
+    e_j, _var_j = clark_plan_moments(
+        belief, sigma, controlled_k, RP, x0, y0, cell, corr_table, element=element
+    )
     return e_j
 
 
 def clark_grad_at(
     belief: np.ndarray, sigma: np.ndarray, controlled_k, cell, x0, y0, corr_table, iy: int, ix: int,
-    eps: float,
+    eps: float, element: str = "sphere",
 ) -> float:
     """Central FD of ClarkE[J] at cell (iy, ix), step `eps` -- Clark is smooth, so this IS its
     analytic derivative (verified per-cell by the eps=0.5/2mm bracket, see `smoothness_check`)."""
     b_plus, b_minus = belief.copy(), belief.copy()
     b_plus[iy, ix] += eps
     b_minus[iy, ix] -= eps
-    e_plus = clark_e(b_plus, sigma, controlled_k, cell, x0, y0, corr_table)
-    e_minus = clark_e(b_minus, sigma, controlled_k, cell, x0, y0, corr_table)
+    e_plus = clark_e(b_plus, sigma, controlled_k, cell, x0, y0, corr_table, element)
+    e_minus = clark_e(b_minus, sigma, controlled_k, cell, x0, y0, corr_table, element)
     return (e_plus - e_minus) / (2.0 * eps)
 
 
 def smoothness_check(
     belief: np.ndarray, sigma: np.ndarray, controlled_k, cell, x0, y0, corr_table, iy: int, ix: int,
+    element: str = "sphere",
 ) -> tuple[float, float, float]:
     """g at eps=0.5mm / 1mm / 2mm and their relative spread -- the pre-registered smoothness
     verification (module docstring): Clark's FD gradient is only "the" derivative if it does not
     depend on the FD step size, unlike the hard adjoint's arg-max, which does."""
-    g_lo = clark_grad_at(belief, sigma, controlled_k, cell, x0, y0, corr_table, iy, ix, FD_EPS_LO)
-    g_mid = clark_grad_at(belief, sigma, controlled_k, cell, x0, y0, corr_table, iy, ix, FD_EPS)
-    g_hi = clark_grad_at(belief, sigma, controlled_k, cell, x0, y0, corr_table, iy, ix, FD_EPS_HI)
+    g_lo = clark_grad_at(
+        belief, sigma, controlled_k, cell, x0, y0, corr_table, iy, ix, FD_EPS_LO, element
+    )
+    g_mid = clark_grad_at(
+        belief, sigma, controlled_k, cell, x0, y0, corr_table, iy, ix, FD_EPS, element
+    )
+    g_hi = clark_grad_at(
+        belief, sigma, controlled_k, cell, x0, y0, corr_table, iy, ix, FD_EPS_HI, element
+    )
     rel = abs(g_lo - g_hi) / max(abs(g_mid), 1e-9)
     return g_lo, g_hi, rel
 
@@ -218,7 +232,11 @@ def mc_paired_diffs(
 
 
 # --- per-seed pipeline --------------------------------------------------------------------------
-def run_seed(seed: int, device: str, n_draws: int) -> dict:
+def run_seed(seed: int, device: str, n_draws: int, element: str = "sphere") -> dict:
+    """`element` (default sphere) selects Clark's settle contact table. `g_hard`/the MC truth
+    below are the real Warp adjoint/forward, sphere-contact only, so under `element="cylinder"`
+    Clark prices a different contact model than the ground truth it is compared against here --
+    same Stage A caveat as `clark.py`'s `run_seed`."""
     scene, _truth, _measured, observed, sigma, poses, omega, (XX, YY) = build_case(
         seed, "hybrid", "all"
     )
@@ -241,15 +259,17 @@ def run_seed(seed: int, device: str, n_draws: int) -> dict:
     rng = np.random.default_rng(RNG_SEED + seed)
     cells = select_test_cells(grad_k, sigma, observed, dist_k, rng)
 
-    e_base = clark_e(belief, sigma, controlled_k, CELL, x0, y0, corr_table)
+    e_base = clark_e(belief, sigma, controlled_k, CELL, x0, y0, corr_table, element)
     per_cell = []
     tests: list[tuple[int, int, float]] = []
     for stratum, iy, ix in cells:
         delta_sigma = float(min(sigma[iy, ix], SIGMA_CAP))
         deltas = (*DELTAS_FIXED, delta_sigma)
-        g_clark = clark_grad_at(belief, sigma, controlled_k, CELL, x0, y0, corr_table, iy, ix, FD_EPS)
+        g_clark = clark_grad_at(
+            belief, sigma, controlled_k, CELL, x0, y0, corr_table, iy, ix, FD_EPS, element
+        )
         g_lo, g_hi, smooth_rel = smoothness_check(
-            belief, sigma, controlled_k, CELL, x0, y0, corr_table, iy, ix
+            belief, sigma, controlled_k, CELL, x0, y0, corr_table, iy, ix, element
         )
         g_hard = float(grad_k[iy, ix])
         row = {
@@ -260,7 +280,7 @@ def run_seed(seed: int, device: str, n_draws: int) -> dict:
         for delta in deltas:
             b_pert = belief.copy()
             b_pert[iy, ix] += delta
-            e_pert = clark_e(b_pert, sigma, controlled_k, CELL, x0, y0, corr_table)
+            e_pert = clark_e(b_pert, sigma, controlled_k, CELL, x0, y0, corr_table, element)
             row["deltas"][f"{delta:.5f}"] = {
                 "delta": delta, "dE_fn": e_pert - e_base, "dE_lin": g_clark * delta,
                 "dJ_hard": g_hard * delta,
@@ -276,11 +296,15 @@ def run_seed(seed: int, device: str, n_draws: int) -> dict:
 
     # --- catch-22: where does |g_clark|'s mass sit, vs the hard adjoint's, over the FULL
     # plan-universe (not just the 20 test cells) --------------------------------------------
-    universe = _plan_universe(controlled_k, CELL, x0, y0, ny, nx)
+    universe = _plan_universe(controlled_k, CELL, x0, y0, ny, nx, element)
     u_iy, u_ix = universe // nx, universe % nx
     g_clark_u = np.array(
-        [clark_grad_at(belief, sigma, controlled_k, CELL, x0, y0, corr_table, iy, ix, FD_EPS)
-         for iy, ix in zip(u_iy, u_ix)]
+        [
+            clark_grad_at(
+                belief, sigma, controlled_k, CELL, x0, y0, corr_table, iy, ix, FD_EPS, element
+            )
+            for iy, ix in zip(u_iy, u_ix)
+        ]
     )
     g_hard_u = grad_k[u_iy, u_ix]
     unobs_u = ~observed[u_iy, u_ix]
@@ -477,12 +501,13 @@ def main() -> None:
     ap.add_argument("--seeds", type=int, default=N_SEEDS)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--n-draws", type=int, default=N_DRAWS_MC)
+    ap.add_argument("--element", default="sphere", choices=("sphere", "cylinder"))
     a = ap.parse_args()
 
     wp.init()
     OUT.mkdir(parents=True, exist_ok=True)
 
-    rows = [run_seed(seed, a.device, a.n_draws) for seed in range(a.seeds)]
+    rows = [run_seed(seed, a.device, a.n_draws, a.element) for seed in range(a.seeds)]
     print(f"  ran {a.seeds} seeds at n_draws={a.n_draws}", flush=True)
 
     floor = _floor_accounting(rows)
@@ -493,12 +518,14 @@ def main() -> None:
             flush=True,
         )
         try:
-            rows = [run_seed(seed, a.device, N_DRAWS_MC_ESCALATED) for seed in range(a.seeds)]
+            rows = [
+                run_seed(seed, a.device, N_DRAWS_MC_ESCALATED, a.element) for seed in range(a.seeds)
+            ]
         except RuntimeError as exc:  # the 4 GiB shared card has a hard ceiling near 6144-8192
             print(f"\n!! escalation OOM'd ({exc}) -- keeping the n_draws={a.n_draws} results !!")
 
     summary = report(rows)
-    path = OUT / "clark_grad.json"
+    path = OUT / ("clark_grad.json" if a.element == "sphere" else f"clark_grad_{a.element}.json")
     path.write_text(json.dumps({"rows": rows, "summary": summary}, indent=2))
     print(f"\nwrote {path}")
 

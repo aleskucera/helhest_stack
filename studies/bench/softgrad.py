@@ -53,6 +53,7 @@ from helhest.engine.envelope import wheel_offset_table
 
 from ..adjoint.harness import Harness
 from ..adjoint.harness import TERM_NAMES
+from .element import element_offsets_single
 from .ranking import _cost
 from .ranking import build_case
 from .ranking import CELL
@@ -120,7 +121,7 @@ def _split_gradients(h: Harness):
     )
 
 
-def run_seed(seed: int, family: str, noise: str) -> dict:
+def run_seed(seed: int, family: str, noise: str, element: str = "sphere") -> dict:
     scene, _t, _m, _o, sigma, poses, omega, _grid = build_case(seed, family, noise)
     belief = scene.elevation.astype(np.float32)
     ny, nx = belief.shape
@@ -128,7 +129,9 @@ def run_seed(seed: int, family: str, noise: str) -> dict:
     h = Harness(scene, poses, omega, device="cuda")
     g_env, g_direct, g_hard, terms = _split_gradients(h)
     j_bel = _cost(terms)
-    dy, dx, cap = wheel_offset_table(h.sim.env_radius, CELL, h.robot_params.wheel_radius)
+    # soft_gradient applies ONE table uniformly to the whole grid (no per-cell pose), so the
+    # cylinder table is taken at a single reference heading -- see `element_offsets_single`.
+    dy, dx, cap = element_offsets_single(element, CELL, h.robot_params)
     del h
 
     scores = {"unweighted": None, "hard": np.sqrt(((g_hard * sigma) ** 2).sum(axis=(1, 2)))}
@@ -198,17 +201,20 @@ def main() -> None:
     ap.add_argument("--family", default="hybrid")
     ap.add_argument("--noise", default="all")
     ap.add_argument("--gate", action="store_true")
+    ap.add_argument("--element", default="sphere", choices=("sphere", "cylinder"))
     a = ap.parse_args()
 
     wp.init()
     if a.gate:
+        # sphere-only: this checks the softening mechanism's tau->0 limit against the real
+        # (sphere-contact) production adjoint, so there is no cylinder variant of this gate.
         print("GATE: soft gradient must reduce to the hard adjoint as tau -> 0")
         gate()
         return
 
     rows = []
     for seed in range(a.seeds):
-        rows.append(run_seed(seed, a.family, a.noise))
+        rows.append(run_seed(seed, a.family, a.noise, a.element))
         if (seed + 1) % 10 == 0:
             print(f"  {seed + 1}/{a.seeds} seeds", flush=True)
 
@@ -227,7 +233,8 @@ def main() -> None:
         n, w, p = sign_test(d)
         print(f"  {k:<12} {d.mean():>+7.3f}   better on {w:>3}/{n:<3}   p={p:.2e}")
 
-    path = OUT / f"softgrad_{a.family}_{a.noise}.json"
+    tag = "" if a.element == "sphere" else f"_{a.element}"
+    path = OUT / f"softgrad_{a.family}_{a.noise}{tag}.json"
     path.write_text(json.dumps({"rows": rows}, indent=2))
     print(f"\nwrote {path}")
 

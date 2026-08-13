@@ -54,22 +54,21 @@ from ..adjoint.harness import Harness
 from .clark import _footprint_cells
 from .clark import _settle_weights
 from .clark import rho1_table
-from .clark_conv import cylinder_offsets
 from .clark_conv import fold_weights
-from .clark_conv import WHEEL_HALF_WIDTH
 from .clark_full import _bilinear_stencil
 from .clark_full import _hinge_inputs
 from .clark_full import _hinge_moments
 from .clark_full import CLEAR_MARGIN
 from .clark_hinge import belly_pose_weights
 from .clark_hinge import coupled_cost_plan_moments
+from .element import broadcast_cap
+from .element import element_offsets
 from .ranking import build_case
 from .ranking import CELL
 from .ranking import N_PLANS
 from .ranking import OUT
 from .risk import CORR_LEN
 from helhest.engine import RobotParams
-from helhest.engine.envelope import wheel_offset_table
 
 
 _RHO_PAD: dict[int, tuple[np.ndarray, int]] = {}
@@ -121,34 +120,14 @@ def full_cost_moments_conv(
     wy = np.stack([y + wheel_xy[w, 0] * s + wheel_xy[w, 1] * c for w in range(3)]).ravel()
 
     # --- the envelope element ------------------------------------------------------------
-    if element == "sphere":
-        env_radius = int(np.ceil(rp.wheel_radius / cell))
-        off_dy, off_dx, off_cap = wheel_offset_table(env_radius, cell, rp.wheel_radius)
-        off_dy, off_dx = np.asarray(off_dy, np.int64), np.asarray(off_dx, np.int64)
-        env_cells = _footprint_cells(wx, wy, off_dy, off_dx, x0, y0, cell, ny, nx)
-        means_env = belief_flat[env_cells] + off_cap[None, :]
-        d_y = off_dy[:, None] - off_dy[None, :]
-        d_x = off_dx[:, None] - off_dx[None, :]
-        rho_kk = _rho(rho1, d_y, d_x)
-    else:
-        n_bins = 32
-        bins = np.round(np.tile(yaw, 3) / (2 * np.pi) * n_bins).astype(np.int64) % n_bins
-        tables = {
-            b: cylinder_offsets(cell, rp.wheel_radius, WHEEL_HALF_WIDTH, 2 * np.pi * b / n_bins)
-            for b in np.unique(bins)
-        }
-        k_min = min(len(t[0]) for t in tables.values())
-        off_dy = np.stack([tables[b][0][:k_min] for b in bins])
-        off_dx = np.stack([tables[b][1][:k_min] for b in bins])
-        off_cap = np.stack([tables[b][2][:k_min] for b in bins])
-        iy0 = np.round((wy - y0) / cell).astype(np.int64)
-        ix0 = np.round((wx - x0) / cell).astype(np.int64)
-        env_cells = np.clip(iy0[:, None] + off_dy, 0, ny - 1) * nx + np.clip(
-            ix0[:, None] + off_dx, 0, nx - 1
-        )
-        means_env = belief_flat[env_cells] + off_cap
-        rho_kk = _rho(rho1, off_dy[:, :, None] - off_dy[:, None, :],
-                      off_dx[:, :, None] - off_dx[:, None, :])
+    off_dy, off_dx, off_cap = element_offsets(element, cell, rp, np.tile(yaw, 3))
+    env_cells = _footprint_cells(wx, wy, off_dy, off_dx, x0, y0, cell, ny, nx)
+    means_env = belief_flat[env_cells] + broadcast_cap(off_cap)
+    rho_kk = _rho(
+        rho1,
+        off_dy[..., :, None] - off_dy[..., None, :],
+        off_dx[..., :, None] - off_dx[..., None, :],
+    )
 
     sig_env = sigma_flat[env_cells]
     mean_env, w_env, order_env = fold_weights(means_env, sig_env, rho_kk)

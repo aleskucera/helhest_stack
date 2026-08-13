@@ -48,7 +48,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import time
 
 import numpy as np
@@ -63,6 +62,8 @@ from .clark import _norm_pdf
 from .clark import clark_plan_moments
 from .clark import rho1_table
 from .clark import rho_lookup
+from .element import broadcast_cap
+from .element import element_offsets
 from .ranking import build_case
 from .ranking import CELL
 from .ranking import N_PLANS
@@ -70,29 +71,6 @@ from .ranking import OUT
 from .risk import CORR_LEN
 from helhest.engine import RobotParams
 from helhest.engine.envelope import wheel_offset_table
-
-WHEEL_HALF_WIDTH = 0.05  # [m] half of the ruler-measured 0.10 m tread (engine/robot.py)
-
-
-def cylinder_offsets(
-    cell: float, radius: float, half_width: float, yaw: float
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """The cylinder wheel's structuring element at heading `yaw`, mirroring
-    `helhest.engine.envelope.cylinder_offset_table`: the rotated rectangle
-    2*radius (along travel) x 2*half_width (across), capped by the along-travel offset alone."""
-    cos_y, sin_y = math.cos(yaw), math.sin(yaw)
-    env_radius = int(math.ceil(math.hypot(radius, half_width) / cell))
-    dy_l, dx_l, cap_l = [], [], []
-    for dy in range(-env_radius, env_radius + 1):
-        for dx in range(-env_radius, env_radius + 1):
-            wx, wy = dx * cell, dy * cell
-            along = wx * cos_y + wy * sin_y
-            across = -wx * sin_y + wy * cos_y
-            if abs(along) <= radius and abs(across) <= half_width:
-                dy_l.append(dy)
-                dx_l.append(dx)
-                cap_l.append(math.sqrt(radius**2 - along**2) - radius)
-    return np.array(dy_l, np.int64), np.array(dx_l, np.int64), np.array(cap_l, np.float64)
 
 
 def fold_weights(
@@ -200,29 +178,8 @@ def plan_moments_conv(
     wx = np.stack([x + wheel_xy[w, 0] * c - wheel_xy[w, 1] * s for w in range(3)]).ravel()
     wy = np.stack([y + wheel_xy[w, 0] * s + wheel_xy[w, 1] * c for w in range(3)]).ravel()
 
-    if element == "sphere":
-        env_radius = int(np.ceil(rp.wheel_radius / cell))
-        off_dy, off_dx, off_cap = wheel_offset_table(env_radius, cell, rp.wheel_radius)
-        off_dy, off_dx = np.asarray(off_dy, np.int64), np.asarray(off_dx, np.int64)
-        cell_flat = _footprint_cells(wx, wy, off_dy, off_dx, x0, y0, cell, ny, nx)
-    else:
-        # The cylinder is not yaw-invariant: one element per pose, quantized to the same yaw
-        # bins the simulator uses so the tables are shared rather than rebuilt per node.
-        n_bins = 32
-        bins = np.round(np.tile(yaw, 3) / (2 * np.pi) * n_bins).astype(np.int64) % n_bins
-        tables = {
-            b: cylinder_offsets(cell, rp.wheel_radius, WHEEL_HALF_WIDTH, 2 * np.pi * b / n_bins)
-            for b in np.unique(bins)
-        }
-        k_min = min(len(t[0]) for t in tables.values())
-        off_dy = np.stack([tables[b][0][:k_min] for b in bins])  # [N, K]
-        off_dx = np.stack([tables[b][1][:k_min] for b in bins])
-        off_cap = np.stack([tables[b][2][:k_min] for b in bins])
-        iy0 = np.round((wy - y0) / cell).astype(np.int64)
-        ix0 = np.round((wx - x0) / cell).astype(np.int64)
-        iy = np.clip(iy0[:, None] + off_dy, 0, ny - 1)
-        ix = np.clip(ix0[:, None] + off_dx, 0, nx - 1)
-        cell_flat = iy * nx + ix
+    off_dy, off_dx, off_cap = element_offsets(element, cell, rp, np.tile(yaw, 3))
+    cell_flat = _footprint_cells(wx, wy, off_dy, off_dx, x0, y0, cell, ny, nx)
 
     # --- the K x K correlation of the element, built once and reused for every node ----------
     key = (element, off_dy.shape[-1])
@@ -235,7 +192,7 @@ def plan_moments_conv(
         if rho_kk_cache is not None and element == "sphere":
             rho_kk_cache[key] = rho_kk
 
-    means = belief_flat[cell_flat] + (off_cap[None, :] if element == "sphere" else off_cap)
+    means = belief_flat[cell_flat] + broadcast_cap(off_cap)
     sigmas = sigma_flat[cell_flat]
     mean_n, w, order = fold_weights(means, sigmas, rho_kk)
 

@@ -174,6 +174,8 @@ from .clark_full import _hinge_inputs
 from .clark_full import _hinge_moments
 from .clark_full import CLEAR_IDX
 from .clark_full import CLEAR_MARGIN
+from .element import broadcast_cap
+from .element import element_offsets
 from .ranking import build_case
 from .ranking import CELL
 from .ranking import N_PLANS
@@ -181,7 +183,6 @@ from .ranking import OUT
 from .risk import CORR_LEN
 from .risk import N_DRAWS
 from helhest.engine import RobotParams
-from helhest.engine.envelope import wheel_offset_table
 
 # Which hinge-hinge pairs approximation (f)'s Phi-weighted cross covariance covers. clark_full.py
 # fixed this at same-timestep-only, a choice calibrated against the FROZEN-pose model; see the
@@ -204,11 +205,12 @@ def belly_pose_weights(rp: RobotParams, chassis_pts: np.ndarray) -> np.ndarray:
 def coupled_cost_plan_moments(
     belief: np.ndarray, sigma: np.ndarray, controlled: np.ndarray, derived: np.ndarray,
     rp: RobotParams, chassis_pts: np.ndarray, clear_margin: float, x0: float, y0: float,
-    cell: float, corr_table: np.ndarray, cross_scope: str = CROSS_SCOPE,
+    cell: float, corr_table: np.ndarray, cross_scope: str = CROSS_SCOPE, element: str = "sphere",
 ) -> dict:
     """E[J], Var[J] for J = settle + clear_soft with the chassis height treated as a Clark node
     correlated with the ground under the belly. Signature is deliberately identical to
-    `clark_full.full_cost_plan_moments` (Stage 2 injects this in its place).
+    `clark_full.full_cost_plan_moments` (Stage 2 injects this in its place, `element` included so
+    the injection keeps working under `run_seed_full`'s `element=` keyword).
 
     Returns the same keys plus `e_clear_frozen` / `var_clear_frozen`, the same quantities under
     the OLD frozen-pose model, computed from the same intermediates so the A/B is exact.
@@ -217,8 +219,6 @@ def coupled_cost_plan_moments(
     belief_flat, sigma_flat = belief.ravel(), sigma.ravel()
 
     # --- envelope (settle) candidates: identical construction to clark_full ---------------------
-    env_radius = int(np.ceil(rp.wheel_radius / cell))
-    off_dy, off_dx, off_cap = wheel_offset_table(env_radius, cell, rp.wheel_radius)
     wheel_xy = np.array([[0.0, rp.half_track], [0.0, -rp.half_track], [-rp.rear_offset, 0.0]])
     t_idx = np.arange(1, controlled.shape[0])
     n_t = len(t_idx)
@@ -226,6 +226,7 @@ def coupled_cost_plan_moments(
     c, s = np.cos(yaw), np.sin(yaw)
     wx_env = np.stack([x + wheel_xy[k, 0] * c - wheel_xy[k, 1] * s for k in range(3)])  # [3, T]
     wy_env = np.stack([y + wheel_xy[k, 0] * s + wheel_xy[k, 1] * c for k in range(3)])
+    off_dy, off_dx, off_cap = element_offsets(element, cell, rp, np.tile(yaw, 3))
     env_cells = _footprint_cells(
         wx_env.ravel(), wy_env.ravel(), off_dy, off_dx, x0, y0, cell, ny, nx
     )  # [3T, Kenv], node order wheel-major then time: node(w, t) = w * n_t + t
@@ -244,7 +245,7 @@ def coupled_cost_plan_moments(
     hinge_u_idx = np.searchsorted(u, hinge_cells)
 
     # --- settle: Clark's max-fold, unchanged ----------------------------------------------------
-    means_env = belief_flat[env_cells] + off_cap[None, :]
+    means_env = belief_flat[env_cells] + broadcast_cap(off_cap)
     mean_env, var_env, cov_to_u_final_env, order_env, phi_env, phineg_env = clark_build(
         means_env,
         sigma_flat[env_cells],
@@ -346,11 +347,16 @@ def coupled_cost_plan_moments(
 
 # --- GATE H: the like-for-like rematch of clark_full.py's Gate 1b -------------------------------
 def gateH_trajectory_vs_mc(
-    device: str, n_cases: int = 12, cross_scope: str = CROSS_SCOPE, rng_offset: int = 1
+    device: str, n_cases: int = 12, cross_scope: str = CROSS_SCOPE, rng_offset: int = 1,
+    element: str = "sphere",
 ) -> dict:
     """The SAME (seed, plan) cases as `clark_full.gate1b_trajectory_vs_mc` (same RNG stream), the
     same true end-to-end MC, scoring frozen and coupled side by side. Criteria pre-registered in
-    the module docstring."""
+    the module docstring.
+
+    `element` (default sphere) selects the settle contact table -- the true MC below is the real
+    Warp settle, sphere-contact only, so a cylinder run prices a different contact model than its
+    own truth (same Stage A caveat as `clark.py`/`clark_full.py`)."""
     rp = RobotParams()
     chassis_pts = rp._chassis_pts()
     corr_table = rho1_table(CORR_LEN, CELL)
@@ -371,6 +377,7 @@ def gateH_trajectory_vs_mc(
         mo = coupled_cost_plan_moments(
             belief, sigma, controlled[:, plan, :], derived[:, plan, :], rp, chassis_pts,
             CLEAR_MARGIN, scene.origin_x, scene.origin_y, CELL, corr_table, cross_scope,
+            element=element,
         )
 
         # true end-to-end MC, byte-identical protocol to gate1b (same seed offset 800_000 + case)
@@ -433,7 +440,8 @@ def gateH_trajectory_vs_mc(
 
 # --- STAGE 2: the full-cost head-to-head, protocol reused verbatim from clark_full -------------
 def run_stage2(
-    device: str, n_seeds: int, family: str, noise: str, seed_offset: int = 0
+    device: str, n_seeds: int, family: str, noise: str, seed_offset: int = 0,
+    element: str = "sphere",
 ) -> dict:
     """`clark_full.run_seed_full` with the coupled moments swapped in for the frozen ones.
 
@@ -446,7 +454,7 @@ def run_stage2(
     clark_full.full_cost_plan_moments = coupled_cost_plan_moments
     try:
         rows = [
-            clark_full.run_seed_full(seed, family, noise, device, use_full=True)
+            clark_full.run_seed_full(seed, family, noise, device, use_full=True, element=element)
             for seed in range(seed_offset, seed_offset + n_seeds)
         ]
     finally:
@@ -509,13 +517,14 @@ def main() -> None:
         default=0,
         help="first stage-2 seed; virgin confirmation uses 5000 (PREREG_stage2_virgin.md)",
     )
+    ap.add_argument("--element", default="sphere", choices=("sphere", "cylinder"))
     args = ap.parse_args()
     wp.init()
 
     out: dict = {}
     if not args.skip_gate:
         out["gateH"] = gateH_trajectory_vs_mc(
-            args.device, args.cases, args.cross_scope, args.rng_offset
+            args.device, args.cases, args.cross_scope, args.rng_offset, args.element
         )
     g = out.get("gateH")
     if g is not None:
@@ -535,7 +544,7 @@ def main() -> None:
                 else "confirmatory: Gate H passed"
             )
             out["stage2"] = run_stage2(
-                args.device, args.seeds, "hybrid", "all", args.seed_offset
+                args.device, args.seeds, "hybrid", "all", args.seed_offset, args.element
             )
             s = out["stage2"]
             print("\n=== STAGE 2: full cost (settle + clear_soft), hybrid/all ===")
