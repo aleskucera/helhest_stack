@@ -48,7 +48,7 @@ def flat() -> Heightmap:
 def run(bearing_deg: float, turn_w: float, max_slew: float, smooth_w: float | None = None,
         a_max: float = 0.0, device: str = "cuda",
         dist: float = 5.0, max_frames: int = 700, n_theta: int = 24,
-        spin_frac: float = 0.0, in_place_cost: float = 0.0) -> dict:
+        spin_frac: float = 0.0, pivot_cost: float = 0.0) -> dict:
     scene = flat()
     mu_hm = Heightmap(np.full_like(scene.H, MU), (scene.x0, scene.y0), scene.cell)
     th = math.radians(bearing_deg)
@@ -72,7 +72,7 @@ def run(bearing_deg: float, turn_w: float, max_slew: float, smooth_w: float | No
     planner = MppiGpu(sim, cost, n_theta=n_theta, **kw)
     planner.reset_nominal(1.5)
 
-    ctg_kw = {"in_place_cost": in_place_cost} if in_place_cost > 0.0 else {}
+    ctg_kw = {"pivot_cost": pivot_cost} if pivot_cost > 0.0 else {}
     ctg = CostToGo(grid, dynamics.robot_params(), dynamics.planning_solver(),
                    n_theta=n_theta, device=device, **ctg_kw)
     V = ctg.compute(
@@ -141,13 +141,13 @@ def main() -> None:
     ap.add_argument("--turn", type=float, default=0.8)
     ap.add_argument("--slew", type=float, default=2.0)
     ap.add_argument("--spin-frac", type=float, default=0.0)
-    ap.add_argument("--in-place-cost", type=float, default=0.0)
+    ap.add_argument("--pivot-cost", type=float, default=0.0)
     args = ap.parse_args()
     wp.init()
 
     if not args.sweep:
         r = run(args.bearing, args.turn, args.slew, spin_frac=args.spin_frac,
-                in_place_cost=args.in_place_cost)
+                pivot_cost=args.pivot_cost)
         print(f"  bearing {args.bearing:.0f} turn {args.turn} slew {args.slew}: {r}")
         return
 

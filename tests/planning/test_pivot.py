@@ -21,7 +21,11 @@ def _corridor_v(pivot_cost: float, device: str) -> tuple[float, float]:
     """V at the start pose facing AWAY from the goal, and CostToGo's unreachable cap.
 
     Corridor 2.2 m wide: straight driving and a pivot-in-place fit, but a min-turn-radius
-    forward U-turn (center excursion ~2*R = 1 m + envelope margins) does not.
+    forward U-turn (center excursion ~2*R = 1 m + envelope margins) does not -- for the
+    SPHERE envelope this corridor was sized against (wheel_width=None, pinned explicitly: the
+    engine's default flipped to the narrower yaw-binned cylinder, wheel_width=0.10, which fits
+    this same forward U-turn and would make v_off finite without a pivot -- that is a real
+    envelope difference, not a pivot-primitive regression, so it is not what this test is for).
     """
     cell, nx, ny = 0.1, 80, 44
     gp = GridParams(nx, ny, cell, 0.0, -2.2)
@@ -31,7 +35,7 @@ def _corridor_v(pivot_cost: float, device: str) -> tuple[float, float]:
     Hd = wp.array(np.ascontiguousarray(H), dtype=wp.float32, device=device)
     ctg = CostToGo(
         gp,
-        RobotParams(),
+        RobotParams(wheel_width=None),
         SolverParams(dt=0.1, k_turn=2.0, newton_iters=6, atol=1e-4),
         n_theta=_N_THETA,
         pivot_cost=pivot_cost,

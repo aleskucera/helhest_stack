@@ -109,7 +109,10 @@ def _launch_cost(
     if loads is None:
         loads = np.full((T, B, 3), rp.mass * rp.gravity / 3.0, np.float32)
     cur_om_d = wp.array(np.ascontiguousarray(cur_om, np.float32), dtype=wp.vec3, device=device)
-    vel_d = wp.array(np.ascontiguousarray(vel, np.float32), dtype=wp.float32, device=device)
+    # the cost kernel reads realized body speed off twist[..., 0] (vx); vy/yaw_rate are unused here
+    twist_np = np.zeros((T + 1, B, 3), np.float32)
+    twist_np[..., 0] = vel
+    vel_d = wp.array(np.ascontiguousarray(twist_np, np.float32), dtype=wp.vec3, device=device)
     turning_d = wp.array(np.ascontiguousarray(turning, np.float32), dtype=wp.vec2, device=device)
     loads_d = wp.array(np.ascontiguousarray(loads, np.float32), dtype=wp.vec3, device=device)
     cy, cx = sim.grid.cells_y, sim.grid.cells_x
@@ -456,7 +459,10 @@ def selftest_reverse(device="cuda"):
     residual = wp.array(resid, dtype=float, device=device)
     twom = wp.array(ctrl, dtype=wp.vec3, device=device)
     cur_om_d = wp.array(cur_om, dtype=wp.vec3, device=device)
-    vel_d = wp.array(vel, dtype=wp.float32, device=device)
+    # the cost kernel reads realized body speed off twist[..., 0] (vx)
+    twist_np = np.zeros((T + 1, B, 3), np.float32)
+    twist_np[..., 0] = vel
+    vel_d = wp.array(np.ascontiguousarray(twist_np), dtype=wp.vec3, device=device)
     turning = np.zeros((T, B, 2), np.float32)
     turning[..., 0] = 1.0
     turning_d = wp.array(turning, dtype=wp.vec2, device=device)
