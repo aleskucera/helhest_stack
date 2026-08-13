@@ -540,3 +540,37 @@ spot-checked numbers drifted; two framing flips: hinge verdict negative->positiv
 the virgin run, and "STEP worse than the mean map" no longer holds — STEP 0.214 vs none
 0.313). Writing standard for the paper: clark_paper/CLAUDE.md (strict academic register,
 every claim proven or cited, independent reviewer panel before finalization).
+
+## 12. The de-sphering recompute (2026-08-13) — engine and element, separated
+
+Campaign: merged engine (bbc98cf) at n=100, cylinder as candidate primary + sphere-on-
+merged-engine baselines. All 15 runs rc=0; artifacts committed; logs log_desphere_*.
+
+**Three-way, realistic_sigma hybrid/all (mean regret):**
+old record: clark 0.045, step 0.214 (p=7.3e-7), bracket 0.098, PASSED.
+merged-SPHERE: clark 0.073, step 0.256 (p=0.0145), PASSED — but bracket p=1.0, fosm
+n.s.: the ENGINE change alone already costs most of the extra-baseline decisiveness.
+merged-CYLINDER: clark 0.160, step 0.285 (p=0.081) — criterion iii FAILS, VERDICT
+FAILED; bracket p=0.49, fosm p=0.34. All arms' regrets grow; separation collapses in
+this one regime (clark still lowest by a wide mean margin).
+
+**But cylinder is NOT weaker across the board:**
+- hybrid/clean and fan/sensor: ALL FOUR criteria PASS decisively (step p<=0.0046,
+  bracket <=0.0022, fosm ~0).
+- Calibration IMPROVES under cylinder: pooled sd-ratio 0.955-0.971 vs sphere's 0.886.
+- Full cost (hinge): Gate H passes on design AND virgin sets; stage 2 hugely decisive
+  (vs step p=4.5e-7, vs bracket p=6.5e-7, mean diffs ~-1.1). Under the true geometry
+  the FULL cost separates sharply while settle-only hybrid/all does not.
+- clark settle benchmark: clark_cvar remains lowest-regret in all three worlds.
+- conv timing: cylinder 1.13 ms/plan (40x) post-merge. (conv's rel-dE/dVar fields vs the
+  sphere reference are the PHYSICS delta, not error — same caveat as ever.)
+
+**Reading:** the story survives (ordering, calibration, 2/3 regimes, full cost) but the
+flagship "all three regimes pass" sentence does NOT survive a straight cylinder re-base:
+hybrid/all loses step-significance (0.081 at n=100), and the engine merge alone had
+already thinned it (7.3e-7 -> 0.0145). Paper options now live with the author:
+(a) cylinder re-base with a reframed headline (calibration 0.96 + 2/3 regimes + decisive
+full cost — arguably a BETTER story: under the deployed geometry the deployed objective
+separates); (b) paper stays on the frozen sphere/old-engine record (valid, reproducible,
+in git), robot and records live on cylinder. Pre-reg bookkeeping either way: these are
+configuration-change reruns, reported beside the originals, never replacing them.
