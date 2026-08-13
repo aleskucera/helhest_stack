@@ -63,7 +63,12 @@ from pathlib import Path
 
 import numpy as np
 import warp as wp
+from helhest.engine import GridParams
+from helhest.engine import init_state_kernel_bt
+from helhest.engine import RobotParams
+from helhest.engine import SolverParams
 
+from . import matched_truth as mt
 from ..adjoint.harness import DERIV_WPITCH
 from ..adjoint.harness import DERIV_WROLL
 from ..adjoint.harness import DERIV_WZ
@@ -86,10 +91,6 @@ from .risk import CORR_LEN
 from .risk import empirical_cvar
 from .risk import KAPPA
 from .risk import N_DRAWS
-from helhest.engine import GridParams
-from helhest.engine import init_state_kernel_bt
-from helhest.engine import RobotParams
-from helhest.engine import SolverParams
 
 RNG_SEED = 12345  # every internal, non-case random draw (gate 0/1/2 case selection) is fixed here
 SETTLE_IDX = TERM_NAMES.index("settle")
@@ -170,9 +171,7 @@ def gate0_correlation(device: str) -> dict:
     # asked -- reported instead of silently cranking B.
     margin = 8
     centers = [
-        (cy, cx)
-        for cy in range(margin, ny - margin, 3)
-        for cx in range(margin, nx - margin, 3)
+        (cy, cx) for cy in range(margin, ny - margin, 3) for cx in range(margin, nx - margin, 3)
     ][:30]
     rows = []
     for dy, dx in pairs:
@@ -353,8 +352,15 @@ def clark_cross_cov(
 
 
 def _footprint_cells(
-    wx: np.ndarray, wy: np.ndarray, off_dy: np.ndarray, off_dx: np.ndarray, grid_x0: float,
-    grid_y0: float, cell: float, ny: int, nx: int,
+    wx: np.ndarray,
+    wy: np.ndarray,
+    off_dy: np.ndarray,
+    off_dx: np.ndarray,
+    grid_x0: float,
+    grid_y0: float,
+    cell: float,
+    ny: int,
+    nx: int,
 ) -> np.ndarray:
     """Absolute [ny*nx]-flat cell index of every candidate, for every (node) in wx/wy. [N, K].
 
@@ -370,8 +376,12 @@ def _footprint_cells(
 
 
 def build_env_nodes(
-    cell_flat: np.ndarray, belief_flat: np.ndarray, sigma_flat: np.ndarray, off_cap: np.ndarray,
-    nx: int, corr_table: np.ndarray,
+    cell_flat: np.ndarray,
+    belief_flat: np.ndarray,
+    sigma_flat: np.ndarray,
+    off_cap: np.ndarray,
+    nx: int,
+    corr_table: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Given the absolute flat cell index of every candidate [N, K], build the Clark inputs
     (means, sigmas, cov_self, cov_to_u) and run `clark_build`. Returns the same 6-tuple plus the
@@ -395,8 +405,15 @@ def build_env_nodes(
 
 
 def clark_plan_moments(
-    belief: np.ndarray, sigma: np.ndarray, controlled: np.ndarray, rp: RobotParams,
-    x0: float, y0: float, cell: float, corr_table: np.ndarray, element: str = "sphere",
+    belief: np.ndarray,
+    sigma: np.ndarray,
+    controlled: np.ndarray,
+    rp: RobotParams,
+    x0: float,
+    y0: float,
+    cell: float,
+    corr_table: np.ndarray,
+    element: str = "sphere",
 ) -> tuple[float, float]:
     """E[J_settle], Var[J_settle] for ONE plan via the closed-form settle map + Clark envelope
     moments/covariance. `controlled`: [T+1, 3] (x, y, yaw) frozen belief-rollout trajectory for
@@ -432,8 +449,14 @@ def _settle_weights(rp: RobotParams) -> np.ndarray:
 
 
 def _settle_moments_from_nodes(
-    mean_n: np.ndarray, var_n: np.ndarray, cov_to_u_final: np.ndarray, u_idx_sorted: np.ndarray,
-    phi: np.ndarray, phineg: np.ndarray, rp: RobotParams, n_steps: int,
+    mean_n: np.ndarray,
+    var_n: np.ndarray,
+    cov_to_u_final: np.ndarray,
+    u_idx_sorted: np.ndarray,
+    phi: np.ndarray,
+    phineg: np.ndarray,
+    rp: RobotParams,
+    n_steps: int,
 ) -> tuple[float, float]:
     cross = clark_cross_cov(cov_to_u_final, u_idx_sorted, phi, phineg)  # [3T, 3T]
     c_w = _settle_weights(rp)
@@ -445,8 +468,15 @@ def _settle_moments_from_nodes(
 
 # --- GATE 2: Clark's per-node moments + cross-covariance vs brute-force MC --------------------
 def _mc_env_stats(
-    belief: np.ndarray, sigma: np.ndarray, x0: float, y0: float, cell: float, cand_abs: dict,
-    n_draws: int, device: str, seed: int,
+    belief: np.ndarray,
+    sigma: np.ndarray,
+    x0: float,
+    y0: float,
+    cell: float,
+    cand_abs: dict,
+    n_draws: int,
+    device: str,
+    seed: int,
 ) -> dict:
     """Brute-force MC truth for one (wheel_L, wheel_R, wheel_rear) case: draws the ACTUAL
     correlated noise generator (`NoiseDraws`, GPU) over a local patch, takes the exact max per
@@ -542,8 +572,12 @@ def gate2_clark_vs_mc(device: str, element: str = "sphere") -> dict:
             abs_err_mean = float(abs(mean_n[w] - mc_mean))
             rows.append(
                 {
-                    "case": case, "wheel": w, "clark_mean": float(mean_n[w]), "mc_mean": mc_mean,
-                    "clark_sd": float(np.sqrt(var_n[w])), "mc_sd": mc_sd,
+                    "case": case,
+                    "wheel": w,
+                    "clark_mean": float(mean_n[w]),
+                    "mc_mean": mc_mean,
+                    "clark_sd": float(np.sqrt(var_n[w])),
+                    "mc_sd": mc_sd,
                     "rel_err_mean": abs_err_mean / max(abs(mc_mean), 1e-6),
                     "rel_err_sd": float(abs(np.sqrt(var_n[w]) - mc_sd)) / max(mc_sd, 1e-6),
                     # abs error scaled by the natural noise scale (mc_sd) instead of by the mean
@@ -597,7 +631,15 @@ def run_seed(seed: int, family: str, noise: str, device: str, element: str = "sp
     grads, terms = h.adjoint(dilate=True, leaf="elevation")
     grad = grads[SETTLE_IDX]  # [K, ny, nx] -- settle-only, declared approximation (c)
     j_bel = _cost_settle(terms)
-    controlled = h.sim.controlled.numpy()  # [T+1, K, 3]
+    # `controlled` is the frozen belief-rollout trajectory `clark_plan_moments`/`_footprint_sigma`
+    # read (declared approximation (a)) -- under `element="cylinder"` it must be settled by the
+    # SAME cylinder contact the estimator's footprint table assumes. `h.sim` is
+    # DifferentiableSimulator, sphere-only regardless of `element` (see matched_truth.py), so the
+    # cylinder trajectory is re-derived through ForwardSimulator with the real cylinder envelope.
+    if element == "cylinder":
+        controlled, _ = mt.cylinder_controlled_trajectory(scene, poses, omega, device=device)
+    else:
+        controlled = h.sim.controlled.numpy()  # [T+1, K, 3]
     traj = controlled[:, :, :2].copy()
     sig_t = _footprint_sigma(traj, sigma, grid)
     step_risk = sig_t.sum(axis=0)
@@ -614,18 +656,25 @@ def run_seed(seed: int, family: str, noise: str, device: str, element: str = "sp
         [max(fosm_variance(grad[k], sigma, CELL, CORR_LEN), 0.0) for k in range(N_PLANS)]
     )
 
-    # NOTE (Stage A caveat): the MC truth below always runs the real Warp settle, which is
-    # sphere-contact only (trajectory generation is unchanged, per this stage's scope). Under
-    # `element="cylinder"` the clark_* arms therefore price a DIFFERENT contact model than the
-    # ground truth they are scored against -- the regret/decision numbers stop being meaningful,
-    # same caveat `clark_conv.py` states for its cylinder timing arm. Only GATE 2
-    # (`gate2_clark_vs_mc`) validates the cylinder estimator against matched-element MC truth.
+    # NOTE (Stage B): `clark_mean`/`clark_cvar` (this estimator) and the MC truth below both now
+    # settle through the SAME contact under `element="cylinder"` (matched_truth.py) -- the
+    # regret/decision numbers are comparing like geometry. `fosm` (the adjoint gradient) and
+    # `bracket` (the two forward evaluations above, via `h.sim`) stay sphere-only: they read
+    # DifferentiableSimulator directly, which has no cylinder path (see matched_truth.py's
+    # module docstring); `main()` records this split in the output JSON.
     e_clark = np.empty(N_PLANS)
     sd_clark = np.empty(N_PLANS)
     for k in range(N_PLANS):
         e_j, var_j = clark_plan_moments(
-            belief, sigma, controlled[:, k, :], rp, scene.origin_x, scene.origin_y, CELL,
-            corr_table, element=element,
+            belief,
+            sigma,
+            controlled[:, k, :],
+            rp,
+            scene.origin_x,
+            scene.origin_y,
+            CELL,
+            corr_table,
+            element=element,
         )
         e_clark[k], sd_clark[k] = e_j, np.sqrt(var_j)
     del h
@@ -640,22 +689,39 @@ def run_seed(seed: int, family: str, noise: str, device: str, element: str = "sp
     }
 
     # --- Monte-Carlo truth: identical protocol to risk.py, settle-only cost -------------------
-    poses_d = np.tile(poses[0], (N_DRAWS, 1)).astype(np.float32)
-    omega_d = np.zeros((omega.shape[0], N_DRAWS, 3), np.float32)
-    hd = Harness(scene, poses_d, omega_d, device=device)
-    draws = NoiseDraws((N_DRAWS, ny, nx), CELL, CORR_LEN, hd.device)
-    with wp.ScopedDevice(hd.device):
-        base = wp.array(np.ascontiguousarray(np.tile(belief, (N_DRAWS, 1, 1)), np.float32))
-        sig_dev = wp.array(np.ascontiguousarray(sigma, np.float32), dtype=wp.float32)
-    samples = np.empty((N_DRAWS, N_PLANS), np.float32)
-    for k in range(N_PLANS):
-        hd.sim.start_pose.assign(np.tile(poses[k], (N_DRAWS, 1)).astype(np.float32))
-        hd.sim.target_wheel_omega.assign(
-            np.ascontiguousarray(np.repeat(omega[:, k : k + 1, :], N_DRAWS, axis=1), np.float32)
+    # Matched-element: under "cylinder" the truth is settled by ForwardSimulator + the real
+    # cylinder envelope (matched_truth.py), not the sphere-locked DifferentiableSimulator below.
+    if element == "cylinder":
+        terms_mc = mt.cylinder_mc_truth_terms(
+            scene,
+            belief,
+            sigma,
+            poses,
+            omega,
+            device=device,
+            seed=900_000 + seed,
+            n_draws=N_DRAWS,
+            corr_len=CORR_LEN,
+            cell=CELL,
         )
-        draws.perturb(base, sig_dev, 1.0, hd.sim.elevation, 900_000 + seed)
-        samples[:, k] = _cost_settle(hd.forward(dilate=True))
-    del hd
+        samples = terms_mc[SETTLE_IDX]  # [N_DRAWS, N_PLANS]
+    else:
+        poses_d = np.tile(poses[0], (N_DRAWS, 1)).astype(np.float32)
+        omega_d = np.zeros((omega.shape[0], N_DRAWS, 3), np.float32)
+        hd = Harness(scene, poses_d, omega_d, device=device)
+        draws = NoiseDraws((N_DRAWS, ny, nx), CELL, CORR_LEN, hd.device)
+        with wp.ScopedDevice(hd.device):
+            base = wp.array(np.ascontiguousarray(np.tile(belief, (N_DRAWS, 1, 1)), np.float32))
+            sig_dev = wp.array(np.ascontiguousarray(sigma, np.float32), dtype=wp.float32)
+        samples = np.empty((N_DRAWS, N_PLANS), np.float32)
+        for k in range(N_PLANS):
+            hd.sim.start_pose.assign(np.tile(poses[k], (N_DRAWS, 1)).astype(np.float32))
+            hd.sim.target_wheel_omega.assign(
+                np.ascontiguousarray(np.repeat(omega[:, k : k + 1, :], N_DRAWS, axis=1), np.float32)
+            )
+            draws.perturb(base, sig_dev, 1.0, hd.sim.elevation, 900_000 + seed)
+            samples[:, k] = _cost_settle(hd.forward(dilate=True))
+        del hd
 
     mc_mean = samples.mean(axis=0)
     mc_sd = samples.std(axis=0)
@@ -815,11 +881,19 @@ def main() -> None:
 
     gate0 = gate0_correlation(a.device)
     gate1 = gate1_linear_map(a.device)
-    gate2 = gate2_clark_vs_mc(a.device, a.element) if not a.skip_gates else {
-        "rows": [], "median_rel_err_mean": float("nan"), "median_rel_err_sd": float("nan"),
-        "median_err_mean_over_sd": float("nan"), "median_rel_err_cov_lr": float("nan"),
-        "median_corr_lr_abs_diff": float("nan"), "passed": False,
-    }
+    gate2 = (
+        gate2_clark_vs_mc(a.device, a.element)
+        if not a.skip_gates
+        else {
+            "rows": [],
+            "median_rel_err_mean": float("nan"),
+            "median_rel_err_sd": float("nan"),
+            "median_err_mean_over_sd": float("nan"),
+            "median_rel_err_cov_lr": float("nan"),
+            "median_corr_lr_abs_diff": float("nan"),
+            "passed": False,
+        }
+    )
 
     rows = []
     for seed in range(a.seeds):
@@ -839,6 +913,13 @@ def main() -> None:
                 "family": a.family,
                 "noise": a.noise,
                 "element": a.element,
+                # matched-element bookkeeping (Stage B, studies/bench/matched_truth.py): the
+                # estimator (clark_mean/clark_cvar), the frozen trajectory, and the MC truth all
+                # settle under `element`; `fosm`/`bracket` read DifferentiableSimulator directly
+                # and stay sphere-only regardless -- no silent mixing.
+                "element_trajectory": a.element,
+                "element_mc_truth": a.element,
+                "element_gradient_arms": "sphere",
                 "rows": rows,
             },
             indent=2,

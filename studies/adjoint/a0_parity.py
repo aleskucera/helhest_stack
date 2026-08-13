@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import numpy as np
 import warp as wp
-
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 from helhest.engine import RobotParams
@@ -50,7 +49,7 @@ def run(harness: Harness, verbose: bool = True) -> dict[str, float]:
     ny, nx = scene.shape
     grid = GridParams(nx, ny, scene.cell, scene.origin_x, scene.origin_y)
     fwd = ForwardSimulator(
-        RobotParams(),
+        RobotParams(wheel_width=None),  # parity against harness.sim, which is sphere-only
         SolverParams(dt=DT, newton_iters=harness.newton_iters, atol=0.0),
         grid,
         harness.batch_size,

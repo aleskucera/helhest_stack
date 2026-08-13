@@ -130,7 +130,8 @@ def _step_gate_kernel(
     """OR a hard block (ALL headings) onto any pose whose footprint (radius foot_r cells) contains a
     STEP taller than step_gate -- a vertical obstacle the body would hit but the settle straddles.
     Heading-independent: the robot cannot be centred within foot_r cells of a tall pole in ANY
-    orientation. Only ever SETS blocked=1 (never clears), so it composes with the settle feasibility."""
+    orientation. Only ever SETS blocked=1 (never clears), so it composes with the settle feasibility.
+    """
     r, c, t = wp.tid()
     ny = step.shape[0]
     nx = step.shape[1]
@@ -199,6 +200,8 @@ class CostToGo:
         robust_margin_deg: float = 0.0,  # heading disturbance tube (orientation-aware erosion)
         obstacle_step_m: float = 0.0,  # hard-block cells with a local step taller than this [m];
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
+        pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives so
+        # a goal behind the robot routes as pivot-then-drive instead of a wide loop. 0 = OFF.
         profile: bool = False,  # opt-in per-stage CUDA-event timing (tiny event nodes + per-call sync)
         device: wp.Device | str | None = None,
     ) -> None:
@@ -253,6 +256,7 @@ class CostToGo:
             n_theta=n_theta,
             turn_radius=self.robot.min_turn_radius,
             step=step,
+            pivot_cost=pivot_cost,
             device=self.device,
         )
 

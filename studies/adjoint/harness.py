@@ -30,7 +30,6 @@ from collections.abc import Iterable
 
 import numpy as np
 import warp as wp
-
 from helhest.engine import DifferentiableSimulator
 from helhest.engine import GridParams
 from helhest.engine import RobotParams
@@ -147,7 +146,10 @@ class Harness:
         # h and the forward map carries small step discontinuities that FD reads as noise.
         solver = SolverParams(dt=dt, newton_iters=newton_iters, atol=0.0)
         grid = GridParams(nx, ny, scene.cell, scene.origin_x, scene.origin_y)
-        self.robot_params = RobotParams(clear_margin=STUDY_CLEAR_MARGIN)
+        # wheel_width=None: DifferentiableSimulator is sphere-only (the taped path has no
+        # yaw-binned cylinder support -- see engine/simulator.py). RobotParams()'s own default
+        # is now the cylinder envelope (improve/robust-control merge), so this must be explicit.
+        self.robot_params = RobotParams(clear_margin=STUDY_CLEAR_MARGIN, wheel_width=None)
         self.sim = DifferentiableSimulator(
             self.robot_params, solver, grid, self.batch_size, self.n_steps, device
         )
@@ -221,6 +223,7 @@ class Harness:
                     sim.envelope,
                     sim.elevation,
                     sim.friction,
+                    sim.mu_scale,
                     sim.grid,
                     sim.robot,
                     sim.solver,
@@ -228,6 +231,7 @@ class Harness:
                     sim.current_wheel_omega[t],
                     sim.controlled[t],
                     sim.derived[t],
+                    sim.twist[t],
                 ],
                 outputs=[
                     sim.current_wheel_omega[t + 1],
@@ -238,6 +242,7 @@ class Harness:
                     sim.clearance[t],
                     sim.clear_soft[t],
                     sim.residual[t],
+                    sim.twist[t + 1],
                 ],
                 device=self.device,
             )

@@ -155,10 +155,13 @@ import json
 
 import numpy as np
 import warp as wp
+from helhest.engine import RobotParams
 
+from . import clark_full
+from . import matched_truth as mt
 from ..adjoint.harness import Harness
 from ..adjoint.sigma import NoiseDraws
-from . import clark_full
+from .clark import _footprint_cells
 from .clark import _norm_cdf  # noqa: F401  (re-exported for symmetry with clark_full's helpers)
 from .clark import _settle_moments_from_nodes
 from .clark import _settle_weights
@@ -168,7 +171,6 @@ from .clark import rho1_table
 from .clark import rho_lookup
 from .clark import RNG_SEED
 from .clark import settle_map
-from .clark import _footprint_cells
 from .clark_full import _bilinear_stencil
 from .clark_full import _hinge_inputs
 from .clark_full import _hinge_moments
@@ -182,7 +184,6 @@ from .ranking import N_PLANS
 from .ranking import OUT
 from .risk import CORR_LEN
 from .risk import N_DRAWS
-from helhest.engine import RobotParams
 
 # Which hinge-hinge pairs approximation (f)'s Phi-weighted cross covariance covers. clark_full.py
 # fixed this at same-timestep-only, a choice calibrated against the FROZEN-pose model; see the
@@ -203,9 +204,19 @@ def belly_pose_weights(rp: RobotParams, chassis_pts: np.ndarray) -> np.ndarray:
 
 
 def coupled_cost_plan_moments(
-    belief: np.ndarray, sigma: np.ndarray, controlled: np.ndarray, derived: np.ndarray,
-    rp: RobotParams, chassis_pts: np.ndarray, clear_margin: float, x0: float, y0: float,
-    cell: float, corr_table: np.ndarray, cross_scope: str = CROSS_SCOPE, element: str = "sphere",
+    belief: np.ndarray,
+    sigma: np.ndarray,
+    controlled: np.ndarray,
+    derived: np.ndarray,
+    rp: RobotParams,
+    chassis_pts: np.ndarray,
+    clear_margin: float,
+    x0: float,
+    y0: float,
+    cell: float,
+    corr_table: np.ndarray,
+    cross_scope: str = CROSS_SCOPE,
+    element: str = "sphere",
 ) -> dict:
     """E[J], Var[J] for J = settle + clear_soft with the chassis height treated as a Clark node
     correlated with the ground under the belly. Signature is deliberately identical to
@@ -304,8 +315,8 @@ def coupled_cost_plan_moments(
         b_t = phi_r[t] @ a  # [3]
         c_un_t = cov_to_u_final_env[nodes_t[:, t]]  # [3, |U|]
         c_nn_t = cross_env[np.ix_(nodes_t[:, t], nodes_t[:, t])]
-        per_t_var += float(v_t @ cov_u @ v_t) - 2.0 * float(b_t @ (c_un_t @ v_t)) + float(
-            b_t @ c_nn_t @ b_t
+        per_t_var += (
+            float(v_t @ cov_u @ v_t) - 2.0 * float(b_t @ (c_un_t @ v_t)) + float(b_t @ c_nn_t @ b_t)
         )
         v_sum += v_t
         b_all[nodes_t[:, t]] = b_t
@@ -338,8 +349,13 @@ def coupled_cost_plan_moments(
     e_j = e_settle + e_clear
     var_j = max(var_settle + var_clear + 2.0 * cov_settle_clear, 0.0)
     return {
-        "e_j": e_j, "var_j": var_j, "e_settle": e_settle, "var_settle": var_settle,
-        "e_clear": e_clear, "var_clear": var_clear, "cov_settle_clear": cov_settle_clear,
+        "e_j": e_j,
+        "var_j": var_j,
+        "e_settle": e_settle,
+        "var_settle": var_settle,
+        "e_clear": e_clear,
+        "var_clear": var_clear,
+        "cov_settle_clear": cov_settle_clear,
         "e_clear_frozen": float(e_hinge_f.sum()),
         "var_clear_frozen": max(float(var_hinge_f.sum() + cross_f), 0.0),
     }
@@ -347,16 +363,19 @@ def coupled_cost_plan_moments(
 
 # --- GATE H: the like-for-like rematch of clark_full.py's Gate 1b -------------------------------
 def gateH_trajectory_vs_mc(
-    device: str, n_cases: int = 12, cross_scope: str = CROSS_SCOPE, rng_offset: int = 1,
+    device: str,
+    n_cases: int = 12,
+    cross_scope: str = CROSS_SCOPE,
+    rng_offset: int = 1,
     element: str = "sphere",
 ) -> dict:
     """The SAME (seed, plan) cases as `clark_full.gate1b_trajectory_vs_mc` (same RNG stream), the
     same true end-to-end MC, scoring frozen and coupled side by side. Criteria pre-registered in
     the module docstring.
 
-    `element` (default sphere) selects the settle contact table -- the true MC below is the real
-    Warp settle, sphere-contact only, so a cylinder run prices a different contact model than its
-    own truth (same Stage A caveat as `clark.py`/`clark_full.py`)."""
+    `element` (default sphere) selects the settle contact table. Under `element="cylinder"` the
+    trajectory AND the true MC below both settle through the real cylinder envelope too (Stage B,
+    `matched_truth.py`)."""
     rp = RobotParams()
     chassis_pts = rp._chassis_pts()
     corr_table = rho1_table(CORR_LEN, CELL)
@@ -368,37 +387,75 @@ def gateH_trajectory_vs_mc(
         scene, _, _, _, sigma, poses, omega, _ = build_case(int(sd), "hybrid", "all")
         belief = scene.elevation.astype(np.float32)
         ny, nx = belief.shape
-        h = Harness(scene, poses, omega, device=device)
-        h.forward(dilate=True)
-        controlled = h.sim.controlled.numpy()
-        derived = h.sim.derived.numpy()
-        del h
+        # Matched-element trajectory (see clark.py's run_seed for the same fix): `h.sim` is
+        # DifferentiableSimulator, sphere-only regardless of `element` (matched_truth.py).
+        if element == "cylinder":
+            controlled, derived = mt.cylinder_controlled_trajectory(
+                scene, poses, omega, device=device
+            )
+        else:
+            h = Harness(scene, poses, omega, device=device)
+            h.forward(dilate=True)
+            controlled = h.sim.controlled.numpy()
+            derived = h.sim.derived.numpy()
+            del h
 
         mo = coupled_cost_plan_moments(
-            belief, sigma, controlled[:, plan, :], derived[:, plan, :], rp, chassis_pts,
-            CLEAR_MARGIN, scene.origin_x, scene.origin_y, CELL, corr_table, cross_scope,
+            belief,
+            sigma,
+            controlled[:, plan, :],
+            derived[:, plan, :],
+            rp,
+            chassis_pts,
+            CLEAR_MARGIN,
+            scene.origin_x,
+            scene.origin_y,
+            CELL,
+            corr_table,
+            cross_scope,
             element=element,
         )
 
-        # true end-to-end MC, byte-identical protocol to gate1b (same seed offset 800_000 + case)
-        poses_d = np.tile(poses[plan], (N_DRAWS, 1)).astype(np.float32)
-        omega_d = np.tile(omega[:, plan : plan + 1, :], (1, N_DRAWS, 1)).astype(np.float32)
-        hd = Harness(scene, poses_d, omega_d, device=device)
-        draws = NoiseDraws((N_DRAWS, ny, nx), CELL, CORR_LEN, hd.device)
-        with wp.ScopedDevice(hd.device):
-            base = wp.array(np.ascontiguousarray(np.tile(belief, (N_DRAWS, 1, 1)), np.float32))
-            sig_dev = wp.array(np.ascontiguousarray(sigma, np.float32), dtype=wp.float32)
-        draws.perturb(base, sig_dev, 1.0, hd.sim.elevation, 800_000 + case)
-        clear_mc = hd.forward(dilate=True)[CLEAR_IDX]
-        del hd
+        # true end-to-end MC, byte-identical protocol to gate1b (same seed offset 800_000 + case).
+        # Matched-element: cylinder truth settles through ForwardSimulator + the real cylinder
+        # envelope (matched_truth.py), not the sphere-locked DifferentiableSimulator below.
+        if element == "cylinder":
+            terms_mc = mt.cylinder_mc_truth_terms(
+                scene,
+                belief,
+                sigma,
+                poses[plan : plan + 1],
+                omega[:, plan : plan + 1, :],
+                device=device,
+                seed=800_000 + case,
+                n_draws=N_DRAWS,
+                corr_len=CORR_LEN,
+                cell=CELL,
+            )
+            clear_mc = terms_mc[CLEAR_IDX, :, 0]  # [N_DRAWS], the single plan
+        else:
+            poses_d = np.tile(poses[plan], (N_DRAWS, 1)).astype(np.float32)
+            omega_d = np.tile(omega[:, plan : plan + 1, :], (1, N_DRAWS, 1)).astype(np.float32)
+            hd = Harness(scene, poses_d, omega_d, device=device)
+            draws = NoiseDraws((N_DRAWS, ny, nx), CELL, CORR_LEN, hd.device)
+            with wp.ScopedDevice(hd.device):
+                base = wp.array(np.ascontiguousarray(np.tile(belief, (N_DRAWS, 1, 1)), np.float32))
+                sig_dev = wp.array(np.ascontiguousarray(sigma, np.float32), dtype=wp.float32)
+            draws.perturb(base, sig_dev, 1.0, hd.sim.elevation, 800_000 + case)
+            clear_mc = hd.forward(dilate=True)[CLEAR_IDX]
+            del hd
 
         mc_mean, mc_sd = float(clear_mc.mean()), float(clear_mc.std())
         sd_coupled = float(np.sqrt(mo["var_clear"]))
         rows.append(
             {
-                "case": case, "seed": int(sd), "plan": int(plan),
-                "mc_mean": mc_mean, "mc_sd": mc_sd,
-                "coupled_mean": mo["e_clear"], "coupled_sd": sd_coupled,
+                "case": case,
+                "seed": int(sd),
+                "plan": int(plan),
+                "mc_mean": mc_mean,
+                "mc_sd": mc_sd,
+                "coupled_mean": mo["e_clear"],
+                "coupled_sd": sd_coupled,
                 "frozen_mean": mo["e_clear_frozen"],
                 "frozen_sd": float(np.sqrt(mo["var_clear_frozen"])),
                 "e_ratio": mo["e_clear"] / max(mc_mean, 1e-6),
@@ -412,9 +469,7 @@ def gateH_trajectory_vs_mc(
     med_e = float(np.median([r["e_ratio"] for r in rows]))
     med_sd = float(np.median([r["sd_ratio"] for r in rows]))
     med_err = float(np.median([r["err_over_mcsd"] for r in rows]))
-    corr = float(
-        np.corrcoef([r["coupled_mean"] for r in rows], [r["mc_mean"] for r in rows])[0, 1]
-    )
+    corr = float(np.corrcoef([r["coupled_mean"] for r in rows], [r["mc_mean"] for r in rows])[0, 1])
     crit = {
         "i_median_e_ratio_in_0.75_1.30": bool(0.75 <= med_e <= 1.30),
         "ii_median_err_over_mcsd_le_1.5": bool(med_err <= 1.5),
@@ -430,9 +485,7 @@ def gateH_trajectory_vs_mc(
         "median_err_over_mcsd": med_err,
         "corr_mean": corr,
         "frozen_median_e_ratio": float(np.median([r["frozen_e_ratio"] for r in rows])),
-        "frozen_median_err_over_mcsd": float(
-            np.median([r["frozen_err_over_mcsd"] for r in rows])
-        ),
+        "frozen_median_err_over_mcsd": float(np.median([r["frozen_err_over_mcsd"] for r in rows])),
         "criteria": crit,
         "passed": all(crit.values()),
     }
@@ -440,7 +493,11 @@ def gateH_trajectory_vs_mc(
 
 # --- STAGE 2: the full-cost head-to-head, protocol reused verbatim from clark_full -------------
 def run_stage2(
-    device: str, n_seeds: int, family: str, noise: str, seed_offset: int = 0,
+    device: str,
+    n_seeds: int,
+    family: str,
+    noise: str,
+    seed_offset: int = 0,
     element: str = "sphere",
 ) -> dict:
     """`clark_full.run_seed_full` with the coupled moments swapped in for the frozen ones.
@@ -467,17 +524,22 @@ def run_stage2(
         # clark_full's own paired sign test, so the statistics match the published comparison.
         # _sign_paired returns (mean of regret[a] - regret[b], n non-tied, k where a is
         # BETTER, p) -- it tests -d, so the third element counts clark_cvar's WINS.
-        mean_diff, n_nonzero, k_clark_better, p = clark_full._sign_paired(
-            rows, "clark_cvar", other
-        )
+        mean_diff, n_nonzero, k_clark_better, p = clark_full._sign_paired(rows, "clark_cvar", other)
         tests[f"clark_cvar_vs_{other}"] = {
-            "p": p, "n_nonzero": n_nonzero, "k_clark_better": k_clark_better,
+            "p": p,
+            "n_nonzero": n_nonzero,
+            "k_clark_better": k_clark_better,
             "mean_regret_diff": mean_diff,  # clark_cvar - other; NEGATIVE means Clark wins
         }
     passed = all(t["p"] < 0.05 and t["mean_regret_diff"] < 0.0 for t in tests.values())
     return {
-        "family": family, "noise": noise, "n_seeds": n_seeds, "seed_offset": seed_offset,
-        "rows": rows, "mean_regret": regret, "tests": tests,
+        "family": family,
+        "noise": noise,
+        "n_seeds": n_seeds,
+        "seed_offset": seed_offset,
+        "rows": rows,
+        "mean_regret": regret,
+        "tests": tests,
         "passed": passed,  # PRE-REG: clark_cvar beats step AND bracket at p < 0.05, full cost
     }
 
@@ -487,8 +549,12 @@ def _print_gate(g: dict, args: argparse.Namespace) -> None:
         f"=== GATE H: pose-coupled hinge vs true end-to-end MC "
         f"(cross_scope={args.cross_scope}, rng_offset={args.rng_offset}) ==="
     )
-    print(f"  E-ratio      coupled {g['median_e_ratio']:.3f}   frozen {g['frozen_median_e_ratio']:.3f}")
-    print(f"  |err|/mc_sd  coupled {g['median_err_over_mcsd']:.3f}   frozen {g['frozen_median_err_over_mcsd']:.3f}")
+    print(
+        f"  E-ratio      coupled {g['median_e_ratio']:.3f}   frozen {g['frozen_median_e_ratio']:.3f}"
+    )
+    print(
+        f"  |err|/mc_sd  coupled {g['median_err_over_mcsd']:.3f}   frozen {g['frozen_median_err_over_mcsd']:.3f}"
+    )
     print(f"  sd-ratio     coupled {g['median_sd_ratio']:.3f}")
     print(f"  corr(E, MC)  coupled {g['corr_mean']:.3f}")
     for k, v in g["criteria"].items():
@@ -521,7 +587,15 @@ def main() -> None:
     args = ap.parse_args()
     wp.init()
 
-    out: dict = {}
+    out: dict = {
+        "element": args.element,
+        # matched-element bookkeeping (Stage B, matched_truth.py): gateH's/stage2's trajectory +
+        # MC truth settle under `element` (stage2 inherits it via run_seed_full); the fosm/bracket
+        # arms inside stage2 read DifferentiableSimulator directly and stay sphere-only regardless.
+        "element_trajectory": args.element,
+        "element_mc_truth": args.element,
+        "element_gradient_arms": "sphere",
+    }
     if not args.skip_gate:
         out["gateH"] = gateH_trajectory_vs_mc(
             args.device, args.cases, args.cross_scope, args.rng_offset, args.element

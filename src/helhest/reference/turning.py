@@ -25,7 +25,8 @@ def turning_params(mu, N, k, wheel_x=WHEEL_X, mass=MASS, g=GRAVITY):
     mu = np.asarray(mu, dtype=np.float64)
     N = np.asarray(N, dtype=np.float64)
     w = mu * N
-    sw = w.sum()
+    # same 0/0 guard as the device kernels (step.py): mu -> 0 must degrade, not NaN
+    sw = max(w.sum(), 1e-6)
     x_icr = float((w * wheel_x).sum() / sw)
     alpha = float(1.0 + k * sw / (g * mass))
     return alpha, x_icr

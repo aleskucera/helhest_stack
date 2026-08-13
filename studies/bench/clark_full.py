@@ -122,13 +122,15 @@ from pathlib import Path
 
 import numpy as np
 import warp as wp
+from helhest.engine import RobotParams
+from helhest.model import euler_zyx
 
+from . import matched_truth as mt
 from ..adjoint.harness import Harness
 from ..adjoint.harness import N_TERMS
 from ..adjoint.harness import TERM_NAMES
 from ..adjoint.sigma import fosm_variance
 from ..adjoint.sigma import NoiseDraws
-from helhest.model import euler_zyx
 from .bundled import BRACKET_C
 from .clark import _cost_settle
 from .clark import _footprint_cells
@@ -139,9 +141,9 @@ from .clark import _settle_weights
 from .clark import clark_build
 from .clark import clark_cross_cov
 from .clark import clark_plan_moments
-from .clark import RNG_SEED
 from .clark import rho1_table
 from .clark import rho_lookup
+from .clark import RNG_SEED
 from .element import broadcast_cap
 from .element import element_offsets
 from .ranking import build_case
@@ -156,7 +158,6 @@ from .risk import CORR_LEN
 from .risk import empirical_cvar
 from .risk import KAPPA
 from .risk import N_DRAWS
-from helhest.engine import RobotParams
 
 SETTLE_IDX = TERM_NAMES.index("settle")
 CLEAR_IDX = TERM_NAMES.index("clear_soft")
@@ -169,7 +170,9 @@ def _cost_full(terms: np.ndarray) -> np.ndarray:
 
 
 # --- the hinge's closed form: max(X, 0) for X ~ N(mu, var) -------------------------------------
-def _hinge_moments(mu_x: np.ndarray, var_x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _hinge_moments(
+    mu_x: np.ndarray, var_x: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """E[max(X,0)], Var[max(X,0)], and Phi(mu/s) (P(X active), also the exact weight
     `Cov(A, max(X,0)) = Phi * Cov(A, X)` needs for any OTHER Gaussian-moment-matched node A --
     see approximation (g))."""
@@ -227,8 +230,15 @@ def _hinge_inputs(
 
 # --- TASK 1: clear_soft alone, closed form -------------------------------------------------------
 def clear_soft_plan_moments(
-    belief: np.ndarray, sigma: np.ndarray, wx: np.ndarray, wy: np.ndarray, mu0: np.ndarray,
-    x0: float, y0: float, cell: float, corr_table: np.ndarray,
+    belief: np.ndarray,
+    sigma: np.ndarray,
+    wx: np.ndarray,
+    wy: np.ndarray,
+    mu0: np.ndarray,
+    x0: float,
+    y0: float,
+    cell: float,
+    corr_table: np.ndarray,
 ) -> tuple[float, float]:
     """E[clear_soft], Var[clear_soft] for a SET OF TIMESTEPS' belly-point nodes: `wx`/`wy`/`mu0`
     are [n_t, n_p] (or [n_p] for a single timestep -- promoted to [1, n_p]), the frozen-pose
@@ -267,8 +277,17 @@ def clear_soft_plan_moments(
 
 # --- MC ground truth for GATE 1: draws real correlated noise, samples RAW elevation ------------
 def _mc_clear_soft_stats(
-    belief: np.ndarray, sigma: np.ndarray, x0: float, y0: float, cell: float, wx: np.ndarray,
-    wy: np.ndarray, mu0: np.ndarray, n_draws: int, device: str, seed: int,
+    belief: np.ndarray,
+    sigma: np.ndarray,
+    x0: float,
+    y0: float,
+    cell: float,
+    wx: np.ndarray,
+    wy: np.ndarray,
+    mu0: np.ndarray,
+    n_draws: int,
+    device: str,
+    seed: int,
 ) -> np.ndarray:
     """Brute-force MC truth for clear_soft AT ONE TIMESTEP (mirrors clark.py's
     `_mc_env_stats`): draws the actual correlated-noise generator over a local patch,
@@ -326,7 +345,10 @@ def gate1_clear_soft_vs_mc(device: str) -> dict:
             x, y, _ = controlled[t, plan]
             iy0 = int(round((y - scene.origin_y) / CELL))
             ix0 = int(round((x - scene.origin_x) / CELL))
-            if margin_cells <= iy0 <= ny - margin_cells and margin_cells <= ix0 <= nx - margin_cells:
+            if (
+                margin_cells <= iy0 <= ny - margin_cells
+                and margin_cells <= ix0 <= nx - margin_cells
+            ):
                 break
         x, y, yaw = controlled[t, plan]
         z, pitch, roll = derived[t, plan]
@@ -346,9 +368,13 @@ def gate1_clear_soft_vs_mc(device: str) -> dict:
         abs_err_sd = abs(np.sqrt(var_clark) - mc_sd)
         rows.append(
             {
-                "case": case, "clark_mean": e_clark, "mc_mean": mc_mean,
-                "clark_sd": float(np.sqrt(var_clark)), "mc_sd": mc_sd,
-                "abs_err_mean": abs_err_mean, "abs_err_sd": abs_err_sd,
+                "case": case,
+                "clark_mean": e_clark,
+                "mc_mean": mc_mean,
+                "clark_sd": float(np.sqrt(var_clark)),
+                "mc_sd": mc_sd,
+                "abs_err_mean": abs_err_mean,
+                "abs_err_sd": abs_err_sd,
                 "err_mean_over_mcsd": abs_err_mean / max(mc_sd, 1e-6),
                 "err_sd_over_mcsd": abs_err_sd / max(mc_sd, 1e-6),
                 "fixed_baseline_ok": bool(abs(mc_mean) > mc_sd),
@@ -426,15 +452,23 @@ def gate1b_trajectory_vs_mc(device: str, n_cases: int = 12) -> dict:
         mc_mean, mc_sd = float(clear_mc.mean()), float(clear_mc.std())
         rows.append(
             {
-                "case": case, "seed": int(sd), "plan": int(plan), "clark_mean": e_clark,
-                "mc_mean": mc_mean, "clark_sd": float(np.sqrt(var_clark)), "mc_sd": mc_sd,
-                "e_ratio": e_clark / max(mc_mean, 1e-6), "sd_ratio": float(np.sqrt(var_clark)) / max(mc_sd, 1e-6),
+                "case": case,
+                "seed": int(sd),
+                "plan": int(plan),
+                "clark_mean": e_clark,
+                "mc_mean": mc_mean,
+                "clark_sd": float(np.sqrt(var_clark)),
+                "mc_sd": mc_sd,
+                "e_ratio": e_clark / max(mc_mean, 1e-6),
+                "sd_ratio": float(np.sqrt(var_clark)) / max(mc_sd, 1e-6),
             }
         )
     med_e = float(np.median([r["e_ratio"] for r in rows]))
     med_sd = float(np.median([r["sd_ratio"] for r in rows]))
     return {
-        "rows": rows, "median_e_ratio": med_e, "median_sd_ratio": med_sd,
+        "rows": rows,
+        "median_e_ratio": med_e,
+        "median_sd_ratio": med_sd,
         # the honest bar: is the FULL-cost clear_soft aggregate usable at all against the SAME
         # truth task 2 will use? Same [0.7, 1.4] band clark.py used for settle's sd ratio, plus a
         # symmetric band on the mean ratio (settle's own E[] needed no such gate -- it has none
@@ -445,9 +479,18 @@ def gate1b_trajectory_vs_mc(device: str, n_cases: int = 12) -> dict:
 
 # --- TASK 2/4: settle + clear_soft together, with the settle-clear_soft cross term (g) ---------
 def full_cost_plan_moments(
-    belief: np.ndarray, sigma: np.ndarray, controlled: np.ndarray, derived: np.ndarray,
-    rp: RobotParams, chassis_pts: np.ndarray, clear_margin: float, x0: float, y0: float,
-    cell: float, corr_table: np.ndarray, element: str = "sphere",
+    belief: np.ndarray,
+    sigma: np.ndarray,
+    controlled: np.ndarray,
+    derived: np.ndarray,
+    rp: RobotParams,
+    chassis_pts: np.ndarray,
+    clear_margin: float,
+    x0: float,
+    y0: float,
+    cell: float,
+    corr_table: np.ndarray,
+    element: str = "sphere",
 ) -> dict:
     """E[J_full], Var[J_full] = Var[settle] + Var[clear_soft] + 2*Cov(settle, clear_soft) for
     ONE plan, plus every component (for diagnostics/calibration). `element` selects the settle
@@ -529,14 +572,24 @@ def full_cost_plan_moments(
     e_j = e_settle + e_clear
     var_j = max(var_settle + var_clear + 2.0 * cov_settle_clear, 0.0)
     return {
-        "e_j": e_j, "var_j": var_j, "e_settle": e_settle, "var_settle": var_settle,
-        "e_clear": e_clear, "var_clear": var_clear, "cov_settle_clear": cov_settle_clear,
+        "e_j": e_j,
+        "var_j": var_j,
+        "e_settle": e_settle,
+        "var_settle": var_settle,
+        "e_clear": e_clear,
+        "var_clear": var_clear,
+        "cov_settle_clear": cov_settle_clear,
     }
 
 
 def run_seed_full(
-    seed: int, family: str, noise: str, device: str, use_full: bool = True,
-    keep_samples: bool = False, element: str = "sphere",
+    seed: int,
+    family: str,
+    noise: str,
+    device: str,
+    use_full: bool = True,
+    keep_samples: bool = False,
+    element: str = "sphere",
 ) -> dict:
     """One seed of the risk.py-style comparison, arms: none / sum_sigma / step / fosm / bracket /
     clark_mean / clark_cvar / mc. Mirrors clark.py's `run_seed` structurally, with `sum_sigma`
@@ -545,10 +598,10 @@ def run_seed_full(
     clark.py's `clark_plan_moments`, the ALREADY-VALIDATED path) if False -- the fallback Gate 1b
     triggers per the module docstring.
 
-    `element` (default sphere) selects the settle contact table. The MC truth below is the real
-    Warp settle, which is sphere-contact only (Stage A leaves trajectory/physics generation
-    unchanged) -- under `element="cylinder"` the clark_* arms therefore price a different contact
-    model than the ground truth they are scored against, same caveat as `clark.py`'s `run_seed`.
+    `element` (default sphere) selects the settle contact table. Under `element="cylinder"` the
+    frozen trajectory AND the MC truth below both settle through the real cylinder envelope too
+    (Stage B, `matched_truth.py`) -- `fosm`/`bracket` still read `h.sim`/`h.adjoint`
+    (DifferentiableSimulator, sphere-only) regardless, recorded explicitly in `main()`'s JSON.
     """
     scene, _truth, _meas, _obs, sigma, poses, omega, grid = build_case(seed, family, noise)
     belief = scene.elevation.astype(np.float32)
@@ -562,8 +615,13 @@ def run_seed_full(
     grads, terms = h.adjoint(dilate=True, leaf="elevation")
     grad = grads[SETTLE_IDX] + grads[CLEAR_IDX] if use_full else grads[SETTLE_IDX]
     j_bel = cost_fn(terms)
-    controlled = h.sim.controlled.numpy()  # [T+1, K, 3]
-    derived = h.sim.derived.numpy()
+    # Matched-element trajectory (see clark.py's run_seed for the same fix): `h.sim` is
+    # DifferentiableSimulator, sphere-only regardless of `element` (matched_truth.py).
+    if element == "cylinder":
+        controlled, derived = mt.cylinder_controlled_trajectory(scene, poses, omega, device=device)
+    else:
+        controlled = h.sim.controlled.numpy()  # [T+1, K, 3]
+        derived = h.sim.derived.numpy()
     traj = controlled[:, :, :2].copy()
     sig_t = _footprint_sigma(traj, sigma, grid)
     step_risk = sig_t.sum(axis=0)
@@ -593,18 +651,37 @@ def run_seed_full(
     for k in range(N_PLANS):
         if use_full:
             mo = full_cost_plan_moments(
-                belief, sigma, controlled[:, k, :], derived[:, k, :], rp, chassis_pts,
-                CLEAR_MARGIN, scene.origin_x, scene.origin_y, CELL, corr_table, element=element,
+                belief,
+                sigma,
+                controlled[:, k, :],
+                derived[:, k, :],
+                rp,
+                chassis_pts,
+                CLEAR_MARGIN,
+                scene.origin_x,
+                scene.origin_y,
+                CELL,
+                corr_table,
+                element=element,
             )
             e_clark[k], sd_clark[k] = mo["e_j"], np.sqrt(mo["var_j"])
             e_settle_c[k], e_clear_c[k] = mo["e_settle"], mo["e_clear"]
             var_settle_c[k], var_clear_c[k], cov_sc_c[k] = (
-                mo["var_settle"], mo["var_clear"], mo["cov_settle_clear"],
+                mo["var_settle"],
+                mo["var_clear"],
+                mo["cov_settle_clear"],
             )
         else:
             e_j, var_j = clark_plan_moments(
-                belief, sigma, controlled[:, k, :], rp, scene.origin_x, scene.origin_y, CELL,
-                corr_table, element=element,
+                belief,
+                sigma,
+                controlled[:, k, :],
+                rp,
+                scene.origin_x,
+                scene.origin_y,
+                CELL,
+                corr_table,
+                element=element,
             )
             e_clark[k], sd_clark[k] = e_j, np.sqrt(var_j)
             e_settle_c[k], var_settle_c[k] = e_j, var_j
@@ -623,24 +700,41 @@ def run_seed_full(
     }
 
     # --- Monte-Carlo truth: identical protocol to risk.py/clark.py ----------------------------
-    poses_d = np.tile(poses[0], (N_DRAWS, 1)).astype(np.float32)
-    omega_d = np.zeros((omega.shape[0], N_DRAWS, 3), np.float32)
-    hd = Harness(scene, poses_d, omega_d, device=device)
-    draws = NoiseDraws((N_DRAWS, ny, nx), CELL, CORR_LEN, hd.device)
-    with wp.ScopedDevice(hd.device):
-        base = wp.array(np.ascontiguousarray(np.tile(belief, (N_DRAWS, 1, 1)), np.float32))
-        sig_dev = wp.array(np.ascontiguousarray(sigma, np.float32), dtype=wp.float32)
-    samples = np.empty((N_DRAWS, N_PLANS), np.float32)
+    # Matched-element: cylinder truth settles through ForwardSimulator + the real cylinder
+    # envelope (matched_truth.py), not the sphere-locked DifferentiableSimulator below.
     t1 = time.perf_counter()
-    for k in range(N_PLANS):
-        hd.sim.start_pose.assign(np.tile(poses[k], (N_DRAWS, 1)).astype(np.float32))
-        hd.sim.target_wheel_omega.assign(
-            np.ascontiguousarray(np.repeat(omega[:, k : k + 1, :], N_DRAWS, axis=1), np.float32)
+    if element == "cylinder":
+        terms_mc = mt.cylinder_mc_truth_terms(
+            scene,
+            belief,
+            sigma,
+            poses,
+            omega,
+            device=device,
+            seed=900_000 + seed,
+            n_draws=N_DRAWS,
+            corr_len=CORR_LEN,
+            cell=CELL,
         )
-        draws.perturb(base, sig_dev, 1.0, hd.sim.elevation, 900_000 + seed)
-        samples[:, k] = cost_fn(hd.forward(dilate=True))
+        samples = cost_fn(terms_mc)  # [N_DRAWS, N_PLANS]
+    else:
+        poses_d = np.tile(poses[0], (N_DRAWS, 1)).astype(np.float32)
+        omega_d = np.zeros((omega.shape[0], N_DRAWS, 3), np.float32)
+        hd = Harness(scene, poses_d, omega_d, device=device)
+        draws = NoiseDraws((N_DRAWS, ny, nx), CELL, CORR_LEN, hd.device)
+        with wp.ScopedDevice(hd.device):
+            base = wp.array(np.ascontiguousarray(np.tile(belief, (N_DRAWS, 1, 1)), np.float32))
+            sig_dev = wp.array(np.ascontiguousarray(sigma, np.float32), dtype=wp.float32)
+        samples = np.empty((N_DRAWS, N_PLANS), np.float32)
+        for k in range(N_PLANS):
+            hd.sim.start_pose.assign(np.tile(poses[k], (N_DRAWS, 1)).astype(np.float32))
+            hd.sim.target_wheel_omega.assign(
+                np.ascontiguousarray(np.repeat(omega[:, k : k + 1, :], N_DRAWS, axis=1), np.float32)
+            )
+            draws.perturb(base, sig_dev, 1.0, hd.sim.elevation, 900_000 + seed)
+            samples[:, k] = cost_fn(hd.forward(dilate=True))
+        del hd
     mc_wall_s_per_plan_per_draw = (time.perf_counter() - t1) / (N_PLANS * N_DRAWS)
-    del hd
 
     mc_mean = samples.mean(axis=0)
     mc_sd = samples.std(axis=0)
@@ -656,10 +750,15 @@ def run_seed_full(
         }
     out["arms"]["mc"] = {"regret": 0.0, "picked_best": True}
     out["calib"] = {
-        "e_clark": e_clark.tolist(), "mc_mean": mc_mean.tolist(), "sd_clark": sd_clark.tolist(),
-        "mc_sd": mc_sd.tolist(), "j_bel": j_bel.tolist(),
-        "e_settle": e_settle_c.tolist(), "e_clear": e_clear_c.tolist(),
-        "var_settle": var_settle_c.tolist(), "var_clear": var_clear_c.tolist(),
+        "e_clark": e_clark.tolist(),
+        "mc_mean": mc_mean.tolist(),
+        "sd_clark": sd_clark.tolist(),
+        "mc_sd": mc_sd.tolist(),
+        "j_bel": j_bel.tolist(),
+        "e_settle": e_settle_c.tolist(),
+        "e_clear": e_clear_c.tolist(),
+        "var_settle": var_settle_c.tolist(),
+        "var_clear": var_clear_c.tolist(),
         "cov_settle_clear": cov_sc_c.tolist(),
     }
     out["wall"] = {
@@ -729,12 +828,27 @@ def bench_wall_costs(
     for _ in range(reps):
         if use_full:
             full_cost_plan_moments(
-                belief, sigma, controlled[:, 0, :], derived[:, 0, :], rp, chassis_pts,
-                CLEAR_MARGIN, scene.origin_x, scene.origin_y, CELL, corr_table,
+                belief,
+                sigma,
+                controlled[:, 0, :],
+                derived[:, 0, :],
+                rp,
+                chassis_pts,
+                CLEAR_MARGIN,
+                scene.origin_x,
+                scene.origin_y,
+                CELL,
+                corr_table,
             )
         else:
             clark_plan_moments(
-                belief, sigma, controlled[:, 0, :], rp, scene.origin_x, scene.origin_y, CELL,
+                belief,
+                sigma,
+                controlled[:, 0, :],
+                rp,
+                scene.origin_x,
+                scene.origin_y,
+                CELL,
                 corr_table,
             )
     clark_s_per_plan = (time.perf_counter() - t0) / reps
@@ -758,11 +872,20 @@ def bench_wall_costs(
 
 
 def report(
-    gate1: dict, gate1b: dict, rows: list[dict], budget: dict | None, wall: dict | None,
-    robust: dict, use_full: bool,
+    gate1: dict,
+    gate1b: dict,
+    rows: list[dict],
+    budget: dict | None,
+    wall: dict | None,
+    robust: dict,
+    use_full: bool,
 ) -> None:
     print("=" * 92)
-    label = "FULL COST (settle + clear_soft)" if use_full else "SETTLE-ONLY (Gate 1b failed, see task 1)"
+    label = (
+        "FULL COST (settle + clear_soft)"
+        if use_full
+        else "SETTLE-ONLY (Gate 1b failed, see task 1)"
+    )
     print(f"COST USED FOR TASKS 2-4: {label}")
 
     print("\nTASK 1 -- GATE 1: closed-form clear_soft E/sd vs 20k-draw MC, PER-TIMESTEP (20 cases)")
@@ -844,14 +967,16 @@ def report(
     print("\nPAIRED SIGN TESTS: clark_cvar vs each (regret, negative = clark_cvar better)")
     for b in ("step", "fosm", "bracket", "sum_sigma", "none"):
         mean_d, k, w, p = _sign_paired(rows, "clark_cvar", b)
-        print(f"  clark_cvar vs {b:<10} mean_diff={mean_d:>+8.4f}  better on {w:>3}/{k:<3}  p={p:.2e}")
+        print(
+            f"  clark_cvar vs {b:<10} mean_diff={mean_d:>+8.4f}  better on {w:>3}/{k:<3}  p={p:.2e}"
+        )
 
     print("\nPRE-REGISTERED VERDICT: clark_cvar beats step AND bracket at p<0.05?")
     _, _, w_step, p_step = _sign_paired(rows, "clark_cvar", "step")
     _, _, w_brk, p_brk = _sign_paired(rows, "clark_cvar", "bracket")
-    beats_step = p_step < 0.05 and np.mean([r["arms"]["clark_cvar"]["regret"] for r in rows]) <= np.mean(
-        [r["arms"]["step"]["regret"] for r in rows]
-    )
+    beats_step = p_step < 0.05 and np.mean(
+        [r["arms"]["clark_cvar"]["regret"] for r in rows]
+    ) <= np.mean([r["arms"]["step"]["regret"] for r in rows])
     beats_bracket = p_brk < 0.05 and np.mean(
         [r["arms"]["clark_cvar"]["regret"] for r in rows]
     ) <= np.mean([r["arms"]["bracket"]["regret"] for r in rows])
@@ -889,7 +1014,9 @@ def report(
             print(f"\n  {tag} (n={len(rrows)})")
             for b in ("step", "fosm", "bracket"):
                 mean_d, k, w, p = _sign_paired(rrows, "clark_cvar", b)
-                print(f"    clark_cvar vs {b:<8} mean_diff={mean_d:>+8.4f}  better on {w:>3}/{k:<3}  p={p:.2e}")
+                print(
+                    f"    clark_cvar vs {b:<8} mean_diff={mean_d:>+8.4f}  better on {w:>3}/{k:<3}  p={p:.2e}"
+                )
 
 
 def main() -> None:
@@ -906,17 +1033,27 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
 
     _empty_gate = {
-        "rows": [], "median_abs_err_mean": float("nan"), "median_abs_err_sd": float("nan"),
-        "median_err_mean_over_mcsd": float("nan"), "median_err_sd_over_mcsd": float("nan"),
-        "n_fixed_baseline_cases": 0, "median_rel_err_fixed_baseline": float("nan"),
-        "corr_mean": float("nan"), "passed": False,
+        "rows": [],
+        "median_abs_err_mean": float("nan"),
+        "median_abs_err_sd": float("nan"),
+        "median_err_mean_over_mcsd": float("nan"),
+        "median_err_sd_over_mcsd": float("nan"),
+        "n_fixed_baseline_cases": 0,
+        "median_rel_err_fixed_baseline": float("nan"),
+        "corr_mean": float("nan"),
+        "passed": False,
     }
     gate1 = gate1_clear_soft_vs_mc(a.device) if not a.skip_gate else _empty_gate
     print(f"gate1 (per-timestep) passed: {gate1['passed']}", flush=True)
     gate1b = (
         gate1b_trajectory_vs_mc(a.device)
         if not a.skip_gate
-        else {"rows": [], "median_e_ratio": float("nan"), "median_sd_ratio": float("nan"), "passed": False}
+        else {
+            "rows": [],
+            "median_e_ratio": float("nan"),
+            "median_sd_ratio": float("nan"),
+            "passed": False,
+        }
     )
     print(f"gate1b (full-trajectory aggregate) passed: {gate1b['passed']}", flush=True)
     # Gate 1b, not Gate 1, decides the fallback: it is the gate that actually matches what
@@ -933,7 +1070,12 @@ def main() -> None:
     for seed in range(a.seeds):
         rows.append(
             run_seed_full(
-                seed, "hybrid", "all", a.device, use_full=use_full, keep_samples=not a.skip_budget,
+                seed,
+                "hybrid",
+                "all",
+                a.device,
+                use_full=use_full,
+                keep_samples=not a.skip_budget,
                 element=a.element,
             )
         )
@@ -950,12 +1092,20 @@ def main() -> None:
 
     robust = {}
     if not a.skip_robustness:
-        for tag, family, noise in (("fan/sensor", "fan", "sensor"), ("hybrid/clean", "hybrid", "clean")):
+        for tag, family, noise in (
+            ("fan/sensor", "fan", "sensor"),
+            ("hybrid/clean", "hybrid", "clean"),
+        ):
             rrows = []
             for seed in range(a.seeds):
                 rrows.append(
                     run_seed_full(
-                        seed, family, noise, a.device, use_full=use_full, element=a.element,
+                        seed,
+                        family,
+                        noise,
+                        a.device,
+                        use_full=use_full,
+                        element=a.element,
                     )
                 )
                 if (seed + 1) % 25 == 0:
@@ -967,9 +1117,25 @@ def main() -> None:
     path.write_text(
         json.dumps(
             {
-                "use_full_cost": use_full, "gate1": gate1, "gate1b": gate1b, "family": "hybrid",
-                "noise": "all", "element": a.element, "rows": rows, "budget": budget, "wall": wall,
+                "use_full_cost": use_full,
+                "gate1": gate1,
+                "gate1b": gate1b,
+                "family": "hybrid",
+                "noise": "all",
+                "element": a.element,
+                "rows": rows,
+                "budget": budget,
+                "wall": wall,
                 "robustness": robust,
+                # matched-element bookkeeping (Stage B, matched_truth.py): run_seed_full's
+                # trajectory + MC truth settle under `element`; fosm/bracket read
+                # DifferentiableSimulator directly and stay sphere-only regardless. gate1/gate1b
+                # above are unconditional sphere-only validation gates (no `element` of their
+                # own) -- untouched by --element, not silently mixed with the rows below.
+                "element_trajectory": a.element,
+                "element_mc_truth": a.element,
+                "element_gradient_arms": "sphere",
+                "element_gates": "sphere",
             },
             indent=2,
         )

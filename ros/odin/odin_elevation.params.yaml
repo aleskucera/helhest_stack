@@ -20,6 +20,11 @@
     # --- Odin pipeline: no ICP, no EKF, no deskew, no gyro prior ---
     icp_enable: false                   # trust the Odin pose directly (dead-reckoning)
     deskew_enable: false                # Odin per-point time is seconds; deskew assumes ns
+    # Odin names the per-point time field 'offset_time', not the Ouster's 't'. Set here so
+    # flipping deskew_enable actually finds it -- on a name miss the parse silently returns
+    # times=None and the deskew is skipped. Measured on in_speed_odin0/out_odin0: the field
+    # runs 0 .. 0.0668 s, i.e. SECONDS over one 14.5 Hz sweep (the ns assumption above).
+    deskew_time_field: offset_time
     imu_rotation_prior: false           # gyro prior + identity IMU TF rolls the map ~40 deg
     publish_map_tf: true                # elevation owns map -> odom_odin ...
     publish_odom_tf: true               # ... and odom_odin -> odin1_base_link
@@ -40,12 +45,141 @@
     # --- tuning knobs (override inline with -p) ---
     plan_wmax: 6.0            # top per-wheel speed [rad/s] -- motor limit ~15, so headroom to raise this
     plan_max_omega: 7.5       # hard output clamp on |wheel vel| [rad/s] -- keep >= plan_wmax
-    k_turn: 1.0              # turn gain override (outdoor-preset value)
-    plan_turn: 0.8            # wheel-differential penalty -> strong straight bias / gentler turns
-    plan_max_slew: 2.0        # accel cap d(cmd)/dt [rad/s^2] -> smooth turn ease-in
+    # Turn gain. alpha = 1 + k_turn*mu sets how much the skid-steer resists yaw, and alpha
+    # DIVIDES the predicted yaw rate -- too high and the planner expects less yaw than it gets, so
+    # the robot overshoots turns. MEASURED 2026-08-10 on flat tarmac: alpha = 1.50 from three
+    # independent estimates (steady arcs 1.52, spins 1.50-1.70, lag fit 1.55), which is k = 0.62.
+    # 0.6 gives 1.48 and is the indoor preset. The previous 1.0 here was the OUTDOOR preset,
+    # calibrated on grass/dirt where the wheels grip harder: it predicts alpha 1.80 and over-
+    # estimates turn resistance by 20% on tarmac. Raise it back toward 1.0 for grass or dirt.
+    # Wheel envelope half-width [m]. 0.10 = the measured tread as a yaw-binned CYLINDER (the
+    # default): honest laterally, where the sphere reached 0.35 m sideways and refused gaps the
+    # robot can straddle. 0.0 = back to the sphere. This is also the lateral SAFETY MARGIN dial --
+    # 0.15 keeps 5 cm per side, 0.20 keeps 10 cm, both far tighter than the sphere's fixed 0.35.
+    # Costs ~3.9 ms per perception frame to dilate (64 yaw slices) against 0.06 for the sphere.
+    # --- robustness tube: the OTHER kind of margin ---------------------------------------------
+    # These erode the cost-to-go's feasible set, so a pose only routes as feasible if it stays
+    # feasible under +/- this much POSITION and HEADING error. That is margin against localisation
+    # and tracking error, and it is independent of plan_wheel_width, which is margin against the
+    # robot's own SHAPE. Prefer widening these over fattening the wheel: the tube keeps the routing
+    # conservative while the envelope stays geometrically honest.
+    #
+    # BOTH QUANTISE, so small values silently do nothing and intermediate ones are unreachable.
+    # The lateral erosion is a whole number of ROUTING CELLS, and the routing cell is
+    # `resolution` x `plan_lat_coarsen` = 0.08 x 3 = 0.24 m. So the tube can be 0.24 or 0.48 --
+    # 0.20 was asked for and is NOT reachable; it rounds to one cell, 0.24 m. Likewise a heading
+    # bin is 360/plan_n_theta = 15 deg, so under 7.5 deg rounds to ZERO and 15.0 buys one bin.
+    #
+    # plan_lat_coarsen was 4 (cell 0.32 m, tube 0.32 m). Going to 3 buys a finer routing grid AND
+    # a smaller tube, and costs solve time: measured on the deployed 16 m window, 3.8 -> 10.1 ms,
+    # which is 15% of a 66 ms sensor frame since the cost-to-go re-solves every plan cycle.
+    # Coarsen 2 (cell 0.16, tube 0.16 m) would be the way to get nearer 20 cm but costs 25.0 ms,
+    # 38% of the frame -- not worth 8 cm.
+    plan_robust_margin_m: 0.20
+    plan_lat_coarsen: 3
+    plan_robust_margin_deg: 15.0
+    plan_wheel_width: 0.10
+    # 0.6 -> 1.0 (alpha 1.80) from fast_experiment0/1, 2026-08-10. Regressing the MEASURED gyro
+    # on the MEASURED wheel differential gives alpha 1.68-2.27 across both bags, against the 1.48
+    # that 0.6 assumes -- so the planner expected up to 38% more yaw than it got and under-turned
+    # consistently. Measured wheels, not commanded, precisely so motor saturation cannot be
+    # mistaken for turn resistance: the deficit is present well BELOW the ~5.3 rad/s ceiling
+    # (alpha 1.68 in the 3.5-4.5 band), and worsens at it (2.36 above 5.3) -- two separate effects.
+    # 1.0 is this file's own outdoor preset and lands mid-band; these were outdoor runs.
+    #
+    # 1.0 -> 1.27 from motors0 (2026-08-11), which finally SEPARATES the two losses that every
+    # earlier estimate had lumped together. Regressing the gyro on the MEASURED wheel differential
+    # gives the vehicle's own turn resistance; regressing the measured differential on the
+    # COMMANDED one gives what the drivetrain fails to deliver. They are independent and they
+    # multiply:
+    #
+    #     drivetrain realises      0.74x commanded differential  -> plan_turn_boost 1.36
+    #     vehicle alpha (measured wheels)   2.02                 -> k_turn 1.27  <- this
+    #     combined alpha (from the command) 2.67                 (1.36 x 2.02 = 2.74, within 3%)
+    #
+    # k_turn belongs to the VEHICLE only. Folding the drivetrain loss into it -- k_turn 2.09 would
+    # have matched the combined figure -- would model a transmission defect as turn resistance,
+    # and the MPPI rollouts use this same constant as physics, so the plan itself would go wrong.
+    k_turn: 1.27
+    # Wheel-differential penalty. THE knob for how willing the planner is to turn, and 0.8 was
+    # far too high: measured closed-loop on flat open ground (scripts/turn_eval.py), a goal at 90
+    # or 180 deg was NEVER REACHED in 70 s, because a differential of 2 rad/s costs 0.8*25*4 = 80
+    # against a progress pull of only 0.3*V^2 -- 10.8 at 6 m to go. Turning lost by 7x, so the
+    # robot drove almost straight and orbited.
+    #
+    #   plan_turn   goal at 90 deg      goal at 180 deg
+    #   0.8         never (70 s)        never (70 s)
+    #   0.4         17.9 s              28.0 s
+    #   0.2         13.7 s              15.5 s      <- here
+    #   0.1         11.0 s              13.7 s
+    #
+    # Lower is quicker but restores the micro-turn wobble on straights this was raised to damp;
+    # 0.2 is the compromise. plan_max_slew turned out NOT to matter (17.9 s at both 2 and 6).
+    plan_turn: 0.2
+    # Wheel-speed CHANGE penalty -- the anti-jerk knob, and the right one for wobble. plan_turn
+    # above penalises the SIZE of a turn, which cannot tell a deliberate 90 deg repositioning from
+    # a wobble; this penalises CHANGING YOUR MIND, which is what wobble is. It expands to
+    # 2*d(mean)^2 + d(diff)^2/2, so it damps both channels. Raised from the 2e-3 default:
+    #
+    #   plan_smooth   straight: flips/s  jerk   max lat   90 deg   180 deg
+    #   2e-3          0.60               0.042  0.09 m    13.7 s   15.5 s
+    #   4e-2          0.36               0.033  0.05 m    13.7 s   15.8 s
+    #   1e-1          0.12               0.043  0.09 m    16.4 s   17.8 s   <- here (field 2026-08-10: smoothest straights, slower turns accepted)
+    #
+    # For comparison the old plan_turn 0.8 gave 0.32 / 0.027 / 0.03 m on straights -- so this
+    # recovers nearly all of that smoothness while turning still works. Past 1e-1 it inverts:
+    # corrections get deferred and come out larger, so jerk rises again AND turning degrades.
+    plan_smooth: 0.1
+    # Accel cap on the published command [rad/s^2]. Raised 2.0 -> 6.0 (the node default). The
+    # justification is the drivetrain's own lag: tau = 0.19 s means a 1 rad/s step is already
+    # answered at only ~5.3 rad/s^2 by the motors, so a 2.0 clamp was TIGHTER THAN THE HARDWARE
+    # and was shaping a command the wheels could not have followed anyway.
+    #
+    # Measured cost, plan_turn 0.2 / plan_smooth 0.04: straight-line 8.4 -> 7.7 s and 180 deg
+    # 15.8 -> 15.5 s, against COMMAND jerk 0.033 -> 0.058. Note that is jerk in the command; the
+    # 0.19 s actuator lag low-passes it before it reaches the wheels, so the robot should not feel
+    # 76% jerkier. If it does, come back here rather than to plan_smooth -- raising plan_smooth to
+    # compensate was measured and BACKFIRES (0.06 doubles the turn-direction flips to 0.89/s and
+    # costs 2 s on a 90 deg turn).
+    plan_max_slew: 6.0
     plan_max_decel: 8.0       # decel cap d(cmd)/dt [rad/s^2] -> softer slow-down (also the stop ramp)
     plan_goal_running: 0.3    # progress pull -> higher = faster toward goal
     plan_effort: 0.001        # wheel-speed^2 penalty -> lower = faster
+
+    # --- ROBUSTNESS to unknown friction (over/understeer sim-to-real gap) ---
+    # Every MPPI candidate rolls out under 3 friction hypotheses spanning the current uncertainty
+    # band and is ranked by its WORST outcome; the online estimator (gyro yaw vs commanded
+    # differential) recenters the band on the REALIZED turn gain -- fixes both understeer and
+    # oversteer -- and its residual noise sizes the band. Rollouts are latency-bound, so the 3
+    # replicas cost ~nothing; candidates drop 4096 -> 1365 (still plenty).
+    plan_n_mu: 3
+    plan_mu_adapt: true
+    plan_mu_span: 0.25        # band half-width until the estimator locks (fraction of plan_friction)
+    # Friction-saturation certificate (speed governor): rollouts whose slope-hold + centripetal +
+    # side-slope demand exceeds the grip budget are penalized -> slow into low-grip corners, full
+    # speed on flat known ground. 0 = off.
+    plan_saturation: 300.0
+
+    # --- POINT TURNS + REVERSE (the map behind is known; there is no rear sensor) ---
+    # Pivot routing: the cost-to-go can plan turn-in-place, so a goal behind the robot becomes
+    # pivot-then-drive instead of a wide loop. [m-equivalent per heading bin; half-turn = 12 bins]
+    plan_pivot_cost: 0.3
+    # Reverse driving: set plan_wmin negative (e.g. -2.5) to let MPPI back up / pivot -- gated per
+    # frame: unlocks ONLY while a robot-width strip behind base_link is measured in the accumulated
+    # map (plan_reverse_clear_m), and reversing over blind cells is heavily penalized regardless.
+    # !! SAFETY: before first enabling, verify the LLC drives a small NEGATIVE /cmd_joints
+    # backward -- only all-positive-forward has been verified on the robot (control/command.py).
+    plan_wmin: 0.0
+    plan_reverse_clear_m: 1.5
+
+    # --- SMOOTHNESS: model the actuation lag instead of filtering the output ---
+    # plan_tau_motor [s] puts a first-order wheel-speed lag INSIDE the MPPI rollouts, so the
+    # planner only picks maneuvers the real (lagged) actuation can track -- measured in sim, an
+    # external slew filter alone leaves ~0.2-0.4 m of unmodeled tracking error at 1.4 m/s, which
+    # is exactly the obstacle-graze depth. MEASURE the real wheel step response (command a speed
+    # step, log /joint_states, fit tau) and set it here; then plan_max_slew can be relaxed toward
+    # a safety backstop. 0 = legacy instantaneous model.
+    plan_tau_motor: 0.0
 
     # --- TURN BRAKE: slow into a corner, then accelerate out (both knobs 0 = off) ---
     # Live-tunable, no node restart:
@@ -54,7 +188,66 @@
     # a_max caps lateral acceleration [m/s^2]; forward speed and turn differential are scaled
     # TOGETHER so the planned arc is unchanged, only slower. At plan_wmax 6 / k_turn 1 the
     # hardest arc the planner can command is ~1.5 m/s^2, so start around 0.6-1.2.
-    plan_turn_brake_a_max: 1.1
+    #
+    # 1.1 -> 0.4 after the field report of an abrupt evasive turn near obstacles. It scales mean
+    # and differential TOGETHER, so the robot tracks the same arc slower rather than turning less
+    # -- which is why it costs no clearance. scripts/overturn_eval.py at the deployed config:
+    #
+    #            yaw at closest approach      clearance        travel time
+    #   slalom   0.98 -> 0.53 rad/s           1.07 -> 1.03 m   +13%
+    #   pillars  1.04 -> 0.74 rad/s           1.04 -> 1.04 m   +4%
+    #
+    # Turning the cap off gives 1.21 / 1.12, so 1.1 was already binding in tight terrain. The
+    # earlier note that this knob "does not bind" came from flat open ground, where the planner
+    # never commands an arc hard enough to reach it.
+    #
+    # Also measured, on the same harness: plan_smooth does NOTHING (it penalises changes INSIDE a
+    # rollout, but only the first step is ever executed, so it damps the plan's interior, not the
+    # command). plan_max_slew 6 -> 1.5 does help (yaw@closest 0.98 -> 0.34) and does NOT cost
+    # clearance, but it only delays WHEN the turn happens -- peak yaw over the run stays 0.89 vs
+    # 0.60 for a_max 0.4 -- and it undoes the slew raise that fixed the sluggish turning.
+    # Field call 2026-08-10: 0.4 -> 0.6 (less corner braking), with the lookahead OFF below.
+    plan_turn_brake_a_max: 0.6
+
+    # Drivetrain differential loss, the OTHER half of the k_turn decomposition above. The two
+    # motors equalise a commanded differential under load, so the wheels realise only 0.74x what
+    # /cmd_joints asks for (motors0, 14539 turning samples, measured wheels vs command). This
+    # amplifies the differential to compensate; forward speed is untouched.
+    #
+    # 1.0 -> 1.36 = 1 / 0.74. Note the loop could not see this until d9c7716: condition_command
+    # applies the boost, and the yaw loop's reference was read off its output, so the boost
+    # cancelled from the error. With that fixed the reference is the UNBOOSTED planned
+    # differential and this knob does what it says.
+    #
+    # docs/turn_differential_hotfix.md calls this a stopgap for a drivetrain defect, and it still
+    # is -- but it is now a MEASURED stopgap on the right quantity rather than a hand-picked one.
+    plan_turn_boost: 1.36
     # Pre-apply the tightest cap found this far ahead along the committed plan, so the robot is
     # already slow when it enters the corner. 0 = react to the current command only.
-    plan_turn_brake_lookahead_s: 1.5
+    # Field call 2026-08-10: OFF (0.0) -- brake AT the corner, do not pre-slow on the approach.
+    plan_turn_brake_lookahead_s: 0.0
+
+    # --- INNER YAW-RATE LOOP (control/yaw_track.py) -- ON since the 2026-08-10 field call ---
+    # Everything downstream of MPPI is feedforward: the planner maps a differential to a yaw rate
+    # through alpha = 1 + k_turn*plan_friction and publishes it. alpha DIVIDES the yaw rate, so
+    # ground softer than plan_friction turns MORE than asked -- 19% at mu 0.4, 32% at mu 0.2 in
+    # the engine, and the `compact` bag reads alpha 1.68-2.01 against the planner's 1.48. This
+    # closes the loop on /odin1/imu (400 Hz, yaw on +z, no spikes -- verified on bags).
+    #
+    # BOTH knobs are needed: the loop lives in the command timer, which only runs when
+    # plan_command_rate > 0. A regulator at the plan rate would be pointless. tau_motor is 0.19 s
+    # so the useful bandwidth is ~1 Hz -- 50 Hz is ample and 400 Hz would buy nothing.
+    #
+    # Note plan_command_rate > 0 is a behaviour change on its own: commands then interpolate the
+    # committed plan on a timer instead of going out once per replan. Turn it on first, confirm
+    # the robot drives the same, and only then set plan_yaw_track.
+    #
+    # Measured on flat ground, commanded differential 2.0, planner believing mu 0.8:
+    #   real mu     0.80    0.40    0.20
+    #   open        0.0%   19.4%   32.1%   steady-state yaw error
+    #   closed      0.4%    1.0%    1.1%   and peak yaw DROPS, 0.617 -> 0.597 at mu 0.4
+    plan_yaw_track: true
+    plan_yaw_track_kp: 0.4
+    plan_yaw_track_ki: 1.0
+    plan_yaw_track_deadband: 0.05   # [rad/s] idle band, so a straight line is not regulated
+    plan_yaw_track_max: 1.5         # [rad/s] hard clamp on the differential correction

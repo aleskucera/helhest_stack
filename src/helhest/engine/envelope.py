@@ -77,6 +77,75 @@ def _gather_kernel(
     envelope[iy, ix] = elevation[contact_iy[iy, ix], contact_ix[iy, ix]] + contact_cap[iy, ix]
 
 
+def cylinder_offset_table(
+    cell_size: float, wheel_radius: float, half_width: float, yaw: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Structuring element of a CYLINDER wheel heading `yaw`, as (dy, dx, cap) offset lists.
+
+    A real wheel is a cylinder with its axis across the body, so along the direction of travel it
+    presents exactly the sphere's circle -- the cap is unchanged there -- while laterally it
+    reaches only `half_width` instead of the full radius. The element is the rotated rectangle
+    2*wheel_radius (along travel) x 2*half_width (across), with
+
+        cap = sqrt(wheel_radius^2 - u^2) - wheel_radius,   u = the ALONG-travel offset only.
+
+    Unlike the sphere's disk this is NOT yaw-invariant, which is why the cylinder needs one
+    dilated envelope per yaw bin instead of one grid shared by every rollout and step.
+    """
+    cos_yaw, sin_yaw = math.cos(yaw), math.sin(yaw)
+    # own search radius: the rotated rectangle's corner reaches past wheel_radius, so the disk's
+    # env_radius would clip it at 45 deg
+    env_radius = int(math.ceil(math.hypot(wheel_radius, half_width) / cell_size))
+    dy_l, dx_l, cap_l = [], [], []
+    for dy in range(-env_radius, env_radius + 1):
+        for dx in range(-env_radius, env_radius + 1):
+            wx, wy = dx * cell_size, dy * cell_size
+            along = wx * cos_yaw + wy * sin_yaw
+            across = -wx * sin_yaw + wy * cos_yaw
+            if abs(along) <= wheel_radius and abs(across) <= half_width:
+                dy_l.append(dy)
+                dx_l.append(dx)
+                cap_l.append(math.sqrt(wheel_radius**2 - along**2) - wheel_radius)
+    return np.array(dy_l, np.int32), np.array(dx_l, np.int32), np.array(cap_l, np.float32)
+
+
+@wp.kernel
+def _contact_table_kernel(
+    elevation: wp.array2d(dtype=wp.float32),
+    off_dy: wp.array(dtype=wp.int32),
+    off_dx: wp.array(dtype=wp.int32),
+    off_cap: wp.array(dtype=wp.float32),
+    contact_iy: wp.array2d(dtype=wp.int32),
+    contact_ix: wp.array2d(dtype=wp.int32),
+    contact_cap: wp.array2d(dtype=wp.float32),
+):
+    """`_contact_kernel` for an arbitrary structuring element supplied as an offset table.
+
+    The disk version bakes in the in-circle test and computes its cap on device; this one walks a
+    host-built (dy, dx, cap) table, so any element shape works -- the cylinder's rotated rectangle
+    in practice. Feeds the same `_gather_kernel`.
+    """
+    iy, ix = wp.tid()
+    ny = elevation.shape[0]
+    nx = elevation.shape[1]
+    best_lift = float(-1.0e9)
+    best_iy = iy
+    best_ix = ix
+    best_cap = float(0.0)
+    for k in range(off_dy.shape[0]):
+        qy = wp.clamp(iy + off_dy[k], 0, ny - 1)
+        qx = wp.clamp(ix + off_dx[k], 0, nx - 1)
+        lift = elevation[qy, qx] + off_cap[k]
+        if lift > best_lift:
+            best_lift = lift
+            best_iy = qy
+            best_ix = qx
+            best_cap = off_cap[k]
+    contact_iy[iy, ix] = best_iy
+    contact_ix[iy, ix] = best_ix
+    contact_cap[iy, ix] = best_cap
+
+
 # --- batched dilation for DifferentiableSimulator (CUDA): tiled arg-max contact (off-tape, picks
 # offset k) + gather (on-tape, the analytical gradient). Splitting them keeps the expensive arg-max
 # off the tape and makes the backward a cheap scatter (vs. autodiffing the whole convolution). The

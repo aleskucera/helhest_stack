@@ -36,7 +36,11 @@ from pathlib import Path
 
 import numpy as np
 import warp as wp
+from helhest.engine import RobotParams
+from helhest.engine.envelope import wheel_offset_table
 
+from . import matched_truth as mt
+from ..adjoint.harness import DERIV_WZ
 from ..adjoint.harness import Harness
 from .clark import _cost_settle
 from .clark import _footprint_cells
@@ -56,9 +60,6 @@ from .risk import ALPHA
 from .risk import empirical_cvar
 from .risk import KAPPA
 from .risk import N_DRAWS
-from ..adjoint.harness import DERIV_WZ
-from helhest.engine import RobotParams
-from helhest.engine.envelope import wheel_offset_table
 
 BELIEF_MODEL = OUT / "belief_model.npz"
 RANK = 5  # PSD-projected rank-5 holds Var[J] to 0.57%; see clark_conv.separable_terms
@@ -89,9 +90,7 @@ class BeliefModel:
 
     def basis(self, ny: int, nx: int, x0: float, y0: float) -> np.ndarray:
         gy, gx = np.mgrid[0:ny, 0:nx]
-        return np.stack([
-            np.ones((ny, nx)), gx * CELL + x0 - self.xc, gy * CELL + y0 - self.yc
-        ])
+        return np.stack([np.ones((ny, nx)), gx * CELL + x0 - self.xc, gy * CELL + y0 - self.yc])
 
     def sd_plane(self, ny: int, nx: int, x0: float, y0: float) -> float:
         """RMS of the plane over the map, the constant that normalizes it to unit variance."""
@@ -110,9 +109,7 @@ class BeliefModel:
         dx = off_dx[..., :, None] - off_dx[..., None, :]
         return self.share + (1.0 - self.share) * self.rho_s[dy + L, dx + L]
 
-    def variance_of(
-        self, field: np.ndarray, ny: int, nx: int, x0: float, y0: float
-    ) -> float:
+    def variance_of(self, field: np.ndarray, ny: int, nx: int, x0: float, y0: float) -> float:
         """Var of a linear functional of the cells, EXACT in both parts: a 3x3 form for the
         plane, the rank-M convolution for the stationary residual."""
         b = self.basis(ny, nx, x0, y0)
@@ -196,8 +193,15 @@ def gate(device: str) -> dict:
 
 
 def _clark_moments(
-    belief: np.ndarray, sigma: np.ndarray, controlled: np.ndarray, rp: RobotParams,
-    x0: float, y0: float, model: BeliefModel, off: tuple | None, element: str = "sphere",
+    belief: np.ndarray,
+    sigma: np.ndarray,
+    controlled: np.ndarray,
+    rp: RobotParams,
+    x0: float,
+    y0: float,
+    model: BeliefModel,
+    off: tuple | None,
+    element: str = "sphere",
 ) -> tuple[float, float]:
     """`clark_conv.plan_moments_conv` under the two-part belief.
 
@@ -240,11 +244,18 @@ def _fosm_variance(
     return model.variance_of(grad * sigma, ny, nx, x0, y0)
 
 
-def run_seed(seed: int, device: str, model: BeliefModel,
-             family: str = "hybrid", noise: str = "all", element: str = "sphere") -> dict:
-    """`element` (default sphere) selects Clark's settle contact table. The MC truth below is the
-    real Warp settle, sphere-contact only, so under `element="cylinder"` Clark prices a different
-    contact model than its own ground truth -- same Stage A caveat as `clark.py`'s `run_seed`."""
+def run_seed(
+    seed: int,
+    device: str,
+    model: BeliefModel,
+    family: str = "hybrid",
+    noise: str = "all",
+    element: str = "sphere",
+) -> dict:
+    """`element` (default sphere) selects Clark's settle contact table. Under `element="cylinder"`
+    the frozen trajectory AND the MC truth below both settle through the real cylinder envelope
+    too (Stage B, `matched_truth.py`); `fosm`/`bracket` still read `h.sim`/`h.adjoint`
+    (DifferentiableSimulator, sphere-only) regardless, recorded explicitly in `main()`'s JSON."""
     scene, _t, _m, _o, sigma, poses, omega, _g = build_case(seed, family, noise)
     belief = scene.elevation.astype(np.float32)
     ny, nx = belief.shape
@@ -264,7 +275,12 @@ def run_seed(seed: int, device: str, model: BeliefModel,
     grads, terms_c = h.adjoint(dilate=True, leaf="elevation")
     grad = grads[1]
     j_bel = _cost_settle(terms_c)
-    controlled = h.sim.controlled.numpy()
+    # Matched-element trajectory (see clark.py's run_seed for the same fix): `h.sim` is
+    # DifferentiableSimulator, sphere-only regardless of `element` (matched_truth.py).
+    if element == "cylinder":
+        controlled, _ = mt.cylinder_controlled_trajectory(scene, poses, omega, device=device)
+    else:
+        controlled = h.sim.controlled.numpy()
 
     def forward_on(elev: np.ndarray) -> np.ndarray:
         stack = np.ascontiguousarray(np.tile(elev, (N_PLANS, 1, 1)), np.float32)
@@ -280,20 +296,27 @@ def run_seed(seed: int, device: str, model: BeliefModel,
     fosm = np.empty(N_PLANS)
     for k in range(N_PLANS):
         e_c[k], v = _clark_moments(
-            belief, sigma, controlled[:, k, :], rp, scene.origin_x, scene.origin_y, model, off,
+            belief,
+            sigma,
+            controlled[:, k, :],
+            rp,
+            scene.origin_x,
+            scene.origin_y,
+            model,
+            off,
             element=element,
         )
         sd_c[k] = np.sqrt(v)
-        fosm[k] = np.sqrt(
-            _fosm_variance(grad[k], sigma, model, scene.origin_x, scene.origin_y)
-        )
-    sig_t = np.array([
-        sigma[
-            np.clip(((controlled[1:, k, 1] - scene.origin_y) / CELL).astype(int), 0, ny - 1),
-            np.clip(((controlled[1:, k, 0] - scene.origin_x) / CELL).astype(int), 0, nx - 1),
-        ].sum()
-        for k in range(N_PLANS)
-    ])
+        fosm[k] = np.sqrt(_fosm_variance(grad[k], sigma, model, scene.origin_x, scene.origin_y))
+    sig_t = np.array(
+        [
+            sigma[
+                np.clip(((controlled[1:, k, 1] - scene.origin_y) / CELL).astype(int), 0, ny - 1),
+                np.clip(((controlled[1:, k, 0] - scene.origin_x) / CELL).astype(int), 0, nx - 1),
+            ].sum()
+            for k in range(N_PLANS)
+        ]
+    )
     del h
 
     est = {
@@ -308,20 +331,27 @@ def run_seed(seed: int, device: str, model: BeliefModel,
     # --- Monte-Carlo truth, drawn from the MEASURED kernel ------------------------------------
     draws = TwoPartDraws(model, (ny, nx), scene.origin_x, scene.origin_y)
     fields = draws.draw(N_DRAWS, np.random.default_rng(900_000 + seed))
-    poses_d = np.tile(poses[0], (N_DRAWS, 1)).astype(np.float32)
-    omega_d = np.zeros((omega.shape[0], N_DRAWS, 3), np.float32)
-    hd = Harness(scene, poses_d, omega_d, device=device)
-    samples = np.empty((N_DRAWS, N_PLANS), np.float32)
     pert = (belief[None] + fields * sigma[None]).astype(np.float32)
-    for k in range(N_PLANS):
-        hd.sim.start_pose.assign(np.tile(poses[k], (N_DRAWS, 1)).astype(np.float32))
-        hd.sim.target_wheel_omega.assign(
-            np.ascontiguousarray(np.repeat(omega[:, k : k + 1, :], N_DRAWS, axis=1), np.float32)
-        )
-        with wp.ScopedDevice(hd.device):
-            hd.sim.set_terrain(wp.array(np.ascontiguousarray(pert), dtype=wp.float32))
-        samples[:, k] = _cost_settle(hd.forward(dilate=True))
-    del hd
+    # Matched-element: cylinder truth settles through ForwardSimulator + the real cylinder
+    # envelope (matched_truth.py), on the SAME `pert` fields, not the sphere-locked
+    # DifferentiableSimulator below.
+    if element == "cylinder":
+        terms_mc = mt.cylinder_mc_truth_terms_from_fields(scene, pert, poses, omega, device=device)
+        samples = _cost_settle(terms_mc)  # [N_DRAWS, N_PLANS]
+    else:
+        poses_d = np.tile(poses[0], (N_DRAWS, 1)).astype(np.float32)
+        omega_d = np.zeros((omega.shape[0], N_DRAWS, 3), np.float32)
+        hd = Harness(scene, poses_d, omega_d, device=device)
+        samples = np.empty((N_DRAWS, N_PLANS), np.float32)
+        for k in range(N_PLANS):
+            hd.sim.start_pose.assign(np.tile(poses[k], (N_DRAWS, 1)).astype(np.float32))
+            hd.sim.target_wheel_omega.assign(
+                np.ascontiguousarray(np.repeat(omega[:, k : k + 1, :], N_DRAWS, axis=1), np.float32)
+            )
+            with wp.ScopedDevice(hd.device):
+                hd.sim.set_terrain(wp.array(np.ascontiguousarray(pert), dtype=wp.float32))
+            samples[:, k] = _cost_settle(hd.forward(dilate=True))
+        del hd
 
     out_samples = samples.copy()
     mc_cvar = empirical_cvar(samples, ALPHA)
@@ -335,8 +365,10 @@ def run_seed(seed: int, device: str, model: BeliefModel,
         }
     out["_samples"] = out_samples
     out["calib"] = {
-        "sd_clark": sd_c.tolist(), "mc_sd": samples.std(axis=0).tolist(),
-        "e_clark": e_c.tolist(), "mc_mean": samples.mean(axis=0).tolist(),
+        "sd_clark": sd_c.tolist(),
+        "mc_sd": samples.std(axis=0).tolist(),
+        "e_clark": e_c.tolist(),
+        "mc_mean": samples.mean(axis=0).tolist(),
     }
     return out
 
@@ -385,9 +417,7 @@ def main() -> None:
     best_arm = min(regret, key=regret.get)
     tests = {}
     for other in ("none", "step", "bracket", "fosm"):
-        d = np.array([
-            r["arms"]["clark_cvar"]["regret"] - r["arms"][other]["regret"] for r in rows
-        ])
+        d = np.array([r["arms"]["clark_cvar"]["regret"] - r["arms"][other]["regret"] for r in rows])
         n, kk, p = sign_p(-d)
         tests[other] = {"mean_diff": float(d.mean()), "wins": kk, "n": n, "p": p}
     # matched-budget curve under the SAME measured belief, so the paper does not quote a
@@ -413,8 +443,10 @@ def main() -> None:
             reg.append(float(true_c[pick] - true_c[int(np.argmin(true_c))]))
         curve.append({"n": nd, "mean_regret": float(np.mean(reg))})
     n_star = next((c["n"] for c in curve if c["mean_regret"] <= clark_r), None)
-    print(f"  matched budget: MC needs N = {n_star} draws to match clark_cvar "
-          f"({clark_r:.4f}); curve " + ", ".join(f"{c['n']}:{c['mean_regret']:.3f}" for c in curve))
+    print(
+        f"  matched budget: MC needs N = {n_star} draws to match clark_cvar "
+        f"({clark_r:.4f}); curve " + ", ".join(f"{c['n']}:{c['mean_regret']:.3f}" for c in curve)
+    )
     for r in rows:
         r.pop("_samples")
     sd = np.concatenate([r["calib"]["sd_clark"] for r in rows])
@@ -430,19 +462,39 @@ def main() -> None:
     for a, v in sorted(regret.items(), key=lambda kv: kv[1]):
         print(f"  {a:12s} {v:.4f}")
     for o, v in tests.items():
-        print(f"  clark_cvar vs {o:8s} mean {v['mean_diff']:+.4f}  {v['wins']}/{v['n']}  "
-              f"p={v['p']:.2e}")
+        print(
+            f"  clark_cvar vs {o:8s} mean {v['mean_diff']:+.4f}  {v['wins']}/{v['n']}  "
+            f"p={v['p']:.2e}"
+        )
     print(f"  pooled sd-ratio median {float(np.median(ratio)):.3f}")
     for k, v in crit.items():
         print(f"    [{'PASS' if v else 'FAIL'}] {k}")
     print(f"  VERDICT: {'PASSED' if all(crit.values()) else 'FAILED'}")
     tag = "" if args.element == "sphere" else f"_{args.element}"
     path = OUT / f"realistic_sigma_{args.family}_{args.noise}{tag}.json"
-    path.write_text(json.dumps(
-        {"gate": g, "element": args.element, "rows": rows, "mean_regret": regret, "tests": tests,
-         "budget_curve": curve, "n_star": n_star,
-         "sd_ratio_median": float(np.median(ratio)), "criteria": crit,
-         "passed": all(crit.values())}, indent=1))
+    path.write_text(
+        json.dumps(
+            {
+                "gate": g,
+                "element": args.element,
+                "rows": rows,
+                "mean_regret": regret,
+                "tests": tests,
+                "budget_curve": curve,
+                "n_star": n_star,
+                "sd_ratio_median": float(np.median(ratio)),
+                "criteria": crit,
+                "passed": all(crit.values()),
+                # matched-element bookkeeping (Stage B, matched_truth.py): run_seed's trajectory
+                # + MC truth settle under `element`; fosm/bracket read DifferentiableSimulator
+                # directly and stay sphere-only regardless -- no silent mixing.
+                "element_trajectory": args.element,
+                "element_mc_truth": args.element,
+                "element_gradient_arms": "sphere",
+            },
+            indent=1,
+        )
+    )
     print(f"wrote {path}")
 
 

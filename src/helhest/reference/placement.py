@@ -122,19 +122,29 @@ def settle(x, y, yaw, hm, init=None, R_wheel=WHEEL_RADIUS, max_iter=20, tol=1e-7
 def normal_loads(place, x, y):
     """Quasi-static contact normal loads N_i (along terrain normals) from gravity.
 
-    Solves vertical-force + horizontal-torque balance about the CoM (the 3
-    determined equations; tangential friction carries the rest). Returns N [3].
+    Force balance ALONG THE SURFACE NORMAL plus horizontal torque balance about the CoM,
+    including the moment of the tangential (friction) reaction. The oracle for
+    `engine.step.normal_loads`; see that function for why the friction moment belongs here and
+    what it was worth when it was missing (0.249 m g at 25 deg, against Project Chrono).
+    Returns N [3].
     """
     R = place["R"]
     contacts = place["contacts"]  # [3,3]
     n = place["normals"]  # [3,3]
     com_world = np.array([x, y, place["z"]]) + R @ COM
     r = contacts - com_world[None, :]  # lever arms [3,3]
+    weight = MASS * GRAVITY
 
-    # A[0,i] = n_z ;  A[1,i] = (r x n)_x ;  A[2,i] = (r x n)_y
-    rxn = np.cross(r, n)  # [3,3]
-    A = np.stack([n[:, 2], rxn[:, 0], rxn[:, 1]], axis=0)  # [3,3]
-    b = np.array([MASS * GRAVITY, 0.0, 0.0])
+    n_bar = n.sum(axis=0)
+    n_bar = n_bar / np.linalg.norm(n_bar)
+    load_sum = weight * n_bar[2]  # total normal load = m g cos(tilt)
+    tangential = np.array([0.0, 0.0, weight]) - load_sum * n_bar
+    inv_sum = 1.0 / max(load_sum, 1e-3 * weight)
+
+    # friction shared in proportion to normal load, f_i = (N_i / S) F_t, keeps this linear
+    m = np.cross(r, n) + inv_sum * np.cross(r, tangential)  # [3,3]
+    A = np.stack([np.ones(3), m[:, 0], m[:, 1]], axis=0)  # [3,3]
+    b = np.array([load_sum, 0.0, 0.0])
     return np.linalg.solve(A, b)
 
 

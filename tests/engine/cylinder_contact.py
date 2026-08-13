@@ -8,26 +8,32 @@ at its RIM:
 
     n_perp = n - (n . a) a,    ct = c - R n_perp/|n_perp| - w sgn(n . a) a
 
-with a the spin axis (body +y). Four checks, on exact planes where the engine's bilinear central
-difference reproduces the slope exactly, so the oracle can compute the normal analytically and
-stays independent of the sampler:
+with a the spin axis (body +y). w is derived from RobotParams.wheel_width (the same knob that
+picks the wheel-envelope shape) rather than a separate field -- w = wheel_width/2, and w = 0
+(wheel_width=None, the sphere envelope) must reproduce the sphere contact exactly.
 
-  1. w = 0 reproduces the sphere contact and the old loads (also covered bit-exactly by the
-     regression in tests/engine/step.py).
+Four checks, on exact planes where the engine's bilinear central difference reproduces the slope
+exactly, so the oracle can compute the normal analytically and stays independent of the sampler:
+
+  1. wheel_width=None reproduces the sphere contact and the old loads (also covered bit-exactly
+     by the golden fixture's diff_cuda path, which pins wheel_width=None).
   2. no LATERAL tilt -> the axial term vanishes and the cylinder must equal the sphere. This is
      what catches a wrong axis or a wrong sign, because both are invisible until the ground
      tilts sideways. It also pins sgn(0) = 0: the contact is then a LINE across the tread whose
      load resultant is centred, and wp.sign would put it on a rim instead.
   3. lateral tilt -> the contact sits on the UPHILL rim, exactly w off the mid-plane, because
      that is the side where the ground comes up to meet the wheel first.
-  4. the loads the kernel returns match the oracle's own 3x3 solve, in every case.
+  4. the loads the kernel returns match the oracle's own 3x3 solve -- INCLUDING the tangential
+     (friction) reaction the current `normal_loads` folds into the torque balance (the model
+     this file's contact-point fix was ported onto is not the simple normal-only balance the
+     original commit shipped against; the oracle below is that model's numpy twin, not a
+     transcription of the older one).
 """
 
 from __future__ import annotations
 
 import numpy as np
 import warp as wp
-
 from helhest.engine import Grid
 from helhest.engine import GridParams
 from helhest.engine import Robot
@@ -73,37 +79,56 @@ def oracle(
     pose: tuple[float, float, float],
     zpr: tuple[float, float, float],
 ) -> tuple[np.ndarray, np.ndarray]:
-    """The same quasi-static solve, from the definition. Returns (loads [3], contacts [3,3])."""
+    """The same quasi-static solve `normal_loads` does, from the definition -- including the
+    tangential (friction) reaction's contribution to the torque balance (fda57bf). Returns
+    (loads [3], contacts [3,3])."""
     x, y, yaw = pose
     z, pitch, roll = zpr
     R = rot_zyx(yaw, pitch, roll)
     p = np.array([x, y, z])
     com = p + R @ np.asarray(rp.com)
+    weight = rp.mass * rp.gravity
     b, l = rp.half_track, rp.rear_offset
     wheel_pos = np.array([[0.0, b, 0.0], [0.0, -b, 0.0], [-l, 0.0, 0.0]])
     # the plane is exact, so its normal is constant and needs no sampling
     n = np.array([-slope_x, -slope_y, 1.0])
     n /= np.linalg.norm(n)
     axis = R @ np.array([0.0, 1.0, 0.0])
+    half_width = 0.0 if rp.wheel_width is None else rp.wheel_width / 2.0
 
-    A = np.zeros((3, 3))
     contacts = np.zeros((3, 3))
+    normals = np.zeros((3, 3))
+    arms = np.zeros((3, 3))
     for i in range(3):
         c = p + R @ wheel_pos[i]
-        if rp.wheel_half_width > 0.0:
+        if half_width > 0.0:
             n_ax = float(n @ axis)
             n_perp = n - n_ax * axis
             ct = (
                 c
                 - rp.wheel_radius * (n_perp / np.linalg.norm(n_perp))
-                - rp.wheel_half_width * np.sign(n_ax) * axis
+                - half_width * np.sign(n_ax) * axis
             )
         else:
             ct = c - rp.wheel_radius * n
         contacts[i] = ct
-        rxn = np.cross(ct - com, n)
-        A[:, i] = [n[2], rxn[0], rxn[1]]
-    return np.linalg.solve(A, np.array([rp.mass * rp.gravity, 0.0, 0.0])), contacts
+        normals[i] = n
+        arms[i] = ct - com
+
+    n_bar = normals.sum(0)
+    n_bar /= np.linalg.norm(n_bar)
+    load_sum = weight * n_bar[2]
+    tangential = np.array([0.0, 0.0, weight]) - load_sum * n_bar
+    inv_sum = 1.0 / max(load_sum, 1.0e-3 * weight)
+
+    A = np.zeros((3, 3))
+    for i in range(3):
+        m = np.cross(arms[i], normals[i]) + inv_sum * np.cross(arms[i], tangential)
+        A[0, i] = 1.0
+        A[1, i] = m[0]
+        A[2, i] = m[1]
+    loads = np.linalg.solve(A, np.array([load_sum, 0.0, 0.0]))
+    return loads, contacts
 
 
 def device_loads(
@@ -128,13 +153,13 @@ def device_loads(
 
 def main() -> None:
     wp.init()
-    device = "cpu"
+    device = "cuda" if wp.get_cuda_device_count() > 0 else "cpu"
     cell, ny, nx = 0.05, 260, 260
     x0 = y0 = -6.5
     grid = GridParams(nx, ny, cell, x0, y0).build()
     pose = (0.0, 0.0, 0.0)  # heading +x, so the spin axis is world +y
     zpr = (0.40, 0.0, 0.0)  # z/pitch/roll pinned: this isolates the contact from the settle
-    half_width = 0.05  # [m] half the measured 0.10 m tread
+    wheel_width = 0.10  # [m] the ruler-measured tread (half-width 0.05, the merged default)
 
     cases = [
         ("flat", 0.0, 0.0),
@@ -148,25 +173,30 @@ def main() -> None:
     for name, sx, sy in cases:
         env = tilted_plane(ny, nx, cell, sx, sy)
         got = {}
-        for hw in (0.0, half_width):
-            rp = RobotParams(wheel_half_width=hw)
+        for ww in (None, wheel_width):
+            rp = RobotParams(wheel_width=ww)
             dev = device_loads(env, grid, rp, pose, zpr, device)
             ref, contacts = oracle(sx, sy, rp, pose, zpr)
-            got[hw] = (dev, ref, contacts)
+            got[ww] = (dev, ref, contacts)
 
-        err_sph = np.abs(got[0.0][0] - got[0.0][1]).max() / got[0.0][1].max()
-        err_cyl = np.abs(got[half_width][0] - got[half_width][1]).max() / got[half_width][1].max()
-        d_loads = np.abs(got[half_width][0] - got[0.0][0]).max()
+        half_width = wheel_width / 2.0
+        err_sph = np.abs(got[None][0] - got[None][1]).max() / got[None][1].max()
+        err_cyl = (
+            np.abs(got[wheel_width][0] - got[wheel_width][1]).max() / got[wheel_width][1].max()
+        )
+        d_loads = np.abs(got[wheel_width][0] - got[None][0]).max()
         # how far off the wheel's mid-plane each contact sits (the axis is world +y at yaw 0)
         centres = np.array([[0.0, 0.365, 0.0], [0.0, -0.365, 0.0], [-0.75, 0.0, 0.0]])
         centres[:, 2] += zpr[0]
-        ax_sph = (got[0.0][2] - centres)[:, 1]
-        ax_cyl = (got[half_width][2] - centres)[:, 1]
-        # the vertical balance the solve is supposed to enforce, re-checked on the loads returned
+        ax_sph = (got[None][2] - centres)[:, 1]
+        ax_cyl = (got[wheel_width][2] - centres)[:, 1]
+        # the balance the solve is supposed to enforce -- Sum N_i = m g (n . z), not m g outright
+        # (fda57bf: the row is resolved ALONG THE SURFACE NORMAL, not vertically) -- re-checked on
+        # the loads returned
         n = np.array([-sx, -sy, 1.0])
         n /= np.linalg.norm(n)
         rp0 = RobotParams()
-        resid = abs(got[half_width][0].sum() * n[2] - rp0.mass * rp0.gravity)
+        resid = abs(got[wheel_width][0].sum() - rp0.mass * rp0.gravity * n[2])
 
         print(
             f"{name:>19}{err_sph:>10.1e}{err_cyl:>10.1e}"
@@ -192,6 +222,7 @@ def main() -> None:
 
     verdict = "PASS" if ok else "FAIL"
     print(f"\n  {verdict} -- kernel matches the oracle; the cylinder rides its own rim")
+    assert ok, "cylinder contact point disagrees with the oracle"
 
 
 if __name__ == "__main__":
