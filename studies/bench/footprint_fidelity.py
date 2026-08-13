@@ -208,8 +208,12 @@ def run(device: str) -> dict:
     env_radius = int(np.ceil(RobotParams().wheel_radius / CELL))
     solver = SolverParams(newton_iters=20, atol=1e-8).build()
     robots = {
-        "sphere": RobotParams(wheel_half_width=0.0).build(device=device),
-        "cylinder": RobotParams(wheel_half_width=CYLINDER_HALF_WIDTH).build(device=device),
+        # Post-merge (bbc98cf) the knob is wheel_width, and it switches the ENVELOPE too, not
+        # only the load moment arm -- the original finding ("bit-identical settle") no longer
+        # holds by construction. Sphere-vs-cylinder attitude is now a real comparison, still
+        # blocked on bag quality (see the module docstring's negative result).
+        "sphere": RobotParams(wheel_width=None).build(device=device),
+        "cylinder": RobotParams(wheel_width=2 * CYLINDER_HALF_WIDTH).build(device=device),
     }
 
     with wp.ScopedDevice(device):
