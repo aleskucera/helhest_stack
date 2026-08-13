@@ -574,3 +574,13 @@ full cost — arguably a BETTER story: under the deployed geometry the deployed 
 separates); (b) paper stays on the frozen sphere/old-engine record (valid, reproducible,
 in git), robot and records live on cylinder. Pre-reg bookkeeping either way: these are
 configuration-change reruns, reported beside the originals, never replacing them.
+
+**§12 addendum — PREREG_fullcost_cylinder verdict (2026-08-13, virgin seeds 6000-6099):**
+hybrid/all PASSED (clark 0.216 vs step 1.42/bracket 1.51; p=7.1e-6/1.6e-5, margins ~1.2);
+hybrid/clean PASSED (p=5.9e-5/2.6e-4); fan/sensor FAILED (p=1.00 both, mean diffs only
+-0.05/-0.10, clark still lowest). Composite headline FAILS per the frozen rule; the
+claim ships regime-qualified. The recorded prediction named fan/sensor as the risk.
+Note the complementary pattern across cost formulations: settle-only separates in
+clean+sensor but not hybrid/all; full cost separates in hybrid (both noise arms) but
+not fan/sensor. Every regime has a decisive instrument; no single instrument covers
+all three — the paper reports this as a finding, not a defect.
