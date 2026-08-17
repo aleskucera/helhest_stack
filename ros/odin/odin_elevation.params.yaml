@@ -176,10 +176,11 @@
     # plan_tau_motor [s] puts a first-order wheel-speed lag INSIDE the MPPI rollouts, so the
     # planner only picks maneuvers the real (lagged) actuation can track -- measured in sim, an
     # external slew filter alone leaves ~0.2-0.4 m of unmodeled tracking error at 1.4 m/s, which
-    # is exactly the obstacle-graze depth. MEASURE the real wheel step response (command a speed
-    # step, log /joint_states, fit tau) and set it here; then plan_max_slew can be relaxed toward
-    # a safety backstop. 0 = legacy instantaneous model.
-    plan_tau_motor: 0.0
+    # is exactly the obstacle-graze depth. -1 = dynamics.MOTOR_TAU, the value MEASURED on the
+    # real wheels (0.19 s, joint dead-time+lag fit over 34 setpoint steps -- see dynamics.py);
+    # 0 would force the legacy instantaneous model. With the lag modeled, plan_max_slew is a
+    # safety backstop, not the smoothness mechanism.
+    plan_tau_motor: -1.0
 
     # --- TURN BRAKE: slow into a corner, then accelerate out (both knobs 0 = off) ---
     # Live-tunable, no node restart:

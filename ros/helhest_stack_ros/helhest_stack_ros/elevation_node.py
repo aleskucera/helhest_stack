@@ -615,10 +615,14 @@ class ElevationNode(Node):
         # tracking lag (~0.2-0.4 m at 1.4 m/s under heavy filtering) is exactly the graze depth
         # measured against obstacles. With the lag modeled, candidates that need late dodges rank
         # poorly by themselves and the executed motion matches the plan (sim: the pocket trap at
-        # 2.1 m/s goes from mass contacts under output filtering to clean in 17 s). Set this to
-        # the MEASURED real wheel-response time constant; 0 = instantaneous (legacy). When > 0,
-        # relax plan_max_slew toward a safety backstop rather than the smoothness mechanism.
-        d("plan_tau_motor", 0.0)
+        # 2.1 m/s goes from mass contacts under output filtering to clean in 17 s).
+        # -1 (default) = use dynamics.MOTOR_TAU, the bag-MEASURED wheel response (0.19 s) that
+        # planning_solver already defaults to -- a 0.0 here would silently OVERRIDE the measured
+        # lag back to instantaneous for the node only, while the demos keep it (the exact config
+        # drift dynamics.py exists to prevent). 0 = explicitly instantaneous (legacy); > 0 =
+        # explicit override. With the lag modeled, relax plan_max_slew toward a safety backstop
+        # rather than the smoothness mechanism.
+        d("plan_tau_motor", -1.0)
         # MPPI speed knobs (rebuild the planner on change): the robot drives slow because the cost
         # balance prefers it. Raise goal_running (reward progress) and/or lower effort (penalty on
         # wheel-speed^2) to drive faster. plan_max_omega is only the output SAFETY clamp, not speed.
@@ -991,7 +995,8 @@ class ElevationNode(Node):
             kt = dynamics.k_turn_for(self.terrain)
             self.get_logger().info(f"planner terrain='{self.terrain}' -> K_TURN={kt}")
         plan_solver = dynamics.planning_solver(k_turn=kt, command_delay=self.plan_command_delay)
-        plan_solver.tau_motor = self.plan_tau_motor  # modeled actuation lag (0 = instantaneous)
+        if self.plan_tau_motor >= 0.0:  # -1 = keep dynamics.MOTOR_TAU (the measured default)
+            plan_solver.tau_motor = self.plan_tau_motor
         self.plan_sim = ForwardSimulator(
             dynamics.robot_params(self.plan_wheel_width),
             plan_solver,
