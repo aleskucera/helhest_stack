@@ -167,6 +167,24 @@ class BaseSimulator:
         `DifferentiableSimulator` overrides this to take a [B, ny, nx] device `wp.array`."""
         self.friction.assign(np.ascontiguousarray(friction_hm.H, np.float32))
 
+    def set_initial_wheel_omega(self, omega: np.ndarray) -> None:
+        """Realized wheel speed (wL, wR, w_rear) entering the rollouts -- the encoder reading, or
+        the last conditioned command as a proxy. [3] broadcasts to the batch; [B, 3] is taken
+        as-is. Seeds the motor-lag state (the body twist has its own seed, `init_twist`); left
+        at the default zeros, every rollout plans from wheels-at-rest."""
+        om = np.asarray(omega, np.float32)
+        if om.ndim == 1:
+            om = np.tile(om, (self.batch_size, 1))
+        self.init_current_wheel_omega.assign(np.ascontiguousarray(om))
+
+    def set_initial_twist(self, twist: np.ndarray) -> None:
+        """Body twist (vx, vy, yaw_rate) entering the rollouts -- measured odometry twist, or
+        a wheel-derived proxy (dynamics.twist_from_wheels). [3] broadcasts; [B, 3] as-is."""
+        tw = np.asarray(twist, np.float32)
+        if tw.ndim == 1:
+            tw = np.tile(tw, (self.batch_size, 1))
+        self.init_twist.assign(np.ascontiguousarray(tw))
+
     def set_mu_scale(self, scales: np.ndarray | float) -> None:
         """Per-rollout friction multiplier [B] (or a scalar for all rollouts). Rollout b sees
         `mu_scale[b] * friction`; robust MPPI uses this to evaluate one candidate under several
@@ -307,10 +325,7 @@ class ForwardSimulator(BaseSimulator):
         if init_wheel_omega is None:
             self.init_current_wheel_omega.zero_()
         else:
-            init_wheel_omega_np = np.asarray(init_wheel_omega, np.float32)
-            if init_wheel_omega_np.ndim == 1:
-                init_wheel_omega_np = np.tile(init_wheel_omega_np, (self.batch_size, 1))
-            self.init_current_wheel_omega.assign(np.ascontiguousarray(init_wheel_omega_np))
+            self.set_initial_wheel_omega(init_wheel_omega)
             # Momentum's boundary condition: the twist state enters at the realized wheel speed
             # (encoder), not at rest -- otherwise a rollout starting already in motion would brake
             # from a phantom v=0 on its first step. vy/yaw_rate start at 0 (unknown without a

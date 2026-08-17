@@ -120,3 +120,19 @@ def test_plan_control_clamps_at_both_ends():
     np.testing.assert_allclose(plan_control_at(U, -1.0, 0.1), [1.0, 2.0])
     np.testing.assert_allclose(plan_control_at(U, 99.0, 0.1), [3.0, 4.0])  # stale plan -> hold last
     np.testing.assert_allclose(plan_control_at(U[:1], 5.0, 0.1), [1.0, 2.0])
+
+
+def test_joint_states_identity_mapping():
+    # current LLC: /joint_states is all-positive-forward wheel rad/s (verified on
+    # bags/motors0 + steps_air) -> identity mapping, reordered to engine (wL, wR, rear),
+    # robust to message ordering.
+    from helhest.control.command import joint_states_to_model
+
+    om = joint_states_to_model(["rear_wheel_j", "left_wheel_j", "right_wheel_j"], [3.0, 1.0, 2.0])
+    assert om is not None and np.allclose(om, [1.0, 2.0, 3.0])
+
+
+def test_joint_states_missing_joint_is_none():
+    from helhest.control.command import joint_states_to_model
+
+    assert joint_states_to_model(["left_wheel_j"], [1.0]) is None

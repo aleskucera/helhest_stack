@@ -11,6 +11,8 @@ Two solver fidelities share the same dt and turn gain:
   execution_solver  -- the single driven / settled robot: more Newton iters (accuracy)
 """
 
+import numpy as np
+
 from .engine import RobotParams
 from .engine import SolverParams
 
@@ -70,7 +72,9 @@ def robot_params(wheel_width=None):
     return RobotParams(wheel_width=wheel_width)
 
 
-def planning_solver(dt=DT, k_turn=K_TURN, command_delay=COMMAND_DELAY, tau_motor=MOTOR_TAU, momentum=True):
+def planning_solver(
+    dt=DT, k_turn=K_TURN, command_delay=COMMAND_DELAY, tau_motor=MOTOR_TAU, momentum=True
+):
     """Solver for the MPPI rollouts (B in the thousands): shallow + loose settle, for speed.
 
     `tau_motor` defaults to the measured MOTOR_TAU: the wheels take ~0.19 s to reach a commanded
@@ -105,4 +109,21 @@ def execution_solver(dt=DT, k_turn=K_TURN, command_delay=0.0, momentum=True):
         tilt_clamp=1.2,
         command_delay=command_delay,
         momentum=momentum,
+    )
+
+
+def twist_from_wheels(wheel_omega: np.ndarray, alpha: float) -> np.ndarray:
+    """Body-twist estimate (vx, vy, yaw_rate) from realized wheel speeds (wL, wR, w_rear)
+    through the turn model -- the rollout `init_twist` proxy when no measured twist is
+    available (lateral velocity is unobservable from wheels alone -> 0)."""
+    rp = robot_params()
+    mean = 0.5 * float(wheel_omega[0] + wheel_omega[1])
+    diff = float(wheel_omega[1] - wheel_omega[0])
+    return np.array(
+        [
+            rp.wheel_radius * mean,
+            0.0,
+            rp.wheel_radius * diff / (2.0 * rp.half_track * float(alpha)),
+        ],
+        np.float32,
     )

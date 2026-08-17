@@ -26,6 +26,27 @@ import numpy as np
 JOINT_NAMES = ("left_wheel_j", "rear_wheel_j", "right_wheel_j")
 
 
+def joint_states_to_model(names: list[str], velocities: list[float]) -> np.ndarray | None:
+    """LLC /joint_states -> model-convention wheel speeds [wL, wR, w_rear], matching joints by
+    NAME so message ordering doesn't matter. Returns None when any drive joint is missing
+    (partial message -> caller falls back to the last command).
+
+    On the CURRENT LLC the measured stream is already all-positive-forward in wheel rad/s --
+    the same convention and units as the /cmd_joints input, so the mapping is identity.
+    Verified on bags/motors0 + bags/steps_air (2026-08-11/12, post the 2026-07-27 unit fix):
+    all three joints read POSITIVE under a pure forward command, measured/commanded median
+    0.976-0.998. The old motor-side [-left, -rear, +right] convention survives only in the
+    /joint_setpoints echo (see the module header) -- do NOT apply it here."""
+    vel_by_name = dict(zip(names, velocities))
+    try:
+        return np.array(
+            [float(vel_by_name[j]) for j in ("left_wheel_j", "right_wheel_j", "rear_wheel_j")],
+            np.float32,
+        )
+    except KeyError:
+        return None
+
+
 def condition_command(
     wl: float,
     wr: float,

@@ -102,6 +102,7 @@ def run(
     drv = WarpDriver(scene, mu_field, init_pose=tuple(start), device=device)
 
     contacts, closest, reached, f = 0, 99.0, False, 0
+    cmd = np.zeros(3, np.float32)  # last executed (wL, wR, rear); seeds the rollout state
     prev_U = None
     prev_yaw, prev_diff = float(start[2]), None
     for f in range(max_frames):
@@ -120,6 +121,12 @@ def run(
         if dock_radius > 0.0 and d < dock_radius:
             cmd = dock_control(state, goal)
         else:
+            # seed the rollouts' realized state from the executing command (else every replan
+            # plans from wheels-at-rest / zero twist)
+            plan_sim.set_initial_wheel_omega(cmd)
+            plan_sim.set_initial_twist(
+                dynamics.twist_from_wheels(cmd, 1.0 + solver.k_turn * MU_PLAN)
+            )
             planner.replan(state, goal, 3)
             U = planner.nominal()
             if prev_U is not None:  # node plan_consistency EMA (receding-horizon shift)

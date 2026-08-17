@@ -299,6 +299,15 @@ class ElevationNode(Node):
         # (`/imu/data`) and a best-effort one (`/ouster/imu`); a reliable sub gets nothing from
         # the latter.
         self.create_subscription(Imu, self.imu_topic, self._imu_callback, qos_profile_sensor_data)
+        self._wheel_meas: np.ndarray | None = None  # measured [wL, wR, w_rear], model convention
+        self._wheel_meas_t: float = 0.0  # node-clock seconds of the last measurement
+        self._twist_meas: np.ndarray | None = None  # measured body twist (vx, vy, yaw_rate)
+        self._twist_meas_t: float = 0.0
+        js_topic = self.get_parameter("joint_states_topic").value
+        if js_topic:
+            self.create_subscription(
+                JointState, js_topic, self._joint_states_callback, qos_profile_sensor_data
+            )
         self.create_subscription(
             PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10
         )
@@ -696,6 +705,13 @@ class ElevationNode(Node):
         # left-wheel sign flip, rear-follower, magnitude clamp, slew limit) is in control/command.py.
         d("plan_actuate", True)  # publish /cmd_joints wheel commands
         d("cmd_topic", "/cmd_joints")  # JointState wheel-velocity command topic (to the LLC)
+        # WHEEL FEEDBACK: measured wheel velocities from the LLC, used to seed each replan's
+        # realized wheel state (motor-lag + body-momentum initial condition). Without it the
+        # rollouts plan from wheels-at-rest every frame. Convention/units verified on
+        # bags/motors0 + steps_air: all-positive-forward wheel rad/s, same as /cmd_joints
+        # (see control/command.joint_states_to_model). When the topic is silent or stale the
+        # seed falls back to the last conditioned command. "" disables. Set AT LAUNCH.
+        d("joint_states_topic", "/joint_states")
         d(
             "plan_max_omega", 5.0
         )  # hard cap on |wheel velocity| [rad/s] -- the motor safe max (~5, see plan_wmax)
@@ -1185,6 +1201,13 @@ class ElevationNode(Node):
     # ------------------------------------------------------------------
     # Callbacks
     # ------------------------------------------------------------------
+
+    def _joint_states_callback(self, msg: JointState) -> None:
+        """Measured wheel velocities from the LLC -> the rollouts' realized-wheel seed."""
+        om = joint_states_to_model(list(msg.name), list(msg.velocity))
+        if om is not None:
+            self._wheel_meas = om
+            self._wheel_meas_t = self.get_clock().now().nanoseconds * 1e-9
 
     def _imu_callback(self, msg: Imu) -> None:
         self._latest_imu = msg
@@ -1712,6 +1735,24 @@ class ElevationNode(Node):
                 wp.array(np.ascontiguousarray(mf.elev_local), dtype=wp.float32, device=self.device)
             )
             self._ck("plan:set_terrain")
+            # Seed the rollouts' REALIZED initial state -- without this every replan planned from
+            # wheels-at-rest and zero body twist (command_history only covers in-flight COMMANDS).
+            # Wheel speed: measured /joint_states when fresh, else the last conditioned command.
+            # Body twist: the odometry's child-frame twist when fresh, else derived from the
+            # wheel seed through the turn model (vy unobservable there -> 0).
+            now_s = self.get_clock().now().nanoseconds * 1e-9
+            if self._wheel_meas is not None and now_s - self._wheel_meas_t < 0.3:
+                wheel_seed = self._wheel_meas
+            else:
+                wheel_seed = to_engine_order(self._prev_cmd)
+            self.plan_sim.set_initial_wheel_omega(wheel_seed)
+            if self._twist_meas is not None and now_s - self._twist_meas_t < 0.3:
+                twist_seed = self._twist_meas
+            else:
+                alpha = 1.0 + self.plan_sim.solver.k_turn * self.plan_friction
+                twist_seed = dynamics.twist_from_wheels(wheel_seed, alpha)
+            self.plan_sim.set_initial_twist(twist_seed)
+            self._ck("plan:seed_state")
             # REVERSE gate (only when plan_wmin < 0): give the cost kernel this frame's observed-
             # cell mask (reversing over blind cells is penalized) and unlock the negative sampling
             # floor only while a robot-width strip behind base_link is measured in the accumulated
@@ -2368,6 +2409,11 @@ class ElevationNode(Node):
         time, so a lookup at any cloud stamp finds a bracketing sample instead of extrapolating.
         """
         stamp = odom_msg.header.stamp
+        # Latest measured body twist (REP-105: Odometry.twist is child/base-frame; the odin
+        # driver's twist-frame fix guarantees it) -> seeds the rollouts' init_twist in _plan.
+        tw = odom_msg.twist.twist
+        self._twist_meas = np.array([tw.linear.x, tw.linear.y, tw.angular.z], np.float32)
+        self._twist_meas_t = self.get_clock().now().nanoseconds * 1e-9
         if self.publish_map_tf and self._map_T_odom is not None:
             self.tf_broadcaster.sendTransform(
                 self._make_tf(self._map_T_odom, self.map_frame, odom_msg.header.frame_id, stamp)
