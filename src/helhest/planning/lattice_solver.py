@@ -127,12 +127,23 @@ def _relax_lattice_pose_kernel(
 
 
 def _build_primitives(
-    n_theta: int, resolution: float, step: float, turn_radius: float, max_sweep: int, nseg: int
+    n_theta: int,
+    resolution: float,
+    step: float,
+    turn_radius: float,
+    max_sweep: int,
+    nseg: int,
+    pivot_cost: float = 0.0,
 ) -> tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Host-side forward-arc motion primitives. For each heading bin and each turn rate, integrate
     the arc of length `step`, and record: endpoint cell offset (dr, dc), resulting heading bin, arc
     cost, and the swept cells (offsets) the arc passes through (for collision). Min turn radius
-    `turn_radius` caps the turn rate, so turning costs space -- the whole point."""
+    `turn_radius` caps the turn rate, so turning costs space -- the whole point.
+
+    pivot_cost > 0 appends two POINT-TURN primitives (heading +-1 bin in place, cost = pivot_cost
+    [m-equivalent] per bin) -- the skid-steer can rotate on the spot, so `goal behind` routes as
+    pivot-then-drive instead of a wide loop (or +inf). Endpoint-heading feasibility is enforced for
+    free: a blocked pose holds V = +inf, so a pivot into it never helps. 0 = forward-arcs only."""
     dth = 2.0 * math.pi / n_theta
     turns = [
         -step / turn_radius,
@@ -141,7 +152,8 @@ def _build_primitives(
         step / turn_radius / 2.0,
         step / turn_radius,
     ]  # dtheta over the step
-    n_prim = len(turns)
+    n_arc = len(turns)
+    n_prim = n_arc + (2 if pivot_cost > 0.0 else 0)
     prim_dr = np.zeros((n_theta, n_prim), np.int32)
     prim_dc = np.zeros((n_theta, n_prim), np.int32)
     prim_heading = np.zeros((n_theta, n_prim), np.int32)
@@ -167,6 +179,13 @@ def _build_primitives(
                 sweep_dr[it, p, s] = cr
                 sweep_dc[it, p, s] = cc
             sweep_n[it, p] = len(uniq)
+        if pivot_cost > 0.0:
+            for p, dbin in ((n_arc, -1), (n_arc + 1, +1)):
+                # in place: endpoint = same cell, heading one bin over; sweep = the cell itself so
+                # the pivot picks up the pose's graded tilt like any arc
+                prim_heading[it, p] = (it + dbin) % n_theta
+                prim_cost[it, p] = pivot_cost
+                sweep_n[it, p] = 1
     return n_prim, prim_dr, prim_dc, prim_heading, prim_cost, sweep_dr, sweep_dc, sweep_n
 
 
@@ -179,6 +198,7 @@ class LatticeValueSolver:
         n_theta: int = 16,
         turn_radius: float = 0.6,
         step: float | None = None,
+        pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives
         device: wp.Device | None = None,
     ):
         self.resolution = resolution
@@ -196,7 +216,13 @@ class LatticeValueSolver:
         nseg = max(8, int(step_cells * 4))
         n_prim, prim_dr, prim_dc, prim_heading, prim_cost, sweep_dr, sweep_dc, sweep_n = (
             _build_primitives(
-                self.n_theta, self.resolution, self._step, float(turn_radius), max_sweep, nseg
+                self.n_theta,
+                self.resolution,
+                self._step,
+                float(turn_radius),
+                max_sweep,
+                nseg,
+                pivot_cost=float(pivot_cost),
             )
         )
         self.n_prim = n_prim

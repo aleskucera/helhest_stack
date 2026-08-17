@@ -70,7 +70,12 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # Identity odin1_base_link->imu_link so a consumer's 400 Hz IMU->base lookup resolves.
-    # Replace with the measured Odin IMU mount if deskew/gravity are ever turned back on.
+    # Identity looks CORRECT, not just a placeholder: measured on in_speed_odin0/out_odin0 the
+    # mean accel is [-0.3, 0.0, +9.81] (z up) and turning puts the gyro energy on z (|w| p99:
+    # z 85 deg/s vs x 13, y 14), i.e. the IMU axes already agree with odin1_base_link. So the
+    # ~40 deg map roll that motivated imu_rotation_prior=False is NOT a 90 deg mount rotation
+    # (as first assumed) -- suspect the orientation-quaternion convention or the gyro
+    # integration instead, and re-test the prior before "fixing" this TF.
     imu_static_tf = Node(
         package="tf2_ros",
         executable="static_transform_publisher",

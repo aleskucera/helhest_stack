@@ -1,5 +1,7 @@
 """Contract tests for the adaptive turn-boost yaw-feedback estimator."""
+
 from helhest.control.turn_adapt import AdaptiveTurnBoost
+from helhest.control.turn_adapt import TurnGainEstimator
 
 # indoor model: alpha = 1 + 0.6*0.8 = 1.48; R=0.35, b=0.365 (dynamics/robot defaults)
 KW = dict(alpha_model=1.48, wheel_radius=0.35, half_track=0.365, dt=0.1)
@@ -7,6 +9,55 @@ KW = dict(alpha_model=1.48, wheel_radius=0.35, half_track=0.365, dt=0.1)
 
 def _model_yaw(diff, alpha=1.48, R=0.35, b=0.365):
     return R * diff / (2.0 * b * alpha)
+
+
+# --- TurnGainEstimator: model-side mu adaptation (both directions) ---
+GE_KW = dict(k_turn=0.6, mu_nominal=0.8, wheel_radius=0.35, half_track=0.365, dt=0.1)
+
+
+def _real_yaw(diff, mu_real, k_turn=0.6, R=0.35, b=0.365):
+    return R * diff / (2.0 * b * (1.0 + k_turn * mu_real))
+
+
+def test_gain_estimator_understeer():
+    # grippier ground than the model assumes (mu_real 1.2 vs nominal 0.8 -> the robot under-turns):
+    # the center must converge to mu_real/mu_nominal = 1.5.
+    est = TurnGainEstimator(tau_s=1.0, **GE_KW)
+    for _ in range(400):
+        est.update(4.0, _real_yaw(4.0, mu_real=1.2))
+    center, span = est.band()
+    assert abs(center - 1.5) < 0.05
+    assert span <= 0.2  # noiseless samples -> span collapses to the floor
+
+
+def test_gain_estimator_oversteer():
+    # slick ground (mu_real 0.4 -> over-turns): center must drop BELOW 1 -- the case the
+    # turn-boost hotfix (clamp floor 1.0) can never correct.
+    est = TurnGainEstimator(tau_s=1.0, **GE_KW)
+    for _ in range(400):
+        est.update(4.0, _real_yaw(4.0, mu_real=0.4))
+    center, _ = est.band()
+    assert abs(center - 0.5) < 0.05
+
+
+def test_gain_estimator_holds_on_straights():
+    est = TurnGainEstimator(tau_s=1.0, **GE_KW)
+    for _ in range(50):
+        est.update(0.0, 0.0)
+    center, _ = est.band()
+    assert center == 1.0
+
+
+def test_gain_estimator_noise_widens_band():
+    # noisy yaw measurements must widen the reported span (the robust replicas' job grows)
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    est = TurnGainEstimator(tau_s=1.0, **GE_KW)
+    for _ in range(400):
+        est.update(4.0, _real_yaw(4.0, mu_real=0.8) * float(rng.uniform(0.6, 1.6)))
+    _, span = est.band()
+    assert span > 0.15  # above the floor
 
 
 def test_no_signal_holds():

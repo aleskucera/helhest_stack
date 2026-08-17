@@ -248,6 +248,9 @@ def _fwd(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, grad=Fals
     pose0 = wp.array(np.asarray([init_pose], np.float32), dtype=wp.vec3, device=dev)
     controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
     derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
+    cur_omega = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev)  # lagged omega (non-diff)
+    twist = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev)  # momentum state (non-diff)
+    mu_scale = wp.full(1, 1.0, dtype=float, device=dev)
     loads = wp.zeros((T, 1), dtype=wp.vec3, device=dev)
     turn = wp.zeros((T, 1), dtype=wp.vec2, device=dev)
     clear = wp.zeros((T, 1), dtype=float, device=dev)
@@ -266,8 +269,30 @@ def _fwd(envH, rawH, muH, g, robot, sp, omega_np, init_pose, wpv, wtv, grad=Fals
             wp.launch(
                 step_kernel,
                 1,
-                inputs=[Henv, Hraw, Hmu, g, robot, sp, omega[t], controlled[t], derived[t]],
-                outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]],
+                inputs=[
+                    Henv,
+                    Hraw,
+                    Hmu,
+                    mu_scale,
+                    g,
+                    robot,
+                    sp,
+                    omega[t],
+                    cur_omega[t],
+                    controlled[t],
+                    derived[t],
+                    twist[t],
+                ],
+                outputs=[
+                    cur_omega[t + 1],
+                    controlled[t + 1],
+                    derived[t + 1],
+                    loads[t],
+                    turn[t],
+                    clear[t],
+                    resid[t],
+                    twist[t + 1],
+                ],
                 device=dev,
             )
         wp.launch(
@@ -354,6 +379,9 @@ def _fwd_h(rawH, muH, g, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, grad=
     pose0 = wp.array(np.asarray([init_pose], np.float32), dtype=wp.vec3, device=dev)
     controlled = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
     derived = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev, requires_grad=grad)
+    cur_omega = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev)  # lagged omega (non-diff)
+    twist = wp.zeros((T + 1, 1), dtype=wp.vec3, device=dev)  # momentum state (non-diff)
+    mu_scale = wp.full(1, 1.0, dtype=float, device=dev)
     loads = wp.zeros((T, 1), dtype=wp.vec3, device=dev)
     turn = wp.zeros((T, 1), dtype=wp.vec2, device=dev)
     clear = wp.zeros((T, 1), dtype=float, device=dev)
@@ -373,8 +401,30 @@ def _fwd_h(rawH, muH, g, Rwheel, robot, sp, omega_np, init_pose, wpv, wtv, grad=
             wp.launch(
                 step_kernel,
                 1,
-                inputs=[Henv, Hraw, Hmu, g, robot, sp, omega[t], controlled[t], derived[t]],
-                outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]],
+                inputs=[
+                    Henv,
+                    Hraw,
+                    Hmu,
+                    mu_scale,
+                    g,
+                    robot,
+                    sp,
+                    omega[t],
+                    cur_omega[t],
+                    controlled[t],
+                    derived[t],
+                    twist[t],
+                ],
+                outputs=[
+                    cur_omega[t + 1],
+                    controlled[t + 1],
+                    derived[t + 1],
+                    loads[t],
+                    turn[t],
+                    clear[t],
+                    resid[t],
+                    twist[t + 1],
+                ],
                 device=dev,
             )
         wp.launch(
@@ -456,6 +506,9 @@ def _fwd_batch(envH, rawH, muH, g, robot, sp, omega_np, poses, wpv, wtv, grad=Fa
     pose0 = wp.array(np.asarray(poses, np.float32), dtype=wp.vec3, device=dev)
     controlled = wp.zeros((T + 1, B), dtype=wp.vec3, device=dev, requires_grad=grad)
     derived = wp.zeros((T + 1, B), dtype=wp.vec3, device=dev, requires_grad=grad)
+    cur_omega = wp.zeros((T + 1, B), dtype=wp.vec3, device=dev)  # lagged omega (non-diff)
+    twist = wp.zeros((T + 1, B), dtype=wp.vec3, device=dev)  # momentum state (non-diff)
+    mu_scale = wp.full(B, 1.0, dtype=float, device=dev)
     loads = wp.zeros((T, B), dtype=wp.vec3, device=dev)
     turn = wp.zeros((T, B), dtype=wp.vec2, device=dev)
     clear = wp.zeros((T, B), dtype=float, device=dev)
@@ -474,8 +527,30 @@ def _fwd_batch(envH, rawH, muH, g, robot, sp, omega_np, poses, wpv, wtv, grad=Fa
             wp.launch(
                 step_kernel,
                 B,
-                inputs=[Henv, Hraw, Hmu, g, robot, sp, omega[t], controlled[t], derived[t]],
-                outputs=[controlled[t + 1], derived[t + 1], loads[t], turn[t], clear[t], resid[t]],
+                inputs=[
+                    Henv,
+                    Hraw,
+                    Hmu,
+                    mu_scale,
+                    g,
+                    robot,
+                    sp,
+                    omega[t],
+                    cur_omega[t],
+                    controlled[t],
+                    derived[t],
+                    twist[t],
+                ],
+                outputs=[
+                    cur_omega[t + 1],
+                    controlled[t + 1],
+                    derived[t + 1],
+                    loads[t],
+                    turn[t],
+                    clear[t],
+                    resid[t],
+                    twist[t + 1],
+                ],
                 device=dev,
             )
         wp.launch(

@@ -24,7 +24,25 @@ TOPICS=(
   # --- planning I/O (plan_actuate on: a goal drives) ---
   /goal_pose                # planning goal (the input)
   /cmd_joints               # wheel command elevation sends to the LLC (the drive output)
+  /yaw_track                # inner yaw loop (x=reference, y=gyro, z=correction) -- the
+                            # correction is NOT recoverable from /cmd_joints, which
+                            # already contains it
+  # --- drivetrain response (100 Hz, from the LLC) ---
+  # Without these a bag can show WHAT was commanded but not what the wheels did, which blocks
+  # every drivetrain question: the turn gain (alpha from measured rather than commanded wheels),
+  # the command->response delay, the torque scale from `effort`, and the differential the LLC
+  # actually realizes. The Odin bags so far have none of it. Cheap: ~100 Hz of 3 floats.
+  /joint_setpoints          # per-wheel target the LLC is acting on -- splits transport from loop
+  /joint_states             # measured wheel position/velocity/effort -- the actual response
+  # --- camera (compressed only; raw / undistorted / intensity_gray are heavy and unused here) ---
+  /odin1/image/compressed   # JPEG camera stream -- light, handy for reviewing a follow-me run
 )
+
+# Tracking namespaces recorded via --regex (below), so EVERY radio/uwb/bluetooth topic -- and any
+# new anchor that appears -- is captured without listing each. Covers the follow-me target
+# (/radio/estimate_pose, in the 'locator' frame; with /tf it reconstructs the chased point in map),
+# the UWB two-way-ranging estimates + per-anchor distances, and the bluetooth AoA stack.
+TOPIC_REGEX="^/(radio|uwb|bluetooth)/"
 
 # Standard scenarios: name -> maneuver to perform while recording.
 declare -A SCENARIOS=(
@@ -33,8 +51,23 @@ declare -A SCENARIOS=(
   [translate]="slow straight drive (~10 m) forward/back -- accumulator + odom drift"
   [drive_goal]="set a /goal_pose and let it drive to it -- planning + actuation capture (clear space!)"
   [dynamic]="people/objects moving through a static scene -- dynamic visibility-carve tuning"
+  [calibrate]="HOLD each command 3-5 s: straight at ~2/4/6 rad/s, then turns (differential ~1/2/4) at each speed, then a few sharp starts from rest -- the only maneuver that gives STEADY-STATE turning (the planner never holds a command longer than ~3 ms) plus clean step responses"
+  [relax]="the SAME differential step (e.g. +1.5 rad/s) applied from three different forward
+speeds -- ~0.5, ~1.0, ~2.0 rad/s mean -- held 4 s each, 5 repeats per speed, both directions.
+Separates a yaw lag keyed to TIME from one keyed to DISTANCE: only the distance form has a
+response time that scales as 1/v. Chrono says the distance form (sigma ~0.15 m) fits better; this
+is the measurement that confirms or kills it on the real robot."
+  [compact]="the relaxation sweep for a SMALL site: spins in place at four wheel speeds instead
+of driving arcs. Same measurement, 1.9 x 1.8 m instead of 41 x 29 m, because what sets a tyre's
+relaxation is the speed the CONTACT travels over the ground and that is nonzero in a spin. Drive
+it with ros/calibrate_drive.py compact --go."
+  [slope]="drive a slope of 10 deg or more: straight up, straight down, and ACROSS it in both
+directions, 4-5 s each, plus a turn while on the cross-slope. Nothing in the archive exceeds 5.4
+deg of tilt, so the load-transfer fix (normal_loads, validated only against Chrono) has never been
+seen on real data. The across-slope runs are the ones that matter -- that is where the old model
+predicted zero lateral transfer and Chrono predicts 0.4 m g."
 )
-ORDER=(static spin translate drive_goal dynamic)
+ORDER=(static spin translate drive_goal dynamic calibrate relax compact slope)
 
 list_scenarios() {
   echo "scenarios:"
@@ -72,4 +105,4 @@ mkdir -p ~/bags
 QOS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/odin/rosbag2_qos.yaml"
 
 echo "recording -> ~/bags/$NAME   (Ctrl-C to stop)"
-exec ros2 bag record -o "$DEST" --qos-profile-overrides-path "$QOS" "${TOPICS[@]}"
+exec ros2 bag record -o "$DEST" --qos-profile-overrides-path "$QOS" "${TOPICS[@]}" --regex "$TOPIC_REGEX"

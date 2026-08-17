@@ -55,9 +55,7 @@ def evaluate(
         wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
     )
     plan_sim.set_friction(mu)
-    planner = MppiGpu(
-        plan_sim, CostParams(), n_theta=n_theta
-    )
+    planner = MppiGpu(plan_sim, CostParams(), n_theta=n_theta)
     planner.reset_nominal(1.5)
     # routing field, optionally coarse (k>1): max-pool the terrain (keeps thin walls), solve low-res
     k = max(1, int(lat_coarsen))
@@ -117,6 +115,7 @@ def evaluate(
         )
 
     contacts, closest, reached, f = 0, 99.0, False, 0
+    cmd = np.zeros(3, np.float32)  # last executed (wL, wR, rear); seeds the rollout state
     poses, cmds = [], []  # trajectory recording (record=True): pose per frame, cmd per step
     for f in range(max_frames):
         st = drv.render_state()
@@ -132,6 +131,12 @@ def evaluate(
         if dock_radius > 0.0 and d < dock_radius:
             cmd = dock_control(state, goal)  # terminal stage
         else:
+            # seed the rollouts' realized state from the executing command (else every replan
+            # plans from wheels-at-rest / zero twist)
+            plan_sim.set_initial_wheel_omega(cmd)
+            plan_sim.set_initial_twist(
+                dynamics.twist_from_wheels(cmd, 1.0 + plan_sim.solver.k_turn * 0.8)
+            )
             planner.replan(state, goal, 3)  # MPPI + cost-to-go routing
             u = planner.nominal()
             cmd = np.array([u[0, 0], u[0, 1], 0.5 * (u[0, 0] + u[0, 1])], np.float32)

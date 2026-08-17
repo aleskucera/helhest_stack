@@ -24,7 +24,9 @@ import warp as wp
 from warp import Device
 
 from .envelope import _contact_kernel
+from .envelope import _contact_table_kernel
 from .envelope import _gather_kernel
+from .envelope import cylinder_offset_table
 from .envelope import gather_bt
 from .envelope import make_tiled_contact
 from .envelope import pad_edge
@@ -37,6 +39,14 @@ from .step import step_kernel_bt
 from .terrain import GridParams
 
 DILATE_TILE = 16  # output tile size for the batched tiled dilation (DifferentiableSimulator)
+# Yaw bins for the CYLINDER wheel envelope (RobotParams.wheel_width). The bin must not shift the
+# contact by more than a cell: R * dpsi <= cell -> dpsi <= 0.1/0.35 = 0.29 rad = 16 deg, so >= 22
+# bins over the circle; 32 rounds that up. Costs n_yaw x the envelope grid (1.6 MB at the real
+# 0.1 m cell) and n_yaw dilations per perception frame, nothing per rollout.
+# Slices span [0, PI): a capsule at yaw and yaw+PI is the same shape, so a 2*PI stack is
+# half redundant. 32 here is PI/32 = 5.6 deg -- the same resolution the previous 64-over-2*PI
+# gave, at half the dilation cost and half the memory. See step.yaw_bin.
+YAW_BINS = 32
 
 
 @wp.kernel
@@ -81,6 +91,7 @@ class BaseSimulator:
 
         self.robot = robot_params.build(device)  # device Robot struct
         self.solver = solver_params.build()  # device Solver struct
+        self.command_delay_steps = int(round(solver_params.command_delay / solver_params.dt))
         self.grid = grid_params.build()  # Grid (fixed)
         self.wheel_radius = robot_params.wheel_radius
         self.env_radius = int(np.ceil(robot_params.wheel_radius / grid_params.cell_size))
@@ -105,10 +116,21 @@ class BaseSimulator:
             self.turning = wp.zeros((T, B), dtype=wp.vec2f, requires_grad=rg)
             self.clearance = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
             self.residual = wp.zeros((T, B), dtype=wp.float32, requires_grad=rg)
+            # Body twist (vx, vy, yaw_rate) carried between steps; only read/written by the
+            # momentum traction model, but grad-tracked like the other state so enabling it in
+            # the taped path does not silently break gradients.
+            self.twist = wp.zeros((T + 1, B), dtype=wp.vec3f, requires_grad=rg)
+            self.init_twist = wp.zeros(B, dtype=wp.vec3f)  # like init_current_wheel_omega
             self.current_wheel_omega = wp.zeros((T + 1, B), dtype=wp.vec3f)
             self.target_wheel_omega = wp.zeros((T, B), dtype=wp.vec3f, requires_grad=control_grad)
             self.start_pose = wp.zeros(B, dtype=wp.vec3f, requires_grad=control_grad)
             self.init_current_wheel_omega = wp.zeros(B, dtype=wp.vec3f)  # like start_pose
+            # per-rollout friction multiplier (robust-MPPI mu samples); 1 = nominal, never grad
+            self.mu_scale = wp.full(B, 1.0, dtype=wp.float32)
+            # Commands already in flight when a rollout starts, oldest first: row k acts on step k
+            # while k < solver.command_delay_steps. Zeros = nothing in flight. At least one row is
+            # allocated so the kernel argument is always a valid array, even with no delay.
+            self.command_history = wp.zeros((max(self.command_delay_steps, 1), B), dtype=wp.vec3f)
 
     def _dilate(
         self,
@@ -145,6 +167,33 @@ class BaseSimulator:
         `DifferentiableSimulator` overrides this to take a [B, ny, nx] device `wp.array`."""
         self.friction.assign(np.ascontiguousarray(friction_hm.H, np.float32))
 
+    def set_initial_wheel_omega(self, omega: np.ndarray) -> None:
+        """Realized wheel speed (wL, wR, w_rear) entering the rollouts -- the encoder reading, or
+        the last conditioned command as a proxy. [3] broadcasts to the batch; [B, 3] is taken
+        as-is. Seeds the motor-lag state (the body twist has its own seed, `init_twist`); left
+        at the default zeros, every rollout plans from wheels-at-rest."""
+        om = np.asarray(omega, np.float32)
+        if om.ndim == 1:
+            om = np.tile(om, (self.batch_size, 1))
+        self.init_current_wheel_omega.assign(np.ascontiguousarray(om))
+
+    def set_initial_twist(self, twist: np.ndarray) -> None:
+        """Body twist (vx, vy, yaw_rate) entering the rollouts -- measured odometry twist, or
+        a wheel-derived proxy (dynamics.twist_from_wheels). [3] broadcasts; [B, 3] as-is."""
+        tw = np.asarray(twist, np.float32)
+        if tw.ndim == 1:
+            tw = np.tile(tw, (self.batch_size, 1))
+        self.init_twist.assign(np.ascontiguousarray(tw))
+
+    def set_mu_scale(self, scales: np.ndarray | float) -> None:
+        """Per-rollout friction multiplier [B] (or a scalar for all rollouts). Rollout b sees
+        `mu_scale[b] * friction`; robust MPPI uses this to evaluate one candidate under several
+        mu hypotheses. 1.0 = nominal."""
+        if np.isscalar(scales):
+            self.mu_scale.fill_(float(scales))
+        else:
+            self.mu_scale.assign(np.ascontiguousarray(scales, np.float32))
+
 
 class ForwardSimulator(BaseSimulator):
     """Forward-only batched rollouts for MPPI planning: the whole rollout (init + T steps) runs in
@@ -162,18 +211,59 @@ class ForwardSimulator(BaseSimulator):
         device: Device | str | None = None,
     ):
         super().__init__(robot_params, solver_params, grid_params, batch_size, n_steps, device)
+        self.wheel_width = robot_params.wheel_width
+        n_yaw = 1 if self.wheel_width is None else YAW_BINS
         with wp.ScopedDevice(self.device):
             self.elevation = wp.zeros((self.cells_y, self.cells_x), dtype=wp.float32)
-            self.envelope = wp.zeros((self.cells_y, self.cells_x), dtype=wp.float32)
+            self.envelope_stack = wp.zeros((n_yaw, self.cells_y, self.cells_x), dtype=wp.float32)
             self.friction = wp.zeros((self.cells_y, self.cells_x), dtype=wp.float32)
             self._contact_iy = wp.zeros((self.cells_y, self.cells_x), dtype=wp.int32)
             self._contact_ix = wp.zeros((self.cells_y, self.cells_x), dtype=wp.int32)
             self._cap = wp.zeros((self.cells_y, self.cells_x), dtype=wp.float32)
+        # `envelope` stays the 2D grid it always was -- slice 0 of the stack, which for the
+        # spherical wheel IS the whole envelope and for the cylinder is the yaw = 0 bin.
+        self.envelope = self.envelope_stack[0]
+        self._yaw_offsets: list[tuple[wp.array, wp.array, wp.array]] = []
+        if self.wheel_width is not None:
+            for k in range(n_yaw):
+                dy, dx, cap = cylinder_offset_table(
+                    self.cell_size,
+                    self.wheel_radius,
+                    0.5 * self.wheel_width,
+                    k * np.pi / n_yaw,
+                )
+                self._yaw_offsets.append(
+                    (
+                        wp.array(dy, dtype=wp.int32, device=self.device),
+                        wp.array(dx, dtype=wp.int32, device=self.device),
+                        wp.array(cap, dtype=wp.float32, device=self.device),
+                    )
+                )
         self._alloc_rollout_buffers(requires_grad=False, control_grad=False)
 
     def set_terrain(self, elevation: wp.array) -> None:
+        """Copy in the raw elevation and rebuild the wheel envelope (one slice per yaw bin)."""
         wp.copy(self.elevation, elevation)
-        self._dilate(self.elevation, self._contact_iy, self._contact_ix, self._cap, self.envelope)
+        if self.wheel_width is None:
+            self._dilate(
+                self.elevation, self._contact_iy, self._contact_ix, self._cap, self.envelope
+            )
+            return
+        for k, (off_dy, off_dx, off_cap) in enumerate(self._yaw_offsets):
+            wp.launch(
+                _contact_table_kernel,
+                dim=self.elevation.shape,
+                inputs=[self.elevation, off_dy, off_dx, off_cap],
+                outputs=[self._contact_iy, self._contact_ix, self._cap],
+                device=self.device,
+            )
+            wp.launch(
+                _gather_kernel,
+                dim=self.elevation.shape,
+                inputs=[self.elevation, self._contact_iy, self._contact_ix, self._cap],
+                outputs=[self.envelope_stack[k]],
+                device=self.device,
+            )
 
     def rollout_launch(self) -> None:
         """Launch the whole rollout (init + T steps) in ONE fused kernel; NO host I/O.
@@ -186,15 +276,18 @@ class ForwardSimulator(BaseSimulator):
             self.batch_size,
             inputs=[
                 self.n_steps,
-                self.envelope,
+                self.envelope_stack,
                 self.elevation,
                 self.friction,
+                self.mu_scale,
                 self.grid,
                 self.robot,
                 self.solver,
                 self.start_pose,
                 self.init_current_wheel_omega,
                 self.target_wheel_omega,
+                self.command_history,
+                self.init_twist,
             ],
             outputs=[
                 self.controlled,
@@ -204,6 +297,7 @@ class ForwardSimulator(BaseSimulator):
                 self.turning,
                 self.clearance,
                 self.residual,
+                self.twist,
             ],
             device=self.device,
         )
@@ -216,7 +310,9 @@ class ForwardSimulator(BaseSimulator):
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """target_wheel_omega [T, B, 3], init_pose (x,y,yaw) shared by all rollouts.
         `init_wheel_omega` is the initial actual wheel speed (shape [3] or [B, 3]); defaults to
-        zeros (wheels at rest). Returns controlled [T+1,B,3] (x,y,yaw),
+        zeros (wheels at rest), and also seeds `self.init_twist`'s vx (momentum's boundary
+        condition) -- set `self.init_twist` directly beforehand for a non-zero vy/yaw_rate, or
+        when leaving `init_wheel_omega` at its default. Returns controlled [T+1,B,3] (x,y,yaw),
         derived [T+1,B,3] (z,pitch,roll), clear/resid [T,B]."""
         # Start pose:
         self.start_pose.assign(
@@ -229,10 +325,15 @@ class ForwardSimulator(BaseSimulator):
         if init_wheel_omega is None:
             self.init_current_wheel_omega.zero_()
         else:
-            init_wheel_omega_np = np.asarray(init_wheel_omega, np.float32)
-            if init_wheel_omega_np.ndim == 1:
-                init_wheel_omega_np = np.tile(init_wheel_omega_np, (self.batch_size, 1))
-            self.init_current_wheel_omega.assign(np.ascontiguousarray(init_wheel_omega_np))
+            self.set_initial_wheel_omega(init_wheel_omega)
+            # Momentum's boundary condition: the twist state enters at the realized wheel speed
+            # (encoder), not at rest -- otherwise a rollout starting already in motion would brake
+            # from a phantom v=0 on its first step. vy/yaw_rate start at 0 (unknown without a
+            # measured turn rate); only vx is recoverable from the wheel speeds alone.
+            vx0 = self.wheel_radius * (init_wheel_omega_np[:, 0] + init_wheel_omega_np[:, 1]) / 2.0
+            init_twist_np = np.zeros((self.batch_size, 3), np.float32)
+            init_twist_np[:, 0] = vx0
+            self.init_twist.assign(np.ascontiguousarray(init_twist_np))
 
         # Launch rollout:
         self.rollout_launch()
@@ -291,6 +392,12 @@ class DifferentiableSimulator(BaseSimulator):
             raise RuntimeError(
                 "DifferentiableSimulator is CUDA-only: the tiled arg-max contact needs GPU shared "
                 "memory. Build it with device='cuda'."
+            )
+        if robot_params.wheel_width is not None:
+            raise NotImplementedError(
+                "wheel_width (the yaw-binned cylinder envelope) is implemented for "
+                "ForwardSimulator only: the taped path would need a [B, n_yaw, ny, nx] stack and "
+                "a yaw index through the custom-grad settle. Use wheel_width=None here."
             )
 
         self.tape: wp.Tape | None = None
@@ -405,6 +512,7 @@ class DifferentiableSimulator(BaseSimulator):
                         self.envelope,
                         self.elevation,
                         self.friction,
+                        self.mu_scale,
                         self.grid,
                         self.robot,
                         self.solver,
@@ -412,6 +520,7 @@ class DifferentiableSimulator(BaseSimulator):
                         self.current_wheel_omega[t],
                         self.controlled[t],
                         self.derived[t],
+                        self.twist[t],
                     ],
                     outputs=[
                         self.current_wheel_omega[t + 1],
@@ -421,6 +530,7 @@ class DifferentiableSimulator(BaseSimulator):
                         self.turning[t],
                         self.clearance[t],
                         self.residual[t],
+                        self.twist[t + 1],
                     ],
                     device=self.device,
                 )
