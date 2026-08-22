@@ -1,0 +1,58 @@
+{
+ "element": "sphere",
+ "rows": [
+  {
+   "seed": 0,
+   "fold_batch_s_per_plan": 0.0015843084365769755,
+   "mc_256_s_per_plan": 0.006828824203694239
+  },
+  {
+   "seed": 1,
+   "fold_batch_s_per_plan": 0.0019011493113794131,
+   "mc_256_s_per_plan": 0.006836120202206075
+  },
+  {
+   "seed": 2,
+   "fold_batch_s_per_plan": 0.002262988124130061,
+   "mc_256_s_per_plan": 0.006839111802401021
+  },
+  {
+   "seed": 3,
+   "fold_batch_s_per_plan": 0.0016686892504367279,
+   "mc_256_s_per_plan": 0.00687050839769654
+  },
+  {
+   "seed": 4,
+   "fold_batch_s_per_plan": 0.0017799313754949253,
+   "mc_256_s_per_plan": 0.006829020398436114
+  },
+  {
+   "seed": 5,
+   "fold_batch_s_per_plan": 0.0016471512499265373,
+   "mc_256_s_per_plan": 0.006810735596809536
+  },
+  {
+   "seed": 6,
+   "fold_batch_s_per_plan": 0.0018015770001511555,
+   "mc_256_s_per_plan": 0.008259704598458484
+  },
+  {
+   "seed": 7,
+   "fold_batch_s_per_plan": 0.00165104756342771,
+   "mc_256_s_per_plan": 0.0068168303987476975
+  },
+  {
+   "seed": 8,
+   "fold_batch_s_per_plan": 0.0016416255639342126,
+   "mc_256_s_per_plan": 0.00682804340030998
+  },
+  {
+   "seed": 9,
+   "fold_batch_s_per_plan": 0.001791217126083211,
+   "mc_256_s_per_plan": 0.006973824405577034
+  }
+ ],
+ "median_fold_batch_ms": 1.7243103129658266,
+ "median_mc_256_ms": 6.832570300321094,
+ "median_ratio_mc_over_fold": 4.1230497626287175
+}
