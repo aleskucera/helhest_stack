@@ -13,7 +13,8 @@ from .kernels import rasterize_all_kernel
 class HeightMapLayers:
     """Per-cell reductions from a single rasterization pass, on GPU.
 
-    `max`, `mean`, `min` hold NaN for empty cells; `count` holds 0.
+    `max`, `mean`, `min` hold NaN for empty cells; `count` holds 0; `std` holds
+    NaN for cells with fewer than 2 points (undefined spread).
 
     NOTE: these arrays are owned by `HeightMapBuilder` and reused on the next
     `build()` call. Call `.to_numpy()` (or `array.numpy().copy()` per field)
@@ -24,24 +25,26 @@ class HeightMapLayers:
     mean: wp.array
     min: wp.array
     count: wp.array
+    std: wp.array
 
     def __getitem__(self, name: str) -> wp.array:
         return getattr(self, name)
 
     def to_numpy(self) -> dict[str, np.ndarray]:
-        """Download all four layers to numpy (copies — safe to retain)."""
+        """Download all five layers to numpy (copies — safe to retain)."""
         return {
             "max": self.max.numpy().copy(),
             "mean": self.mean.numpy().copy(),
             "min": self.min.numpy().copy(),
             "count": self.count.numpy().copy(),
+            "std": self.std.numpy().copy(),
         }
 
 
 class HeightMapBuilder:
-    """Rasterize 3D points into a 2D grid of max/mean/min/count layers.
+    """Rasterize 3D points into a 2D grid of max/mean/min/count/std layers.
 
-    Preallocates the five GPU grid buffers once; `build()` only resets them
+    Preallocates the GPU grid buffers once; `build()` only resets them
     in-place each call. Accepts points as either numpy (uploaded each call)
     or a pre-uploaded `wp.array` of `vec3` (used directly, no copy).
     """
@@ -69,12 +72,16 @@ class HeightMapBuilder:
             self._sum = wp.empty(self.shape, dtype=wp.float32)
             self._count = wp.empty(self.shape, dtype=wp.int32)
             self._mean = wp.empty(self.shape, dtype=wp.float32)
+            self._sum64 = wp.empty(self.shape, dtype=wp.float64)
+            self._sumsq64 = wp.empty(self.shape, dtype=wp.float64)
+            self._std = wp.empty(self.shape, dtype=wp.float32)
 
         self._layers = HeightMapLayers(
             max=self._max,
             mean=self._mean,
             min=self._min,
             count=self._count,
+            std=self._std,
         )
 
     def build(self, points: np.ndarray | wp.array) -> HeightMapLayers:
@@ -93,6 +100,8 @@ class HeightMapBuilder:
         self._min.fill_(float("inf"))
         self._sum.zero_()
         self._count.zero_()
+        self._sum64.zero_()
+        self._sumsq64.zero_()
 
         xmin, _, ymin, _ = self.bounds
         with wp.ScopedDevice(self.device):
@@ -110,12 +119,23 @@ class HeightMapBuilder:
                     self._min,
                     self._sum,
                     self._count,
+                    self._sum64,
+                    self._sumsq64,
                 ],
             )
             wp.launch(
                 finalize_kernel,
                 dim=self.shape,
-                inputs=[self._sum, self._count, self._max, self._min, self._mean],
+                inputs=[
+                    self._sum,
+                    self._count,
+                    self._max,
+                    self._min,
+                    self._mean,
+                    self._sum64,
+                    self._sumsq64,
+                    self._std,
+                ],
             )
 
         return self._layers

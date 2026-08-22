@@ -17,8 +17,15 @@ def rasterize_all_kernel(
     min_map: wp.array2d(dtype=wp.float32),
     sum_map: wp.array2d(dtype=wp.float32),
     count_map: wp.array2d(dtype=wp.int32),
+    sum64_map: wp.array2d(dtype=wp.float64),
+    sumsq64_map: wp.array2d(dtype=wp.float64),
 ):
-    """Scatter (N, 3) points into max/min/sum/count per cell via atomics."""
+    """Scatter (N, 3) points into max/min/sum/count per cell via atomics.
+
+    sum64/sumsq64 accumulate in float64: cell heights are O(10) m but per-cell
+    sigma is O(0.02) m, so var = E[z^2] - E[z]^2 cancels ~7 significant digits --
+    float32 accumulation would destroy the std estimate.
+    """
     tid = wp.tid()
     p = points[tid]
     j = int((p[0] - xmin) * inv_res)
@@ -29,6 +36,9 @@ def rasterize_all_kernel(
     wp.atomic_min(min_map, i, j, p[2])
     wp.atomic_add(sum_map, i, j, p[2])
     wp.atomic_add(count_map, i, j, 1)
+    z64 = wp.float64(p[2])
+    wp.atomic_add(sum64_map, i, j, z64)
+    wp.atomic_add(sumsq64_map, i, j, z64 * z64)
 
 
 @wp.kernel
@@ -38,8 +48,16 @@ def finalize_kernel(
     max_map: wp.array2d(dtype=wp.float32),
     min_map: wp.array2d(dtype=wp.float32),
     mean_map: wp.array2d(dtype=wp.float32),
+    sum64_map: wp.array2d(dtype=wp.float64),
+    sumsq64_map: wp.array2d(dtype=wp.float64),
+    std_map: wp.array2d(dtype=wp.float32),
 ):
-    """Finalize per-cell reductions: mean = sum / count; NaN for empty cells."""
+    """Finalize per-cell reductions: mean = sum / count; NaN for empty cells.
+
+    std needs >= 2 samples to be defined (a single point has zero sample variance
+    but no meaningful spread estimate); float64 var is clamped at 0 before sqrt to
+    guard against a tiny negative from float64 cancellation.
+    """
     i, j = wp.tid()
     c = count_map[i, j]
     nan = wp.float32(wp.nan)
@@ -49,6 +67,14 @@ def finalize_kernel(
         mean_map[i, j] = nan
         max_map[i, j] = nan
         min_map[i, j] = nan
+    if c >= 2:
+        c64 = wp.float64(c)
+        m64 = sum64_map[i, j] / c64
+        var64 = sumsq64_map[i, j] / c64 - m64 * m64
+        var64 = wp.max(var64, wp.float64(0.0))
+        std_map[i, j] = wp.float32(wp.sqrt(var64))
+    else:
+        std_map[i, j] = nan
 
 
 @wp.kernel
