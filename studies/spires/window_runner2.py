@@ -30,7 +30,9 @@ def _homogeneous(R: np.ndarray) -> np.ndarray:
     return T
 
 
-def run_sequence(seq_dir: Path, out_dir: Path, *, window_s: float = WINDOW_S) -> None:
+def run_sequence(
+    seq_dir: Path, out_dir: Path, *, window_s: float = WINDOW_S, max_variance: float = 9.0e-4
+) -> None:
     arch = HesaiScanArchive(str(seq_dir / "raw" / "lidar-clouds.zip"))
     gt = GtTrajectory(str(seq_dir / "trajectory" / "gt-tum.txt"))
     vil = GtTrajectory(str(seq_dir / "trajectory" / "vilens-slam-tum.txt"))
@@ -60,7 +62,7 @@ def run_sequence(seq_dir: Path, out_dir: Path, *, window_s: float = WINDOW_S) ->
             path[:, 1].min() - MARGIN_M,
             path[:, 1].max() + MARGIN_M,
         )
-        belief = ElevationBelief(bounds, CELL)
+        belief = ElevationBelief(bounds, CELL, max_variance=max_variance)
 
         our_poses, gt_poses = [], []
         t_prev = ts0
@@ -117,5 +119,11 @@ if __name__ == "__main__":
     ap.add_argument("seq_dir")
     ap.add_argument("out_dir")
     ap.add_argument("--window", type=float, default=WINDOW_S)
+    ap.add_argument("--max-variance", type=float, default=9.0e-4)
     args = ap.parse_args()
-    run_sequence(Path(args.seq_dir), Path(args.out_dir), window_s=args.window)
+    run_sequence(
+        Path(args.seq_dir),
+        Path(args.out_dir),
+        window_s=args.window,
+        max_variance=args.max_variance,
+    )

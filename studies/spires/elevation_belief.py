@@ -18,7 +18,15 @@ import numpy as np
 
 SIGMA_R = 0.02  # [m] a-priori Hesai range noise (fixed in the prereg, not tuned)
 SIGMA_Z_MIN = 0.01  # [m] variance floor on a fresh cell's height
-MAHALANOBIS_GATE = 2.0  # keep-highest rule threshold (paper cites Kleiner, no number)
+# audited against the elevation_mapping package (ElevationMap.hpp defaults):
+MAHALANOBIS_GATE = 2.5  # their mahalanobisDistanceThreshold_
+MIN_H_VARIANCE = 1.0e-4  # their minHorizontalVariance_ -- RESET on measurement
+MULTI_HEIGHT_NOISE = 9.0e-6  # their multiHeightNoise_ (cross-scan conflict inflation)
+MIN_VARIANCE = 9.0e-6  # their minVariance_ clamp
+# their maxVariance_ default is 9e-4 ((3 cm)^2): the package CLAMPS vertical
+# variance there, truncating any honestly-supplied pose covariance. Kept as a
+# parameter so the design site can measure both the default and an unclamped run.
+MAX_VARIANCE_DEFAULT = 9.0e-4
 
 
 @dataclass
@@ -39,7 +47,15 @@ class ElevationBelief:
         bounds: tuple[float, float, float, float],
         cell: float,
         rates: DriftRates | None = None,
+        *,
+        max_variance: float = MAX_VARIANCE_DEFAULT,
+        increase_height_alpha: float = 0.0,
     ):
+        # alpha follows the PAPER's keep-highest semantics (alpha=0: jump to the
+        # higher surface); the package's default alpha=1 ignores it -- the
+        # paper-vs-code discrepancy is documented in the prereg design log
+        self.max_variance = max_variance
+        self.alpha = increase_height_alpha
         self.xmin, self.xmax, self.ymin, self.ymax = bounds
         self.cell = cell
         self.rates = rates or DriftRates()
@@ -99,8 +115,9 @@ class ElevationBelief:
         z = pts_world[ok, 2]
         vp = var_p[ok]
 
-        # per-scan per-cell HIGHEST point (their multi-return rule applied
-        # within the scan): sort by (cell, z) and keep each cell's last row
+        # per-scan per-cell HIGHEST point first: within one scan the package
+        # ignores lower conflicts and (paper semantics, alpha=0) jumps to higher
+        # ones, so the scan's highest point is the effective same-scan update
         order = np.lexsort((z, idx))
         idx_s, z_s, vp_s = idx[order], z[order], vp[order]
         last = np.append(idx_s[1:] != idx_s[:-1], True)
@@ -111,16 +128,29 @@ class ElevationBelief:
         v0 = self.var_h[ci, cj]
 
         fresh = ~np.isfinite(h0)
-        d_maha = (p_tilde - h0) / np.sqrt(v0 + p_var)
-        higher = ~fresh & (d_maha > MAHALANOBIS_GATE)  # new surface above: replace
-        below = ~fresh & (d_maha < -MAHALANOBIS_GATE)  # stray low return: drop
-        fuse = ~fresh & ~higher & ~below
+        # their gate: |z - h| / sqrt(map variance) -- the MAP sd only (audited)
+        d_maha = (p_tilde - h0) / np.sqrt(np.maximum(v0, 1e-12))
+        conflict = ~fresh & (np.abs(d_maha) > MAHALANOBIS_GATE)
+        # cross-scan conflict (their else-branch): elevation kept, variance
+        # inflated by multiHeightNoise; paper-alpha semantics for HIGHER points:
+        # blend toward the new surface with weight (1 - alpha)
+        higher = conflict & (d_maha > 0)
+        lower = conflict & (d_maha <= 0)
+        fuse = ~fresh & ~conflict
 
-        # initialize / replace
-        take = fresh | higher
+        take = fresh
         self.h[ci[take], cj[take]] = p_tilde[take]
         self.var_h[ci[take], cj[take]] = p_var[take]
         self.var_meas[ci[take], cj[take]] = p_var[take]
+        if higher.any():
+            a = self.alpha
+            self.h[ci[higher], cj[higher]] = a * h0[higher] + (1 - a) * p_tilde[higher]
+            self.var_h[ci[higher], cj[higher]] = a * v0[higher] + (1 - a) * p_var[higher]
+            self.var_meas[ci[higher], cj[higher]] = (
+                a * self.var_meas[ci[higher], cj[higher]] + (1 - a) * p_var[higher]
+            )
+        if lower.any():
+            self.var_h[ci[lower], cj[lower]] = v0[lower] + MULTI_HEIGHT_NOISE
         # Kalman fuse (their eq. 6)
         if fuse.any():
             hf, vf = h0[fuse], v0[fuse]
@@ -129,7 +159,15 @@ class ElevationBelief:
             self.var_h[ci[fuse], cj[fuse]] = (vf * wf) / (vf + wf)
             vm = self.var_meas[ci[fuse], cj[fuse]]
             self.var_meas[ci[fuse], cj[fuse]] = (vm * wf) / (vm + wf)
-        self.n_upd[ci[~below], cj[~below]] += 1
+        # variance clamps (their VarianceClampOperator)
+        touched = ci[~lower], cj[~lower]
+        self.var_h[touched] = np.clip(self.var_h[touched], MIN_VARIANCE, self.max_variance)
+        # horizontal variances RESET on measurement (audited: init + fuse branches;
+        # this is what keeps freshly-seen cells sharp in the package)
+        rst = fresh | fuse | higher
+        self.var_x[ci[rst], cj[rst]] = MIN_H_VARIANCE
+        self.var_y[ci[rst], cj[rst]] = MIN_H_VARIANCE
+        self.n_upd[ci[~lower], cj[~lower]] += 1
 
     def readout(self) -> dict[str, np.ndarray]:
         """III-D fusion, moment-matched: horizontal uncertainty becomes vertical
@@ -142,8 +180,9 @@ class ElevationBelief:
         finite = np.isfinite(self.h)
         sx = float(np.sqrt(np.median(self.var_x[finite]))) if finite.any() else 0.0
         sy = float(np.sqrt(np.median(self.var_y[finite]))) if finite.any() else 0.0
-        rx = min(int(np.ceil(2.0 * sx / self.cell)), 8)
-        ry = min(int(np.ceil(2.0 * sy / self.cell)), 8)
+        # their ellipse: 2.486 sigma (95% chi-square, 2 dof) + sqrt(2) * resolution
+        rx = min(int(np.ceil((2.486 * sx + 1.42 * self.cell) / self.cell)), 25)
+        ry = min(int(np.ceil((2.486 * sy + 1.42 * self.cell) / self.cell)), 25)
 
         w_sum = np.zeros_like(self.h)
         wh = np.zeros_like(self.h)
@@ -157,15 +196,19 @@ class ElevationBelief:
         def shifted(a: np.ndarray, di: int, dj: int) -> np.ndarray:
             return a[pad + di : pad + di + self.ny, pad + dj : pad + dj + self.nx]
 
+        from math import erf, sqrt
+
+        def cdf(x: float, s: float) -> float:
+            return 0.5 * (1.0 + erf(x / (s * sqrt(2.0))))
+
+        half = self.cell / 2.0
         for di in range(-ry, ry + 1):
             for dj in range(-rx, rx + 1):
-                w = np.exp(
-                    -0.5
-                    * (
-                        (dj * self.cell / max(sx, 1e-3)) ** 2
-                        + (di * self.cell / max(sy, 1e-3)) ** 2
-                    )
-                )
+                # their weight: per-axis Gaussian probability MASS over the cell
+                dx, dy = abs(dj) * self.cell, abs(di) * self.cell
+                wx = cdf(dx + half, max(sx, 1e-3)) - cdf(dx - half, max(sx, 1e-3))
+                wy = cdf(dy + half, max(sy, 1e-3)) - cdf(dy - half, max(sy, 1e-3))
+                w = max(wx * wy, 1e-12)
                 src_f = shifted(f0, di, dj)
                 w_sum += w * src_f
                 wh += w * src_f * shifted(h0, di, dj)
