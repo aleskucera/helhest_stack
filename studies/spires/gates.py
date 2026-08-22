@@ -79,6 +79,7 @@ def run_gates(window_dir: Path, site: str) -> dict:
     j_clark: list[float] = []
     j_mean: list[float] = []
     j_z: list[float] = []
+    win_diffs: list[list[float]] = []  # per-window paired |err| differences
     skipped = 0
     total_fp = 0
 
@@ -87,6 +88,17 @@ def run_gates(window_dir: Path, site: str) -> dict:
     for f in sorted(window_dir.glob("window_*.npz")):
         d = np.load(f)
         mu, sg, cnt = d["mu"], d["sigma"], d["count"]
+        # independent/common split: the raw Kalman sd is the per-cell independent
+        # part; whatever fusion added on top (drift-induced smear) is common-mode
+        # across a 0.7 m footprint, because drift shifts neighborhoods coherently
+        # the pure measurement sd is the independent part; raw_sd would still
+        # carry the (common) q_z drift accumulation
+        if "meas_sd" in d.files:
+            sg_ind = d["meas_sd"]
+        elif "raw_sd" in d.files:
+            sg_ind = d["raw_sd"]
+        else:
+            sg_ind = np.zeros_like(sg)
         x0, y0, cell = float(d["xmin"]), float(d["ymin"]), float(d["cell"])
         ny, nx = mu.shape
 
@@ -105,6 +117,7 @@ def run_gates(window_dir: Path, site: str) -> dict:
         err_all.append((mu - gt)[ok].ravel())
 
         # --- Gate J: footprints along the GT walk inside this window
+        win_diffs.append([])
         gt_poses = d["gt_poses"]
         path = gt_poses[:, :3, 3]
         # subsample path to ~FOOT_STEP_M spacing
@@ -135,16 +148,28 @@ def run_gates(window_dir: Path, site: str) -> dict:
                 continue
             truth = float(np.nanmax(tval[good]))
             meanmap = float(np.nanmax(bmu[good]))
-            e, sd = clark_fold_diag(bmu[good], bsg[good])
+            # correlated fold: fold the INDEPENDENT parts; the common part adds
+            # variance to the max but not expectation (max(h_i + c) = c + max h_i)
+            si = sg_ind[fi, fj][good]
+            si = np.where(np.isfinite(si), si, 0.0)
+            common_var = float(np.median(np.maximum(bsg[good] ** 2 - si**2, 0.0)))
+            e, sd_i = clark_fold_diag(bmu[good], np.maximum(si, 1e-3))
+            sd = math.sqrt(sd_i**2 + common_var)
             j_clark.append(abs(e - truth))
             j_mean.append(abs(meanmap - truth))
             j_z.append((truth - e) / sd)
+            win_diffs[-1].append(abs(meanmap - truth) - abs(e - truth))
 
     z = np.concatenate(z_all) if z_all else np.array([])
     err = np.concatenate(err_all) if err_all else np.array([])
     jc, jm, jz = np.array(j_clark), np.array(j_mean), np.array(j_z)
     wins = int(np.sum(jc < jm))
     losses = int(np.sum(jm < jc))
+    # clustered test: footprints inside one window share that window's drift, so
+    # the unit of independence is the window (one median difference each)
+    wmed = [float(np.median(v)) for v in win_diffs if len(v) >= 3]
+    w_wins = int(np.sum(np.array(wmed) > 0))
+    w_losses = int(np.sum(np.array(wmed) < 0))
 
     out = {
         "C_cells": len(z),
@@ -162,6 +187,9 @@ def run_gates(window_dir: Path, site: str) -> dict:
         "J_wins": wins,
         "J_losses": losses,
         "J_p": _sign_test_p(wins, losses),
+        "J_windows": len(wmed),
+        "J_win_wins": w_wins,
+        "J_win_p": _sign_test_p(w_wins, w_losses),
         "J_cov1": float(np.mean(np.abs(jz) <= 1)) if len(jz) else np.nan,
         "J_cov2": float(np.mean(np.abs(jz) <= 2)) if len(jz) else np.nan,
     }
