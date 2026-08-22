@@ -15,6 +15,8 @@ Render them:  python -m helhest.worlds [--out /tmp/worlds.png]
 """
 
 import argparse
+import math
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -22,6 +24,31 @@ from .heightmap import _grid
 from .heightmap import Heightmap
 
 _WALL = 1.0  # impassable obstacle height (drive in -> infeasible settle)
+
+
+@dataclass(frozen=True)
+class Box:
+    """One obstacle as a solid box, in world metres.
+
+    The heightmap builders below rasterise obstacles into cells, which is what the
+    planner consumes. A physics simulator wants the solid instead: extruding a
+    rasterised wall gives one sliver quad per cell across the height discontinuity
+    (0.06 m wide, 1.0 m tall), so a wheel finds a handful of badly-conditioned
+    contacts on a face that should produce a dense manifold.
+
+    ``OBSTACLES`` below carries the same geometry the builders draw, so a consumer
+    that can use solids does not have to recover them from the grid.
+    ``test_obstacles_match_heightmaps`` keeps the two in step.
+
+    The box spans ``z`` in ``[0, h]``; ``yaw`` rotates it about its centre.
+    """
+
+    cx: float
+    cy: float
+    hx: float
+    hy: float
+    h: float = _WALL
+    yaw: float = 0.0
 
 
 def _box(H, XX, YY, cx, cy, hx, hy, h=_WALL):
@@ -100,6 +127,69 @@ def bumpy_world(cell=0.06, seed=0):
         amp, wid = rng.uniform(0.25, 0.8), rng.uniform(0.35, 0.7)
         H += amp * np.exp(-((XX - cx) ** 2 + (YY - cy) ** 2) / (2 * wid**2))
     return Heightmap(H, (xlim[0], ylim[0]), cell)
+
+
+
+# The same obstacles the builders above rasterise, as solids. Kept beside the
+# builders so the two are edited together; test_obstacles_match_heightmaps
+# rasterises these and diffs against the builder output.
+#
+# bumpy has none -- it is summed Gaussian mounds, genuinely continuous terrain
+# that a heightmap represents correctly and a box cannot.
+OBSTACLES: dict[str, tuple[Box, ...]] = {
+    # one slab with a 1.8 m gap at |y| < 0.9, split into the two halves
+    "gap": (
+        Box(6.0, 3.2, 0.2, 2.3),
+        Box(6.0, -3.2, 0.2, 2.3),
+    ),
+    # three partial-width slabs forcing an S-weave
+    "slalom": (
+        Box(4.0, -2.15, 0.2, 3.35),    # open above y = 1.2
+        Box(9.0, 2.15, 0.2, 3.35),     # open below y = -1.2
+        Box(14.0, 3.35, 0.2, 2.15),    # open centre
+        Box(14.0, -3.35, 0.2, 2.15),
+    ),
+    "pillars": tuple(
+        Box(cx, cy, 0.45, 0.45)
+        for cx, cy in (
+            (4.0, -2.0), (4.0, 2.0),
+            (7.0, 0.0), (7.0, -4.0), (7.0, 4.0),
+            (10.0, -2.0), (10.0, 2.0),
+            (13.0, -2.5), (13.0, 2.5),
+        )
+    ),
+    # U opening away from the start
+    "pocket": (
+        Box(7.0, 0.0, 0.2, 2.5),       # closed side, faces the start
+        Box(9.0, 2.5, 2.0, 0.2),       # top
+        Box(9.0, -2.5, 2.0, 0.2),      # bottom
+    ),
+    # diagonal band with a notch near x = 6, as two rotated slabs. The notch is a
+    # vertical cut while a box ends perpendicular to its axis, so the two ends are
+    # off by the ridge angle -- approximate here, unlike the others.
+    "ridge": (
+        Box(1.5, 0.3 * (1.5 - 6.0), 3.5 / math.cos(0.2914567944778671), 0.2873478855663454, yaw=0.2914567944778671),
+        Box(10.5, 0.3 * (10.5 - 6.0), 3.5 / math.cos(0.2914567944778671), 0.2873478855663454, yaw=0.2914567944778671),
+    ),
+    "bumpy": (),
+}
+
+
+def stamp(boxes, XX, YY):
+    """Stamp `boxes` onto the sample points `XX`, `YY` -- the inverse of reading OBSTACLES."""
+    H = np.zeros_like(XX)
+    for b in boxes:
+        dx, dy = XX - b.cx, YY - b.cy
+        if b.yaw:
+            c, s_ = np.cos(-b.yaw), np.sin(-b.yaw)
+            dx, dy = c * dx - s_ * dy, s_ * dx + c * dy
+        H[(np.abs(dx) <= b.hx) & (np.abs(dy) <= b.hy)] = b.h
+    return H
+
+
+def rasterise(boxes, xlim, ylim, cell):
+    """Stamp `boxes` into a fresh height grid over `xlim`/`ylim`."""
+    return stamp(boxes, *_grid(xlim, ylim, cell))
 
 
 WORLDS = {
