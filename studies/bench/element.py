@@ -223,6 +223,19 @@ def blend_weights(c_nodes: np.ndarray, w: np.ndarray) -> np.ndarray:
     return (np.asarray(c_nodes, np.float64)[:, None] * np.asarray(w, np.float64)).ravel()
 
 
+def blend_matrix(w: np.ndarray) -> np.ndarray:
+    """`blend_stencil`'s weights [N, 4] as the dense contraction W [N, 4N], `W[i, 4i:4i+4] = w[i]`.
+
+    For callers that need the CONTRACTED moments rather than a single coefficient vector: the
+    contact means are `W @ mean_nodes` and their covariance is `W @ Sigma_nodes @ W.T`. Downstream
+    code that was written against one node per (wheel, timestep) then works unchanged."""
+    w = np.asarray(w, np.float64)
+    n = w.shape[0]
+    W = np.zeros((n, 4 * n))
+    W[np.repeat(np.arange(n), 4), np.arange(4 * n)] = w.ravel()
+    return W
+
+
 def broadcast_cap(off_cap: np.ndarray) -> np.ndarray:
     """`off_cap` ready to add to a [N, K] candidate-means array: the sphere's shared [K] table
     broadcasts over nodes via a leading axis; the cylinder's per-node [N, K] table already is

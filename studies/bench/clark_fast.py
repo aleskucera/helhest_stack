@@ -60,7 +60,9 @@ import numpy as np
 import warp as wp
 
 from ..adjoint.harness import Harness
-from .clark import _footprint_cells
+from .element import blend_stencil
+from .element import blend_weights
+from .element import stencil_cells
 from .clark import _norm_cdf
 from .clark import _norm_pdf
 from .clark import _settle_weights
@@ -141,7 +143,11 @@ def clark_plan_moments_lean(
     wx = np.stack([x + wheel_xy[w, 0] * c - wheel_xy[w, 1] * s for w in range(3)]).ravel()
     wy = np.stack([y + wheel_xy[w, 0] * s + wheel_xy[w, 1] * c for w in range(3)]).ravel()
 
-    cell_flat = _footprint_cells(wx, wy, off_dy, off_dx, x0, y0, cell, ny, nx)
+    # Engine reads the dilated field BILINEARLY: the contact is a weighted sum of the maxima
+    # at four cells, not the maximum at one (`element.blend_stencil`). 4x the nodes, and the
+    # per-node coefficient becomes c_i * w_ij; the fold itself is unchanged.
+    iy_b, ix_b, w_blend = blend_stencil(wx, wy, x0, y0, cell, ny, nx)
+    cell_flat = stencil_cells(iy_b, ix_b, off_dy, off_dx, ny, nx)
     u, inv = np.unique(cell_flat.ravel(), return_inverse=True)
     u_idx = inv.reshape(cell_flat.shape)
     u_iy, u_ix = u // nx, u % nx
@@ -156,9 +162,9 @@ def clark_plan_moments_lean(
     )
     u_idx_sorted = np.take_along_axis(u_idx, order, axis=1)
     cross = clark_cross_cov(cov_to_u_final, u_idx_sorted, phi, phineg)
-    c_w = np.repeat(_settle_weights(rp), n_t)
-    e_j = float(c_w @ mean_n) + n_t * DERIV_WZ * rp.wheel_radius
-    return e_j, max(float(c_w @ cross @ c_w), 0.0)
+    c_eff = blend_weights(np.repeat(_settle_weights(rp), n_t), w_blend)
+    e_j = float(c_eff @ mean_n) + n_t * DERIV_WZ * rp.wheel_radius
+    return e_j, max(float(c_eff @ cross @ c_eff), 0.0)
 
 
 def equivalence_and_timing(device: str, n_seeds: int) -> dict:

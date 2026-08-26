@@ -62,7 +62,10 @@ from .clark import _norm_pdf
 from .clark import clark_plan_moments
 from .clark import rho1_table
 from .clark import rho_lookup
+from .element import blend_stencil
+from .element import blend_weights
 from .element import broadcast_cap
+from .element import stencil_cells
 from .element import element_offsets
 from .ranking import build_case
 from .ranking import CELL
@@ -178,8 +181,12 @@ def plan_moments_conv(
     wx = np.stack([x + wheel_xy[w, 0] * c - wheel_xy[w, 1] * s for w in range(3)]).ravel()
     wy = np.stack([y + wheel_xy[w, 0] * s + wheel_xy[w, 1] * c for w in range(3)]).ravel()
 
-    off_dy, off_dx, off_cap = element_offsets(element, cell, rp, np.tile(yaw, 3))
-    cell_flat = _footprint_cells(wx, wy, off_dy, off_dx, x0, y0, cell, ny, nx)
+    # Engine reads the dilated field BILINEARLY: the contact is a weighted sum of the maxima
+    # at four cells, not the maximum at one (`element.blend_stencil`). 4x the nodes, and the
+    # per-node coefficient becomes c_i * w_ij; the fold itself is unchanged.
+    iy_b, ix_b, w_blend = blend_stencil(wx, wy, x0, y0, cell, ny, nx)
+    off_dy, off_dx, off_cap = element_offsets(element, cell, rp, np.repeat(np.tile(yaw, 3), 4))
+    cell_flat = stencil_cells(iy_b, ix_b, off_dy, off_dx, ny, nx)
 
     # --- the K x K correlation of the element, built once and reused for every node ----------
     key = (element, off_dy.shape[-1])
@@ -196,8 +203,8 @@ def plan_moments_conv(
     sigmas = sigma_flat[cell_flat]
     mean_n, w, order = fold_weights(means, sigmas, rho_kk)
 
-    # --- E[J]: unchanged --------------------------------------------------------------------
-    c_w = np.repeat(_settle_weights(rp), n_t)
+    # --- E[J] -------------------------------------------------------------------------------
+    c_w = blend_weights(np.repeat(_settle_weights(rp), n_t), w_blend)
     e_j = float(c_w @ mean_n) + n_t * DERIV_WZ * rp.wheel_radius
 
     # --- Var[J]: scatter c_a * w_{a,i} * sigma onto a patch, then two convolutions ------------
@@ -334,27 +341,30 @@ def plan_moments_conv_batch(
     t_idx = np.arange(1, controlled_all.shape[0])
     n_t = len(t_idx)
 
-    cells = []
+    cells, blends = [], []
     for k in range(n_plans):
         ctl = controlled_all[:, k, :]
         x, y, yaw = ctl[t_idx, 0], ctl[t_idx, 1], ctl[t_idx, 2]
         c, s = np.cos(yaw), np.sin(yaw)
         wx = np.stack([x + wheel_xy[w, 0] * c - wheel_xy[w, 1] * s for w in range(3)]).ravel()
         wy = np.stack([y + wheel_xy[w, 0] * s + wheel_xy[w, 1] * c for w in range(3)]).ravel()
-        cells.append(_footprint_cells(wx, wy, off_dy, off_dx, x0, y0, cell, ny, nx))
-    cell_flat = np.concatenate(cells, axis=0)  # [n_plans * 3T, K]
+        iy_b, ix_b, w_b = blend_stencil(wx, wy, x0, y0, cell, ny, nx)
+        cells.append(stencil_cells(iy_b, ix_b, off_dy, off_dx, ny, nx))
+        blends.append(w_b)
+    cell_flat = np.concatenate(cells, axis=0)  # [n_plans * 4 * 3T, K]
 
     means = belief_flat[cell_flat] + off_cap[None, :]
     mean_n, w, order = fold_weights(means, sigma_flat[cell_flat], rho_kk)
 
-    c_w = np.repeat(_settle_weights(rp), n_t)
+    c_settle = np.repeat(_settle_weights(rp), n_t)
     cells_sorted = np.take_along_axis(cell_flat, order, axis=1)
     wsig = w * sigma_flat[cells_sorted]
     pad = rho1.shape[0]
-    n_nodes = 3 * n_t
+    n_nodes = 4 * 3 * n_t
     out = []
     for k in range(n_plans):
         sl = slice(k * n_nodes, (k + 1) * n_nodes)
+        c_w = blend_weights(c_settle, blends[k])
         e_j = float(c_w @ mean_n[sl]) + n_t * DERIV_WZ * rp.wheel_radius
         iy, ix = cells_sorted[sl] // nx, cells_sorted[sl] % nx
         y_lo, x_lo = int(iy.min()) - pad, int(ix.min()) - pad

@@ -51,7 +51,8 @@ import warp as wp
 
 from ..adjoint.harness import DERIV_WZ
 from ..adjoint.harness import Harness
-from .clark import _footprint_cells
+from .element import blend_stencil
+from .element import stencil_cells
 from .clark import _settle_weights
 from .clark import rho1_table
 from .clark_conv import fold_weights
@@ -120,8 +121,13 @@ def full_cost_moments_conv(
     wy = np.stack([y + wheel_xy[w, 0] * s + wheel_xy[w, 1] * c for w in range(3)]).ravel()
 
     # --- the envelope element ------------------------------------------------------------
-    off_dy, off_dx, off_cap = element_offsets(element, cell, rp, np.tile(yaw, 3))
-    env_cells = _footprint_cells(wx, wy, off_dy, off_dx, x0, y0, cell, ny, nx)
+    # The engine reads the dilated field BILINEARLY, so a contact is a weighted sum of the maxima
+    # at four cells (`element.blend_stencil`). Everything downstream represents a node as
+    # (cells, weight-over-cells) and is LINEAR in that representation, so the four corners
+    # concatenate into one contact carrying 4K cells with weights scaled by the blend.
+    iy_b, ix_b, w_blend = blend_stencil(wx, wy, x0, y0, cell, ny, nx)
+    off_dy, off_dx, off_cap = element_offsets(element, cell, rp, np.repeat(np.tile(yaw, 3), 4))
+    env_cells = stencil_cells(iy_b, ix_b, off_dy, off_dx, ny, nx)   # [4*3T, K]
     means_env = belief_flat[env_cells] + broadcast_cap(off_cap)
     rho_kk = _rho(
         rho1,
@@ -130,11 +136,15 @@ def full_cost_moments_conv(
     )
 
     sig_env = sigma_flat[env_cells]
-    mean_env, w_env, order_env = fold_weights(means_env, sig_env, rho_kk)
+    mean_env_nodes, w_env, order_env = fold_weights(means_env, sig_env, rho_kk)
 
-    # node (w, t) as a weight vector over its own K cells, in sorted order
-    node_cells = np.take_along_axis(env_cells, order_env, axis=1)         # [3T, K]
+    # contact (w, t) as a weight vector over the 4 corners' K cells each, in sorted order
+    node_cells = np.take_along_axis(env_cells, order_env, axis=1)         # [4*3T, K]
     node_w = w_env * np.take_along_axis(sig_env, order_env, axis=1)       # weight * sigma
+    n_contacts, k1 = node_cells.shape[0] // 4, node_cells.shape[1]
+    node_cells = node_cells.reshape(n_contacts, 4 * k1)
+    node_w = (w_blend[:, :, None] * node_w.reshape(n_contacts, 4, k1)).reshape(n_contacts, 4 * k1)
+    mean_env = (w_blend * mean_env_nodes.reshape(n_contacts, 4)).sum(axis=1)
     node_iy, node_ix = node_cells // nx, node_cells % nx
     n_nodes, k_env = node_cells.shape
     # node index layout is wheel-major then time, matching _footprint_cells' input order
@@ -181,7 +191,9 @@ def full_cost_moments_conv(
 
     # --- hinge arguments ----------------------------------------------------------------------
     # mean: anchored at the real belief pose, corrected by the envelope max's Jensen uplift
-    delta = (mean_env - means_env.max(axis=1)).reshape(3, n_t)            # [3, T]
+    # blended contact's Jensen uplift over the blended belief-map contact
+    delta = (mean_env - (w_blend * means_env.max(axis=1).reshape(n_contacts, 4)).sum(axis=1)
+             ).reshape(3, n_t)                                        # [3, T]
     mu_frozen = mu0 + (hinge_w * belief_flat[hinge_cells]).sum(axis=2)    # [T, Np]
     mu_x = mu_frozen - (a @ delta).T                                      # [T, Np]
     var_x = np.maximum(

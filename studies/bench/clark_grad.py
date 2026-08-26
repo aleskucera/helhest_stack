@@ -47,7 +47,9 @@ from .clark import clark_plan_moments
 from .clark import rho1_table
 from .clark import RNG_SEED
 from .clark import SETTLE_IDX
+from .element import blend_stencil
 from .element import element_offsets
+from .element import stencil_cells
 from .ranking import build_case
 from .ranking import CELL
 from .ranking import kendall_tau
@@ -91,7 +93,6 @@ def _plan_universe(
     enters any node's candidate mean) -- so this is also the hard adjoint's own potential-support
     superset, before the arg-max prunes it down to the single winner per node.
     """
-    from .clark import _footprint_cells  # local import: private helper, used nowhere else here
 
     wheel_xy = np.array([[0.0, RP.half_track], [0.0, -RP.half_track], [-RP.rear_offset, 0.0]])
     t_idx = np.arange(1, controlled_k.shape[0])
@@ -99,8 +100,11 @@ def _plan_universe(
     c, s = np.cos(yaw), np.sin(yaw)
     wx = np.stack([x + wheel_xy[w, 0] * c - wheel_xy[w, 1] * s for w in range(3)])
     wy = np.stack([y + wheel_xy[w, 0] * s + wheel_xy[w, 1] * c for w in range(3)])
-    off_dy, off_dx, _off_cap = element_offsets(element, cell, RP, np.tile(yaw, 3))
-    cell_flat = _footprint_cells(wx.ravel(), wy.ravel(), off_dy, off_dx, x0, y0, cell, ny, nx)
+    # The contact is the engine's 4-cell bilinear blend, so the support set is the union over
+    # all four stencil positions -- a superset of the old single-cell one.
+    iy_b, ix_b, _w = blend_stencil(wx.ravel(), wy.ravel(), x0, y0, cell, ny, nx)
+    off_dy, off_dx, _off_cap = element_offsets(element, cell, RP, np.repeat(np.tile(yaw, 3), 4))
+    cell_flat = stencil_cells(iy_b, ix_b, off_dy, off_dx, ny, nx)
     return np.unique(cell_flat)
 
 

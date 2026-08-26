@@ -126,6 +126,7 @@ from helhest.engine import RobotParams
 from helhest.model import euler_zyx
 
 from . import matched_truth as mt
+from ..adjoint.harness import DERIV_WZ
 from ..adjoint.harness import Harness
 from ..adjoint.harness import N_TERMS
 from ..adjoint.harness import TERM_NAMES
@@ -144,8 +145,11 @@ from .clark import clark_plan_moments
 from .clark import rho1_table
 from .clark import rho_lookup
 from .clark import RNG_SEED
+from .element import blend_matrix
+from .element import blend_stencil
 from .element import broadcast_cap
 from .element import element_offsets
+from .element import stencil_cells
 from .ranking import build_case
 from .ranking import CELL
 from .ranking import N_PLANS
@@ -507,10 +511,14 @@ def full_cost_plan_moments(
     c, s = np.cos(yaw), np.sin(yaw)
     wx_env = np.stack([x + wheel_xy[k, 0] * c - wheel_xy[k, 1] * s for k in range(3)])  # [3, T]
     wy_env = np.stack([y + wheel_xy[k, 0] * s + wheel_xy[k, 1] * c for k in range(3)])
-    off_dy, off_dx, off_cap = element_offsets(element, cell, rp, np.tile(yaw, 3))
-    env_cells = _footprint_cells(
-        wx_env.ravel(), wy_env.ravel(), off_dy, off_dx, x0, y0, cell, ny, nx
-    )  # [3T, Kenv]
+    # The engine reads the dilated field BILINEARLY, so a wheel's contact is a weighted sum
+    # of the maxima at four cells. Fold 4x the nodes, then contract with W right after the
+    # fold -- every coupling term below is written against one node per (wheel, t) and is
+    # unchanged by this.
+    iy_b, ix_b, w_blend = blend_stencil(wx_env.ravel(), wy_env.ravel(), x0, y0, cell, ny, nx)
+    off_dy, off_dx, off_cap = element_offsets(element, cell, rp, np.repeat(np.tile(yaw, 3), 4))
+    env_cells = stencil_cells(iy_b, ix_b, off_dy, off_dx, ny, nx)  # [4*3T, Kenv]
+    W_blend = blend_matrix(w_blend)  # [3T, 4*3T]
 
     # clear_soft candidates: the belly bilinear stencil.
     wxb, wyb, mu0 = _hinge_inputs(controlled, derived, chassis_pts, clear_margin)  # [T, Np]
@@ -535,11 +543,16 @@ def full_cost_plan_moments(
         means_env, sigmas_env, cov_self_env, cov_to_u_env
     )
     u_idx_sorted_env = np.take_along_axis(env_u_idx, order_env, axis=1)
-    cross_env = clark_cross_cov(cov_to_u_final_env, u_idx_sorted_env, phi_env, phineg_env)
+    # contract the 4 stencil corners into one contact per (wheel, t) BEFORE anything downstream
+    cross_env = W_blend @ clark_cross_cov(
+        cov_to_u_final_env, u_idx_sorted_env, phi_env, phineg_env
+    ) @ W_blend.T
+    mean_env = W_blend @ mean_env
+    cov_to_u_final_env = W_blend @ cov_to_u_final_env
+    var_env = np.diag(cross_env).copy()
     c_w = np.repeat(_settle_weights(rp), n_t)
-    e_settle, var_settle = _settle_moments_from_nodes(
-        mean_env, var_env, cov_to_u_final_env, u_idx_sorted_env, phi_env, phineg_env, rp, n_t
-    )
+    e_settle = float(c_w @ mean_env) + n_t * DERIV_WZ * rp.wheel_radius
+    var_settle = max(float(c_w @ cross_env @ c_w), 0.0)
 
     # --- clear_soft: the closed-form hinge, on the SAME universe --------------------------------
     n_p = chassis_pts.shape[0]

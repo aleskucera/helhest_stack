@@ -530,7 +530,7 @@ def _mc_env_stats(
     return env_samples
 
 
-def gate2_clark_vs_mc(device: str, element: str = "sphere", traj: str = "sphere") -> dict:
+def gate2_clark_vs_mc(device: str, element: str = "sphere") -> dict:
     """20 random single-timestep, real-belief-map, real-footprint cases: Clark's per-wheel
     E[env]/sd[env] and cov(env_L, env_R) against 20k-draw brute-force MC.
 
@@ -558,19 +558,21 @@ def gate2_clark_vs_mc(device: str, element: str = "sphere", traj: str = "sphere"
     four-cell bilinear stencil, while this gate folds one node per wheel, because the quantity
     under test is the fold rather than the contact.
 
-    `traj` -- AND THE SECOND THING THIS GATE DOES NOT EXERCISE. The default "sphere" reads
-    `h.sim.controlled` (DifferentiableSimulator), whose yaw is IDENTICALLY ZERO at every plan
-    and timestep (measured: 0 of 656 entries non-zero). Under `element="cylinder"` that means
-    this gate evaluates the yaw-DEPENDENT cylinder element at a single heading, yaw = 0, on
-    every case -- while the benchmark it certifies runs on `matched_truth`'s cylinder
-    trajectory, which spans +-0.89 rad and visits 19 of the 32 yaw bins.
+    THE TRAJECTORY BUG, FIXED 2026-08-26. This gate used to build a `Harness` and read
+    `h_.sim.controlled` IMMEDIATELY, without running any rollout first. That array is only
+    populated by `h.forward()`/`h.adjoint()`, so it was ALL ZEROS: every case was evaluated at
+    pose (0, 0, 0) -- the map origin -- and the `margin_cells` retry loop that samples `t` was
+    meaningless, since every `t` returned the same pose. The apparent "yaw is always 0" was a
+    symptom of reading an uninitialised buffer, not a property of the trajectory.
 
-    `run_seed` re-derives the cylinder trajectory precisely to avoid this mismatch; this gate
-    never received that fix. Pass `traj="matched"` to run it on the same trajectory the
-    estimator actually sees. The default is left as "sphere" so the pre-registered numbers keep
-    their meaning -- changing a gate's definition is not something to do silently -- but the
-    yaw = 0 restriction should be understood before quoting this gate as evidence about the
-    cylinder."""
+    `run_seed` never had this bug: it calls `h.adjoint(...)` before reading `controlled`, and
+    under `element="cylinder"` re-derives the trajectory through `matched_truth` so the estimator
+    and its truth settle through the same contact. This gate now does the same, so it tests the
+    poses the estimator is actually certified at: the real trajectory spans +-0.89 rad and
+    visits 19 of the 32 yaw bins, and its plans differ by up to 3.3 m.
+
+    Consequence for the pre-registered numbers: they were measured at one pose, so they do not
+    transfer. Re-run and re-pin them."""
     rp = RobotParams()
     corr_table = rho1_table(CORR_LEN, CELL)
     rng = np.random.default_rng(RNG_SEED)
@@ -583,11 +585,16 @@ def gate2_clark_vs_mc(device: str, element: str = "sphere", traj: str = "sphere"
         scene, _, _, _, sigma, poses, omega, _ = build_case(int(sd), "hybrid", "all")
         belief = scene.elevation.astype(np.float32)
         ny, nx = belief.shape
+        # `controlled` is only populated by a rollout -- reading it straight after the
+        # constructor gave an all-zero array (see docstring). Match `run_seed`: run the
+        # adjoint for the sphere, and re-derive the matched trajectory for the cylinder.
         h_ = Harness(scene, poses, omega, device=device)
-        controlled = h_.sim.controlled.numpy()  # [T+1, K, 3] -- yaw identically 0, see docstring
-        del h_
-        if traj == "matched":
+        if element == "cylinder":
             controlled, _ = mt.cylinder_controlled_trajectory(scene, poses, omega, device=device)
+        else:
+            h_.adjoint(dilate=True, leaf="elevation")
+            controlled = h_.sim.controlled.numpy()  # [T+1, K, 3]
+        del h_
         plan = int(rng.integers(0, N_PLANS))
         margin_cells = 12  # keep the case interior: no true-grid-edge clamping in the MC patch
         for _try in range(50):
