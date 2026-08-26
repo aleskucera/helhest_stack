@@ -9,31 +9,31 @@
  },
  "var_error": {
   "assumed_single_term": {
-   "median": 1.484561518547977,
-   "mean": 1.4812354260712002,
-   "max": 2.3083106168693512,
+   "median": 1.4689486630981077,
+   "mean": 1.4876748876239465,
+   "max": 2.311972878990555,
    "note": "the PRODUCTION assumption rho1_table(CORR_LEN, CELL) outer rho1_table -- what plan_moments_conv's own Var[J] already uses -- checked against the dense (no-approximation) quadratic form under the measured rho_stationary"
   },
   "rank_m_psd_projected": {
    "1": {
-    "median": 0.07069231438358284,
-    "mean": 0.07051477813188023,
-    "max": 0.17269265475360698
+    "median": 0.0787710668492251,
+    "mean": 0.0766758358730199,
+    "max": 0.1812786192272076
    },
    "2": {
-    "median": 0.021388968119336015,
-    "mean": 0.021351673245724144,
-    "max": 0.05886598300565698
+    "median": 0.02050641825834909,
+    "mean": 0.02236136240523189,
+    "max": 0.06109256618925837
    },
    "3": {
-    "median": 0.01422069740540877,
-    "mean": 0.020254439376747965,
-    "max": 0.07083987910267951
+    "median": 0.013488152931548727,
+    "mean": 0.02109048974282049,
+    "max": 0.07641382695610273
    },
    "5": {
-    "median": 0.014154360146102097,
-    "mean": 0.020893246647695162,
-    "max": 0.06991087123238122
+    "median": 0.01429034365180411,
+    "mean": 0.02109348909317668,
+    "max": 0.07558885529468079
    }
   }
  },

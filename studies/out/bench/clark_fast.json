@@ -3,98 +3,98 @@
   {
    "seed": 0,
    "max_abs_dE": 0.0,
-   "max_abs_dVar": 0.0,
+   "max_abs_dVar": 8.881784197001252e-16,
    "rel_dE": 0.0,
-   "ref_s_per_plan": 0.05003756518726732,
-   "lean_s_per_plan": 0.013156155125216173,
-   "speedup": 3.8033577980059836
+   "ref_s_per_plan": 0.11580017262531328,
+   "lean_s_per_plan": 0.11086344450086472,
+   "speedup": 1.0445298100440137
   },
   {
    "seed": 1,
    "max_abs_dE": 0.0,
-   "max_abs_dVar": 0.0,
+   "max_abs_dVar": 4.440892098500626e-16,
    "rel_dE": 0.0,
-   "ref_s_per_plan": 0.05107548243722704,
-   "lean_s_per_plan": 0.013457772812216717,
-   "speedup": 3.7952403529105245
+   "ref_s_per_plan": 0.11676642187558173,
+   "lean_s_per_plan": 0.10961571749976429,
+   "speedup": 1.0652342979539664
   },
   {
    "seed": 2,
    "max_abs_dE": 0.0,
-   "max_abs_dVar": 0.0,
+   "max_abs_dVar": 4.440892098500626e-16,
    "rel_dE": 0.0,
-   "ref_s_per_plan": 0.04931146406215703,
-   "lean_s_per_plan": 0.013333618750039022,
-   "speedup": 3.698280638331039
+   "ref_s_per_plan": 0.11481659449964354,
+   "lean_s_per_plan": 0.1110240370635438,
+   "speedup": 1.0341597868030064
   },
   {
    "seed": 3,
    "max_abs_dE": 0.0,
-   "max_abs_dVar": 0.0,
+   "max_abs_dVar": 4.440892098500626e-16,
    "rel_dE": 0.0,
-   "ref_s_per_plan": 0.04824586599988834,
-   "lean_s_per_plan": 0.013597561062852037,
-   "speedup": 3.5481264453883576
+   "ref_s_per_plan": 0.12038279062471702,
+   "lean_s_per_plan": 0.10874399762542453,
+   "speedup": 1.1070292913028914
   },
   {
    "seed": 4,
    "max_abs_dE": 0.0,
-   "max_abs_dVar": 0.0,
+   "max_abs_dVar": 4.440892098500626e-16,
    "rel_dE": 0.0,
-   "ref_s_per_plan": 0.04654654687510629,
-   "lean_s_per_plan": 0.0132285340632734,
-   "speedup": 3.5186473915000334
+   "ref_s_per_plan": 0.11765985068814189,
+   "lean_s_per_plan": 0.11534590393785038,
+   "speedup": 1.0200609355971435
   },
   {
    "seed": 5,
    "max_abs_dE": 0.0,
-   "max_abs_dVar": 0.0,
+   "max_abs_dVar": 8.881784197001252e-16,
    "rel_dE": 0.0,
-   "ref_s_per_plan": 0.04468885918686283,
-   "lean_s_per_plan": 0.013030462812821497,
-   "speedup": 3.4295680689783814
+   "ref_s_per_plan": 0.11329840250073175,
+   "lean_s_per_plan": 0.11338266624989046,
+   "speedup": 0.9992568198301759
   },
   {
    "seed": 6,
    "max_abs_dE": 0.0,
-   "max_abs_dVar": 0.0,
+   "max_abs_dVar": 4.440892098500626e-16,
    "rel_dE": 0.0,
-   "ref_s_per_plan": 0.0519304598119561,
-   "lean_s_per_plan": 0.01335528556319332,
-   "speedup": 3.888382585773722
+   "ref_s_per_plan": 0.11601078937565035,
+   "lean_s_per_plan": 0.10679070900005172,
+   "speedup": 1.0863378515034876
   },
   {
    "seed": 7,
    "max_abs_dE": 0.0,
-   "max_abs_dVar": 0.0,
+   "max_abs_dVar": 8.881784197001252e-16,
    "rel_dE": 0.0,
-   "ref_s_per_plan": 0.04906648193809815,
-   "lean_s_per_plan": 0.013266853499771969,
-   "speedup": 3.6984264534873703
+   "ref_s_per_plan": 0.11799451962542662,
+   "lean_s_per_plan": 0.11022705156392476,
+   "speedup": 1.0704678928747107
   },
   {
    "seed": 8,
    "max_abs_dE": 0.0,
-   "max_abs_dVar": 0.0,
+   "max_abs_dVar": 8.881784197001252e-16,
    "rel_dE": 0.0,
-   "ref_s_per_plan": 0.04889810193708399,
-   "lean_s_per_plan": 0.013632284937557415,
-   "speedup": 3.5869336770072957
+   "ref_s_per_plan": 0.11800961774861207,
+   "lean_s_per_plan": 0.10971345999860205,
+   "speedup": 1.075616590253518
   },
   {
    "seed": 9,
    "max_abs_dE": 0.0,
-   "max_abs_dVar": 0.0,
+   "max_abs_dVar": 4.440892098500626e-16,
    "rel_dE": 0.0,
-   "ref_s_per_plan": 0.04966076562504895,
-   "lean_s_per_plan": 0.01351777262516407,
-   "speedup": 3.673738788341707
+   "ref_s_per_plan": 0.11609358356145094,
+   "lean_s_per_plan": 0.10837151650048327,
+   "speedup": 1.0712555043089504
   }
  ],
  "max_rel_dE": 0.0,
- "max_abs_dVar": 0.0,
- "median_ref_ms": 49.18897300012759,
- "median_lean_ms": 13.344452156616171,
- "median_speedup": 3.6860097133363734,
- "mc_256_s_per_plan": 0.006393215002026409
+ "max_abs_dVar": 8.881784197001252e-16,
+ "median_ref_ms": 116.43000271851633,
+ "median_lean_ms": 109.9702557812634,
+ "median_speedup": 1.0678510954143385,
+ "mc_256_s_per_plan": 0.007310585194500163
 }
