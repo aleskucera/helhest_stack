@@ -953,6 +953,7 @@ def traction_twist(
 @wp.func
 def step_predict(
     env_i: wp.array2d(dtype=wp.float32),
+    grid_env: Grid,  # grid of `env_i` -- the full map, or a local patch (see `patch_grid`)
     fric_i: wp.array2d(dtype=wp.float32),
     grid: Grid,
     robot: Robot,
@@ -965,19 +966,21 @@ def step_predict(
     tid: int,
     turn_out: wp.array(dtype=wp.vec2),  # [B] (alpha, x_icr) -> written at tid
     twist_out: wp.array(dtype=wp.vec3),  # [B] solved (vx, vy, yaw_rate) -> written at tid
-) -> wp.vec4:
-    """Grip-weighted ICR + turn resistance from the CURRENT pose, then Euler integrate. Write
-    turn_out[tid]=(alpha, x_icr); return the predicted (pre-settle) pose and alpha as
-    (xn, yn, yawn, alpha) -- `step_finalize` needs alpha to rebuild the twist, and returning it
-    beats re-reading the output array inside the kernel (that would put a read-after-write on a
-    grad-tracked buffer in the taped path)."""
+) -> wp.vec3:
+    """Grip-weighted ICR + turn resistance from the CURRENT pose, then Euler integrate. Writes
+    turn_out[tid] = (alpha, x_icr) and twist_out[tid], and returns the predicted (pre-settle)
+    pose (xn, yn, yawn). alpha used to be returned alongside the pose for `step_finalize`, which
+    no longer reads it; `turn_out` is now its only destination.
+
+    The envelope carries its OWN grid: the taped cylinder path reads a local envelope patch
+    (`patch_grid`) while the friction it samples at the contact point stays on the full map."""
     x = pc[0]
     y = pc[1]
     yaw = pc[2]
     R = euler_zyx(yaw, tc[1], tc[2])
     p = wp.vec3(x, y, tc[0])
 
-    loads = normal_loads(env_i, grid, robot, R, p)  # per-wheel normal load N_i
+    loads = normal_loads(env_i, grid_env, robot, R, p)  # per-wheel normal load N_i
     mu = wp.vec3()  # per-wheel friction at the contact (the shear model needs them separately)
     total_grip = float(0.0)  # Sum_i grip_i
     grip_x = float(0.0)  # Sum_i grip_i * wheel_x  (x_icr = grip_x / total_grip)
@@ -985,7 +988,7 @@ def step_predict(
         st_i = wp.static(i)
         wheel_pos = robot.wheel_pos[st_i]
         wheel_center = p + R * wheel_pos
-        n = sample_normal(env_i, grid, wheel_center[0], wheel_center[1])
+        n = sample_normal(env_i, grid_env, wheel_center[0], wheel_center[1])
         ct = wheel_center - robot.wheel_radius * n  # contact point
         # grip_i = mu_scale * mu_i * N_i
         mu[st_i] = mu_scale * sample_field(fric_i, grid, ct[0], ct[1])
@@ -1012,21 +1015,18 @@ def step_predict(
         alpha = body_twist(robot, om, 1.0)[1] / wz
         x_icr = -vy / wz
     turn_out[tid] = wp.vec2(alpha, x_icr)
-    next_pose = integrate_pose(pc, vw, wz, solver.dt)
-    return wp.vec4(next_pose[0], next_pose[1], next_pose[2], alpha)
+    return integrate_pose(pc, vw, wz, solver.dt)
 
 
 @wp.func
 def step_finalize(
     env_i: wp.array2d(dtype=wp.float32),
+    grid_env: Grid,  # grid of `env_i` -- the full map, or a local patch (see `patch_grid`)
     elev_i: wp.array2d(dtype=wp.float32),
-    fric_i: wp.array2d(dtype=wp.float32),
     grid: Grid,
     robot: Robot,
     pose_next: wp.vec3,  # predicted (xn, yn, yawn)
     settled: wp.vec3,  # settled (z, pitch, roll) of the new pose
-    om: wp.vec3,  # (wL, wR, w_rear) realized this step
-    alpha: float,  # turn resistance used this step (from step_predict)
     tid: int,
     controlled_next: wp.array(dtype=wp.vec3),  # [B] -> written at tid
     derived_next: wp.array(dtype=wp.vec3),
@@ -1035,7 +1035,11 @@ def step_finalize(
     clear_soft_out: wp.array(dtype=float),
     resid_out: wp.array(dtype=float),
 ):
-    """Write the NEW state + diagnostics at tid from the predicted pose and its settled tilt."""
+    """Write the NEW state + diagnostics at tid from the predicted pose and its settled tilt.
+
+    Takes neither the wheel speeds nor alpha: the diagnostics here are functions of the POSE
+    alone. (They were parameters until the taped cylinder path, which runs this in a separate
+    launch from `step_predict`, had no honest value to pass for either.)"""
     controlled_next[tid] = pose_next
     derived_next[tid] = settled
     xn = pose_next[0]
@@ -1043,11 +1047,11 @@ def step_finalize(
     yawn = pose_next[2]
     Rn = euler_zyx(yawn, settled[1], settled[2])
     pn = wp.vec3(xn, yn, settled[0])
-    loads_out[tid] = normal_loads(env_i, grid, robot, Rn, pn)
+    loads_out[tid] = normal_loads(env_i, grid_env, robot, Rn, pn)
     cc = chassis_clearance(elev_i, grid, robot, Rn, pn)
     clear_out[tid] = cc[0]
     clear_soft_out[tid] = cc[1]
-    cres = clearances(env_i, grid, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
+    cres = clearances(env_i, grid_env, robot, xn, yn, yawn, settled[0], settled[1], settled[2])
     resid_out[tid] = wp.max(wp.max(wp.abs(cres[0]), wp.abs(cres[1])), wp.abs(cres[2]))
 
 
@@ -1120,8 +1124,9 @@ def step_kernel(
         current_wheel_omega_in[tid], target_wheel_omega[tid], solver.dt, solver.tau_motor
     )
     current_wheel_omega_out[tid] = omega
-    pred = step_predict(
+    pose_next = step_predict(
         envelope,
+        grid,
         friction,
         grid,
         robot,
@@ -1135,18 +1140,15 @@ def step_kernel(
         turn_out,
         twist_out,
     )
-    pose_next = wp.vec3(pred[0], pred[1], pred[2])
     settled = settle(envelope, grid, robot, solver, pose_next, tc)
     step_finalize(
         envelope,
+        grid,
         elevation,
-        friction,
         grid,
         robot,
         pose_next,
         settled,
-        omega,
-        pred[3],
         tid,
         controlled_next,
         derived_next,
@@ -1188,8 +1190,9 @@ def step_kernel_bt(
         current_wheel_omega_in[tid], target_wheel_omega[tid], solver.dt, solver.tau_motor
     )
     current_wheel_omega_out[tid] = omega
-    pred = step_predict(
+    pose_next = step_predict(
         envelope[tid],
+        grid,
         friction[tid],
         grid,
         robot,
@@ -1203,18 +1206,15 @@ def step_kernel_bt(
         turn_out,
         twist_out,
     )
-    pose_next = wp.vec3(pred[0], pred[1], pred[2])
     settled = settle_bt(envelope, tid, grid, robot, solver, pose_next, tc)
     step_finalize(
         envelope[tid],
+        grid,
         elevation[tid],
-        friction[tid],
         grid,
         robot,
         pose_next,
         settled,
-        omega,
-        pred[3],
         tid,
         controlled_next,
         derived_next,
@@ -1372,3 +1372,174 @@ def rollout_kernel(
 
         pc = pose_next  # carry state in registers (no global round-trip)
         tc = settled
+
+
+# ----------------------------------------------------------------------------
+# taped CYLINDER path: the rollout on local envelope patches
+# ----------------------------------------------------------------------------
+# The cylinder envelope is yaw-dependent and the taped terrain is per-rollout, so there is no grid
+# to share: `envelope/contact_patch/gather_patch` materialise one small square patch of envelope
+# per (rollout, timestep) instead of a [B, n_yaw, ny, nx] stack. These three kernels are the
+# `init_state_kernel_bt` / `step_kernel_bt` pair rewritten to read that patch -- same physics
+# (`step_predict`, `settle_bt`, `step_finalize` are the shared @wp.func bodies), same frozen-arg-max
+# gradient (`settle_bt`'s IFT adjoint scatters into the patch, whose own gather adjoint carries it
+# on to the raw elevation).
+#
+# The step is SPLIT in two launches because it reads the envelope at two different headings, as
+# `rollout_kernel` does: `step_predict` on the CURRENT pose's bin, the settle and the diagnostics on
+# the NEW pose's bin (`env_c`/`env_n` there). The new pose is what `step_predict` returns, so its
+# patch cannot exist before that launch has run -- predict writes `pose_next`, the host builds the
+# patch for it off-tape, and the settle launch consumes it. Patch t+1 then serves as the current
+# patch of step t+1, so the rollout builds T+1 patches, not 2T.
+
+
+@wp.func
+def patch_grid(grid: Grid, org: wp.vec2i, n: int) -> Grid:
+    """The `Grid` of one [n, n] envelope patch whose lower-left cell is `org` of `grid`.
+
+    The patch holds the full map's own cell centres, shifted by `org`, so
+    `sample_field(patch, patch_grid(grid, org, n), x, y)` reads exactly what
+    `sample_field(envelope, grid, x, y)` would -- `_locate`'s cell-centre convention is the same
+    map, translated. Built per THREAD because every rollout is somewhere else on the map.
+    """
+    pg = Grid()
+    pg.cells_x = n
+    pg.cells_y = n
+    pg.cell_size = grid.cell_size
+    pg.origin_x = grid.origin_x + float(org[0]) * grid.cell_size
+    pg.origin_y = grid.origin_y + float(org[1]) * grid.cell_size
+    return pg
+
+
+@wp.kernel
+def patch_anchor_kernel(
+    pose: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) the patch must cover
+    grid: Grid,
+    pad: int,  # patch half-width in cells (see `DifferentiableSimulator._patch_pad`)
+    n_yaw: int,
+    org: wp.array(dtype=wp.vec2i),  # [B] patch lower-left cell (x, y) -> written
+    bin_idx: wp.array(dtype=wp.int32),  # [B] yaw bin of the element to dilate with -> written
+):
+    """Where rollout b's envelope patch sits this step, and which yaw bin's element builds it.
+
+    The patch is centred on the pose's own cell (`_locate`'s convention, UNCLAMPED: a patch may
+    hang off the map, where the gather edge-replicates exactly as sampling the full grid clamps).
+    """
+    b = wp.tid()
+    p = pose[b]
+    ix = int(wp.floor((p[0] - grid.origin_x) / grid.cell_size - 0.5))
+    iy = int(wp.floor((p[1] - grid.origin_y) / grid.cell_size - 0.5))
+    org[b] = wp.vec2i(ix - pad, iy - pad)
+    bin_idx[b] = yaw_bin(p[2], n_yaw)
+
+
+@wp.kernel
+def init_state_kernel_bt_patch(
+    env_patch: wp.array3d(dtype=wp.float32),  # [B, P, P] per-rollout envelope patch
+    org: wp.array(dtype=wp.vec2i),  # [B] patch lower-left cell
+    n_patch: int,  # P
+    grid: Grid,
+    robot: Robot,
+    solver: Solver,
+    start_pose: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw)
+    controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] -> writes row 0
+    derived: wp.array2d(dtype=wp.vec3),  # [T+1, B] -> writes row 0
+):
+    """`init_state_kernel_bt` on the patch: rollout tid settles its start pose on env_patch[tid]."""
+    tid = wp.tid()
+    pc = start_pose[tid]
+    pg = patch_grid(grid, org[tid], n_patch)
+    z0 = sample_field(env_patch[tid], pg, pc[0], pc[1]) + robot.wheel_radius
+    settled = settle_bt(env_patch, tid, pg, robot, solver, pc, wp.vec3(z0, 0.0, 0.0))
+    controlled[0, tid] = pc
+    derived[0, tid] = settled
+
+
+@wp.kernel
+def predict_kernel_bt_patch(
+    env_patch: wp.array3d(dtype=wp.float32),  # [B, P, P] patch of the CURRENT heading
+    org: wp.array(dtype=wp.vec2i),  # [B] its lower-left cell
+    n_patch: int,
+    friction: wp.array3d(dtype=wp.float32),  # [B, ny, nx] on the FULL grid
+    mu_scale: wp.array(dtype=float),  # [B] per-rollout friction multiplier (1 = nominal)
+    grid: Grid,
+    robot: Robot,
+    solver: Solver,
+    target_wheel_omega: wp.array(dtype=wp.vec3),  # [B] commanded (wL, wR, w_rear) this step
+    current_wheel_omega_in: wp.array(dtype=wp.vec3),  # [B] lagged omega entering this step
+    controlled: wp.array(dtype=wp.vec3),  # [B] (x, y, yaw) current state
+    derived: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) current state
+    twist_in: wp.array(dtype=wp.vec3),  # [B] body twist entering this step
+    current_wheel_omega_out: wp.array(dtype=wp.vec3),  # [B] -> written
+    pose_next_out: wp.array(dtype=wp.vec3),  # [B] predicted pre-settle (x, y, yaw) -> written
+    turn_out: wp.array(dtype=wp.vec2),  # [B] (alpha, x_icr) -> written
+    twist_out: wp.array(dtype=wp.vec3),  # [B] solved body twist -> written
+):
+    """First half of a patched step: the motor lag and `step_predict` on the CURRENT heading's
+    patch. The predicted pose goes to a buffer instead of straight into the settle, because the
+    settle needs the NEW heading's patch, which cannot be built until this pose exists."""
+    tid = wp.tid()
+    omega = motor_lag_step(
+        current_wheel_omega_in[tid], target_wheel_omega[tid], solver.dt, solver.tau_motor
+    )
+    current_wheel_omega_out[tid] = omega
+    pg = patch_grid(grid, org[tid], n_patch)
+    pose_next = step_predict(
+        env_patch[tid],
+        pg,
+        friction[tid],
+        grid,
+        robot,
+        solver,
+        mu_scale[tid],
+        omega,
+        controlled[tid],
+        derived[tid],
+        twist_in[tid],
+        tid,
+        turn_out,
+        twist_out,
+    )
+    pose_next_out[tid] = pose_next
+
+
+@wp.kernel
+def settle_kernel_bt_patch(
+    env_patch: wp.array3d(dtype=wp.float32),  # [B, P, P] patch of the NEW heading
+    org: wp.array(dtype=wp.vec2i),  # [B] its lower-left cell
+    n_patch: int,
+    elevation: wp.array3d(dtype=wp.float32),  # [B, ny, nx] raw terrain (belly clearance)
+    grid: Grid,
+    robot: Robot,
+    solver: Solver,
+    pose_next: wp.array(dtype=wp.vec3),  # [B] predicted pose from `predict_kernel_bt_patch`
+    derived: wp.array(dtype=wp.vec3),  # [B] (z, pitch, roll) current state = settle warm start
+    controlled_next: wp.array(dtype=wp.vec3),  # [B] -> written
+    derived_next: wp.array(dtype=wp.vec3),
+    loads_out: wp.array(dtype=wp.vec3),
+    clear_out: wp.array(dtype=float),
+    clear_soft_out: wp.array(dtype=float),
+    resid_out: wp.array(dtype=float),
+):
+    """Second half of a patched step: settle the predicted pose on the NEW heading's patch and
+    write the state + diagnostics."""
+    tid = wp.tid()
+    pg = patch_grid(grid, org[tid], n_patch)
+    pn = pose_next[tid]
+    settled = settle_bt(env_patch, tid, pg, robot, solver, pn, derived[tid])
+    step_finalize(
+        env_patch[tid],
+        pg,
+        elevation[tid],
+        grid,
+        robot,
+        pn,
+        settled,
+        tid,
+        controlled_next,
+        derived_next,
+        loads_out,
+        clear_out,
+        clear_soft_out,
+        resid_out,
+    )

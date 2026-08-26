@@ -94,8 +94,10 @@ class RobotParams:  # host-side robot knobs — what you nudge
     # keeps 5 cm of margin per side and 0.20 keeps 10 cm -- all still far tighter than the sphere.
     # Prefer widening this, or clear_margin / max_roll, over going back to the sphere.
     #
-    # NOT usable with DifferentiableSimulator: the taped settle would need a yaw index threaded
-    # through it, so the gradient paths pass wheel_width=None explicitly.
+    # Usable with DifferentiableSimulator since 2026-08-26: the taped path binds the yaw at the
+    # patch, not inside the settle -- it builds a local envelope patch per (rollout, timestep) in
+    # that step's bin, so no yaw index has to be threaded through the custom-grad settle and no
+    # [B, n_yaw, ny, nx] stack is ever materialised.
     wheel_width: float | None = 0.10
     half_track: float = 0.365
     rear_offset: float = 0.75

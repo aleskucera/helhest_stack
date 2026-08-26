@@ -5,9 +5,10 @@ Run:  python -m tests.engine.golden           # check against the committed fixt
 
 This is the non-interference proof for engine work: a change that adds new outputs or
 opt-in parameters must leave every PRE-EXISTING output bit-identical with default
-parameters. The fixture pins one `ForwardSimulator` rollout (CPU and CUDA) and one
-`DifferentiableSimulator` forward+backward, B=8, T=16, on a seeded terrain/friction/
-control set.
+parameters. The fixture pins one `ForwardSimulator` rollout (CPU and CUDA) and two
+`DifferentiableSimulator` forward+backward passes -- the spherical wheel and the cylinder
+(`wheel_width`), which take different envelope paths -- B=8, T=16, on a seeded
+terrain/friction/control set.
 
 Forward arrays are compared EXACTLY (bit-identical). The two gradient arrays are compared
 with a tolerance instead: the envelope-adjoint scatter uses atomics, so summation order --
@@ -84,10 +85,12 @@ def _controls() -> tuple[np.ndarray, np.ndarray]:
 
 def _forward_outputs(sim: ForwardSimulator | DifferentiableSimulator) -> dict[str, np.ndarray]:
     """Every pre-existing output array of a simulator, as numpy."""
-    names = ["envelope", "controlled", "derived", "current_wheel_omega", "loads", "turning"]
-    names += ["clearance", "clear_soft", "residual"]
-    # `clear_soft` only exists on branches carrying the tie-free belly hinge -- pin whatever the
-    # simulator actually exposes, so the fixture stays a complete snapshot after a merge.
+    names = ["envelope", "env_patch", "controlled", "derived", "current_wheel_omega", "loads"]
+    names += ["turning", "clearance", "clear_soft", "residual"]
+    # `clear_soft` only exists on branches carrying the tie-free belly hinge, and exactly one of
+    # `envelope` / `env_patch` exists (the spherical wheel dilates the whole map, the cylinder
+    # builds per-step patches) -- pin whatever the simulator actually exposes, so the fixture stays
+    # a complete snapshot after a merge.
     return {n: getattr(sim, n).numpy() for n in names if hasattr(sim, n)}
 
 
@@ -112,8 +115,13 @@ def _run_forward(device: str) -> dict[str, np.ndarray]:
     return _forward_outputs(sim)
 
 
-def _run_differentiable(device: str) -> dict[str, np.ndarray]:
-    """One taped `DifferentiableSimulator` rollout + backward of the seeded batch."""
+def _run_differentiable(device: str, wheel_width: float | None = None) -> dict[str, np.ndarray]:
+    """One taped `DifferentiableSimulator` rollout + backward of the seeded batch.
+
+    `wheel_width=None` is the spherical wheel (one dilated envelope grid); a float is the cylinder
+    (a local envelope patch per rollout and step, in that step's yaw bin). Both are pinned: the
+    sphere because it must not move when the cylinder path is worked on, the cylinder because it
+    is now what the benchmarks' gradient baselines run."""
     elevation, friction = _scene()
     start, omega = _controls()
     rng = np.random.default_rng(SEED + 2)
@@ -125,7 +133,7 @@ def _run_differentiable(device: str) -> dict[str, np.ndarray]:
     fric_stack = np.repeat(friction[None], BATCH, axis=0)
 
     sim = DifferentiableSimulator(
-        RobotParams(wheel_width=None),  # sphere: DifferentiableSimulator requires it
+        RobotParams(wheel_width=wheel_width),
         SolverParams(),
         GridParams(CELLS_X, CELLS_Y, CELL, *ORIGIN),
         BATCH,
@@ -152,6 +160,7 @@ def collect(device: str = "cuda") -> dict[str, np.ndarray]:
         ("fwd_cpu", _run_forward("cpu")),
         ("fwd_cuda", _run_forward(device)),
         ("diff_cuda", _run_differentiable(device)),
+        ("diff_cuda_cyl", _run_differentiable(device, wheel_width=0.10)),
     ):
         for name, value in arrays.items():
             out[f"{key}.{name}"] = value

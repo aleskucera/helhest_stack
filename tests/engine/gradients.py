@@ -669,9 +669,216 @@ def _selftest_bptt():
     print(f"BPTT d/dHenv,d/dHmu vs FD  worst={worst:.2e}  {'OK' if worst < 5e-2 else 'REVIEW'}")
 
 
+# ---------------------------------------------------------------------------------------------
+# the CYLINDER wheel: the same d(loss)/d(raw elevation) check, through the taped patch path
+# ---------------------------------------------------------------------------------------------
+# Everything above runs the SPHERE, whose envelope is one dilated grid. The cylinder element is
+# yaw-dependent, so `DifferentiableSimulator` builds a local envelope patch per (rollout, timestep)
+# in that step's yaw bin (`engine/envelope.py`). The derivative is taken exactly as before -- the
+# arg-max frozen off the tape, the gather differentiated -- so the check that it is RIGHT is the
+# same one: perturb a raw elevation cell, and compare the analytic gradient against a central
+# difference of the true forward, which re-runs the arg-max and so includes contact switching.
+#
+# CUDA-only (`DifferentiableSimulator` is), and per-rollout rather than shared-terrain, so it
+# cannot reuse `_fwd_h`'s CPU scaffolding. The rollouts differ only in START HEADING, which is what
+# puts the "at several yaws" in this check: each one dilates with a different bin's element.
+
+
+@wp.kernel
+def _term_kernel(
+    derived: wp.array2d(dtype=wp.vec3),  # [T+1, B] (z, pitch, roll)
+    controlled: wp.array2d(dtype=wp.vec3),  # [T+1, B] (x, y, yaw)
+    w_der: wp.vec3,
+    w_ctrl: wp.vec3,
+    n_steps: int,
+    terms: wp.array(dtype=float),  # [B] this rollout's scalar -> written
+):
+    """Per-ROLLOUT scalar: the settle weighted over the whole horizon, plus the final pose.
+
+    Per rollout, not one batch sum, for finite differences' sake: a perturbation of rollout b's
+    terrain only moves term b, and differencing a number of size ~10 in float32 resolves ~1e-6
+    where differencing the batch sum would resolve ~1e-5 and drown the gradient of a single cell.
+    """
+    b = wp.tid()
+    acc = wp.dot(w_ctrl, controlled[n_steps, b])
+    for t in range(n_steps + 1):
+        acc += wp.dot(w_der, derived[t, b])
+    terms[b] = acc
+
+
+W_DER = wp.vec3(1.0, 0.7, 0.5)  # (z, pitch, roll): the study's settle-cost weights
+W_CTRL = wp.vec3(0.3, 0.3, 0.2)
+
+
+def _cyl_sim(scene, poses, omega, wheel_width, cell, origin, device="cuda:0"):
+    """A `DifferentiableSimulator` on `scene` (broadcast to one slice per rollout) + its loss."""
+    from helhest.engine import DifferentiableSimulator, GridParams, RobotParams, SolverParams
+
+    ny, nx = scene.shape
+    B, T = len(poses), omega.shape[0]
+    sim = DifferentiableSimulator(
+        RobotParams(wheel_width=wheel_width),
+        SolverParams(),
+        GridParams(nx, ny, cell, *origin),
+        B,
+        T,
+        device=device,
+    )
+    with wp.ScopedDevice(device):
+        sim.set_terrain(wp.array(np.repeat(scene[None], B, 0), dtype=wp.float32))
+        sim.set_friction(wp.array(np.full((B, ny, nx), 0.7, np.float32), dtype=wp.float32))
+        sim.terms = wp.zeros(B, dtype=float, requires_grad=True)
+    sim.start_pose.assign(np.ascontiguousarray(poses, np.float32))
+    sim.target_wheel_omega.assign(np.ascontiguousarray(omega, np.float32))
+    return sim
+
+
+@wp.kernel
+def _sum_terms(terms: wp.array(dtype=float), loss: wp.array(dtype=float)):
+    wp.atomic_add(loss, 0, terms[wp.tid()])
+
+
+def _cyl_loss(sim):
+    """Sum of the per-rollout terms -- the scalar the tape backpropagates."""
+    loss = wp.zeros(1, dtype=float, device=sim.device, requires_grad=True)
+    wp.launch(
+        _term_kernel,
+        sim.batch_size,
+        inputs=[sim.derived, sim.controlled, W_DER, W_CTRL, sim.n_steps],
+        outputs=[sim.terms],
+        device=sim.device,
+    )
+    wp.launch(_sum_terms, sim.batch_size, inputs=[sim.terms], outputs=[loss], device=sim.device)
+    return loss
+
+
+def _cyl_scene(nx, ny, cell, origin, seed=20260826):
+    rng = np.random.default_rng(seed)
+    xs = origin[0] + cell * np.arange(nx)
+    ys = origin[1] + cell * np.arange(ny)
+    X, Y = np.meshgrid(xs, ys)
+    h = 0.05 * X
+    for _ in range(30):
+        h += rng.uniform(-0.10, 0.22) * np.exp(
+            -((X - rng.uniform(xs[0], xs[-1])) ** 2 + (Y - rng.uniform(ys[0], ys[-1])) ** 2)
+            / (2.0 * rng.uniform(0.3, 0.9) ** 2)
+        )
+    return np.ascontiguousarray(h, np.float32)
+
+
+def _cyl_fd_stats(wheel_width, batch, steps, eps, n_cells, device, seed=7):
+    """Analytic vs central-difference d(loss)/d(raw elevation) on `n_cells` cells per rollout.
+
+    Returns (stats dict, worst-cell probe). The forward is re-run for every perturbation, so the
+    difference quotient sees the arg-max recomputed -- contact switching included, not assumed away.
+    """
+    cell, origin, nx, ny = 0.1, (-4.5, -4.5), 91, 91
+    scene = _cyl_scene(nx, ny, cell, origin)
+    yaws = np.linspace(0.0, np.pi, batch, endpoint=False) + 0.11
+    poses = np.stack(
+        [np.full(batch, -1.2), np.linspace(-0.8, 0.8, batch), yaws], axis=1
+    ).astype(np.float32)
+    rng = np.random.default_rng(seed)
+    omega = rng.uniform(0.8, 2.0, (steps, batch, 3)).astype(np.float32)
+
+    sim = _cyl_sim(scene, poses, omega, wheel_width, cell, origin, device)
+    sim.rollout_taped(_cyl_loss)
+    sim.backward()
+    g_an = sim.elevation.grad.numpy().copy()
+    stack = np.repeat(scene[None], batch, 0).astype(np.float32)
+
+    def fd_at(b, iy, ix, step):
+        pert = stack.copy()
+        pert[b, iy, ix] += step
+        sim.elevation.assign(np.ascontiguousarray(pert, np.float32))
+        sim.rollout_taped(_cyl_loss)
+        up = sim.terms.numpy()[b]
+        pert[b, iy, ix] -= 2 * step
+        sim.elevation.assign(np.ascontiguousarray(pert, np.float32))
+        sim.rollout_taped(_cyl_loss)
+        return (up - sim.terms.numpy()[b]) / (2 * step)
+
+    err, worst = [], (0.0, None)
+    for b in range(batch):
+        mag = np.abs(g_an[b])
+        cand = np.argwhere(mag > 0.05 * mag.max())
+        pick = cand[rng.choice(len(cand), size=min(n_cells, len(cand)), replace=False)]
+        for iy, ix in pick:
+            fd = fd_at(b, iy, ix, eps)
+            e = abs(g_an[b, iy, ix] - fd)
+            err.append(e)
+            if e > worst[0]:
+                worst = (e, (b, int(iy), int(ix), float(g_an[b, iy, ix]), float(fd)))
+    err = np.array(err)
+    stats = {
+        "n": len(err),
+        "scale": float(np.abs(g_an).max()),
+        "median": float(np.median(err)),
+        "p90": float(np.percentile(err, 90)),
+        "max": float(err.max()),
+        "bins": sorted(int(v) for v in set(sim._patch_bin.numpy()[0]))
+        if wheel_width is not None
+        else [],
+    }
+    # the worst cell again at a fifth of the step: an active-set switch shrinks with eps, a wrong
+    # chain rule does not
+    b, iy, ix, ga, fd = worst[1]
+    probe = (b, iy, ix, ga, fd, fd_at(b, iy, ix, eps / 5.0))
+    del sim
+    return stats, probe
+
+
+def _selftest_cylinder_dh(batch=6, steps=12, eps=1e-4, n_cells=6, device="cuda:0"):
+    """d(loss)/d(raw elevation) through the CYLINDER patch path vs FD, at `batch` start headings.
+
+    Run against the SPHERE through the same scene, loss, poses and step, because that is the path
+    whose gradient the rest of this file (and Section III) already validates: the claim being
+    tested is not that the cylinder gradient is exact -- no frozen-arg-max gradient is, once the
+    active set moves -- but that it is as right as the sphere's, which the patch construction must
+    not degrade.
+
+    MEASURED, choosing eps: the difference quotient is taken on a per-rollout term of size ~10 in
+    float32, so it carries ~5e-3 of absolute noise at eps = 1e-4 and more below. Above it, the
+    step starts to cross contact switches: at the worst cell of this scene the quotient runs
+    1.91 (eps = 2e-3), 2.45 (5e-4), 3.4714 (1e-4) against an analytic 3.4705 -- converging on the
+    analytic value as the step shrinks inside the validity radius, which is what an active-set
+    switch looks like and a wrong chain rule does not.
+    """
+    wp.init()
+    out = {}
+    for tag, width in (("cylinder", 0.10), ("sphere", None)):
+        stats, probe = _cyl_fd_stats(width, batch, steps, eps, n_cells, device)
+        out[tag] = stats
+        bins = f" yaw bins {stats['bins']}" if stats["bins"] else ""
+        print(
+            f"  {tag:8s} {stats['n']} cells{bins}  ||g||={stats['scale']:.3f}  "
+            f"median={stats['median']:.2e}  p90={stats['p90']:.2e}  max={stats['max']:.2e}"
+        )
+        b, iy, ix, ga, fd, fd5 = probe
+        print(
+            f"  {tag:8s} worst cell b={b} ({iy},{ix}): analytic {ga:+.4f}  "
+            f"fd@{eps:g} {fd:+.4f}  fd@{eps/5:g} {fd5:+.4f}"
+        )
+    cyl, sph = out["cylinder"], out["sphere"]
+    ok = (
+        cyl["median"] < 5e-3 * cyl["scale"]
+        and cyl["p90"] < 2e-2 * cyl["scale"]
+        and cyl["median"] < 4.0 * sph["median"]
+    )
+    print(
+        f"cylinder d/d(raw h) vs FD  median={cyl['median']:.2e} "
+        f"(sphere {sph['median']:.2e})  {'OK' if ok else 'REVIEW'}"
+    )
+    assert ok, "the cylinder patch gradient is worse against FD than the sphere's whole-map one"
+
+
 if __name__ == "__main__":
     _selftest()
     _selftest_step_grad()
     _selftest_bptt()
     _selftest_dh()
     _selftest_batch()
+    if wp.get_cuda_device_count() > 0:
+        _selftest_cylinder_dh()
+    else:
+        print("cylinder d/d(raw h) vs FD  SKIPPED (no CUDA device)")

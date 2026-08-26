@@ -13,7 +13,9 @@ Three classes:
   - `DifferentiableSimulator`-- taped per-step rollout for gradient-based calibration: terrain and
                                 state buffers carry `.grad`; controls/start pose do NOT (we don't
                                 differentiate w.r.t. control). Terrain is ALWAYS per-rollout
-                                `[B, ny, nx]` -- each rollout calibrates its own grid.
+                                `[B, ny, nx]` -- each rollout calibrates its own grid. Both wheel
+                                elements: the sphere dilates that terrain once, the cylinder
+                                builds a local envelope patch per (rollout, timestep).
 The standalone FD oracle in tests/engine/gradients.py still keeps its own buffers.
 """
 
@@ -26,14 +28,21 @@ from warp import Device
 from .envelope import _contact_kernel
 from .envelope import _contact_table_kernel
 from .envelope import _gather_kernel
+from .envelope import contact_patch
+from .envelope import cyl_bin_tables
 from .envelope import cylinder_offset_table
 from .envelope import gather_bt
+from .envelope import gather_patch
 from .envelope import make_tiled_contact
 from .envelope import pad_edge
 from .envelope import wheel_offset_table
 from .robot import RobotParams
 from .step import init_state_kernel_bt
+from .step import init_state_kernel_bt_patch
+from .step import patch_anchor_kernel
+from .step import predict_kernel_bt_patch
 from .step import rollout_kernel
+from .step import settle_kernel_bt_patch
 from .step import SolverParams
 from .step import step_kernel_bt
 from .terrain import GridParams
@@ -41,8 +50,10 @@ from .terrain import GridParams
 DILATE_TILE = 16  # output tile size for the batched tiled dilation (DifferentiableSimulator)
 # Yaw bins for the CYLINDER wheel envelope (RobotParams.wheel_width). The bin must not shift the
 # contact by more than a cell: R * dpsi <= cell -> dpsi <= 0.1/0.35 = 0.29 rad = 16 deg, so >= 22
-# bins over the circle; 32 rounds that up. Costs n_yaw x the envelope grid (1.6 MB at the real
-# 0.1 m cell) and n_yaw dilations per perception frame, nothing per rollout.
+# bins over the circle; 32 rounds that up. In ForwardSimulator it costs n_yaw x the envelope grid
+# (1.6 MB at the real 0.1 m cell) and n_yaw dilations per perception frame, nothing per rollout; in
+# DifferentiableSimulator it costs nothing at all -- the bin only selects which element dilates a
+# patch that is built per step regardless.
 # Slices span [0, PI): a capsule at yaw and yaw+PI is the same shape, so a 2*PI stack is
 # half redundant. 32 here is PI/32 = 5.6 deg -- the same resolution the previous 64-over-2*PI
 # gave, at half the dilation cost and half the memory. See step.yaw_bin.
@@ -360,14 +371,27 @@ class DifferentiableSimulator(BaseSimulator):
     Gradients flow to the raw terrain (`elevation`/`friction`) and the state buffers
     (`controlled`/`derived`); controls (`target_wheel_omega`) and `start_pose` are NOT grad-tracked -- we
     don't differentiate w.r.t. control, and a non-grad leaf simply skips its gradient without
-    breaking the terrain chain. The dilation is split: a shared-memory tiled arg-max CONTACT runs
-    off-tape (fast, non-diff) and the GATHER runs on-tape (envelope = elevation[contact] + cap), so
+    breaking the terrain chain. The dilation is split: the arg-max CONTACT runs off-tape (fast,
+    non-diff) and the GATHER runs on-tape (envelope = elevation[contact] + cap), so
     `d(loss)/d(raw elevation)` flows through the cheap scatter adjoint -- the analytical gradient,
-    not autodiff of the convolution.
+    not autodiff of the convolution. That split is the gradient: the active set is frozen, and the
+    derivative is exact for as long as it stays frozen (`contact_margin` / `patch_margin` measure
+    how far that is).
 
-    CUDA-only (the tiled contact needs GPU shared memory). NOTE: per-rollout terrain costs B x the
-    grid memory (x2 for grads), so B is the number of calibration episodes (10s-100s), not the
-    thousands used for planning.
+    BOTH WHEEL ELEMENTS, in the same split:
+      - `wheel_width=None`, the sphere: yaw-invariant, so one shared-memory tiled dilation of the
+        [B, ny, nx] terrain serves every heading and every step. `envelope` is that grid.
+      - `wheel_width=w`, the cylinder: yaw-DEPENDENT, so there is no grid to share. Each step
+        materialises a robot-sized square envelope patch per rollout, in that step's yaw bin
+        (`env_patch`, `_alloc_cylinder`); the whole-map alternative is a [B, n_yaw, ny, nx] stack,
+        measured at 11.8 GB on the deployed node's shape. The step then runs in two launches
+        instead of one, because it reads the envelope at two headings -- `step_predict` on the
+        current one, the settle and the diagnostics on the new one, exactly as `rollout_kernel`
+        does with its `env_c` / `env_n`.
+
+    CUDA-only (the sphere's tiled contact needs GPU shared memory). NOTE: per-rollout terrain costs
+    B x the grid memory (x2 for grads), so B is the number of calibration episodes (10s-100s), not
+    the thousands used for planning.
     """
 
     def __init__(
@@ -386,16 +410,25 @@ class DifferentiableSimulator(BaseSimulator):
                 "DifferentiableSimulator is CUDA-only: the tiled arg-max contact needs GPU shared "
                 "memory. Build it with device='cuda'."
             )
-        if robot_params.wheel_width is not None:
-            raise NotImplementedError(
-                "wheel_width (the yaw-binned cylinder envelope) is implemented for "
-                "ForwardSimulator only: the taped path would need a [B, n_yaw, ny, nx] stack and "
-                "a yaw index through the custom-grad settle. Use wheel_width=None here."
-            )
-
+        self.wheel_width = robot_params.wheel_width
         self.tape: wp.Tape | None = None
         self._loss: wp.array | None = None
 
+        ny, nx = self.cells_y, self.cells_x
+        with wp.ScopedDevice(self.device):  # per-rollout terrain [B, ny, nx]
+            self.elevation = wp.zeros((batch_size, ny, nx), dtype=wp.float32, requires_grad=True)
+            self.friction = wp.zeros((batch_size, ny, nx), dtype=wp.float32, requires_grad=True)
+        if self.wheel_width is None:
+            self._alloc_sphere()
+        else:
+            self._alloc_cylinder()
+
+        # State/diagnostic buffers carry grad; controls + start pose do NOT (no control gradients).
+        self._alloc_rollout_buffers(requires_grad=True, control_grad=False)
+
+    def _alloc_sphere(self) -> None:
+        """Whole-map envelope buffers for the yaw-INVARIANT spherical wheel: one dilation of the
+        [B, ny, nx] terrain covers every heading and every step, so the envelope is a grid."""
         ny, nx = self.cells_y, self.cells_x
         R, T = self.env_radius, DILATE_TILE
         dy, dx, cap = wheel_offset_table(R, self.cell_size, self.wheel_radius)
@@ -405,21 +438,68 @@ class DifferentiableSimulator(BaseSimulator):
         self._tiled_contact = make_tiled_contact(R, T)
         self._n_tiles = ((ny + T - 1) // T, (nx + T - 1) // T)
         pny, pnx = self._n_tiles[0] * T + 2 * R, self._n_tiles[1] * T + 2 * R
-        with wp.ScopedDevice(self.device):  # per-rollout terrain [B, ny, nx]
-            self.elevation = wp.zeros((batch_size, ny, nx), dtype=wp.float32, requires_grad=True)
-            self.envelope = wp.zeros((batch_size, ny, nx), dtype=wp.float32, requires_grad=True)
-            self.friction = wp.zeros((batch_size, ny, nx), dtype=wp.float32, requires_grad=True)
-            self._best_k = wp.zeros((batch_size, ny, nx), dtype=wp.float32)  # contact offset
+        B = self.batch_size
+        with wp.ScopedDevice(self.device):
+            self.envelope = wp.zeros((B, ny, nx), dtype=wp.float32, requires_grad=True)
+            self._best_k = wp.zeros((B, ny, nx), dtype=wp.float32)  # contact offset
             # winner - runner-up of the dilation arg-max: how far the terrain must move for the
             # contact to flip, i.e. the radius in which the FROZEN-arg-max gradient is exact.
-            self.contact_margin = wp.zeros((batch_size, ny, nx), dtype=wp.float32)
-            self._elev_pad = wp.zeros((batch_size, pny, pnx), dtype=wp.float32)
+            self.contact_margin = wp.zeros((B, ny, nx), dtype=wp.float32)
+            self._elev_pad = wp.zeros((B, pny, pnx), dtype=wp.float32)
             self._off_dy = wp.array(dy, dtype=wp.int32)
             self._off_dx = wp.array(dx, dtype=wp.int32)
             self._off_cap = wp.array(cap, dtype=wp.float32)
 
-        # State/diagnostic buffers carry grad; controls + start pose do NOT (no control gradients).
-        self._alloc_rollout_buffers(requires_grad=True, control_grad=False)
+    def _alloc_cylinder(self) -> None:
+        """Local envelope PATCHES for the yaw-DEPENDENT cylinder wheel: one [P, P] patch per
+        (rollout, timestep), dilated with that step's yaw-bin element.
+
+        Sized from the robot, not the map. The envelope is read only under the wheels, so a patch
+        has to reach the farthest wheel centre (`half_track` or `rear_offset`), plus one cell for
+        `sample_normal`'s central difference, plus the bilinear stencil's second cell, plus the
+        pose's own offset inside its cell: `pad = ceil(reach / cell) + 3`, checked against the reads
+        the kernels actually make in `tests/engine/patch.py`. Nothing here scales with
+        `n_yaw x ny x nx` -- that stack measures 11.8 GB on the deployed node's shape.
+        """
+        rp = self.robot_params
+        reach = max(rp.half_track, rp.rear_offset)  # farthest wheel centre from the body origin
+        self._patch_pad = int(np.ceil(reach / self.cell_size)) + 3
+        self.patch_cells = 2 * self._patch_pad + 1
+        dy, dx, cap, k_real = cyl_bin_tables(
+            self.cell_size, self.wheel_radius, 0.5 * self.wheel_width, YAW_BINS
+        )
+        self.patch_k = int(k_real.max())  # candidates in the widest yaw bin's element
+        B, T, P = self.batch_size, self.n_steps, self.patch_cells
+        with wp.ScopedDevice(self.device):
+            # T+1 patches, not 2T: the patch a step settles onto is the one the NEXT step predicts
+            # from, exactly as `rollout_kernel` reuses its `env_n` as the following `env_c`.
+            self.env_patch = wp.zeros((T + 1, B, P, P), dtype=wp.float32, requires_grad=True)
+            self._patch_best_k = wp.zeros((T + 1, B, P, P), dtype=wp.int32)
+            # `contact_margin`'s patch twin: winner - runner-up per patch cell, i.e. the radius in
+            # which the frozen-arg-max gradient is exact. Per (step, rollout, patch cell), NOT
+            # map-shaped -- the cylinder has no one envelope for a whole rollout to share.
+            self.patch_margin = wp.zeros((T + 1, B, P, P), dtype=wp.float32)
+            self._patch_org = wp.zeros((T + 1, B), dtype=wp.vec2i)
+            self._patch_bin = wp.zeros((T + 1, B), dtype=wp.int32)
+            # the pre-settle pose, which the split step hands from `predict` to `settle`
+            self._pose_next = wp.zeros((T, B), dtype=wp.vec3, requires_grad=True)
+            self._off_dy = wp.array(dy, dtype=wp.int32)
+            self._off_dx = wp.array(dx, dtype=wp.int32)
+            self._off_cap = wp.array(cap, dtype=wp.float32)
+            self._k_real = wp.array(k_real, dtype=wp.int32)
+
+    @staticmethod
+    def patch_stack_bytes(batch_size: int, n_steps: int, patch_cells: int) -> int:
+        """Device memory an envelope-patch stack of this shape holds: the patch, its grad, the
+        frozen arg-max index and its margin, 4 bytes per patch cell each. A staticmethod so the
+        cost of a shape can be quoted (or compared against the [B, n_yaw, ny, nx] stack this
+        replaces) without building the simulator."""
+        return 4 * 4 * (n_steps + 1) * batch_size * patch_cells**2
+
+    def patch_bytes(self) -> int:
+        """This simulator's envelope-patch stack in bytes -- the cylinder path's dominant
+        allocation. O(B x T x patch); the map size does not appear in it."""
+        return self.patch_stack_bytes(self.batch_size, self.n_steps, self.patch_cells)
 
     def _contact(self) -> None:
         """Off-tape shared-memory tiled arg-max -> self._best_k (the contact offset per cell).
@@ -459,6 +539,57 @@ class DifferentiableSimulator(BaseSimulator):
             device=self.device,
         )
 
+    def _contact_patch(self, t: int, pose: wp.array) -> None:
+        """Off-tape: anchor step `t`'s envelope patch on `pose` and freeze its arg-max.
+
+        The patch twin of `_contact`, and non-differentiable for the same reason -- `_gather_patch`
+        supplies the gradient. `pose` is [B] (x, y, yaw): the start pose at t = 0, the pose the
+        previous step predicted afterwards. Both the patch's position and WHICH cylinder element
+        dilates it come from that pose, so the whole yaw dependence is resolved here, off the tape.
+        """
+        wp.launch(
+            patch_anchor_kernel,
+            self.batch_size,
+            inputs=[pose, self.grid, self._patch_pad, YAW_BINS],
+            outputs=[self._patch_org[t], self._patch_bin[t]],
+            device=self.device,
+        )
+        wp.launch(
+            contact_patch,
+            dim=(self.batch_size, self.patch_cells, self.patch_cells),
+            inputs=[
+                self.elevation,
+                self._patch_org[t],
+                self._patch_bin[t],
+                self._off_dy,
+                self._off_dx,
+                self._off_cap,
+                self._k_real,
+            ],
+            outputs=[self._patch_best_k[t], self.patch_margin[t]],
+            device=self.device,
+        )
+
+    def _gather_patch(self, t: int) -> None:
+        """envelope patch = elevation[frozen contact] + cap for step `t`. Recorded ON the tape: its
+        scatter adjoint IS d(envelope)/d(elevation), the same analytical gradient `_gather` gives
+        on the whole map -- the cylinder changes the candidate set, not how the derivative flows."""
+        wp.launch(
+            gather_patch,
+            dim=(self.batch_size, self.patch_cells, self.patch_cells),
+            inputs=[
+                self.elevation,
+                self._patch_org[t],
+                self._patch_bin[t],
+                self._patch_best_k[t],
+                self._off_dy,
+                self._off_dx,
+                self._off_cap,
+            ],
+            outputs=[self.env_patch[t]],
+            device=self.device,
+        )
+
     def set_terrain(self, elevation: wp.array) -> None:
         """Load a [B, ny, nx] device stack into the owned `elevation` buffer (copy + shape check).
         A convenience init helper -- `elevation` is a public calibration parameter you may also
@@ -492,7 +623,12 @@ class DifferentiableSimulator(BaseSimulator):
         The arg-max CONTACT is recomputed off-tape here (fresh for the current `elevation`, so
         in-place parameter updates need no `set_terrain`), then the cheap GATHER runs ON the tape so
         `d(loss)/d(raw elevation)` connects through envelope = elevation[contact] -- its scatter
-        adjoint is the analytical gradient. `elevation`/`friction` must already be set."""
+        adjoint is the analytical gradient. `elevation`/`friction` must already be set.
+
+        The CYLINDER (`wheel_width`) runs `_rollout_taped_patch` instead: same split, same adjoint,
+        but on a local envelope patch per (rollout, step) rather than one dilated map."""
+        if self.wheel_width is not None:
+            return self._rollout_taped_patch(loss_fn)
         self._contact()  # off-tape arg-max -> best_k, fresh for the current elevation
         wp.copy(
             self.current_wheel_omega[0], self.init_current_wheel_omega
@@ -538,6 +674,98 @@ class DifferentiableSimulator(BaseSimulator):
                     ],
                     device=self.device,
                 )
+            self._loss = loss_fn(self) if loss_fn is not None else None
+        return self._loss
+
+    def _rollout_taped_patch(self, loss_fn: Callable | None) -> wp.array | None:
+        """`rollout_taped` for the cylinder: the same recording, on per-step envelope patches.
+
+        The step is split in two launches because the envelope is read at TWO headings -- the
+        current one for `step_predict`, the new one for the settle and the diagnostics (the
+        `env_c` / `env_n` of `rollout_kernel`). The new pose is what predict returns, so its patch
+        is built between the two launches; patch t+1 is then reused as step t+1's current patch.
+
+        The tape is entered and left around each off-tape contact rather than wrapping everything:
+        the arg-max must stay OFF it (that is the frozen-arg-max gradient of Section III), while
+        every gather, settle and step launch goes on. `wp.Tape` accumulates across re-entry, so the
+        recorded sequence is the same one a single `with` block would hold, minus the arg-max.
+        """
+        wp.copy(self.current_wheel_omega[0], self.init_current_wheel_omega)  # off-tape seed
+        self.tape = wp.Tape()
+        self._contact_patch(0, self.start_pose)  # off-tape arg-max of the start pose's patch
+        with self.tape:
+            self._gather_patch(0)
+            wp.launch(
+                init_state_kernel_bt_patch,
+                self.batch_size,
+                inputs=[
+                    self.env_patch[0],
+                    self._patch_org[0],
+                    self.patch_cells,
+                    self.grid,
+                    self.robot,
+                    self.solver,
+                    self.start_pose,
+                ],
+                outputs=[self.controlled, self.derived],
+                device=self.device,
+            )
+        for t in range(self.n_steps):
+            with self.tape:
+                wp.launch(
+                    predict_kernel_bt_patch,
+                    self.batch_size,
+                    inputs=[
+                        self.env_patch[t],
+                        self._patch_org[t],
+                        self.patch_cells,
+                        self.friction,
+                        self.mu_scale,
+                        self.grid,
+                        self.robot,
+                        self.solver,
+                        self.target_wheel_omega[t],
+                        self.current_wheel_omega[t],
+                        self.controlled[t],
+                        self.derived[t],
+                        self.twist[t],
+                    ],
+                    outputs=[
+                        self.current_wheel_omega[t + 1],
+                        self._pose_next[t],
+                        self.turning[t],
+                        self.twist[t + 1],
+                    ],
+                    device=self.device,
+                )
+            self._contact_patch(t + 1, self._pose_next[t])  # off-tape, on the pose just predicted
+            with self.tape:
+                self._gather_patch(t + 1)
+                wp.launch(
+                    settle_kernel_bt_patch,
+                    self.batch_size,
+                    inputs=[
+                        self.env_patch[t + 1],
+                        self._patch_org[t + 1],
+                        self.patch_cells,
+                        self.elevation,
+                        self.grid,
+                        self.robot,
+                        self.solver,
+                        self._pose_next[t],
+                        self.derived[t],
+                    ],
+                    outputs=[
+                        self.controlled[t + 1],
+                        self.derived[t + 1],
+                        self.loads[t],
+                        self.clearance[t],
+                        self.clear_soft[t],
+                        self.residual[t],
+                    ],
+                    device=self.device,
+                )
+        with self.tape:
             self._loss = loss_fn(self) if loss_fn is not None else None
         return self._loss
 

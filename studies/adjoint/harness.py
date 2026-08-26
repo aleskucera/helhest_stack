@@ -146,9 +146,11 @@ class Harness:
         # h and the forward map carries small step discontinuities that FD reads as noise.
         solver = SolverParams(dt=dt, newton_iters=newton_iters, atol=0.0)
         grid = GridParams(nx, ny, scene.cell, scene.origin_x, scene.origin_y)
-        # wheel_width=None: DifferentiableSimulator is sphere-only (the taped path has no
-        # yaw-binned cylinder support -- see engine/simulator.py). RobotParams()'s own default
-        # is now the cylinder envelope (improve/robust-control merge), so this must be explicit.
+        # wheel_width=None pins the SPHERE. It is no longer forced -- the taped path took the
+        # cylinder on 2026-08-26 (local envelope patches, engine/simulator.py) -- but switching
+        # this harness moves every adjoint number in studies/out, so it is sequenced as its own
+        # change; see theory/HANDOFF_CYLINDER_GRADIENTS.md section 5. RobotParams()'s own default
+        # is the cylinder envelope, so the sphere has to be explicit either way.
         self.robot_params = RobotParams(clear_margin=STUDY_CLEAR_MARGIN, wheel_width=None)
         self.sim = DifferentiableSimulator(
             self.robot_params, solver, grid, self.batch_size, self.n_steps, device

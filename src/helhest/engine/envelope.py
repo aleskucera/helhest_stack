@@ -12,6 +12,14 @@ adjoint scatters to the arg-max (contact) cell. Implementations:
     (off-tape: a shared-memory tiled arg-max picking the offset `best_k`; needs an edge-padded input
     via `pad_edge`) + `gather_bt` (on-tape: envelope = elevation[contact] + cap, whose cheap scatter
     adjoint IS the analytical gradient -- no autodiff through the convolution).
+  - local PATCHES for DifferentiableSimulator's CYLINDER wheel -- `contact_patch` (off-tape) +
+    `gather_patch` (on-tape), the same split on a robot-sized square of envelope per (rollout,
+    timestep) instead of the whole map. The cylinder element is yaw-dependent, so there is no grid
+    to share across headings; see the section at the bottom of this file.
+
+The cylinder element itself is `cylinder_offset_table` (memoised as `cyl_table`, padded per yaw bin
+by `cyl_bin_tables`), binned over [0, PI) by `step.yaw_bin`. ONE definition, shared by
+ForwardSimulator, the taped patches and `helhest.risk.contact`.
 
 The batched contact also emits a `margin` = winner - runner-up. Freezing the arg-max makes the
 gradient exact ONLY while the arg-max cannot move, and `margin` is exactly how far the terrain
@@ -316,3 +324,124 @@ def make_tiled_contact(env_radius: int, tile: int = 16):
         )
 
     return contact_tiled
+
+
+# --- LOCAL envelope patches for the taped cylinder path (DifferentiableSimulator) -------------
+# The cylinder element is yaw-dependent, so the forward planner's trick -- dilate the whole grid
+# once per yaw bin and share it across every rollout and step -- does not carry over to the taped
+# path, whose terrain is per-rollout: that would be a [B, n_yaw, ny, nx] stack, MEASURED at 11.8 GB
+# on the deployed node's shape (B=4096, 150x150, 32 bins) against a 3.7 GB card.
+#
+# It is also unnecessary. The envelope is only ever READ under the wheels (`step.py`: `clearances`,
+# `settle`'s `sample_height_grad`, `normal_loads`' `sample_normal`), never away from the robot, so
+# the taped path materialises only a small square PATCH of the envelope per (rollout, timestep) --
+# large enough to cover every wheel-centre stencil of that step, in that step's yaw bin. Memory
+# becomes O(B x T x patch) instead of O(B x n_yaw x ny x nx), independent of the map size.
+#
+# The split is exactly the one the full-grid path uses and the one Section III studies: the arg-max
+# is frozen OFF the tape (`contact_patch` -> `best_k`) and only the gather runs ON it
+# (`gather_patch`), so the derivative is still the scatter adjoint of a frozen linear gather. What
+# changes is WHICH candidates the arg-max ranges over (the yaw bin's cylinder element instead of
+# the yaw-invariant disk) and WHERE it is evaluated (a patch per step instead of the whole map).
+
+
+def cyl_bin_tables(
+    cell_size: float, wheel_radius: float, half_width: float, n_bins: int = N_YAW_BINS
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Every yaw bin's cylinder element, padded into one `[n_bins, K]` table + `k_real`.
+
+    A kernel that picks its element per THREAD cannot hold a ragged list of per-bin tables, so the
+    `cyl_table` outputs are padded to the longest bin and the real count carried alongside. Padding
+    is never read -- every loop is bounded by `k_real[bin]`. (`helhest.risk.contact` builds the same
+    padded shape from the same `cyl_table`; it pads to its own compile-time `MAX_K` instead, because
+    its fold carries the candidates in fixed-length registers.)
+    """
+    tables = [cyl_table(cell_size, wheel_radius, half_width, b, n_bins) for b in range(n_bins)]
+    k_real = np.array([len(t[0]) for t in tables], np.int32)
+    K = int(k_real.max())
+    dy = np.zeros((n_bins, K), np.int32)
+    dx = np.zeros((n_bins, K), np.int32)
+    cap = np.zeros((n_bins, K), np.float32)
+    for b, (t_dy, t_dx, t_cap) in enumerate(tables):
+        k = len(t_dy)
+        dy[b, :k], dx[b, :k], cap[b, :k] = t_dy, t_dx, t_cap
+    return dy, dx, cap, k_real
+
+
+@wp.func
+def patch_source(org: wp.vec2i, i: int, j: int, dy: int, dx: int, ny: int, nx: int) -> wp.vec2i:
+    """Cell of the full `[ny, nx]` map that candidate offset (dy, dx) reads for patch cell (i, j).
+
+    Patch cell (i, j) IS map cell (org.y + i, org.x + j); out-of-map reads clamp, which
+    edge-replicates exactly as `_locate`'s clamp does when sampling the full grid, so a patch
+    hanging off the map border still reproduces the full-grid envelope there. The ONE place this
+    mapping lives -- the off-tape arg-max and the on-tape gather must agree on it cell for cell,
+    or the frozen index would point somewhere the forward never looked.
+    """
+    return wp.vec2i(
+        wp.clamp(org[0] + j + dx, 0, nx - 1),
+        wp.clamp(org[1] + i + dy, 0, ny - 1),
+    )
+
+
+@wp.kernel
+def contact_patch(
+    elevation: wp.array3d(dtype=wp.float32),  # [B, ny, nx] raw per-rollout terrain
+    org: wp.array(dtype=wp.vec2i),  # [B] patch lower-left cell (x, y) in map indices
+    bin_idx: wp.array(dtype=wp.int32),  # [B] yaw bin of this rollout at this step
+    off_dy: wp.array2d(dtype=wp.int32),  # [n_bins, K] padded element tables
+    off_dx: wp.array2d(dtype=wp.int32),
+    off_cap: wp.array2d(dtype=wp.float32),
+    k_real: wp.array(dtype=wp.int32),  # [n_bins] real candidates before the padding
+    best_k: wp.array3d(dtype=wp.int32),  # [B, P, P] arg-max candidate -> written
+    margin: wp.array3d(dtype=wp.float32),  # [B, P, P] winner - runner-up [m] -> written
+):
+    """Off-tape arg-max over one patch: the frozen contact of rollout `b`'s wheel element.
+
+    One thread per patch cell, walking that rollout's yaw-bin element in a runtime loop. Not
+    differentiable by construction -- `gather_patch` supplies the gradient -- so the comparison
+    chain costs no backward. `margin` is the winner-runner-up gap: how far the terrain must move
+    before this cell's arg-max flips, i.e. the radius inside which the frozen gradient is the true
+    derivative (Section III). Diagnostic only; it enters neither the envelope nor any gradient.
+    """
+    b, i, j = wp.tid()
+    ny = elevation.shape[1]
+    nx = elevation.shape[2]
+    bn = bin_idx[b]
+    best = float(-1.0e9)
+    second = float(-1.0e9)
+    bk = int(0)
+    for k in range(k_real[bn]):
+        q = patch_source(org[b], i, j, off_dy[bn, k], off_dx[bn, k], ny, nx)
+        lift = elevation[b, q[1], q[0]] + off_cap[bn, k]
+        if lift > best:
+            second = best
+            best = lift
+            bk = k
+        elif lift > second:
+            second = lift
+    best_k[b, i, j] = bk
+    margin[b, i, j] = best - second
+
+
+@wp.kernel
+def gather_patch(
+    elevation: wp.array3d(dtype=wp.float32),  # [B, ny, nx] raw per-rollout terrain
+    org: wp.array(dtype=wp.vec2i),  # [B] patch lower-left cell
+    bin_idx: wp.array(dtype=wp.int32),  # [B] yaw bin
+    best_k: wp.array3d(dtype=wp.int32),  # [B, P, P] frozen arg-max from `contact_patch`
+    off_dy: wp.array2d(dtype=wp.int32),
+    off_dx: wp.array2d(dtype=wp.int32),
+    off_cap: wp.array2d(dtype=wp.float32),
+    patch: wp.array3d(dtype=wp.float32),  # [B, P, P] envelope patch -> written
+):
+    """On-tape gather: patch = elevation[frozen contact] + cap. Its scatter adjoint IS
+    d(envelope)/d(elevation) -- the same analytical gradient the full-grid `gather_bt` gives, with
+    the cylinder's candidate set and evaluated only where the wheels read."""
+    b, i, j = wp.tid()
+    ny = elevation.shape[1]
+    nx = elevation.shape[2]
+    bn = bin_idx[b]
+    k = best_k[b, i, j]
+    q = patch_source(org[b], i, j, off_dy[bn, k], off_dx[bn, k], ny, nx)
+    patch[b, i, j] = elevation[b, q[1], q[0]] + off_cap[bn, k]
