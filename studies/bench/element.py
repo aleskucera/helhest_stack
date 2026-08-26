@@ -92,6 +92,59 @@ def _cyl_table(cell: float, radius: float, half_width: float, b: int, n_bins: in
     return t
 
 
+def crowned_offsets(
+    cell: float, radius: float, half_width: float, crown_radius: float, yaw: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The wheel as a TIRE: a surface of revolution whose tread is crowned across its width.
+
+    `cylinder_offsets` caps by the along-travel coordinate ALONE, so every cell of an
+    across-tread column carries the identical cap and the envelope's max over them is an EXACT
+    tie wherever the ground is level across the tread. A real tire is curved across its tread
+    too, which breaks that tie by construction rather than by relying on terrain roughness.
+
+    Model the tread profile as a circular arc of radius `crown_radius` (R_c). The wheel's radius
+    at axial offset `across` is then
+
+        rho(across) = radius - (R_c - sqrt(R_c^2 - across^2))
+
+    and the cap -- the height of the tire surface above its own lowest point, negated -- is
+
+        cap(along, across) = sqrt(rho(across)^2 - along^2) - radius.
+
+    ONE parameter spans both elements the study has used, which is why it is worth carrying as a
+    parameter rather than a third element:
+
+        R_c = radius    ->  rho = sqrt(radius^2 - across^2), cap = sqrt(radius^2 - across^2
+                            - along^2) - radius: the SPHERE, exactly.
+        R_c -> infinity ->  rho = radius: the flat-tread CYLINDER, exactly.
+
+    A measured tire sits between them, and the across-tread cap step it supplies is
+    approximately half_width^2 / (2 R_c) -- the quantity that sets the contact validity radius.
+    """
+    cos_y, sin_y = math.cos(yaw), math.sin(yaw)
+    env_radius = int(math.ceil(math.hypot(radius, half_width) / cell))
+    dy_l, dx_l, cap_l = [], [], []
+    for dy in range(-env_radius, env_radius + 1):
+        for dx in range(-env_radius, env_radius + 1):
+            wx, wy = dx * cell, dy * cell
+            along = wx * cos_y + wy * sin_y
+            across = -wx * sin_y + wy * cos_y
+            if abs(across) > half_width:
+                continue
+            if math.isinf(crown_radius):
+                rho = radius
+            else:
+                if abs(across) > crown_radius:
+                    continue
+                rho = radius - (crown_radius - math.sqrt(crown_radius**2 - across**2))
+            if rho <= 0.0 or abs(along) > rho:
+                continue
+            dy_l.append(dy)
+            dx_l.append(dx)
+            cap_l.append(math.sqrt(rho**2 - along**2) - radius)
+    return np.array(dy_l, np.int64), np.array(dx_l, np.int64), np.array(cap_l, np.float64)
+
+
 def element_offsets(
     element: str, cell: float, rp: RobotParams, yaw: np.ndarray, n_bins: int = N_YAW_BINS,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
