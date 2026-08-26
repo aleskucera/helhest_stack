@@ -77,6 +77,21 @@ def cylinder_offsets(
     return np.array(dy_l, np.int64), np.array(dx_l, np.int64), np.array(cap_l, np.float64)
 
 
+_CYL_TABLE_CACHE: dict = {}
+
+
+def _cyl_table(cell: float, radius: float, half_width: float, b: int, n_bins: int):
+    """`cylinder_offset_table` memoised on its arguments. The table is a deterministic function
+    of (cell, radius, half_width, bin), and profiling showed it being rebuilt on every call --
+    336 rebuilds across 48 plan evaluations, ~11% of the deployed cylinder path."""
+    key = (cell, radius, half_width, b, n_bins)
+    t = _CYL_TABLE_CACHE.get(key)
+    if t is None:
+        t = cylinder_offset_table(cell, radius, half_width, math.pi * b / n_bins)
+        _CYL_TABLE_CACHE[key] = t
+    return t
+
+
 def element_offsets(
     element: str, cell: float, rp: RobotParams, yaw: np.ndarray, n_bins: int = N_YAW_BINS,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -124,10 +139,8 @@ def element_offsets(
         # `engine/step.py::yaw_bin`, verbatim: floor(yaw / (PI/n) + 0.5), wrapped into [0, n).
         k = np.floor(yaw / (np.pi / n_bins) + 0.5).astype(np.int64)
         bins = ((k % n_bins) + n_bins) % n_bins
-        tables = {
-            b: cylinder_offset_table(cell, rp.wheel_radius, WHEEL_HALF_WIDTH, np.pi * b / n_bins)
-            for b in np.unique(bins)
-        }
+        tables = {b: _cyl_table(cell, rp.wheel_radius, WHEEL_HALF_WIDTH, int(b), n_bins)
+                  for b in np.unique(bins)}
         k_max = max(len(t[0]) for t in tables.values())
         # Build one padded row PER DISTINCT BIN, then gather. The per-node Python loop this
         # replaces cost ~14% of the estimator's runtime once the bilinear blend quadrupled the

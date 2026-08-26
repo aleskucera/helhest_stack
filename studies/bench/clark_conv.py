@@ -138,15 +138,37 @@ def fold_weights(
     return mean_run, w, order
 
 
+_TOEPLITZ_CACHE: dict = {}
+
+
+def _sym_toeplitz(n: int, kernel: np.ndarray) -> np.ndarray:
+    """[n, n] banded symmetric Toeplitz `M[i, j] = kernel[j - i + L]`, zero outside the band.
+
+    `field @ M` equals `np.convolve(row, kernel, mode="same")` for every row at once: the kernel
+    is symmetric, so `kernel[i - j + L] == kernel[j - i + L]` and the two agree exactly."""
+    key = (n, kernel.tobytes())
+    m = _TOEPLITZ_CACHE.get(key)
+    if m is None:
+        L = len(kernel) // 2
+        idx = np.arange(n)
+        d = idx[None, :] - idx[:, None] + L
+        m = np.where((d >= 0) & (d < len(kernel)), kernel[np.clip(d, 0, len(kernel) - 1)], 0.0)
+        _TOEPLITZ_CACHE[key] = m
+    return m
+
+
 def _separable_quadratic(
     field: np.ndarray, rho1: np.ndarray
 ) -> float:
     """<G, (G * rho1) * rho1> for a 2-D field, by two 1-D convolutions with the symmetric
     (2L-1)-tap kernel built from rho1. This is the plan's variance."""
     kernel = np.concatenate([rho1[:0:-1], rho1])
-    tmp = np.apply_along_axis(np.convolve, 1, field, kernel, mode="same")
-    tmp = np.apply_along_axis(np.convolve, 0, tmp, kernel, mode="same")
-    return float((field * tmp).sum())
+    # `apply_along_axis(np.convolve, ...)` is a PYTHON loop over every row and then every
+    # column -- profiling the deployed cylinder path showed ~5.5k np.convolve calls per 16
+    # plans. The same separable convolution is one banded symmetric Toeplitz matmul per axis,
+    # which BLAS does in a single call; the matrices depend only on (n, kernel) and are cached.
+    tmp = field @ _sym_toeplitz(field.shape[1], kernel)
+    return float((field * (_sym_toeplitz(field.shape[0], kernel) @ tmp)).sum())
 
 
 def plan_moments_conv(
