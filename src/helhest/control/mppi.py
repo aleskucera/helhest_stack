@@ -11,6 +11,7 @@ Kernels (all suffixed _kernel):
   _cost          per-rollout scalar cost J[B] (cost-to-go goal V^2 + graded-infeasible + effort/smooth)
   _minmax/_bisect_*/_count_below/_elite_u   CEM reweight (top-k elite mean) of U, on device
   _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
+  _risk          folds sqrt(Var[J]) from helhest.risk's contact estimator into J/Jsafe (opt-in)
 """
 
 from dataclasses import dataclass
@@ -18,12 +19,16 @@ from dataclasses import dataclass
 import numpy as np
 import warp as wp
 
+from ..engine.envelope import N_YAW_BINS
 from ..engine.robot import Robot
 from ..engine.simulator import ForwardSimulator
 from ..engine.terrain import _locate
 from ..engine.terrain import Grid
 from ..engine.terrain import sample_field
 from ..profiling import StageProfiler
+from ..risk.contact import DERIV_W_DEFAULT
+from ..risk.contact import WarpContactEstimator
+from ..risk.sigma import rho1_table
 
 
 def _n_bisect(n_cand: int) -> int:
@@ -73,6 +78,44 @@ class SamplingConfig:
     # elite mean only mixes candidates on the best candidate's side (obstacle dead ahead ->
     # commit early instead of averaging left- and right-passers into a straight-at-it mean).
     turn_mode_th: float = 0.5
+
+
+@dataclass
+class RiskConfig:
+    """Turns on the contact-uncertainty risk term: `helhest.risk.WarpContactEstimator` runs inside
+    the refine on the same trajectories the cost kernel scores, and its per-candidate sd enters
+    the cost (`CostParams.risk_sd` / `risk_sd_safe`).
+
+    What it buys. The rollout settles the robot on the BELIEVED terrain, so it can only tell you
+    how good a plan is if the map is right. The estimator propagates the map's per-cell sigma
+    through the wheel envelope and the settle to a variance on the same scalar cost, so a plan
+    that is merely UNCERTAIN can be ranked below one equally good in expectation but standing on
+    ground the robot has actually seen. `None` (the default) leaves MppiGpu exactly as it was --
+    nothing is allocated, nothing is launched.
+
+    What it costs. Three [n_rollouts, ny, nx] float32 accumulation grids, which is the dominant
+    allocation once it is on (`MppiGpu.risk_bytes()`), plus six kernel launches per refine.
+    MEASURED on a 90x90 map at T = 25: the estimator is 2.2 ms per refine at P = 128 and 8.7 ms
+    at P = 512, against 0.9-1.1 ms for the whole rest of the refine -- it DOMINATES, because the
+    sample/rollout/cost/CEM chain is latency-bound and nearly flat in P while this is not.
+
+    This config turns the COMPUTATION on; the two `CostParams` weights turn its EFFECT on. With
+    the weights at zero the moments are still computed every refine and readable off
+    `_risk_est.e_j` / `.var_j` for logging, and nothing enters the cost.
+    """
+
+    # [m] spatial correlation length of the map's height error. This is a SENSOR property, not a
+    # tuning knob: it sets how much the errors under one wheel cancel. 0 = independent per cell,
+    # which is unrealistically benign -- the envelope is a max over K cells and averages it away.
+    corr_len: float = 0.15
+    # (z, pitch, roll) weights of the scalar the estimator takes moments of. A cost choice.
+    deriv_w: tuple = DERIV_W_DEFAULT
+    # heading bins the wheel's structuring element is tabulated at; must match the engine's
+    # dilation binning or the two disagree about which element a pose sees
+    n_bins: int = N_YAW_BINS
+    # [m] flat per-cell sigma the map is initialised to, so the term is well-defined before the
+    # first `set_sigma`. Replace it per frame with `helhest.risk.map_sigma`.
+    sigma_init: float = 0.02
 
 
 @wp.struct
@@ -145,6 +188,16 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # routes. ~75 makes any forward-capable route win while a genuinely stuck robot (forward
     # progress impossible, V flat ahead) still backs out over remembered ground.
     reverse: float = 75.0
+    # --- contact-uncertainty risk (needs MppiGpu(risk=RiskConfig(...)); 0 = off) ---------------
+    # Weight on sqrt(Var[J]) from the contact estimator, per rollout, added to the TOTAL cost.
+    # Units: J is the horizon sum of deriv_w . (z, pitch, roll) in metres/radians, so sqrt(Var) is
+    # in the same units and risk_sd is dimensionless against the other weights.
+    risk_sd: float = 0.0
+    # The same term added to the SAFETY share instead, so it is worst-cased across the n_mu
+    # friction replicas rather than averaged over them. At the deployed n_mu = 1 the two are
+    # IDENTICAL (`_robust_j_kernel` is a copy there); they only diverge once robust-mu is on, and
+    # which one is right is an empirical question -- hence two weights rather than a guess.
+    risk_sd_safe: float = 0.0
 
     def build(self) -> CostWeights:
         cw = CostWeights()
@@ -516,6 +569,31 @@ def _robust_j_kernel(
     Jc[c] = worst_safe + mean_rest / float(n_mu)
 
 
+@wp.kernel
+def _risk_kernel(
+    var_j: wp.array(dtype=wp.float32),  # [B] Var[J] per rollout, from WarpContactEstimator
+    kappa: float,  # weight into the total cost only
+    kappa_safe: float,  # weight into the SAFETY share (worst-cased across the mu replicas)
+    J: wp.array(dtype=float),  # [B] modified in place
+    Jsafe: wp.array(dtype=float),  # [B] modified in place
+):
+    """Fold the contact estimator's per-rollout risk into the cost, in place.
+
+    A SEPARATE kernel rather than an argument to `_cost_kernel` on purpose: the selftests launch
+    `_cost_kernel` directly with an explicit input list, so extending its signature would break
+    them for no gain. Both weights zero -> MppiGpu never launches this at all.
+
+    `Jout` already contains `Jsafe` as a summand (see `_cost_kernel`), so a contribution to the
+    safety share must be added to BOTH to keep that invariant -- `_robust_j_kernel` subtracts
+    `Jsafe` out of `J` to separate the worst-cased part from the averaged one, and the identity
+    is what makes that subtraction meaningful."""
+    r = wp.tid()
+    sd = wp.sqrt(wp.max(var_j[r], 0.0))
+    safe_add = kappa_safe * sd
+    Jsafe[r] = Jsafe[r] + safe_add
+    J[r] = J[r] + kappa * sd + safe_add
+
+
 # --- CEM reweight (option B): elite = top-k lowest-cost candidates; U = their mean. Rank-based,
 # so the validity penalty can't blow up the weighting (invalid samples just don't make the
 # elite). The top-k threshold tau is found by device-side BISECTION (a host partition would
@@ -674,7 +752,12 @@ class MppiGpu:
     in-graph, so each replay draws fresh noise); on CPU it runs eager. Wraps a ForwardSimulator.
 
     `goal` and `start_pose` are device arrays set per replan, so the captured graph picks
-    up new values; the weights/sigma/wmax/elite_frac are baked at capture (fixed per planner)."""
+    up new values; the weights/sigma/wmax/elite_frac are baked at capture (fixed per planner).
+
+    Pass `risk=RiskConfig(...)` to price map uncertainty: `helhest.risk.WarpContactEstimator`
+    runs inside the captured refine on the same trajectories the cost kernel scores, and
+    `CostParams.risk_sd` weights its per-candidate sd into the cost. Off by default -- nothing is
+    allocated and no kernel is launched -- so the ten selftests are untouched by it."""
 
     def __init__(
         self,
@@ -684,6 +767,7 @@ class MppiGpu:
         n_theta: int = 16,
         seed: int = 0,
         profile: bool = False,
+        risk: RiskConfig | None = None,  # contact-uncertainty risk term; None = off (default)
     ):
         sampling = sampling or SamplingConfig()
 
@@ -708,6 +792,7 @@ class MppiGpu:
 
         # CEM elite count (over candidates)
         self.target_k = float(int(sampling.elite_frac * self.n_cand))
+        self.cost = cost  # host weights; the risk term reads its two from here at launch time
         self.cw = cost.build()  # host CostParams -> device CostWeights struct (weights only)
         # arm the saturation certificate from the sim's solver: total_grip is recovered from alpha
         # via k_turn, and the accel demand needs the rollout dt. k_turn <= 0 leaves it off.
@@ -744,6 +829,33 @@ class MppiGpu:
             # unknown-cell penalty is inert until a perception mask is supplied (set_measured)
             self.measured = wp.full((ny, nx), 1.0, dtype=wp.float32)
         self.set_mu_band()  # nominal mu (fills sim.mu_scale for the replica layout)
+
+        # --- contact-uncertainty risk (off unless a RiskConfig is passed) -----------------------
+        # The estimator runs on ALL n_rollouts, not on n_cand: each mu replica follows a different
+        # trajectory, so each has its own risk, and `_robust_j_kernel` is what collapses them --
+        # scoring n_cand would silently price the first replica's route for all of them.
+        self.risk = risk
+        self._risk_est = None
+        self._ctrl_view = None
+        self.sigma = None
+        if risk is not None:
+            with wp.ScopedDevice(self.device):
+                self.sigma = wp.full((ny, nx), float(risk.sigma_init), dtype=wp.float32)
+            self._risk_est = WarpContactEstimator(
+                ny, nx, sim.grid.cell_size, sim.grid.origin_x, sim.grid.origin_y,
+                sim.robot_params, rho1_table(risk.corr_len, sim.grid.cell_size),
+                self.n_rollouts, self.horizon, device=self.device, n_bins=risk.n_bins,
+                deriv_w=risk.deriv_w,
+            )
+            # [T+1, B] vec3f -> [T+1, B, 3] float32, ZERO COPY and built ONCE: it aliases the
+            # rollout's own pose buffer, so the estimator reads whatever the last rollout wrote
+            # with no marshalling inside the refine.
+            self._ctrl_view = self.sim.controlled.view(wp.float32)
+            if tuple(self._ctrl_view.shape) != (self.horizon + 1, self.n_rollouts, 3):
+                raise RuntimeError(  # a vec3f -> float32 view that is not [T+1, B, 3] would
+                    f"controlled view is {tuple(self._ctrl_view.shape)}, expected "
+                    f"{(self.horizon + 1, self.n_rollouts, 3)}"  # silently mis-index the poses
+                )
 
         # the grid the cost kernel samples the lattice field on: defaults to the sim grid, but a COARSER
         # grid can be set (set_lattice(V, grid)) so the routing field is solved at low resolution --
@@ -802,6 +914,27 @@ class MppiGpu:
         else:
             self.measured.assign(np.ascontiguousarray(mask, np.float32))
 
+    def set_sigma(self, sigma):
+        """Per-cell height uncertainty [m] on the SIM grid, for the contact-uncertainty risk term.
+
+        Build it with `helhest.risk.map_sigma(belief, measured, cell, ...)`, which is the study's
+        noise model: sensor noise growing with range and a pose-error marginal on observed cells,
+        and a distance-to-observed term on blind ones. Accepts a numpy array of the sim's
+        [ny, nx] shape or a device array. Copies into the stable buffer the captured graph reads,
+        so it can be called every frame without recapturing.
+        """
+        if self.sigma is None:
+            raise RuntimeError("risk term is off: construct MppiGpu(..., risk=RiskConfig())")
+        if isinstance(sigma, wp.array):
+            wp.copy(self.sigma, sigma)
+        else:
+            self.sigma.assign(np.ascontiguousarray(sigma, np.float32))
+
+    def risk_bytes(self) -> int:
+        """Device memory the risk term holds (0 when off). Dominated by the three
+        [n_rollouts, ny, nx] accumulation grids, so it scales with the batch."""
+        return 0 if self._risk_est is None else self._risk_est.grid_bytes()
+
     def set_lattice(self, V, grid=None):
         """Copy the orientation-aware cost-to-go V[ny', nx', n_theta] into the stable buffer the cost
         kernel reads. `grid` is the Grid V was solved on (a coarse grid for a low-res routing field);
@@ -841,6 +974,14 @@ class MppiGpu:
         self._prof.mark(1)  # sample done
         self.sim.rollout_launch()
         self._prof.mark(2)  # rollout done
+        # Contact-uncertainty risk, on the trajectories the rollout just wrote. Issued BEFORE the
+        # cost kernel so the two are independent launches the scheduler can overlap; the fold-in
+        # happens after both. Six asynchronous launches, no readback, capture-safe -- its three
+        # `zero_()` resets lower to cuMemsetD8Async on the capture stream. Timed inside the
+        # "cost" stage rather than given one of its own, so `timing_stats()` keeps the same four
+        # keys whether or not the term is on; T7 in the handoff measures it by comparison instead.
+        if self._risk_est is not None:
+            self._risk_est.moments(self.sim.elevation, self.sigma, self._ctrl_view)
         wp.launch(
             _cost_kernel,
             self.n_rollouts,
@@ -867,6 +1008,14 @@ class MppiGpu:
             outputs=[self.J, self.Jsafe],
             device=self.device,
         )
+        if self._risk_est is not None and (self.cost.risk_sd != 0.0 or self.cost.risk_sd_safe != 0.0):
+            wp.launch(
+                _risk_kernel,
+                self.n_rollouts,
+                inputs=[self._risk_est.var_j, self.cost.risk_sd, self.cost.risk_sd_safe],
+                outputs=[self.J, self.Jsafe],
+                device=self.device,
+            )
         # collapse the mu replicas: worst-replica safety + mean-replica goal/shaping
         wp.launch(
             _robust_j_kernel,

@@ -22,6 +22,7 @@ sigma), so `margin` is the linearisation-validity flag for anything propagating 
 through this dilation. Diagnostic only: it never enters the envelope or any gradient.
 """
 
+import functools
 import math
 
 import numpy as np
@@ -107,6 +108,37 @@ def cylinder_offset_table(
                 dx_l.append(dx)
                 cap_l.append(math.sqrt(wheel_radius**2 - along**2) - wheel_radius)
     return np.array(dy_l, np.int32), np.array(dx_l, np.int32), np.array(cap_l, np.float32)
+
+
+# Heading quantization the cylinder table is shared and gathered at. The cylinder element is not
+# yaw-invariant (see `cylinder_offset_table`), so every consumer that reuses a table across yaws
+# -- the dilation, and the risk estimator's structuring-element upload -- must bin at the SAME
+# resolution or they disagree about which element a pose sees.
+N_YAW_BINS = 32
+
+
+@functools.lru_cache(maxsize=None)
+def cyl_table(cell_size: float, wheel_radius: float, half_width: float, b: int, n_bins: int):
+    """`cylinder_offset_table` for yaw bin `b` of `n_bins` over [0, PI), memoised.
+
+    The table is a deterministic function of its arguments, and profiling the contact estimator
+    showed it being rebuilt on every call -- 336 rebuilds across 48 plan evaluations, ~11% of the
+    deployed cylinder path. Bins span [0, PI) because the element is symmetric under yaw -> yaw+PI.
+    """
+    return cylinder_offset_table(cell_size, wheel_radius, half_width, math.pi * b / n_bins)
+
+
+def wheel_half_width(rp) -> float:
+    """[m] half the wheel tread, from the robot's own `wheel_width`.
+
+    ONE definition. The tread is a ruler measurement that lives on `RobotParams`; the structuring
+    element needs its half. Carrying a second literal (`0.05`) alongside `wheel_width = 0.10` is
+    the same number stored twice, and they only agree until someone widens one of them.
+    `wheel_width = None` is the spherical envelope, which has no tread at all.
+    """
+    if rp.wheel_width is None:
+        raise ValueError("wheel_width is None (spherical envelope): no tread half-width exists")
+    return 0.5 * float(rp.wheel_width)
 
 
 @wp.kernel

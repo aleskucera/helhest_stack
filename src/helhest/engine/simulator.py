@@ -90,6 +90,10 @@ class BaseSimulator:
         self.n_steps = n_steps
 
         self.robot = robot_params.build(device)  # device Robot struct
+        # the HOST params too: `robot`/`grid` are device structs, and consumers that build their
+        # own geometry on the CPU (the risk estimator's structuring-element tables) need the
+        # dataclass, not a copy of the three scalars they happen to want today.
+        self.robot_params = robot_params
         self.solver = solver_params.build()  # device Solver struct
         self.command_delay_steps = int(round(solver_params.command_delay / solver_params.dt))
         self.grid = grid_params.build()  # Grid (fixed)

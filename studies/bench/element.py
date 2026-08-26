@@ -48,11 +48,17 @@ import math
 import numpy as np
 
 from helhest.engine import RobotParams
+from helhest.engine.envelope import cyl_table as _cyl_table
 from helhest.engine.envelope import cylinder_offset_table
+from helhest.engine.envelope import N_YAW_BINS
+from helhest.engine.envelope import wheel_half_width
 from helhest.engine.envelope import wheel_offset_table
 
-WHEEL_HALF_WIDTH = 0.05  # [m] half of the ruler-measured 0.10 m tread (engine/robot.py)
-N_YAW_BINS = 32  # heading quantization the cylinder table is shared/gathered at
+# [m] half the ruler-measured tread, DERIVED from the robot rather than restated. It was a
+# literal 0.05 beside `RobotParams.wheel_width = 0.10` -- the same measurement stored twice, and
+# agreeing only until someone widened one of them (the half-width is also the lateral
+# safety-margin dial, so widening it is a thing people do).
+WHEEL_HALF_WIDTH = wheel_half_width(RobotParams())
 PAD_CAP = -1.0e3  # [m] sentinel cap: a padded candidate that cannot win any fold (see below)
 
 
@@ -75,21 +81,6 @@ def cylinder_offsets(
                 dx_l.append(dx)
                 cap_l.append(math.sqrt(radius**2 - along**2) - radius)
     return np.array(dy_l, np.int64), np.array(dx_l, np.int64), np.array(cap_l, np.float64)
-
-
-_CYL_TABLE_CACHE: dict = {}
-
-
-def _cyl_table(cell: float, radius: float, half_width: float, b: int, n_bins: int):
-    """`cylinder_offset_table` memoised on its arguments. The table is a deterministic function
-    of (cell, radius, half_width, bin), and profiling showed it being rebuilt on every call --
-    336 rebuilds across 48 plan evaluations, ~11% of the deployed cylinder path."""
-    key = (cell, radius, half_width, b, n_bins)
-    t = _CYL_TABLE_CACHE.get(key)
-    if t is None:
-        t = cylinder_offset_table(cell, radius, half_width, math.pi * b / n_bins)
-        _CYL_TABLE_CACHE[key] = t
-    return t
 
 
 def crowned_offsets(
