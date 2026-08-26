@@ -81,6 +81,7 @@ from .bundled import BRACKET_C
 from .element import blend_stencil
 from .element import blend_weights
 from .element import broadcast_cap
+from .element import dedupe_nodes
 from .element import element_offsets
 from .element import stencil_cells
 from .ranking import build_case
@@ -354,6 +355,32 @@ def clark_cross_cov(
     return run
 
 
+def clark_quad_form(
+    cov_to_u_final: np.ndarray,
+    u_idx_sorted: np.ndarray,
+    phi: np.ndarray,
+    phineg: np.ndarray,
+    c: np.ndarray,
+) -> float:
+    """`c @ clark_cross_cov(...) @ c` WITHOUT materializing the [N, N] matrix. Exact, not an
+    approximation -- and O(N K) instead of O(N^2 K).
+
+    `clark_cross_cov` replays B's fold on A's covariance vector, and that recursion is LINEAR in
+    the A index: A enters only as `cov_to_u_final[A, :]`. So the contraction over A commutes
+    inside the replay --- run it once on `v = c @ cov_to_u_final` instead of once per (A, B).
+
+    This matters because the bilinear contact blend multiplies the node count by four, and the
+    pairwise form costs N^2: the blend made `clark_cross_cov` 16x more expensive, while this
+    form costs 4x. Callers that genuinely need the full matrix (the settle/clear_soft coupling
+    in `clark_full`/`clark_hinge`) still call `clark_cross_cov`."""
+    k = u_idx_sorted.shape[1]
+    cv = (c @ cov_to_u_final)[u_idx_sorted]  # [N, K]
+    run = cv[:, 0].copy()
+    for i in range(1, k):
+        run = run * phi[:, i - 1] + cv[:, i] * phineg[:, i - 1]
+    return float(c @ run)
+
+
 def _footprint_cells(
     wx: np.ndarray,
     wy: np.ndarray,
@@ -395,6 +422,21 @@ def build_env_nodes(
     """Given the absolute flat cell index of every candidate [N, K], build the Clark inputs
     (means, sigmas, cov_self, cov_to_u) and run `clark_build`. Returns the same 6-tuple plus the
     per-node universe index in SORTED order (needed by `clark_cross_cov`)."""
+    # DEDUPLICATE IDENTICAL NODES. A node is fully determined by its candidate cells and their
+    # caps, and after the bilinear blend many are repeats: consecutive timesteps' 2x2 stencils
+    # overlap and the yaw bins are 5.6 deg wide, so ~42% of a plan's 480 blended nodes are exact
+    # duplicates of another (measured: 480 -> 279 unique). Folding the unique set and scattering
+    # back is exact, and the fold is the dominant cost.
+    # Subset the caps in their ORIGINAL dtype: the sphere table is float32, and upcasting here
+    # would change the rounding of `belief + cap` and break bit-equality with the undeduped path.
+    cap_rows = np.ascontiguousarray(np.broadcast_to(broadcast_cap(off_cap), cell_flat.shape))
+    first, back = dedupe_nodes(cell_flat, cap_rows)
+    if len(first) < len(cell_flat):
+        m, v, cu, od, ph, pn = build_env_nodes(
+            cell_flat[first], belief_flat, sigma_flat, cap_rows[first], nx, corr_table,
+        )
+        return m[back], v[back], cu[back], od[back], ph[back], pn[back]
+
     n, k = cell_flat.shape
     u, inv = np.unique(cell_flat.ravel(), return_inverse=True)
     u_idx = inv.reshape(n, k)
@@ -456,10 +498,10 @@ def clark_plan_moments(
         cell_flat, belief_flat, sigma_flat, off_cap, nx, corr_table
     )
     n_steps = len(t_idx)
-    cross = clark_cross_cov(cov_to_u_final, u_idx_sorted, phi, phineg)  # [12T, 12T]
     c_eff = blend_weights(np.repeat(_settle_weights(rp), n_steps), w_blend)
     e_j = float(c_eff @ mean_n) + n_steps * DERIV_WZ * rp.wheel_radius
-    return e_j, max(float(c_eff @ cross @ c_eff), 0.0)
+    var_j = clark_quad_form(cov_to_u_final, u_idx_sorted, phi, phineg, c_eff)
+    return e_j, max(var_j, 0.0)
 
 
 def _settle_weights(rp: RobotParams) -> np.ndarray:

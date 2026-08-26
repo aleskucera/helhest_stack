@@ -129,17 +129,22 @@ def element_offsets(
             for b in np.unique(bins)
         }
         k_max = max(len(t[0]) for t in tables.values())
-        n = len(yaw)
-        off_dy = np.empty((n, k_max), np.int64)
-        off_dx = np.empty((n, k_max), np.int64)
-        off_cap = np.empty((n, k_max), np.float64)
-        for i, b in enumerate(bins):
-            t_dy, t_dx, t_cap = tables[b]
-            pad = k_max - len(t_dy)
-            off_dy[i] = np.concatenate([t_dy, np.repeat(t_dy[-1:], pad)])
-            off_dx[i] = np.concatenate([t_dx, np.repeat(t_dx[-1:], pad)])
-            off_cap[i] = np.concatenate([t_cap, np.full(pad, PAD_CAP)])
-        return off_dy, off_dx, off_cap
+        # Build one padded row PER DISTINCT BIN, then gather. The per-node Python loop this
+        # replaces cost ~14% of the estimator's runtime once the bilinear blend quadrupled the
+        # node count; distinct bins are at most `n_bins` and typically ~19 on a real plan.
+        uniq = np.array(sorted(tables))
+        n_u = len(uniq)
+        t_dy = np.empty((n_u, k_max), np.int64)
+        t_dx = np.empty((n_u, k_max), np.int64)
+        t_cap = np.empty((n_u, k_max), np.float64)
+        for j, b in enumerate(uniq):
+            a_, b_, c_ = tables[b]
+            pad = k_max - len(a_)
+            t_dy[j] = np.concatenate([a_, np.repeat(a_[-1:], pad)])
+            t_dx[j] = np.concatenate([b_, np.repeat(b_[-1:], pad)])
+            t_cap[j] = np.concatenate([c_, np.full(pad, PAD_CAP)])
+        row = np.searchsorted(uniq, bins)
+        return t_dy[row], t_dx[row], t_cap[row]
     raise ValueError(f"unknown element {element!r}")
 
 
@@ -221,6 +226,31 @@ def blend_weights(c_nodes: np.ndarray, w: np.ndarray) -> np.ndarray:
     the Clark machinery already produces -- so the blend costs 4x the nodes and no new
     approximation."""
     return (np.asarray(c_nodes, np.float64)[:, None] * np.asarray(w, np.float64)).ravel()
+
+
+def dedupe_nodes(
+    cell_flat: np.ndarray, cap_rows: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Indices of the DISTINCT nodes, and the map back. `(first, back)` with
+    `first` selecting one representative each and `x[first][back] == x` for any per-node array.
+
+    A max-node is fully determined by its candidate cells and their caps. After the bilinear
+    blend many nodes repeat: consecutive timesteps' 2x2 stencils overlap and the yaw bins are
+    5.6 deg wide, so ~42% of a plan's 480 blended nodes are exact duplicates (measured
+    480 -> 279). The fold is the dominant cost, so folding only the distinct set is a direct
+    saving, and exact -- these are the same random variable, not merely a close one."""
+    key = np.concatenate(
+        [np.asarray(cell_flat, np.int64),
+         # float64 first: caps arrive as float32 from the sphere table, and a bitwise view
+         # needs a fixed 8-byte element. Exact equality is the right test here -- two nodes
+         # share a table row or they do not.
+         np.ascontiguousarray(
+             np.broadcast_to(cap_rows, cell_flat.shape), dtype=np.float64
+         ).view(np.int64)],
+        axis=1,
+    )
+    _u, first, back = np.unique(key, axis=0, return_index=True, return_inverse=True)
+    return first, back.ravel()
 
 
 def blend_matrix(w: np.ndarray) -> np.ndarray:

@@ -63,6 +63,7 @@ from .clark import clark_plan_moments
 from .clark import rho1_table
 from .clark import rho_lookup
 from .element import blend_stencil
+from .element import dedupe_nodes
 from .element import blend_weights
 from .element import broadcast_cap
 from .element import stencil_cells
@@ -201,7 +202,14 @@ def plan_moments_conv(
 
     means = belief_flat[cell_flat] + broadcast_cap(off_cap)
     sigmas = sigma_flat[cell_flat]
-    mean_n, w, order = fold_weights(means, sigmas, rho_kk)
+    # fold only the DISTINCT nodes (see element.dedupe_nodes); exact, and the fold dominates
+    first, back = dedupe_nodes(cell_flat, broadcast_cap(off_cap))
+    if len(first) < len(cell_flat):
+        rk = rho_kk[first] if rho_kk.ndim == 3 else rho_kk
+        m_u, w_u, o_u = fold_weights(means[first], sigmas[first], rk)
+        mean_n, w, order = m_u[back], w_u[back], o_u[back]
+    else:
+        mean_n, w, order = fold_weights(means, sigmas, rho_kk)
 
     # --- E[J] -------------------------------------------------------------------------------
     c_w = blend_weights(np.repeat(_settle_weights(rp), n_t), w_blend)
@@ -354,7 +362,13 @@ def plan_moments_conv_batch(
     cell_flat = np.concatenate(cells, axis=0)  # [n_plans * 4 * 3T, K]
 
     means = belief_flat[cell_flat] + off_cap[None, :]
-    mean_n, w, order = fold_weights(means, sigma_flat[cell_flat], rho_kk)
+    sig_all = sigma_flat[cell_flat]
+    first, back = dedupe_nodes(cell_flat, off_cap[None, :])
+    if len(first) < len(cell_flat):
+        m_u, w_u, o_u = fold_weights(means[first], sig_all[first], rho_kk)
+        mean_n, w, order = m_u[back], w_u[back], o_u[back]
+    else:
+        mean_n, w, order = fold_weights(means, sig_all, rho_kk)
 
     c_settle = np.repeat(_settle_weights(rp), n_t)
     cells_sorted = np.take_along_axis(cell_flat, order, axis=1)
