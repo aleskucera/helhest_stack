@@ -43,15 +43,17 @@ from . import matched_truth as mt
 from ..adjoint.harness import DERIV_WZ
 from ..adjoint.harness import Harness
 from .clark import _cost_settle
-from .clark import _footprint_cells
 from .clark import _settle_weights
 from .clark import rho1_table
 from .clark_conv import fold_weights
 from .clark_conv import kernel_is_psd
 from .clark_conv import separable_quadratic_multi
 from .clark_conv import separable_terms
+from .element import blend_stencil
+from .element import blend_weights
 from .element import broadcast_cap
 from .element import element_offsets
+from .element import stencil_cells
 from .ranking import build_case
 from .ranking import CELL
 from .ranking import N_PLANS
@@ -218,20 +220,25 @@ def _clark_moments(
     c, s = np.cos(yaw), np.sin(yaw)
     wx = np.stack([x + wheel_xy[w, 0] * c - wheel_xy[w, 1] * s for w in range(3)]).ravel()
     wy = np.stack([y + wheel_xy[w, 0] * s + wheel_xy[w, 1] * c for w in range(3)]).ravel()
+    # The engine reads the dilated field bilinearly, so the contact is a weighted sum of the
+    # maxima at four cells (`element.blend_stencil`). A stencil corner is simply another node
+    # carrying effective weight c_i * w_ij, so the fold and the variance operator are unchanged
+    # -- only the node count (4x) and the coefficient vector differ.
+    iy, ix, w_blend = blend_stencil(wx, wy, x0, y0, CELL, ny, nx)
     if off is not None:
-        off_dy, off_dx, off_cap, rho_kk = off
+        off_dy, off_dx, off_cap, rho_kk = off          # sphere: yaw-invariant [K], still valid
     else:
-        off_dy, off_dx, off_cap = element_offsets(element, CELL, rp, np.tile(yaw, 3))
+        off_dy, off_dx, off_cap = element_offsets(element, CELL, rp, np.repeat(np.tile(yaw, 3), 4))
         rho_kk = model.rho_kk(off_dy, off_dx)
-    cells = _footprint_cells(wx, wy, off_dy, off_dx, x0, y0, CELL, ny, nx)
+    cells = stencil_cells(iy, ix, off_dy, off_dx, ny, nx)
     means = bflat[cells] + broadcast_cap(off_cap)
     sig = sflat[cells]
     mean_n, w, order = fold_weights(means, sig, rho_kk)
-    c_w = np.repeat(_settle_weights(rp), n_t)
-    e_j = float(c_w @ mean_n) + n_t * DERIV_WZ * rp.wheel_radius
+    c_eff = blend_weights(np.repeat(_settle_weights(rp), n_t), w_blend)
+    e_j = float(c_eff @ mean_n) + n_t * DERIV_WZ * rp.wheel_radius
     cells_s = np.take_along_axis(cells, order, axis=1)
     field = np.zeros((ny, nx))
-    np.add.at(field, (cells_s // nx, cells_s % nx), c_w[:, None] * w * sflat[cells_s])
+    np.add.at(field, (cells_s // nx, cells_s % nx), c_eff[:, None] * w * sflat[cells_s])
     return e_j, model.variance_of(field, ny, nx, x0, y0)
 
 

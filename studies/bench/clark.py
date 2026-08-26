@@ -78,8 +78,11 @@ from ..adjoint.sigma import _gauss_kernel
 from ..adjoint.sigma import fosm_variance
 from ..adjoint.sigma import NoiseDraws
 from .bundled import BRACKET_C
+from .element import blend_stencil
+from .element import blend_weights
 from .element import broadcast_cap
 from .element import element_offsets
+from .element import stencil_cells
 from .ranking import build_case
 from .ranking import CELL
 from .ranking import N_PLANS
@@ -365,7 +368,13 @@ def _footprint_cells(
     """Absolute [ny*nx]-flat cell index of every candidate, for every (node) in wx/wy. [N, K].
 
     `off_dy`/`off_dx` are [K] (one element shared by every node, e.g. the yaw-invariant sphere)
-    or [N, K] (one element per node, e.g. the yaw-dependent cylinder from `element.py`)."""
+    or [N, K] (one element per node, e.g. the yaw-dependent cylinder from `element.py`).
+
+    LEGACY SINGLE-CELL PATH. `np.round` snaps the wheel to ONE cell; the engine instead reads the
+    dilated field BILINEARLY over four (`element.blend_stencil`). New code should use
+    `element.stencil_cells`; this remains for `gate2_clark_vs_mc` (which tests the fold, not the
+    contact, so a single node per wheel is the right structure there) and for the six benchmarks
+    listed in `element.py`'s module docstring that have not been converted yet."""
     iy0 = np.round((wy - grid_y0) / cell).astype(np.int64)
     ix0 = np.round((wx - grid_x0) / cell).astype(np.int64)
     dy = off_dy if off_dy.ndim == 2 else off_dy[None, :]
@@ -418,7 +427,13 @@ def clark_plan_moments(
     """E[J_settle], Var[J_settle] for ONE plan via the closed-form settle map + Clark envelope
     moments/covariance. `controlled`: [T+1, 3] (x, y, yaw) frozen belief-rollout trajectory for
     this plan (declared approximation (a)). `element` selects the contact candidate table
-    (`element.py`): sphere (default, yaw-invariant disk) or cylinder (yaw-dependent tread)."""
+    (`element.py`): sphere (default, yaw-invariant disk) or cylinder (yaw-dependent tread).
+
+    The contact height is the engine's BILINEAR blend of four dilated cells (see
+    `element.blend_stencil`), not a single rounded cell. Correcting that -- with the two
+    `element_offsets` defects -- took the modelled height from a 2.84 cm median mismatch against
+    the engine to 0.06 cm, and this benchmark's decision result from undemonstrated
+    (clark_cvar vs step 32/52, p = 0.126) to 42/47, p = 2.5e-08."""
     ny, nx = belief.shape
     belief_flat, sigma_flat = belief.ravel(), sigma.ravel()
     wheel_xy = np.array([[0.0, rp.half_track], [0.0, -rp.half_track], [-rp.rear_offset, 0.0]])
@@ -430,14 +445,21 @@ def clark_plan_moments(
     wy = np.stack([y + wheel_xy[w, 0] * s + wheel_xy[w, 1] * c for w in range(3)])  # [3, T]
     wx_flat, wy_flat = wx.ravel(), wy.ravel()  # node order: wheel-major, then time
 
-    off_dy, off_dx, off_cap = element_offsets(element, cell, rp, np.tile(yaw, 3))
-    cell_flat = _footprint_cells(wx_flat, wy_flat, off_dy, off_dx, x0, y0, cell, ny, nx)
+    # The engine reads the dilated field BILINEARLY, so the contact height is a weighted sum of
+    # the maxima at four neighbouring cells, not the maximum at one (`element.blend_stencil`).
+    # Clark already supplies what such a sum needs -- each maximum's mean and the covariance
+    # BETWEEN maxima -- so this costs 4x the nodes and adds no approximation.
+    iy, ix, w_blend = blend_stencil(wx_flat, wy_flat, x0, y0, cell, ny, nx)
+    off_dy, off_dx, off_cap = element_offsets(element, cell, rp, np.repeat(np.tile(yaw, 3), 4))
+    cell_flat = stencil_cells(iy, ix, off_dy, off_dx, ny, nx)
     mean_n, var_n, cov_to_u_final, u_idx_sorted, phi, phineg = build_env_nodes(
         cell_flat, belief_flat, sigma_flat, off_cap, nx, corr_table
     )
-    return _settle_moments_from_nodes(
-        mean_n, var_n, cov_to_u_final, u_idx_sorted, phi, phineg, rp, len(t_idx)
-    )
+    n_steps = len(t_idx)
+    cross = clark_cross_cov(cov_to_u_final, u_idx_sorted, phi, phineg)  # [12T, 12T]
+    c_eff = blend_weights(np.repeat(_settle_weights(rp), n_steps), w_blend)
+    e_j = float(c_eff @ mean_n) + n_steps * DERIV_WZ * rp.wheel_radius
+    return e_j, max(float(c_eff @ cross @ c_eff), 0.0)
 
 
 def _settle_weights(rp: RobotParams) -> np.ndarray:
@@ -508,7 +530,7 @@ def _mc_env_stats(
     return env_samples
 
 
-def gate2_clark_vs_mc(device: str, element: str = "sphere") -> dict:
+def gate2_clark_vs_mc(device: str, element: str = "sphere", traj: str = "sphere") -> dict:
     """20 random single-timestep, real-belief-map, real-footprint cases: Clark's per-wheel
     E[env]/sd[env] and cov(env_L, env_R) against 20k-draw brute-force MC.
 
@@ -518,7 +540,37 @@ def gate2_clark_vs_mc(device: str, element: str = "sphere") -> dict:
     every other heading. `cand_abs` is built from that SAME table for both Clark and the MC
     patch below, so a cylinder run validates the cylinder estimator against truth rather than
     measuring physics drift against the sphere (contrast `clark_conv.py`'s cylinder arm, which
-    only ever compares itself to the sphere)."""
+    only ever compares itself to the sphere).
+
+    WHAT THIS GATE CANNOT SEE, BY CONSTRUCTION. Because `cand_abs` and Clark's inputs come from
+    the same candidate table, any error in WHICH cells the footprint covers cancels on both
+    sides. This gate measures the accuracy of THE FOLD GIVEN THE CANDIDATES; it cannot ask
+    whether those candidates are the ones the engine reads. That is not a flaw to fix here -- a
+    fold test should isolate the fold -- but it is why three contact-height defects worth a
+    2.84 cm median mismatch survived a benchmark whose every gate passed, and why this gate's
+    numbers barely move when they are corrected.
+
+    The check that CAN see the contact is `run_seed`'s calib/arms, whose truth is a real
+    ForwardSimulator rollout through the real cylinder envelope (`matched_truth.py`). Anything
+    claiming the estimator matches the engine must be verified there, not here.
+
+    The node structure here is deliberately UNBLENDED: `clark_plan_moments` folds the engine's
+    four-cell bilinear stencil, while this gate folds one node per wheel, because the quantity
+    under test is the fold rather than the contact.
+
+    `traj` -- AND THE SECOND THING THIS GATE DOES NOT EXERCISE. The default "sphere" reads
+    `h.sim.controlled` (DifferentiableSimulator), whose yaw is IDENTICALLY ZERO at every plan
+    and timestep (measured: 0 of 656 entries non-zero). Under `element="cylinder"` that means
+    this gate evaluates the yaw-DEPENDENT cylinder element at a single heading, yaw = 0, on
+    every case -- while the benchmark it certifies runs on `matched_truth`'s cylinder
+    trajectory, which spans +-0.89 rad and visits 19 of the 32 yaw bins.
+
+    `run_seed` re-derives the cylinder trajectory precisely to avoid this mismatch; this gate
+    never received that fix. Pass `traj="matched"` to run it on the same trajectory the
+    estimator actually sees. The default is left as "sphere" so the pre-registered numbers keep
+    their meaning -- changing a gate's definition is not something to do silently -- but the
+    yaw = 0 restriction should be understood before quoting this gate as evidence about the
+    cylinder."""
     rp = RobotParams()
     corr_table = rho1_table(CORR_LEN, CELL)
     rng = np.random.default_rng(RNG_SEED)
@@ -532,8 +584,10 @@ def gate2_clark_vs_mc(device: str, element: str = "sphere") -> dict:
         belief = scene.elevation.astype(np.float32)
         ny, nx = belief.shape
         h_ = Harness(scene, poses, omega, device=device)
-        controlled = h_.sim.controlled.numpy()  # [T+1, K, 3]
+        controlled = h_.sim.controlled.numpy()  # [T+1, K, 3] -- yaw identically 0, see docstring
         del h_
+        if traj == "matched":
+            controlled, _ = mt.cylinder_controlled_trajectory(scene, poses, omega, device=device)
         plan = int(rng.integers(0, N_PLANS))
         margin_cells = 12  # keep the case interior: no true-grid-edge clamping in the MC patch
         for _try in range(50):

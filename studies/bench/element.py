@@ -14,6 +14,31 @@ Two elements:
 (non-convolution) machinery for the sphere, and reported it as a PHYSICS change (not an error) for
 the cylinder. Every other benchmark's own choke point now calls through this ONE copy instead of
 re-deriving it.
+
+CONTACT-HEIGHT DEFECTS FIXED 2026-08-26
+---------------------------------------
+Three separate mismatches made the modelled contact height differ from the height the engine
+actually rests a wheel on, by a median of 2.84 cm. Two were in `element_offsets` (yaw binned over
+[0, 2*pi) instead of the engine's [0, PI); K truncated to the batch minimum instead of padded)
+and are fixed there. The third was the single-cell read, fixed by `blend_stencil` below.
+
+Corrected, the modelled height matches the engine to 0.06 cm, and both benchmarks that feed the
+paper's SectionV moved from undemonstrated to decisive against every baseline (`clark.py`:
+clark_cvar vs step 32/52 p = 0.126 -> 42/47 p = 2.5e-08; `realistic_sigma.py` hybrid/all, which
+had `passed = False` on its own pre-registered criteria, 35/56 p = 0.081 -> 45/51 p = 1.8e-08).
+Pre-registrations and artifacts live in the clark_paper repo under
+`theory/notes/measurements/clark_paper_benchmark_*` and `clark_realistic_sigma_*`.
+
+STILL ON THE SINGLE-CELL READ -- these call `clark._footprint_cells` directly and have NOT been
+converted to `blend_stencil`/`stencil_cells`:
+
+    clark_conv.py, clark_fast.py, clark_full.py, clark_grad.py, clark_hinge.py,
+    clark_hinge_fast.py
+
+They each contract nodes differently, and converting them without a validated reference to check
+against is how silent errors get introduced -- so they were left explicit rather than changed
+blind. They DO pick up the two `element_offsets` fixes automatically. `clark.gate2_clark_vs_mc`
+is single-cell too, but deliberately: it tests the fold, not the contact (see its docstring).
 """
 
 from __future__ import annotations
@@ -23,10 +48,12 @@ import math
 import numpy as np
 
 from helhest.engine import RobotParams
+from helhest.engine.envelope import cylinder_offset_table
 from helhest.engine.envelope import wheel_offset_table
 
 WHEEL_HALF_WIDTH = 0.05  # [m] half of the ruler-measured 0.10 m tread (engine/robot.py)
 N_YAW_BINS = 32  # heading quantization the cylinder table is shared/gathered at
+PAD_CAP = -1.0e3  # [m] sentinel cap: a padded candidate that cannot win any fold (see below)
 
 
 def cylinder_offsets(
@@ -58,9 +85,35 @@ def element_offsets(
 
     sphere:   off_dy/off_dx/off_cap are [K], shared by every node (yaw-invariant); `yaw` unused.
     cylinder: off_dy/off_dx/off_cap are [N, K], one row per entry of `yaw` (radians, any shape --
-              raveled to [N]), quantized to `n_bins` heading bins. K is truncated to the smallest
-              per-bin table (yaw-ragged: a diagonal heading clips a few more cells than an axis-
-              aligned one), matching every node to the SAME K so they stack into one array.
+              raveled to [N]), quantized to `n_bins` heading bins.
+
+    TWO DEFECTS FIXED HERE (2026-08-26). Both made the modelled contact height differ from the
+    one the engine actually rests on; together with the single-cell read they accounted for a
+    2.84 cm median mismatch, and correcting all three moved the benchmark's decision result from
+    undemonstrated to p < 1e-7 (clark_paper_benchmark_PREREG.md, clark_realistic_sigma_PREREG.md
+    in the clark_paper repo). Neither was a modelling choice; both were oversights.
+
+      1. YAW BINNING. This binned over [0, 2*pi) in `n_bins`, while the engine's stack spans
+         [0, PI) (`engine/step.py::yaw_bin`) because a capsule at yaw and yaw+PI is the same
+         shape. That was half the engine's angular resolution AND misaligned bin centres. The
+         engine's exact expression is used now, and the table comes from the engine's own
+         `cylinder_offset_table` rather than this module's re-derivation, so the two cannot
+         drift apart again.
+
+      2. K TRUNCATION. The per-bin tables are yaw-ragged (a diagonal heading clips a few more
+         cells than an axis-aligned one). This truncated every node to the SMALLEST K in the
+         batch, so a plan mixing headings dropped 2 of 7 cells from every axis-aligned node --
+         and dropped them from one END of the (dy, dx) scan, losing the footprint's front rather
+         than trimming it symmetrically. Now the rows are PADDED up to the largest K instead.
+
+    The pad is a SENTINEL, not a duplicate. Duplicating a real candidate looks free because a
+    true maximum is idempotent -- max(M, x, x) = max(M, x) -- but Clark's fold is not the true
+    maximum: it re-applies its normal approximation at every fold, so a duplicated candidate is
+    folded twice and the approximation applied twice, shifting the mean by up to 2.7 cm
+    (measured). A cap of `PAD_CAP` drives alpha to +inf instead, so the fold returns the running
+    mean, variance and covariance row unchanged -- exact to machine precision, and independent
+    of how many pads are added. Pad slots reuse a real (dy, dx) so every gather stays in bounds;
+    they take zero fold weight (verified: max weight 0.000e+00).
     """
     if element == "sphere":
         env_radius = int(np.ceil(rp.wheel_radius / cell))
@@ -68,15 +121,24 @@ def element_offsets(
         return np.asarray(off_dy, np.int64), np.asarray(off_dx, np.int64), np.asarray(off_cap)
     if element == "cylinder":
         yaw = np.asarray(yaw).ravel()
-        bins = np.round(yaw / (2 * np.pi) * n_bins).astype(np.int64) % n_bins
+        # `engine/step.py::yaw_bin`, verbatim: floor(yaw / (PI/n) + 0.5), wrapped into [0, n).
+        k = np.floor(yaw / (np.pi / n_bins) + 0.5).astype(np.int64)
+        bins = ((k % n_bins) + n_bins) % n_bins
         tables = {
-            b: cylinder_offsets(cell, rp.wheel_radius, WHEEL_HALF_WIDTH, 2 * np.pi * b / n_bins)
+            b: cylinder_offset_table(cell, rp.wheel_radius, WHEEL_HALF_WIDTH, np.pi * b / n_bins)
             for b in np.unique(bins)
         }
-        k_min = min(len(t[0]) for t in tables.values())
-        off_dy = np.stack([tables[b][0][:k_min] for b in bins])
-        off_dx = np.stack([tables[b][1][:k_min] for b in bins])
-        off_cap = np.stack([tables[b][2][:k_min] for b in bins])
+        k_max = max(len(t[0]) for t in tables.values())
+        n = len(yaw)
+        off_dy = np.empty((n, k_max), np.int64)
+        off_dx = np.empty((n, k_max), np.int64)
+        off_cap = np.empty((n, k_max), np.float64)
+        for i, b in enumerate(bins):
+            t_dy, t_dx, t_cap = tables[b]
+            pad = k_max - len(t_dy)
+            off_dy[i] = np.concatenate([t_dy, np.repeat(t_dy[-1:], pad)])
+            off_dx[i] = np.concatenate([t_dx, np.repeat(t_dx[-1:], pad)])
+            off_cap[i] = np.concatenate([t_cap, np.full(pad, PAD_CAP)])
         return off_dy, off_dx, off_cap
     raise ValueError(f"unknown element {element!r}")
 
@@ -93,6 +155,72 @@ def element_offsets_single(
     if off_dy.ndim == 1:
         return off_dy, off_dx, off_cap
     return off_dy[0], off_dx[0], off_cap[0]
+
+
+def blend_stencil(
+    wx: np.ndarray,
+    wy: np.ndarray,
+    origin_x: float,
+    origin_y: float,
+    cell: float,
+    ny: int,
+    nx: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The FOUR cells the engine's bilinear read touches, and their weights. [N, 4] each.
+
+    THE THIRD DEFECT (fixed 2026-08-26). `_footprint_cells` snaps a wheel to ONE cell with
+    `np.round`, so the modelled contact height is a single dilated cell's value. The engine does
+    not do that: `engine/envelope.py` dilates the elevation at EVERY cell, then `sample_field`
+    reads that dilated field with a BILINEAR sample at the wheel's exact position
+    (`engine/step.py`). The height a wheel rests on is therefore a weighted blend of four
+    neighbouring dilated cells.
+
+    The difference is not a small bias. It is SCATTER -- 2.73 cm of it on the belief map with no
+    noise at all (mean only +0.34 cm) -- and it makes the modelled height 3.3x jumpier in time
+    than the engine's, because a discrete maximum steps abruptly as the winning cell changes
+    while a bilinear sample slides continuously. Any cost with an acceleration term divides that
+    jumpiness by dt^4 = 1e-4.
+
+    Cell-centre convention is `_locate`'s, exactly: (x - origin)/cell - 0.5, floor, fractional
+    part. Corner order is (00, 10, 01, 11) = (+0,+0), (+1,+0), (+0,+1), (+1,+1) in (x, y).
+
+    Callers must index the returned (iy, ix) DIRECTLY and never route them back through
+    `_footprint_cells`: `np.round` is banker's rounding, so a cell centre at index+0.5 lands on
+    index for even indices and index+1 for odd ones, silently displacing half the stencil.
+    """
+    fx = (np.asarray(wx, np.float64) - origin_x) / cell - 0.5
+    fy = (np.asarray(wy, np.float64) - origin_y) / cell - 0.5
+    xi = np.clip(np.floor(fx).astype(np.int64), 0, nx - 2)
+    yi = np.clip(np.floor(fy).astype(np.int64), 0, ny - 2)
+    tx = np.clip(fx - xi, 0.0, 1.0)
+    ty = np.clip(fy - yi, 0.0, 1.0)
+    ix = np.stack([xi, xi + 1, xi, xi + 1], axis=-1)
+    iy = np.stack([yi, yi, yi + 1, yi + 1], axis=-1)
+    w = np.stack([(1 - tx) * (1 - ty), tx * (1 - ty), (1 - tx) * ty, tx * ty], axis=-1)
+    return iy, ix, w
+
+
+def stencil_cells(
+    iy: np.ndarray, ix: np.ndarray, off_dy: np.ndarray, off_dx: np.ndarray, ny: int, nx: int
+) -> np.ndarray:
+    """Absolute [ny*nx]-flat candidate index for every stencil node. [4N, K].
+
+    `iy`/`ix` are `blend_stencil`'s [N, 4]; node index is `4*n + corner`, so the flattened
+    ordering lines up with a blend weight vector built as `(c[:, None] * w).ravel()`.
+    `off_dy`/`off_dx` must already be per-node for the 4N nodes (build them on a yaw array
+    repeated 4x, e.g. `np.repeat(yaw_per_node, 4)`), or [K] for the yaw-invariant sphere."""
+    ry, rx = iy.ravel()[:, None], ix.ravel()[:, None]
+    return np.clip(ry + off_dy, 0, ny - 1) * nx + np.clip(rx + off_dx, 0, nx - 1)
+
+
+def blend_weights(c_nodes: np.ndarray, w: np.ndarray) -> np.ndarray:
+    """Fold a per-node coefficient vector [N] and `blend_stencil`'s weights [N, 4] into the
+    effective per-stencil-node coefficients [4N], matching `stencil_cells`' 4*n + corner order.
+
+    A weighted sum of maxima needs each maximum's mean and the covariance BETWEEN maxima, which
+    the Clark machinery already produces -- so the blend costs 4x the nodes and no new
+    approximation."""
+    return (np.asarray(c_nodes, np.float64)[:, None] * np.asarray(w, np.float64)).ravel()
 
 
 def broadcast_cap(off_cap: np.ndarray) -> np.ndarray:
