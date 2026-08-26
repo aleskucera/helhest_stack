@@ -29,16 +29,20 @@ had `passed = False` on its own pre-registered criteria, 35/56 p = 0.081 -> 45/5
 Pre-registrations and artifacts live in the clark_paper repo under
 `theory/notes/measurements/clark_paper_benchmark_*` and `clark_realistic_sigma_*`.
 
-STILL ON THE SINGLE-CELL READ -- these call `clark._footprint_cells` directly and have NOT been
-converted to `blend_stencil`/`stencil_cells`:
+ALL CONVERTED as of 0e41164 -- these six called `clark._footprint_cells` directly and now read
+`blend_stencil`/`stencil_cells`:
 
     clark_conv.py, clark_fast.py, clark_full.py, clark_grad.py, clark_hinge.py,
     clark_hinge_fast.py
 
-They each contract nodes differently, and converting them without a validated reference to check
-against is how silent errors get introduced -- so they were left explicit rather than changed
-blind. They DO pick up the two `element_offsets` fixes automatically. `clark.gate2_clark_vs_mc`
-is single-cell too, but deliberately: it tests the fold, not the contact (see its docstring).
+They each contract nodes differently, so the conversion was not uniform; the guard was to
+establish the relationships they are documented to reproduce on the UNCONVERTED code and require
+them to survive (`clark_blend_invariants.py`, in the clark_paper repo -- all hold). Note that the
+two `fold_weights`-based relationships (conv, hinge_fast) were exact before and are now ~5e-7
+relative: the sentinel pad that replaced the K truncation duplicates a real offset, so `a`
+collapses to 0 and the two implementations take their degenerate branch by slightly different
+arithmetic. `clark.gate2_clark_vs_mc` is single-cell still, but deliberately: it tests the fold,
+not the contact (see its docstring).
 """
 
 from __future__ import annotations

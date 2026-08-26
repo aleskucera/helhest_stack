@@ -601,7 +601,27 @@ def gate2_clark_vs_mc(device: str, element: str = "sphere") -> dict:
     visits 19 of the 32 yaw bins, and its plans differ by up to 3.3 m.
 
     Consequence for the pre-registered numbers: they were measured at one pose, so they do not
-    transfer. Re-run and re-pin them."""
+    transfer. Re-run and re-pin them.
+
+    VERDICT AT REAL POSES (2026-08-26, 100-seed regeneration, artifacts at aa83f13). The bar is
+    LEFT AS PRE-REGISTERED and the miss is recorded -- author's decision; re-tuning a frozen
+    threshold so it passes is what this project forbids.
+
+        median |rel err| E[env]        0.0422 sphere / 0.0428 cylinder   bar 0.03   FAIL
+        median |rel err| sd[env]       0.0510 sphere / 0.0143 cylinder   bar 0.10   PASS
+        median |E err| / mc_sd         0.0818 sphere / 0.0294 cylinder   (no bar)
+        median absolute |E err|        6.7 mm sphere  / 2.2 mm cylinder
+
+    The miss is substantially a denominator effect, which is why this gate reports
+    `err_mean_over_sd` alongside: `rel_err_mean` divides by |E[env]|, and 53% of cylinder cases
+    have a baseline below one noise sd because a footprint can land at a low point of the terrain
+    where that denominator passes through zero. It is NOT evidence of a heading-dependent
+    accuracy loss -- measured directly at 20 distinct real positions, one heading at a time, the
+    error stays under 3.3 mm and never exceeds 5% of a noise sd at any yaw.
+
+    NO NUMBER IN THE PAPER DEPENDS ON THIS GATE (verified by grep over sections/*.tex: gate 2 is
+    never cited), so the failure is not paper-blocking. Full analysis:
+    clark_paper/theory/notes/the_three_findings.tex section A."""
     rp = RobotParams()
     corr_table = rho1_table(CORR_LEN, CELL)
     rng = np.random.default_rng(RNG_SEED)
