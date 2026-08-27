@@ -36,6 +36,9 @@ from helhest.engine import RobotParams
 from helhest.engine import SolverParams
 from helhest.engine.envelope import wheel_offset_table
 from helhest.engine.step import init_state_kernel_bt
+from helhest.engine.step import init_state_kernel_bt_patch
+from helhest.engine.step import predict_kernel_bt_patch
+from helhest.engine.step import settle_kernel_bt_patch
 from helhest.engine.step import step_kernel_bt
 
 from . import subcell
@@ -135,6 +138,7 @@ class Harness:
         dt: float = 0.1,
         newton_iters: int = 20,
         device: str = "cuda",
+        wheel_width: float | None = None,
     ):
         ny, nx = scene.shape
         self.batch_size = poses.shape[0]
@@ -151,7 +155,10 @@ class Harness:
         # this harness moves every adjoint number in studies/out, so it is sequenced as its own
         # change; see theory/HANDOFF_CYLINDER_GRADIENTS.md section 5. RobotParams()'s own default
         # is the cylinder envelope, so the sphere has to be explicit either way.
-        self.robot_params = RobotParams(clear_margin=STUDY_CLEAR_MARGIN, wheel_width=None)
+        self.robot_params = RobotParams(
+            clear_margin=STUDY_CLEAR_MARGIN, wheel_width=wheel_width
+        )
+        self.wheel_width = wheel_width
         self.sim = DifferentiableSimulator(
             self.robot_params, solver, grid, self.batch_size, self.n_steps, device
         )
@@ -191,11 +198,18 @@ class Harness:
         # NaN pose out of the traction solve, with the settle still looking plausible.
         self.sim.set_terrain(self._raw0)
         wp.copy(self.sim.friction, self._fric0)
-        self.sim._contact()
-        self.sim._gather()
-        with wp.ScopedDevice(self.device):
-            self._env0 = wp.array(self.sim.envelope.numpy(), dtype=wp.float32)
-        self._env_np = self._env0.numpy()
+        # `_env0` is the pre-dilated terrain the dilate=False level rolls out on. It presumes ONE
+        # yaw-invariant envelope, which the cylinder does not have -- and dilate=False is refused
+        # there anyway (see `_rollout`), so skip it rather than build a meaningless array.
+        if self.wheel_width is None:
+            self.sim._contact()
+            self.sim._gather()
+            with wp.ScopedDevice(self.device):
+                self._env0 = wp.array(self.sim.envelope.numpy(), dtype=wp.float32)
+            self._env_np = self._env0.numpy()
+        else:
+            self._env0 = None
+            self._env_np = None
 
     # --- terrain source for a level ------------------------------------------------------
     def base_terrain(self, dilate: bool) -> np.ndarray:
@@ -207,6 +221,57 @@ class Harness:
         wp.copy(self.sim.friction, self._fric0)
 
     # --- forward / tape ------------------------------------------------------------------
+    def _launches_patch(self) -> None:
+        """`_launches` for the CYLINDER: the same recording, on per-step envelope patches.
+
+        Mirrors `DifferentiableSimulator._rollout_taped_cylinder`. The sphere builds ONE
+        yaw-invariant envelope and reuses it for every step; the cylinder cannot, because a step
+        reads the envelope at two headings -- `step_predict` on the current pose's bin, the settle
+        on the new pose's bin. So the fused `step_kernel_bt` becomes predict -> build the next
+        patch -> settle, and the patch for t+1 is the current patch of t+1 (T+1 patches, not 2T).
+        """
+        sim = self.sim
+        sim._gather_patch(0)
+        wp.launch(
+            init_state_kernel_bt_patch,
+            self.batch_size,
+            inputs=[sim.env_patch[0], sim._patch_org[0], sim.patch_cells, sim.grid, sim.robot,
+                    sim.solver, sim.start_pose],
+            outputs=[sim.controlled, sim.derived],
+            device=self.device,
+        )
+        for t in range(self.n_steps):
+            wp.launch(
+                predict_kernel_bt_patch,
+                self.batch_size,
+                inputs=[sim.env_patch[t], sim._patch_org[t], sim.patch_cells, sim.friction,
+                        sim.mu_scale, sim.grid, sim.robot, sim.solver,
+                        sim.target_wheel_omega[t], sim.current_wheel_omega[t],
+                        sim.controlled[t], sim.derived[t], sim.twist[t]],
+                outputs=[sim.current_wheel_omega[t + 1], sim._pose_next[t], sim.turning[t],
+                         sim.twist[t + 1]],
+                device=self.device,
+            )
+            sim._contact_patch(t + 1, sim._pose_next[t])   # off-tape; the tape must not see it
+            sim._gather_patch(t + 1)
+            wp.launch(
+                settle_kernel_bt_patch,
+                self.batch_size,
+                inputs=[sim.env_patch[t + 1], sim._patch_org[t + 1], sim.patch_cells,
+                        sim.elevation, sim.grid, sim.robot, sim.solver, sim._pose_next[t],
+                        sim.derived[t]],
+                outputs=[sim.controlled[t + 1], sim.derived[t + 1], sim.loads[t],
+                         sim.clearance[t], sim.clear_soft[t], sim.residual[t]],
+                device=self.device,
+            )
+        wp.launch(
+            _terms_kernel,
+            self.batch_size,
+            inputs=[sim.controlled, sim.derived, sim.clearance, sim.clear_soft, self.n_steps],
+            outputs=[self.terms],
+            device=self.device,
+        )
+
     def _launches(self) -> None:
         sim = self.sim
         self._subcell.gather() if self.use_subcell else sim._gather()
@@ -260,6 +325,32 @@ class Harness:
         """One forward rollout; on `tape` if given. Mirrors `rollout_taped` except that the
         arg-max contact can be replaced by the identity."""
         sim = self.sim
+        if self.wheel_width is not None:
+            if not dilate:
+                # The identity-gather trick forces `best_k` to the (0, 0) offset, whose cap is 0,
+                # so the gather becomes `envelope = elevation`. Every yaw bin's table does contain
+                # that offset with cap exactly 0, but at a DIFFERENT index per bin (each bin orders
+                # its own table), so this needs a [n_bins] lookup rather than one constant. Not
+                # written, because nothing needs it yet: `fosm` and `bracket` both use dilate=True.
+                # `cylinder_adjoint.py` and `study_b_element.py` are the dilate=False callers and
+                # are sphere studies.
+                raise NotImplementedError(
+                    "dilate=False is not implemented on the cylinder: the identity offset's index "
+                    "differs per yaw bin. Use wheel_width=None, or add the per-bin lookup."
+                )
+            if self.use_subcell:
+                raise NotImplementedError("sub-cell refinement is a sphere-only path")
+            # the start pose's patch; every later patch is built inside _launches_patch, on the
+            # pose predict has just returned
+            sim._contact_patch(0, sim.start_pose)
+            wp.copy(sim.current_wheel_omega[0], sim.init_current_wheel_omega)
+            self.terms.zero_()
+            if tape is None:
+                self._launches_patch()
+            else:
+                with tape:
+                    self._launches_patch()
+            return
         if dilate and self.use_subcell:
             self._subcell.contact()  # off-tape: discrete arg-max, then parabolic refinement
         elif dilate:
