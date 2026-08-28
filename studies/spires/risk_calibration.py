@@ -2,9 +2,11 @@
 
 Protocol: clark_paper/PREREG_risk_calibration.md (frozen 2026-08-28). This module implements
 the two experiments on the design site (keble-college-*) and nothing else. The held-out set
-(virgin-*) is locked by pre-registration and this file REFUSES to open it: every path that
-reaches the filesystem goes through `_forbid_held_out`, which raises on any path containing
-"virgin", and the site filter defaults to the design site.
+(virgin-*) was locked by pre-registration and this file refused to open it: every path that
+reaches the filesystem goes through `_forbid_held_out`, which raised on any path containing
+"virgin". Amendment A3 (2026-08-28) froze the pipeline at spires commit e54c12a and unlocked
+that guard for ONE held-out run (`HELD_OUT_UNLOCKED`). The site filter still DEFAULTS to the
+design site: the held-out set has to be named explicitly. There is no second draw.
 
 WHAT IS COMPUTED, per design window
 -----------------------------------
@@ -174,9 +176,19 @@ from .vehicle import stencil_cells
 from .vehicle import WHEEL_BODY_XY
 
 # --- the pre-registration's hard boundary ----------------------------------------------------
-DESIGN_SITE = "keble-college-*"  # the ONLY site this module will open
+DESIGN_SITE = "keble-college-*"  # the DEFAULT site: nothing else is opened unless asked for
 DESIGN_TLS_SITE = "keble-college"
 HELD_OUT_TOKEN = "virgin"
+HELD_OUT_SITE = "virgin-*"
+HELD_OUT_TLS_SITES = ("blenheim-palace", "christ-church")
+# --- THE UNLOCK (prereg amendment A3, 2026-08-28) --------------------------------------------
+# Until this line was flipped, every filesystem entry point below raised on any path containing
+# "virgin". A3 freezes the pipeline at spires commit e54c12a with RECAL_VAR_SCALE =
+# 2.396213379859416 and RECAL_OFFSET_SD = 0.0, and authorizes ONE held-out run. This commit
+# changes the lock and NOTHING else -- no scoring code, no parameter, no filter, no criterion.
+# The held-out set is still not the default: it must be named explicitly with
+# `--site "virgin-*"`. There is no second draw.
+HELD_OUT_UNLOCKED = True
 OUT_ROOT = Path("/home/kuceral4/data/oxford_spires/out")
 
 RESAMPLE_M = 0.10  # along-track resample spacing = one map cell
@@ -211,7 +223,13 @@ class HeldOutViolation(RuntimeError):
 
 
 def _forbid_held_out(path) -> None:
-    """The single choke point. Every filesystem path in this module passes through here."""
+    """The single choke point. Every filesystem path in this module passes through here.
+
+    Unlocked by A3 (see HELD_OUT_UNLOCKED). Kept, rather than deleted, so that reverting one
+    boolean restores the lock exactly and so the choke points stay visible in the source.
+    """
+    if HELD_OUT_UNLOCKED:
+        return
     if HELD_OUT_TOKEN in str(path).lower():
         raise HeldOutViolation(
             f"{path!r} is in the pre-registered HELD-OUT set (virgin-*). "
@@ -243,12 +261,16 @@ def window_files(site: str = DESIGN_SITE, root: Path = OUT_ROOT) -> list[Path]:
 
 def tls_site_of(window_file: Path) -> str:
     _forbid_held_out(window_file)
-    if not window_file.parent.name.startswith("keble-college-"):
-        raise HeldOutViolation(
-            f"{window_file.parent.name!r} is not a design-site window directory; "
-            "this module opens the design site only."
-        )
-    return DESIGN_TLS_SITE
+    name = window_file.parent.name
+    if name.startswith("keble-college-"):
+        return DESIGN_TLS_SITE
+    if HELD_OUT_UNLOCKED and name.startswith("virgin-"):
+        for site in HELD_OUT_TLS_SITES:
+            if site in name:
+                return site
+    raise HeldOutViolation(
+        f"{name!r} is not a window directory this module knows a TLS survey for."
+    )
 
 
 # --- one window ------------------------------------------------------------------------------
