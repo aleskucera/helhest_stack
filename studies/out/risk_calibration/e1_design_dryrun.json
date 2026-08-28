@@ -1,0 +1,2005 @@
+{
+  "experiment": "E1 DESIGN-SITE DRY RUN -- NOT the pre-registered held-out test",
+  "prereg": "clark_paper/PREREG_risk_calibration.md frozen 2026-08-28 + amendment A1",
+  "site_filter": "keble-college-*",
+  "held_out_touched": false,
+  "truth_raster": "tls_max_raster.npz",
+  "qc_raster": "tls_mean_raster.npz",
+  "overhang_threshold_m": 1.0,
+  "resample_m": 0.1,
+  "cost_weights": {
+    "wz": 1.0,
+    "wpitch": 0.7,
+    "wroll": 0.5
+  },
+  "n_windows_computed": 38,
+  "primary": {
+    "n": 13,
+    "clark": {
+      "mean_nll": 5.485816095168229,
+      "cov1": 0.5384615384615384,
+      "cov2": 0.8461538461538461,
+      "sd_ratio": 1.6076423727977156,
+      "mean_z": -0.10250930845461682,
+      "median_z": -0.23038686173435205,
+      "median_sd": 26.398082331429485
+    },
+    "clark-diag": {
+      "mean_nll": 104.5475592764273,
+      "cov1": 0.07692307692307693,
+      "cov2": 0.07692307692307693,
+      "sd_ratio": 10.933504830390701,
+      "mean_z": -9.69576258270441,
+      "median_z": -8.682653911897459,
+      "median_sd": 3.4749347642851314
+    },
+    "fosm": {
+      "mean_nll": 5.527909886059971,
+      "cov1": 0.6923076923076923,
+      "cov2": 0.9230769230769231,
+      "sd_ratio": 1.5491149091333913,
+      "mean_z": 0.4597798042128899,
+      "median_z": 0.18960498783232674,
+      "median_sd": 26.894681250167324
+    },
+    "nll_diff_clark_minus_fosm": {
+      "mean": -0.04209379089174126,
+      "median": 0.008586457618673826,
+      "n_negative": 6
+    },
+    "nll_diff_clark_minus_clark-diag": {
+      "mean": -99.06174318125909,
+      "median": -39.10103081029999,
+      "n_negative": 12
+    },
+    "mean-map": {
+      "median_abs_err": 25.36058210540159,
+      "mean_err": 2.6598733439381372
+    }
+  },
+  "groups": {
+    "distinct_unflagged": {
+      "n": 13,
+      "clark": {
+        "mean_nll": 5.485816095168229,
+        "cov1": 0.5384615384615384,
+        "cov2": 0.8461538461538461,
+        "sd_ratio": 1.6076423727977156,
+        "mean_z": -0.10250930845461682,
+        "median_z": -0.23038686173435205,
+        "median_sd": 26.398082331429485
+      },
+      "clark-diag": {
+        "mean_nll": 104.5475592764273,
+        "cov1": 0.07692307692307693,
+        "cov2": 0.07692307692307693,
+        "sd_ratio": 10.933504830390701,
+        "mean_z": -9.69576258270441,
+        "median_z": -8.682653911897459,
+        "median_sd": 3.4749347642851314
+      },
+      "fosm": {
+        "mean_nll": 5.527909886059971,
+        "cov1": 0.6923076923076923,
+        "cov2": 0.9230769230769231,
+        "sd_ratio": 1.5491149091333913,
+        "mean_z": 0.4597798042128899,
+        "median_z": 0.18960498783232674,
+        "median_sd": 26.894681250167324
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": -0.04209379089174126,
+        "median": 0.008586457618673826,
+        "n_negative": 6
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -99.06174318125909,
+        "median": -39.10103081029999,
+        "n_negative": 12
+      },
+      "mean-map": {
+        "median_abs_err": 25.36058210540159,
+        "mean_err": 2.6598733439381372
+      }
+    },
+    "distinct_flagged": {
+      "n": 12,
+      "clark": {
+        "mean_nll": 9.65898414753832,
+        "cov1": 0.4166666666666667,
+        "cov2": 0.5,
+        "sd_ratio": 2.0817844860830714,
+        "mean_z": 2.116878248690847,
+        "median_z": 1.8018616693727494,
+        "median_sd": 100.36505687141982
+      },
+      "clark-diag": {
+        "mean_nll": 47.80043861224115,
+        "cov1": 0.0,
+        "cov2": 0.0,
+        "sd_ratio": 9.539590826709736,
+        "mean_z": 2.1315829963020883,
+        "median_z": 1.4824839010219213,
+        "median_sd": 21.90004194694272
+      },
+      "fosm": {
+        "mean_nll": 11.295766403261752,
+        "cov1": 0.3333333333333333,
+        "cov2": 0.3333333333333333,
+        "sd_ratio": 2.1063140506590368,
+        "mean_z": 2.7615316072382146,
+        "median_z": 2.6070735951502453,
+        "median_sd": 100.85453128116671
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": -1.6367822557234313,
+        "median": -1.6999111136298235,
+        "n_negative": 10
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -38.141454464702825,
+        "median": -24.91709200330515,
+        "n_negative": 12
+      },
+      "mean-map": {
+        "median_abs_err": 187.4212228348024,
+        "mean_err": 380.49751001910937
+      }
+    },
+    "distinct_all": {
+      "n": 25,
+      "clark": {
+        "mean_nll": 7.488936760305872,
+        "cov1": 0.48,
+        "cov2": 0.68,
+        "sd_ratio": 2.135245022444939,
+        "mean_z": 0.9627967189752057,
+        "median_z": 0.46401401115034663,
+        "median_sd": 35.68532995898959
+      },
+      "clark-diag": {
+        "mean_nll": 77.30894135761795,
+        "cov1": 0.04,
+        "cov2": 0.04,
+        "sd_ratio": 11.741006033988914,
+        "mean_z": -4.018636704781292,
+        "median_z": -5.742431430662759,
+        "median_sd": 5.214561644486601
+      },
+      "fosm": {
+        "mean_nll": 8.296481014316825,
+        "cov1": 0.52,
+        "cov2": 0.64,
+        "sd_ratio": 2.1472767113628484,
+        "mean_z": 1.5646206696650455,
+        "median_z": 0.9207588056743197,
+        "median_sd": 35.86767716765475
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": -0.8075442540109526,
+        "median": -0.2691549126321391,
+        "n_negative": 16
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -69.82000459731208,
+        "median": -32.72995883566132,
+        "n_negative": 24
+      },
+      "mean-map": {
+        "median_abs_err": 33.364573823246246,
+        "mean_err": 184.02193894802033
+      }
+    },
+    "ablation_unclamped": {
+      "n": 13,
+      "clark": {
+        "mean_nll": 7.539722936520288,
+        "cov1": 0.5384615384615384,
+        "cov2": 0.7692307692307693,
+        "sd_ratio": 2.2176196814712004,
+        "mean_z": 0.9575433479077664,
+        "median_z": 0.46401401115034663,
+        "median_sd": 33.84752514303247
+      },
+      "clark-diag": {
+        "mean_nll": 57.990603320253086,
+        "cov1": 0.07692307692307693,
+        "cov2": 0.07692307692307693,
+        "sd_ratio": 10.606233011769143,
+        "mean_z": -2.4354205147909,
+        "median_z": -5.742431430662759,
+        "median_sd": 6.380571351539246
+      },
+      "fosm": {
+        "mean_nll": 8.443949135937304,
+        "cov1": 0.5384615384615384,
+        "cov2": 0.6923076923076923,
+        "sd_ratio": 2.2135661551684738,
+        "mean_z": 1.6429692748755023,
+        "median_z": 0.8306296226675345,
+        "median_sd": 34.05184420852099
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": -0.9042261994170165,
+        "median": -0.2433365924410973,
+        "n_negative": 8
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -50.45088038373279,
+        "median": -23.674475105547607,
+        "n_negative": 12
+      },
+      "mean-map": {
+        "median_abs_err": 28.28447050605746,
+        "mean_err": 187.78689771527144
+      }
+    }
+  },
+  "by_sequence_distinct_unflagged": {
+    "keble-college-02-default": {
+      "n": 7,
+      "clark": {
+        "mean_nll": 4.940638939180502,
+        "cov1": 0.5714285714285714,
+        "cov2": 1.0,
+        "sd_ratio": 1.097174157764856,
+        "mean_z": -0.28030910130018843,
+        "median_z": -0.23038686173435205,
+        "median_sd": 28.168197994307477
+      },
+      "clark-diag": {
+        "mean_nll": 46.9383375322222,
+        "cov1": 0.14285714285714285,
+        "cov2": 0.14285714285714285,
+        "sd_ratio": 5.878689392673158,
+        "mean_z": -7.6805035111447415,
+        "median_z": -5.74916222730296,
+        "median_sd": 3.4749347642851314
+      },
+      "fosm": {
+        "mean_nll": 4.811347455510613,
+        "cov1": 0.7142857142857143,
+        "cov2": 1.0,
+        "sd_ratio": 0.8549233559734982,
+        "mean_z": 0.3718983202400725,
+        "median_z": 0.18960498783232674,
+        "median_sd": 28.035986683772734
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 0.12929148366988968,
+        "median": 0.008586457618673826,
+        "n_negative": 3
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -41.9976985930417,
+        "median": -14.454911680929335,
+        "n_negative": 6
+      },
+      "mean-map": {
+        "median_abs_err": 23.092836484680674,
+        "mean_err": -12.658340483230404
+      }
+    },
+    "keble-college-03-default": {
+      "n": 6,
+      "clark": {
+        "mean_nll": 6.121856110487244,
+        "cov1": 0.5,
+        "cov2": 0.6666666666666666,
+        "sd_ratio": 2.1592573214670674,
+        "mean_z": 0.10492378319855004,
+        "median_z": -0.16722167214561937,
+        "median_sd": 25.67393243155753
+      },
+      "clark-diag": {
+        "mean_nll": 171.75831797799992,
+        "cov1": 0.0,
+        "cov2": 0.0,
+        "sd_ratio": 15.267930348222166,
+        "mean_z": -12.046898166190694,
+        "median_z": -13.281317865203423,
+        "median_sd": 3.3895534056061303
+      },
+      "fosm": {
+        "mean_nll": 6.363899388367556,
+        "cov1": 0.6666666666666666,
+        "cov2": 0.8333333333333334,
+        "sd_ratio": 2.2042951631731094,
+        "mean_z": 0.5623082021811768,
+        "median_z": 0.31761435774078484,
+        "median_sd": 26.0023973368839
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": -0.2420432778803107,
+        "median": -0.04164752190085874,
+        "n_negative": 3
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -165.63646186751268,
+        "median": -124.82935358055343,
+        "n_negative": 6
+      },
+      "mean-map": {
+        "median_abs_err": 29.36257796432392,
+        "mean_err": 20.531122808968103
+      }
+    }
+  },
+  "skipped": [
+    {
+      "window": "keble-college-02-default/window_002",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.010250091552734375,
+      "overhang_qc_cells": 642,
+      "track_len_m": 22.6,
+      "n_steps": 21,
+      "n_steps_total": 226,
+      "retained": 0.09292035398230089,
+      "n_cells": 253,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.517576277256012,
+      "median_raw_sd_on_candidates_m": 0.22153674066066742,
+      "median_meas_sd_on_candidates_m": 0.0037000731099396944,
+      "reason": "retained 0.093 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "keble-college-02-default/window_006",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.011800289154052734,
+      "overhang_qc_cells": 723,
+      "track_len_m": 24.0,
+      "n_steps": 11,
+      "n_steps_total": 240,
+      "retained": 0.04583333333333333,
+      "n_cells": 310,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.14899584650993347,
+      "median_raw_sd_on_candidates_m": 0.12997058779001236,
+      "median_meas_sd_on_candidates_m": 0.003006818355061114,
+      "reason": "retained 0.046 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "keble-college-02-unclamped/window_002",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.010250091552734375,
+      "overhang_qc_cells": 642,
+      "track_len_m": 22.6,
+      "n_steps": 21,
+      "n_steps_total": 226,
+      "retained": 0.09292035398230089,
+      "n_cells": 253,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.517576277256012,
+      "median_raw_sd_on_candidates_m": 0.22153674066066742,
+      "median_meas_sd_on_candidates_m": 0.0037000731099396944,
+      "reason": "retained 0.093 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "keble-college-02-unclamped/window_006",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.011800289154052734,
+      "overhang_qc_cells": 723,
+      "track_len_m": 24.0,
+      "n_steps": 11,
+      "n_steps_total": 240,
+      "retained": 0.04583333333333333,
+      "n_cells": 310,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.14899584650993347,
+      "median_raw_sd_on_candidates_m": 0.12997058779001236,
+      "median_meas_sd_on_candidates_m": 0.003006818355061114,
+      "reason": "retained 0.046 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "keble-college-03-default/window_008",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.04029989242553711,
+      "overhang_qc_cells": 842,
+      "track_len_m": 25.5,
+      "n_steps": 126,
+      "n_steps_total": 255,
+      "retained": 0.49411764705882355,
+      "n_cells": 1245,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.12991972267627716,
+      "median_raw_sd_on_candidates_m": 0.0678224191069603,
+      "median_meas_sd_on_candidates_m": 0.002734139561653137,
+      "reason": "retained 0.494 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "keble-college-03-default/window_011",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.011875152587890625,
+      "overhang_qc_cells": 719,
+      "track_len_m": 23.5,
+      "n_steps": 37,
+      "n_steps_total": 235,
+      "retained": 0.1574468085106383,
+      "n_cells": 413,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.3268080949783325,
+      "median_raw_sd_on_candidates_m": 0.26003119349479675,
+      "median_meas_sd_on_candidates_m": 0.00282470416277647,
+      "reason": "retained 0.157 < MIN_RETAINED 0.5"
+    }
+  ],
+  "windows": [
+    {
+      "window": "keble-college-02-default/window_000",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.013424396514892578,
+      "overhang_qc_cells": 510,
+      "track_len_m": 14.100000000000001,
+      "n_steps": 133,
+      "n_steps_total": 141,
+      "retained": 0.9432624113475178,
+      "n_cells": 1339,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.6509066820144653,
+      "median_raw_sd_on_candidates_m": 0.0777813121676445,
+      "median_meas_sd_on_candidates_m": 0.002821823814883828,
+      "J_tls": -694.7373431128999,
+      "clark": {
+        "E": -637.294259821746,
+        "sd": 34.532460621717846,
+        "z": -1.6634517858547078,
+        "nll": 5.844374224402346
+      },
+      "clark-diag": {
+        "E": -580.0063279539514,
+        "sd": 7.123454508487894,
+        "z": -16.106092208807073,
+        "nll": 132.58543444403932
+      },
+      "fosm": {
+        "E": -679.7879277736278,
+        "sd": 35.86767716765475,
+        "z": -0.41679351772334566,
+        "nll": 4.585633483894843
+      },
+      "mean-map": {
+        "E": -679.7879277736278,
+        "sd": null,
+        "err": -14.94941533927215
+      }
+    },
+    {
+      "window": "keble-college-02-default/window_001",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.015642642974853516,
+      "overhang_qc_cells": 722,
+      "track_len_m": 20.8,
+      "n_steps": 172,
+      "n_steps_total": 208,
+      "retained": 0.8269230769230769,
+      "n_cells": 1754,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.21126145869493484,
+      "median_raw_sd_on_candidates_m": 0.10601487010717392,
+      "median_meas_sd_on_candidates_m": 0.002439373405650258,
+      "J_tls": -907.0323293950338,
+      "clark": {
+        "E": -917.9823056588714,
+        "sd": 20.576520251992747,
+        "z": 0.5321587970044219,
+        "nll": 4.084685657963501
+      },
+      "clark-diag": {
+        "E": -889.8603355426629,
+        "sd": 2.9868688990581096,
+        "z": -5.74916222730296,
+        "nll": 18.539597338892836
+      },
+      "fosm": {
+        "E": -930.1251658797145,
+        "sd": 20.935602468156254,
+        "z": 1.1030414109078372,
+        "nll": 4.568739887385167
+      },
+      "mean-map": {
+        "E": -930.1251658797145,
+        "sd": null,
+        "err": 23.092836484680674
+      }
+    },
+    {
+      "window": "keble-college-02-default/window_003",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.0133514404296875,
+      "overhang_qc_cells": 754,
+      "track_len_m": 22.700000000000003,
+      "n_steps": 145,
+      "n_steps_total": 227,
+      "retained": 0.6387665198237885,
+      "n_cells": 1410,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.14786101132631302,
+      "median_raw_sd_on_candidates_m": 0.0777718685567379,
+      "median_meas_sd_on_candidates_m": 0.002274582162499428,
+      "J_tls": -781.4113469414921,
+      "clark": {
+        "E": -778.6346219363288,
+        "sd": 12.052445110194542,
+        "z": -0.23038686173435205,
+        "nll": 3.434745139296127
+      },
+      "clark-diag": {
+        "E": -769.8907947189946,
+        "sd": 2.0782285020353406,
+        "z": -5.543448283581271,
+        "nll": 17.015363818687263
+      },
+      "fosm": {
+        "E": -781.9670556047051,
+        "sd": 12.258169031150125,
+        "z": 0.045333741262738016,
+        "nll": 3.426158681677453
+      },
+      "mean-map": {
+        "E": -781.9670556047051,
+        "sd": null,
+        "err": 0.5557086632130677
+      }
+    },
+    {
+      "window": "keble-college-02-default/window_004",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.0167694091796875,
+      "overhang_qc_cells": 757,
+      "track_len_m": 22.200000000000003,
+      "n_steps": 222,
+      "n_steps_total": 222,
+      "retained": 1.0,
+      "n_cells": 2064,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.22680789977312088,
+      "median_raw_sd_on_candidates_m": 0.10947801172733307,
+      "median_meas_sd_on_candidates_m": 0.002717143972404301,
+      "J_tls": -1197.9265252704258,
+      "clark": {
+        "E": -1231.8777983221519,
+        "sd": 28.168197994307477,
+        "z": 1.2053051124742618,
+        "nll": 4.983512351161978
+      },
+      "clark-diag": {
+        "E": -1198.895196960644,
+        "sd": 3.4749347642851314,
+        "z": 0.27875967634672777,
+        "nll": 2.2033677177560937
+      },
+      "fosm": {
+        "E": -1243.4626919517864,
+        "sd": 28.035986683772734,
+        "z": 1.6242041771162972,
+        "nll": 5.571447061354782
+      },
+      "mean-map": {
+        "E": -1243.4626919517864,
+        "sd": null,
+        "err": 45.536166681360555
+      }
+    },
+    {
+      "window": "keble-college-02-default/window_005",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.028944015502929688,
+      "overhang_qc_cells": 843,
+      "track_len_m": 24.0,
+      "n_steps": 240,
+      "n_steps_total": 240,
+      "retained": 1.0,
+      "n_cells": 2288,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.1742890626192093,
+      "median_raw_sd_on_candidates_m": 0.1258658915758133,
+      "median_meas_sd_on_candidates_m": 0.0030679114861413836,
+      "J_tls": -1302.3732137373631,
+      "clark": {
+        "E": -1318.0789396464938,
+        "sd": 33.84752514303247,
+        "z": 0.46401401115034663,
+        "nll": 4.548458918696221
+      },
+      "clark-diag": {
+        "E": -1283.43252984062,
+        "sd": 3.455390177988615,
+        "z": -5.481489186777903,
+        "nll": 17.182235767830043
+      },
+      "fosm": {
+        "E": -1330.6576842434206,
+        "sd": 34.05184420852099,
+        "z": 0.8306296226675345,
+        "nll": 4.791795511137319
+      },
+      "mean-map": {
+        "E": -1330.6576842434206,
+        "sd": null,
+        "err": 28.28447050605746
+      }
+    },
+    {
+      "window": "keble-college-02-default/window_007",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 12.349299252033234,
+      "overhang_qc_cells": 805,
+      "track_len_m": 23.3,
+      "n_steps": 215,
+      "n_steps_total": 233,
+      "retained": 0.9227467811158798,
+      "n_cells": 2059,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.26431703567504883,
+      "median_raw_sd_on_candidates_m": 0.1450585126876831,
+      "median_meas_sd_on_candidates_m": 0.0033410219475626945,
+      "J_tls": -931.5801863652632,
+      "clark": {
+        "E": -905.9499154872843,
+        "sd": 113.81246883512799,
+        "z": -0.22519738953301888,
+        "nll": 5.6788475489922625
+      },
+      "clark-diag": {
+        "E": -783.6292791355044,
+        "sd": 25.76450568303664,
+        "z": -5.742431430662759,
+        "nll": 20.655695697133385
+      },
+      "fosm": {
+        "E": -940.0584990770813,
+        "sd": 115.83687506589335,
+        "z": 0.07319182865555704,
+        "nll": 5.673800007073375
+      },
+      "mean-map": {
+        "E": -940.0584990770813,
+        "sd": null,
+        "err": 8.478312711818035
+      }
+    },
+    {
+      "window": "keble-college-02-default/window_008",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 15.676536917686462,
+      "overhang_qc_cells": 570,
+      "track_len_m": 15.700000000000001,
+      "n_steps": 157,
+      "n_steps_total": 157,
+      "retained": 1.0,
+      "n_cells": 1554,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 3.1317795515060425,
+      "median_raw_sd_on_candidates_m": 0.07355933636426926,
+      "median_meas_sd_on_candidates_m": 0.006056590471416712,
+      "J_tls": 2024.380602690122,
+      "clark": {
+        "E": 997.0809811344257,
+        "sd": 225.02631395120824,
+        "z": 4.565242186646858,
+        "nll": 16.755873990835223
+      },
+      "clark-diag": {
+        "E": 1555.5205238224378,
+        "sd": 41.82895725481277,
+        "z": 11.208983193424885,
+        "nll": 67.47317950542275
+      },
+      "fosm": {
+        "E": 873.1712492871233,
+        "sd": 226.89535716641976,
+        "z": 5.073745746849404,
+        "nll": 19.21487541459185
+      },
+      "mean-map": {
+        "E": 873.1712492871233,
+        "sd": null,
+        "err": 1151.2093534029987
+      }
+    },
+    {
+      "window": "keble-college-02-default/window_009",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 17.787695169448853,
+      "overhang_qc_cells": 485,
+      "track_len_m": 14.0,
+      "n_steps": 140,
+      "n_steps_total": 140,
+      "retained": 1.0,
+      "n_cells": 1475,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.34673815965652466,
+      "median_raw_sd_on_candidates_m": 0.1779930740594864,
+      "median_meas_sd_on_candidates_m": 0.015222587622702122,
+      "J_tls": 1748.6402961959297,
+      "clark": {
+        "E": 1619.3330535816626,
+        "sd": 30.802224563483364,
+        "z": 4.197983893915357,
+        "nll": 13.158059833449515
+      },
+      "clark-diag": {
+        "E": 1671.1565749771773,
+        "sd": 4.831109431754748,
+        "z": 16.038494327918563,
+        "nll": 131.1106648238465
+      },
+      "fosm": {
+        "E": 1599.030747032547,
+        "sd": 30.99578490414927,
+        "z": 4.826770789190603,
+        "nll": 16.001647883302894
+      },
+      "mean-map": {
+        "E": 1599.030747032547,
+        "sd": null,
+        "err": 149.60954916338278
+      }
+    },
+    {
+      "window": "keble-college-02-default/window_010",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 11.27303671836853,
+      "overhang_qc_cells": 494,
+      "track_len_m": 14.4,
+      "n_steps": 144,
+      "n_steps_total": 144,
+      "retained": 1.0,
+      "n_cells": 1470,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.675204575061798,
+      "median_raw_sd_on_candidates_m": 0.3765612244606018,
+      "median_meas_sd_on_candidates_m": 0.015013742726296186,
+      "J_tls": 1854.823995290255,
+      "clark": {
+        "E": 1758.5450646094084,
+        "sd": 100.16845017213888,
+        "z": 0.9611702139285552,
+        "nll": 5.9877158938041335
+      },
+      "clark-diag": {
+        "E": 1980.3705784372603,
+        "sd": 17.449160276360942,
+        "z": -7.1949928339582145,
+        "nll": 29.66219099935174
+      },
+      "fosm": {
+        "E": 1629.591098784033,
+        "sd": 92.89501729659132,
+        "z": 2.4245960984872617,
+        "nll": 8.389741662857688
+      },
+      "mean-map": {
+        "E": 1629.591098784033,
+        "sd": null,
+        "err": 225.232896506222
+      }
+    },
+    {
+      "window": "keble-college-02-default/window_011",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 14.379133224487305,
+      "overhang_qc_cells": 616,
+      "track_len_m": 17.6,
+      "n_steps": 176,
+      "n_steps_total": 176,
+      "retained": 1.0,
+      "n_cells": 1741,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.2918380498886108,
+      "median_raw_sd_on_candidates_m": 0.16373211145401,
+      "median_meas_sd_on_candidates_m": 0.007072365377098322,
+      "J_tls": 1344.3636046040374,
+      "clark": {
+        "E": 516.204067219613,
+        "sd": 170.04174113411662,
+        "z": 4.870330848536961,
+        "nll": 17.915043763304297
+      },
+      "clark-diag": {
+        "E": 796.2354167477546,
+        "sd": 33.58389568321633,
+        "z": 16.321161577756204,
+        "nll": 137.62314281374552
+      },
+      "fosm": {
+        "E": 361.2507714418256,
+        "sd": 170.45652667676958,
+        "z": 5.767528250921435,
+        "nll": 22.689609884502083
+      },
+      "mean-map": {
+        "E": 361.2507714418256,
+        "sd": null,
+        "err": 983.1128331622118
+      }
+    },
+    {
+      "window": "keble-college-02-default/window_012",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.039821624755859375,
+      "overhang_qc_cells": 802,
+      "track_len_m": 22.8,
+      "n_steps": 228,
+      "n_steps_total": 228,
+      "retained": 1.0,
+      "n_cells": 2218,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.325326383113861,
+      "median_raw_sd_on_candidates_m": 0.13662981241941452,
+      "median_meas_sd_on_candidates_m": 0.0035509016597643495,
+      "J_tls": -1184.3665587402556,
+      "clark": {
+        "E": -845.0419411785722,
+        "sd": 212.60071946085364,
+        "z": -1.5960652363839418,
+        "nll": 7.5520665026090725
+      },
+      "clark-diag": {
+        "E": -457.95571403989624,
+        "sd": 47.724905835965046,
+        "z": -15.220791575725706,
+        "nll": 120.62064002560115
+      },
+      "fosm": {
+        "E": -1008.7900378378572,
+        "sd": 227.21523104602971,
+        "z": -0.7727321803828803,
+        "nll": 6.643393767159067
+      },
+      "mean-map": {
+        "E": -1008.7900378378572,
+        "sd": null,
+        "err": -175.57652090239844
+      }
+    },
+    {
+      "window": "keble-college-02-default/window_013",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 1.0585250854492188,
+      "overhang_qc_cells": 650,
+      "track_len_m": 18.2,
+      "n_steps": 182,
+      "n_steps_total": 182,
+      "retained": 1.0,
+      "n_cells": 1825,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.3485155999660492,
+      "median_raw_sd_on_candidates_m": 0.09171335399150848,
+      "median_meas_sd_on_candidates_m": 0.0040852585807442665,
+      "J_tls": -947.0092069650852,
+      "clark": {
+        "E": -947.8403351439403,
+        "sd": 20.422105038834246,
+        "z": 0.040697478407566434,
+        "nll": 3.936384570114801
+      },
+      "clark-diag": {
+        "E": -908.7528070244641,
+        "sd": 4.485893044714786,
+        "z": -8.528156948747197,
+        "nll": 38.784606598234696
+      },
+      "fosm": {
+        "E": -959.2043156995936,
+        "sd": 20.687922653248627,
+        "z": 0.5894796175967615,
+        "nll": 4.122231726282783
+      },
+      "mean-map": {
+        "E": -959.2043156995936,
+        "sd": null,
+        "err": 12.19510873450838
+      }
+    },
+    {
+      "window": "keble-college-02-default/window_014",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.015025615692138672,
+      "overhang_qc_cells": 420,
+      "track_len_m": 12.100000000000001,
+      "n_steps": 94,
+      "n_steps_total": 121,
+      "retained": 0.7768595041322314,
+      "n_cells": 1053,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.42605623602867126,
+      "median_raw_sd_on_candidates_m": 0.06181180477142334,
+      "median_meas_sd_on_candidates_m": 0.0031550803687423468,
+      "J_tls": -494.46702602554615,
+      "clark": {
+        "E": -481.0595075904091,
+        "sd": 19.900203780427454,
+        "z": -0.6737377457573474,
+        "nll": 4.136629780134269
+      },
+      "clark-diag": {
+        "E": -456.55813252779217,
+        "sd": 6.380571351539246,
+        "z": -5.941300772164997,
+        "nll": 20.421723612748682
+      },
+      "fosm": {
+        "E": -498.91539654929215,
+        "sd": 23.461252652698313,
+        "z": 0.18960498783232674,
+        "nll": 4.092263795965657
+      },
+      "mean-map": {
+        "E": -498.91539654929215,
+        "sd": null,
+        "err": 4.448370523746007
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_000",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.013424396514892578,
+      "overhang_qc_cells": 510,
+      "track_len_m": 14.100000000000001,
+      "n_steps": 133,
+      "n_steps_total": 141,
+      "retained": 0.9432624113475178,
+      "n_cells": 1339,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.6509066820144653,
+      "median_raw_sd_on_candidates_m": 0.0777813121676445,
+      "median_meas_sd_on_candidates_m": 0.002821823814883828,
+      "J_tls": -694.7373431128999,
+      "clark": {
+        "E": -637.294259821746,
+        "sd": 34.532460621717846,
+        "z": -1.6634517858547078,
+        "nll": 5.844374224402346
+      },
+      "clark-diag": {
+        "E": -580.0063279539514,
+        "sd": 7.123454508487894,
+        "z": -16.106092208807073,
+        "nll": 132.58543444403932
+      },
+      "fosm": {
+        "E": -679.7879277736278,
+        "sd": 35.86767716765475,
+        "z": -0.41679351772334566,
+        "nll": 4.585633483894843
+      },
+      "mean-map": {
+        "E": -679.7879277736278,
+        "sd": null,
+        "err": -14.94941533927215
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_001",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.015642642974853516,
+      "overhang_qc_cells": 722,
+      "track_len_m": 20.8,
+      "n_steps": 172,
+      "n_steps_total": 208,
+      "retained": 0.8269230769230769,
+      "n_cells": 1754,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.21126145869493484,
+      "median_raw_sd_on_candidates_m": 0.10601487010717392,
+      "median_meas_sd_on_candidates_m": 0.002439373405650258,
+      "J_tls": -907.0323293950338,
+      "clark": {
+        "E": -917.9823056588714,
+        "sd": 20.576520251992747,
+        "z": 0.5321587970044219,
+        "nll": 4.084685657963501
+      },
+      "clark-diag": {
+        "E": -889.8603355426629,
+        "sd": 2.9868688990581096,
+        "z": -5.74916222730296,
+        "nll": 18.539597338892836
+      },
+      "fosm": {
+        "E": -930.1251658797145,
+        "sd": 20.935602468156254,
+        "z": 1.1030414109078372,
+        "nll": 4.568739887385167
+      },
+      "mean-map": {
+        "E": -930.1251658797145,
+        "sd": null,
+        "err": 23.092836484680674
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_003",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.0133514404296875,
+      "overhang_qc_cells": 754,
+      "track_len_m": 22.700000000000003,
+      "n_steps": 145,
+      "n_steps_total": 227,
+      "retained": 0.6387665198237885,
+      "n_cells": 1410,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.14786101132631302,
+      "median_raw_sd_on_candidates_m": 0.0777718685567379,
+      "median_meas_sd_on_candidates_m": 0.002274582162499428,
+      "J_tls": -781.4113469414921,
+      "clark": {
+        "E": -778.6346219363288,
+        "sd": 12.052445110194542,
+        "z": -0.23038686173435205,
+        "nll": 3.434745139296127
+      },
+      "clark-diag": {
+        "E": -769.8907947189946,
+        "sd": 2.0782285020353406,
+        "z": -5.543448283581271,
+        "nll": 17.015363818687263
+      },
+      "fosm": {
+        "E": -781.9670556047051,
+        "sd": 12.258169031150125,
+        "z": 0.045333741262738016,
+        "nll": 3.426158681677453
+      },
+      "mean-map": {
+        "E": -781.9670556047051,
+        "sd": null,
+        "err": 0.5557086632130677
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_004",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.0167694091796875,
+      "overhang_qc_cells": 757,
+      "track_len_m": 22.200000000000003,
+      "n_steps": 222,
+      "n_steps_total": 222,
+      "retained": 1.0,
+      "n_cells": 2064,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.22680789977312088,
+      "median_raw_sd_on_candidates_m": 0.10947801172733307,
+      "median_meas_sd_on_candidates_m": 0.002717143972404301,
+      "J_tls": -1197.9265252704258,
+      "clark": {
+        "E": -1231.8777983221519,
+        "sd": 28.168197994307477,
+        "z": 1.2053051124742618,
+        "nll": 4.983512351161978
+      },
+      "clark-diag": {
+        "E": -1198.895196960644,
+        "sd": 3.4749347642851314,
+        "z": 0.27875967634672777,
+        "nll": 2.2033677177560937
+      },
+      "fosm": {
+        "E": -1243.4626919517864,
+        "sd": 28.035986683772734,
+        "z": 1.6242041771162972,
+        "nll": 5.571447061354782
+      },
+      "mean-map": {
+        "E": -1243.4626919517864,
+        "sd": null,
+        "err": 45.536166681360555
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_005",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.028944015502929688,
+      "overhang_qc_cells": 843,
+      "track_len_m": 24.0,
+      "n_steps": 240,
+      "n_steps_total": 240,
+      "retained": 1.0,
+      "n_cells": 2288,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.1742890626192093,
+      "median_raw_sd_on_candidates_m": 0.1258658915758133,
+      "median_meas_sd_on_candidates_m": 0.0030679114861413836,
+      "J_tls": -1302.3732137373631,
+      "clark": {
+        "E": -1318.0789396464938,
+        "sd": 33.84752514303247,
+        "z": 0.46401401115034663,
+        "nll": 4.548458918696221
+      },
+      "clark-diag": {
+        "E": -1283.43252984062,
+        "sd": 3.455390177988615,
+        "z": -5.481489186777903,
+        "nll": 17.182235767830043
+      },
+      "fosm": {
+        "E": -1330.6576842434206,
+        "sd": 34.05184420852099,
+        "z": 0.8306296226675345,
+        "nll": 4.791795511137319
+      },
+      "mean-map": {
+        "E": -1330.6576842434206,
+        "sd": null,
+        "err": 28.28447050605746
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_007",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": true,
+      "overhang_gap_m": 12.349299252033234,
+      "overhang_qc_cells": 805,
+      "track_len_m": 23.3,
+      "n_steps": 215,
+      "n_steps_total": 233,
+      "retained": 0.9227467811158798,
+      "n_cells": 2059,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.26431703567504883,
+      "median_raw_sd_on_candidates_m": 0.1450585126876831,
+      "median_meas_sd_on_candidates_m": 0.0033410219475626945,
+      "J_tls": -931.5801863652632,
+      "clark": {
+        "E": -905.9499154872843,
+        "sd": 113.81246883512799,
+        "z": -0.22519738953301888,
+        "nll": 5.6788475489922625
+      },
+      "clark-diag": {
+        "E": -783.6292791355044,
+        "sd": 25.76450568303664,
+        "z": -5.742431430662759,
+        "nll": 20.655695697133385
+      },
+      "fosm": {
+        "E": -940.0584990770813,
+        "sd": 115.83687506589335,
+        "z": 0.07319182865555704,
+        "nll": 5.673800007073375
+      },
+      "mean-map": {
+        "E": -940.0584990770813,
+        "sd": null,
+        "err": 8.478312711818035
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_008",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": true,
+      "overhang_gap_m": 15.676536917686462,
+      "overhang_qc_cells": 570,
+      "track_len_m": 15.700000000000001,
+      "n_steps": 157,
+      "n_steps_total": 157,
+      "retained": 1.0,
+      "n_cells": 1554,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 3.1317795515060425,
+      "median_raw_sd_on_candidates_m": 0.07355933636426926,
+      "median_meas_sd_on_candidates_m": 0.006056590471416712,
+      "J_tls": 2024.380602690122,
+      "clark": {
+        "E": 997.0809811344257,
+        "sd": 225.02631395120824,
+        "z": 4.565242186646858,
+        "nll": 16.755873990835223
+      },
+      "clark-diag": {
+        "E": 1555.5205238224378,
+        "sd": 41.82895725481277,
+        "z": 11.208983193424885,
+        "nll": 67.47317950542275
+      },
+      "fosm": {
+        "E": 873.1712492871233,
+        "sd": 226.89535716641976,
+        "z": 5.073745746849404,
+        "nll": 19.21487541459185
+      },
+      "mean-map": {
+        "E": 873.1712492871233,
+        "sd": null,
+        "err": 1151.2093534029987
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_009",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": true,
+      "overhang_gap_m": 17.787695169448853,
+      "overhang_qc_cells": 485,
+      "track_len_m": 14.0,
+      "n_steps": 140,
+      "n_steps_total": 140,
+      "retained": 1.0,
+      "n_cells": 1475,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.34673815965652466,
+      "median_raw_sd_on_candidates_m": 0.1779930740594864,
+      "median_meas_sd_on_candidates_m": 0.015222587622702122,
+      "J_tls": 1748.6402961959297,
+      "clark": {
+        "E": 1619.3330535816626,
+        "sd": 30.802224563483364,
+        "z": 4.197983893915357,
+        "nll": 13.158059833449515
+      },
+      "clark-diag": {
+        "E": 1671.1565749771773,
+        "sd": 4.831109431754748,
+        "z": 16.038494327918563,
+        "nll": 131.1106648238465
+      },
+      "fosm": {
+        "E": 1599.030747032547,
+        "sd": 30.99578490414927,
+        "z": 4.826770789190603,
+        "nll": 16.001647883302894
+      },
+      "mean-map": {
+        "E": 1599.030747032547,
+        "sd": null,
+        "err": 149.60954916338278
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_010",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": true,
+      "overhang_gap_m": 11.27303671836853,
+      "overhang_qc_cells": 494,
+      "track_len_m": 14.4,
+      "n_steps": 144,
+      "n_steps_total": 144,
+      "retained": 1.0,
+      "n_cells": 1470,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.675204575061798,
+      "median_raw_sd_on_candidates_m": 0.3765612244606018,
+      "median_meas_sd_on_candidates_m": 0.015013742726296186,
+      "J_tls": 1854.823995290255,
+      "clark": {
+        "E": 1758.5450646094084,
+        "sd": 100.16845017213888,
+        "z": 0.9611702139285552,
+        "nll": 5.9877158938041335
+      },
+      "clark-diag": {
+        "E": 1980.3705784372603,
+        "sd": 17.449160276360942,
+        "z": -7.1949928339582145,
+        "nll": 29.66219099935174
+      },
+      "fosm": {
+        "E": 1629.591098784033,
+        "sd": 92.89501729659132,
+        "z": 2.4245960984872617,
+        "nll": 8.389741662857688
+      },
+      "mean-map": {
+        "E": 1629.591098784033,
+        "sd": null,
+        "err": 225.232896506222
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_011",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": true,
+      "overhang_gap_m": 14.379133224487305,
+      "overhang_qc_cells": 616,
+      "track_len_m": 17.6,
+      "n_steps": 176,
+      "n_steps_total": 176,
+      "retained": 1.0,
+      "n_cells": 1741,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.2918380498886108,
+      "median_raw_sd_on_candidates_m": 0.16373211145401,
+      "median_meas_sd_on_candidates_m": 0.007072365377098322,
+      "J_tls": 1344.3636046040374,
+      "clark": {
+        "E": 516.204067219613,
+        "sd": 170.04174113411662,
+        "z": 4.870330848536961,
+        "nll": 17.915043763304297
+      },
+      "clark-diag": {
+        "E": 796.2354167477546,
+        "sd": 33.58389568321633,
+        "z": 16.321161577756204,
+        "nll": 137.62314281374552
+      },
+      "fosm": {
+        "E": 361.2507714418256,
+        "sd": 170.45652667676958,
+        "z": 5.767528250921435,
+        "nll": 22.689609884502083
+      },
+      "mean-map": {
+        "E": 361.2507714418256,
+        "sd": null,
+        "err": 983.1128331622118
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_012",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.039821624755859375,
+      "overhang_qc_cells": 802,
+      "track_len_m": 22.8,
+      "n_steps": 228,
+      "n_steps_total": 228,
+      "retained": 1.0,
+      "n_cells": 2218,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.325326383113861,
+      "median_raw_sd_on_candidates_m": 0.13662981241941452,
+      "median_meas_sd_on_candidates_m": 0.0035509016597643495,
+      "J_tls": -1184.3665587402556,
+      "clark": {
+        "E": -845.0419411785722,
+        "sd": 212.60071946085364,
+        "z": -1.5960652363839418,
+        "nll": 7.5520665026090725
+      },
+      "clark-diag": {
+        "E": -457.95571403989624,
+        "sd": 47.724905835965046,
+        "z": -15.220791575725706,
+        "nll": 120.62064002560115
+      },
+      "fosm": {
+        "E": -1008.7900378378572,
+        "sd": 227.21523104602971,
+        "z": -0.7727321803828803,
+        "nll": 6.643393767159067
+      },
+      "mean-map": {
+        "E": -1008.7900378378572,
+        "sd": null,
+        "err": -175.57652090239844
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_013",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": true,
+      "overhang_gap_m": 1.0585250854492188,
+      "overhang_qc_cells": 650,
+      "track_len_m": 18.2,
+      "n_steps": 182,
+      "n_steps_total": 182,
+      "retained": 1.0,
+      "n_cells": 1825,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.3485155999660492,
+      "median_raw_sd_on_candidates_m": 0.09171335399150848,
+      "median_meas_sd_on_candidates_m": 0.0040852585807442665,
+      "J_tls": -947.0092069650852,
+      "clark": {
+        "E": -947.8403351439403,
+        "sd": 20.422105038834246,
+        "z": 0.040697478407566434,
+        "nll": 3.936384570114801
+      },
+      "clark-diag": {
+        "E": -908.7528070244641,
+        "sd": 4.485893044714786,
+        "z": -8.528156948747197,
+        "nll": 38.784606598234696
+      },
+      "fosm": {
+        "E": -959.2043156995936,
+        "sd": 20.687922653248627,
+        "z": 0.5894796175967615,
+        "nll": 4.122231726282783
+      },
+      "mean-map": {
+        "E": -959.2043156995936,
+        "sd": null,
+        "err": 12.19510873450838
+      }
+    },
+    {
+      "window": "keble-college-02-unclamped/window_014",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.015025615692138672,
+      "overhang_qc_cells": 420,
+      "track_len_m": 12.100000000000001,
+      "n_steps": 94,
+      "n_steps_total": 121,
+      "retained": 0.7768595041322314,
+      "n_cells": 1053,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.42605623602867126,
+      "median_raw_sd_on_candidates_m": 0.06181180477142334,
+      "median_meas_sd_on_candidates_m": 0.0031550803687423468,
+      "J_tls": -494.46702602554615,
+      "clark": {
+        "E": -481.0595075904091,
+        "sd": 19.900203780427454,
+        "z": -0.6737377457573474,
+        "nll": 4.136629780134269
+      },
+      "clark-diag": {
+        "E": -456.55813252779217,
+        "sd": 6.380571351539246,
+        "z": -5.941300772164997,
+        "nll": 20.421723612748682
+      },
+      "fosm": {
+        "E": -498.91539654929215,
+        "sd": 23.461252652698313,
+        "z": 0.18960498783232674,
+        "nll": 4.092263795965657
+      },
+      "mean-map": {
+        "E": -498.91539654929215,
+        "sd": null,
+        "err": 4.448370523746007
+      }
+    },
+    {
+      "window": "keble-college-03-default/window_000",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.011945724487304688,
+      "overhang_qc_cells": 571,
+      "track_len_m": 16.3,
+      "n_steps": 163,
+      "n_steps_total": 163,
+      "retained": 1.0,
+      "n_cells": 1625,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.2178911566734314,
+      "median_raw_sd_on_candidates_m": 0.08675192296504974,
+      "median_meas_sd_on_candidates_m": 0.002533083548769355,
+      "J_tls": -849.0007087064273,
+      "clark": {
+        "E": -948.1616398624735,
+        "sd": 24.94978253168558,
+        "z": 3.9744206599842857,
+        "nll": 12.03381343045427
+      },
+      "clark-diag": {
+        "E": -907.0273340645542,
+        "sd": 3.9295300241575792,
+        "z": 14.766810534948588,
+        "nll": 111.31680505274073
+      },
+      "fosm": {
+        "E": -962.1973929631819,
+        "sd": 25.075192706104154,
+        "z": 4.5142897039111745,
+        "nll": 14.330223317630962
+      },
+      "mean-map": {
+        "E": -962.1973929631819,
+        "sd": null,
+        "err": 113.19668425675457
+      }
+    },
+    {
+      "window": "keble-college-03-default/window_001",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 14.321243286132812,
+      "overhang_qc_cells": 857,
+      "track_len_m": 24.400000000000002,
+      "n_steps": 194,
+      "n_steps_total": 244,
+      "retained": 0.7950819672131147,
+      "n_cells": 2126,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.30815327167510986,
+      "median_raw_sd_on_candidates_m": 0.15258415788412094,
+      "median_meas_sd_on_candidates_m": 0.00286580843385309,
+      "J_tls": -1051.063015234247,
+      "clark": {
+        "E": -1050.4562777866252,
+        "sd": 80.63437133963346,
+        "z": -0.007524551100747899,
+        "nll": 5.308891844670506
+      },
+      "clark-diag": {
+        "E": -934.2921336610634,
+        "sd": 20.55882982761702,
+        "z": -5.679840854381858,
+        "nll": 20.072525122725363
+      },
+      "fosm": {
+        "E": -1075.1339031555988,
+        "sd": 91.89534804132602,
+        "z": 0.26193804620585376,
+        "nll": 5.473894711520454
+      },
+      "mean-map": {
+        "E": -1075.1339031555988,
+        "sd": null,
+        "err": 24.07088792135187
+      }
+    },
+    {
+      "window": "keble-college-03-default/window_002",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 13.530195474624634,
+      "overhang_qc_cells": 553,
+      "track_len_m": 15.5,
+      "n_steps": 155,
+      "n_steps_total": 155,
+      "retained": 1.0,
+      "n_cells": 1576,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 3.337926506996155,
+      "median_raw_sd_on_candidates_m": 0.10378147661685944,
+      "median_meas_sd_on_candidates_m": 0.011273316573351622,
+      "J_tls": 1852.308126896791,
+      "clark": {
+        "E": 1033.1703491948797,
+        "sd": 211.1817931612398,
+        "z": 3.878827646266314,
+        "nll": 13.794309829417793
+      },
+      "clark-diag": {
+        "E": 1590.6230460639113,
+        "sd": 43.49953610062424,
+        "z": 6.015813139421605,
+        "nll": 22.78669267110779
+      },
+      "fosm": {
+        "E": 922.531426581808,
+        "sd": 211.88302708230086,
+        "z": 4.38816035960178,
+        "nll": 15.902948567346112
+      },
+      "mean-map": {
+        "E": 922.531426581808,
+        "sd": null,
+        "err": 929.776700314983
+      }
+    },
+    {
+      "window": "keble-college-03-default/window_003",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 16.71214008331299,
+      "overhang_qc_cells": 445,
+      "track_len_m": 13.0,
+      "n_steps": 130,
+      "n_steps_total": 130,
+      "retained": 1.0,
+      "n_cells": 1325,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.7159007787704468,
+      "median_raw_sd_on_candidates_m": 0.09694167226552963,
+      "median_meas_sd_on_candidates_m": 0.018827134743332863,
+      "J_tls": 1578.6005197131635,
+      "clark": {
+        "E": 1628.9892641388456,
+        "sd": 100.56166357070077,
+        "z": -0.5010730991960548,
+        "nll": 5.655246765784638
+      },
+      "clark-diag": {
+        "E": 1771.1535401117546,
+        "sd": 23.24125406626842,
+        "z": -8.284966889031006,
+        "nll": 38.38520560144596
+      },
+      "fosm": {
+        "E": 1557.7141299143448,
+        "sd": 95.04650002854905,
+        "z": 0.21974917322095106,
+        "nll": 5.497449628602271
+      },
+      "mean-map": {
+        "E": 1557.7141299143448,
+        "sd": null,
+        "err": 20.886389798818755
+      }
+    },
+    {
+      "window": "keble-college-03-default/window_004",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 14.152000427246094,
+      "overhang_qc_cells": 450,
+      "track_len_m": 13.200000000000001,
+      "n_steps": 132,
+      "n_steps_total": 132,
+      "retained": 1.0,
+      "n_cells": 1583,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.45943108201026917,
+      "median_raw_sd_on_candidates_m": 0.28003039956092834,
+      "median_meas_sd_on_candidates_m": 0.01455114409327507,
+      "J_tls": 1632.4633080365427,
+      "clark": {
+        "E": 1553.2717752540887,
+        "sd": 35.68532995898959,
+        "z": 2.2191621283441343,
+        "nll": 6.956018487957174
+      },
+      "clark-diag": {
+        "E": 1602.6770401833235,
+        "sd": 5.214561644486601,
+        "z": 5.712132655428953,
+        "nll": 18.88462329806732
+      },
+      "fosm": {
+        "E": 1529.1359287394478,
+        "sd": 37.040862811346244,
+        "z": 2.7895510918132285,
+        "nll": 8.421757883672363
+      },
+      "mean-map": {
+        "E": 1529.1359287394478,
+        "sd": null,
+        "err": 103.32737929709492
+      }
+    },
+    {
+      "window": "keble-college-03-default/window_005",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 13.530195474624634,
+      "overhang_qc_cells": 351,
+      "track_len_m": 10.0,
+      "n_steps": 100,
+      "n_steps_total": 100,
+      "retained": 1.0,
+      "n_cells": 1026,
+      "frac_cells_count0": 0.0009746588693957114,
+      "median_sigma_on_candidates_m": 4.90065860748291,
+      "median_raw_sd_on_candidates_m": 0.38148313760757446,
+      "median_meas_sd_on_candidates_m": 0.019996402785182,
+      "J_tls": 1359.2620262963121,
+      "clark": {
+        "E": 1066.5366124485413,
+        "sd": 211.42107091308296,
+        "z": 1.3845612104013643,
+        "nll": 7.231295147541204
+      },
+      "clark-diag": {
+        "E": 1480.1759282941948,
+        "sd": 44.0140684855116,
+        "z": -2.7471648533851107,
+        "nll": 8.476905220161834
+      },
+      "fosm": {
+        "E": 866.9682471024087,
+        "sd": 208.87860703873235,
+        "z": 2.356841546260491,
+        "nll": 9.038042825947706
+      },
+      "mean-map": {
+        "E": 866.9682471024087,
+        "sd": null,
+        "err": 492.29377919390345
+      }
+    },
+    {
+      "window": "keble-college-03-default/window_006",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 13.89681100845337,
+      "overhang_qc_cells": 472,
+      "track_len_m": 13.9,
+      "n_steps": 126,
+      "n_steps_total": 139,
+      "retained": 0.9064748201438849,
+      "n_cells": 1384,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.8331375420093536,
+      "median_raw_sd_on_candidates_m": 0.056382590904831886,
+      "median_meas_sd_on_candidates_m": 0.002640764112584293,
+      "J_tls": 198.89951421290704,
+      "clark": {
+        "E": -176.67422964592674,
+        "sd": 93.46447101558883,
+        "z": 4.018358417672875,
+        "nll": 13.530122094588286
+      },
+      "clark-diag": {
+        "E": 31.441163581444506,
+        "sd": 19.79421347112775,
+        "z": 8.459964871840993,
+        "nll": 39.68983099565098
+      },
+      "fosm": {
+        "E": -266.877415809112,
+        "sd": 106.66256253378438,
+        "z": 4.366826738055243,
+        "nll": 15.123196643441432
+      },
+      "mean-map": {
+        "E": -266.877415809112,
+        "sd": null,
+        "err": 465.77693002201903
+      }
+    },
+    {
+      "window": "keble-college-03-default/window_007",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.019413471221923828,
+      "overhang_qc_cells": 821,
+      "track_len_m": 24.1,
+      "n_steps": 139,
+      "n_steps_total": 241,
+      "retained": 0.5767634854771784,
+      "n_cells": 1466,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.225221648812294,
+      "median_raw_sd_on_candidates_m": 0.15679612010717392,
+      "median_meas_sd_on_candidates_m": 0.002378912875428796,
+      "J_tls": -731.3745379694,
+      "clark": {
+        "E": -697.4666295726024,
+        "sd": 24.84811737697841,
+        "z": -1.36460673790172,
+        "nll": 5.0627962979630725
+      },
+      "clark-diag": {
+        "E": -664.6342819628167,
+        "sd": 2.859515205563568,
+        "z": -23.33971012874184,
+        "nll": 274.3406250819712
+      },
+      "fosm": {
+        "E": -707.4585505824838,
+        "sd": 25.110113423600474,
+        "z": -0.9524444188467124,
+        "nll": 4.595784408929006
+      },
+      "mean-map": {
+        "E": -707.4585505824838,
+        "sd": null,
+        "err": -23.915987386916186
+      }
+    },
+    {
+      "window": "keble-college-03-default/window_009",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.020381927490234375,
+      "overhang_qc_cells": 856,
+      "track_len_m": 24.6,
+      "n_steps": 246,
+      "n_steps_total": 246,
+      "retained": 1.0,
+      "n_cells": 2434,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.2598532885313034,
+      "median_raw_sd_on_candidates_m": 0.10944814234972,
+      "median_meas_sd_on_candidates_m": 0.0026141261914744973,
+      "J_tls": -1302.9877758679588,
+      "clark": {
+        "E": -1316.089251258941,
+        "sd": 35.80331929462317,
+        "z": 0.3659290716363747,
+        "nll": 4.563931182774538
+      },
+      "clark-diag": {
+        "E": -1263.8762507813728,
+        "sd": 4.304136122116588,
+        "z": -9.0869628601227,
+        "nll": 43.66496199307453
+      },
+      "fosm": {
+        "E": -1336.56906489715,
+        "sd": 35.838570884065035,
+        "z": 0.9370152938805497,
+        "nll": 4.936962076112826
+      },
+      "mean-map": {
+        "E": -1336.56906489715,
+        "sd": null,
+        "err": 33.58128902919111
+      }
+    },
+    {
+      "window": "keble-college-03-default/window_010",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.0212554931640625,
+      "overhang_qc_cells": 835,
+      "track_len_m": 24.8,
+      "n_steps": 234,
+      "n_steps_total": 248,
+      "retained": 0.9435483870967742,
+      "n_cells": 2301,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.22492006421089172,
+      "median_raw_sd_on_candidates_m": 0.12881790101528168,
+      "median_meas_sd_on_candidates_m": 0.0028387210331857204,
+      "J_tls": -1264.079224110991,
+      "clark": {
+        "E": -1283.9450067087075,
+        "sd": 36.46728753652455,
+        "z": 0.5447562442865983,
+        "nll": 4.663733842905789
+      },
+      "clark-diag": {
+        "E": -1233.893531424397,
+        "sd": 3.476551408461854,
+        "z": -8.682653911897459,
+        "nll": 39.859218837965315
+      },
+      "fosm": {
+        "E": -1297.4437979342372,
+        "sd": 36.23595410397583,
+        "z": 0.9207588056743197,
+        "nll": 4.932888755537928
+      },
+      "mean-map": {
+        "E": -1297.4437979342372,
+        "sd": null,
+        "err": 33.364573823246246
+      }
+    },
+    {
+      "window": "keble-college-03-default/window_012",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.013648509979248047,
+      "overhang_qc_cells": 753,
+      "track_len_m": 22.8,
+      "n_steps": 147,
+      "n_steps_total": 228,
+      "retained": 0.6447368421052632,
+      "n_cells": 1455,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.14906561374664307,
+      "median_raw_sd_on_candidates_m": 0.08243278414011002,
+      "median_meas_sd_on_candidates_m": 0.003136553568765521,
+      "J_tls": -772.4506478409257,
+      "clark": {
+        "E": -741.4108077159333,
+        "sd": 14.169663607389769,
+        "z": -2.190584122886625,
+        "nll": 5.9693712465720585
+      },
+      "clark-diag": {
+        "E": -722.6566791633884,
+        "sd": 1.7494157050354906,
+        "z": -28.463199761046603,
+        "nll": 406.55509070117364
+      },
+      "fosm": {
+        "E": -747.0900657355241,
+        "sd": 14.407456331810435,
+        "z": -1.7602400813395205,
+        "nll": 5.135906978571292
+      },
+      "mean-map": {
+        "E": -747.0900657355241,
+        "sd": null,
+        "err": -25.36058210540159
+      }
+    },
+    {
+      "window": "keble-college-03-default/window_013",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.01409769058227539,
+      "overhang_qc_cells": 778,
+      "track_len_m": 22.200000000000003,
+      "n_steps": 201,
+      "n_steps_total": 222,
+      "retained": 0.9054054054054054,
+      "n_cells": 2019,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.2101735919713974,
+      "median_raw_sd_on_candidates_m": 0.11661586165428162,
+      "median_meas_sd_on_candidates_m": 0.0023849140852689743,
+      "J_tls": -1053.8062584974707,
+      "clark": {
+        "E": -1035.3177697991514,
+        "sd": 26.398082331429485,
+        "z": -0.7003724159276135,
+        "nll": 4.437490662253743
+      },
+      "clark-diag": {
+        "E": -996.0918806430151,
+        "sd": 3.3025554027504067,
+        "z": -17.475672870284146,
+        "nll": 154.81320620107414
+      },
+      "fosm": {
+        "E": -1046.1270177344052,
+        "sd": 26.894681250167324,
+        "z": -0.28553009019274994,
+        "nll": 4.251630793423321
+      },
+      "mean-map": {
+        "E": -1046.1270177344052,
+        "sd": null,
+        "err": -7.679240763065536
+      }
+    }
+  ],
+  "runtime_s": 11.388428926467896,
+  "drift_rates_frozen": {
+    "q_x": 0.004202,
+    "q_y": 0.01061,
+    "q_z": 0.00743,
+    "q_yaw": 0.0003651
+  }
+}

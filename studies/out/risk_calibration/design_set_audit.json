@@ -1,0 +1,457 @@
+{
+  "overhang_flag": {
+    "rule": "max(tls_max - tls_mean) > OVERHANG_M over the track cells dilated 3x3",
+    "threshold_m": 1.0,
+    "n_windows_all": 44,
+    "n_flagged_all": 18,
+    "n_windows_distinct": 29,
+    "n_flagged_distinct": 12,
+    "per_window": [
+      {
+        "window": "keble-college-02-default/window_000",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.013424396514892578,
+        "overhang_qc_cells": 510,
+        "track_len_m": 14.100000000000001
+      },
+      {
+        "window": "keble-college-02-default/window_001",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.015642642974853516,
+        "overhang_qc_cells": 722,
+        "track_len_m": 20.8
+      },
+      {
+        "window": "keble-college-02-default/window_002",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.010250091552734375,
+        "overhang_qc_cells": 642,
+        "track_len_m": 22.6
+      },
+      {
+        "window": "keble-college-02-default/window_003",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.0133514404296875,
+        "overhang_qc_cells": 754,
+        "track_len_m": 22.700000000000003
+      },
+      {
+        "window": "keble-college-02-default/window_004",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.0167694091796875,
+        "overhang_qc_cells": 757,
+        "track_len_m": 22.200000000000003
+      },
+      {
+        "window": "keble-college-02-default/window_005",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.028944015502929688,
+        "overhang_qc_cells": 843,
+        "track_len_m": 24.0
+      },
+      {
+        "window": "keble-college-02-default/window_006",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.011800289154052734,
+        "overhang_qc_cells": 723,
+        "track_len_m": 24.0
+      },
+      {
+        "window": "keble-college-02-default/window_007",
+        "distinct": true,
+        "overhang_flag": true,
+        "overhang_gap_m": 12.349299252033234,
+        "overhang_qc_cells": 805,
+        "track_len_m": 23.3
+      },
+      {
+        "window": "keble-college-02-default/window_008",
+        "distinct": true,
+        "overhang_flag": true,
+        "overhang_gap_m": 15.676536917686462,
+        "overhang_qc_cells": 570,
+        "track_len_m": 15.700000000000001
+      },
+      {
+        "window": "keble-college-02-default/window_009",
+        "distinct": true,
+        "overhang_flag": true,
+        "overhang_gap_m": 17.787695169448853,
+        "overhang_qc_cells": 485,
+        "track_len_m": 14.0
+      },
+      {
+        "window": "keble-college-02-default/window_010",
+        "distinct": true,
+        "overhang_flag": true,
+        "overhang_gap_m": 11.27303671836853,
+        "overhang_qc_cells": 494,
+        "track_len_m": 14.4
+      },
+      {
+        "window": "keble-college-02-default/window_011",
+        "distinct": true,
+        "overhang_flag": true,
+        "overhang_gap_m": 14.379133224487305,
+        "overhang_qc_cells": 616,
+        "track_len_m": 17.6
+      },
+      {
+        "window": "keble-college-02-default/window_012",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.039821624755859375,
+        "overhang_qc_cells": 802,
+        "track_len_m": 22.8
+      },
+      {
+        "window": "keble-college-02-default/window_013",
+        "distinct": true,
+        "overhang_flag": true,
+        "overhang_gap_m": 1.0585250854492188,
+        "overhang_qc_cells": 650,
+        "track_len_m": 18.2
+      },
+      {
+        "window": "keble-college-02-default/window_014",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.015025615692138672,
+        "overhang_qc_cells": 420,
+        "track_len_m": 12.100000000000001
+      },
+      {
+        "window": "keble-college-02-unclamped/window_000",
+        "distinct": false,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.013424396514892578,
+        "overhang_qc_cells": 510,
+        "track_len_m": 14.100000000000001
+      },
+      {
+        "window": "keble-college-02-unclamped/window_001",
+        "distinct": false,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.015642642974853516,
+        "overhang_qc_cells": 722,
+        "track_len_m": 20.8
+      },
+      {
+        "window": "keble-college-02-unclamped/window_002",
+        "distinct": false,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.010250091552734375,
+        "overhang_qc_cells": 642,
+        "track_len_m": 22.6
+      },
+      {
+        "window": "keble-college-02-unclamped/window_003",
+        "distinct": false,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.0133514404296875,
+        "overhang_qc_cells": 754,
+        "track_len_m": 22.700000000000003
+      },
+      {
+        "window": "keble-college-02-unclamped/window_004",
+        "distinct": false,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.0167694091796875,
+        "overhang_qc_cells": 757,
+        "track_len_m": 22.200000000000003
+      },
+      {
+        "window": "keble-college-02-unclamped/window_005",
+        "distinct": false,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.028944015502929688,
+        "overhang_qc_cells": 843,
+        "track_len_m": 24.0
+      },
+      {
+        "window": "keble-college-02-unclamped/window_006",
+        "distinct": false,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.011800289154052734,
+        "overhang_qc_cells": 723,
+        "track_len_m": 24.0
+      },
+      {
+        "window": "keble-college-02-unclamped/window_007",
+        "distinct": false,
+        "overhang_flag": true,
+        "overhang_gap_m": 12.349299252033234,
+        "overhang_qc_cells": 805,
+        "track_len_m": 23.3
+      },
+      {
+        "window": "keble-college-02-unclamped/window_008",
+        "distinct": false,
+        "overhang_flag": true,
+        "overhang_gap_m": 15.676536917686462,
+        "overhang_qc_cells": 570,
+        "track_len_m": 15.700000000000001
+      },
+      {
+        "window": "keble-college-02-unclamped/window_009",
+        "distinct": false,
+        "overhang_flag": true,
+        "overhang_gap_m": 17.787695169448853,
+        "overhang_qc_cells": 485,
+        "track_len_m": 14.0
+      },
+      {
+        "window": "keble-college-02-unclamped/window_010",
+        "distinct": false,
+        "overhang_flag": true,
+        "overhang_gap_m": 11.27303671836853,
+        "overhang_qc_cells": 494,
+        "track_len_m": 14.4
+      },
+      {
+        "window": "keble-college-02-unclamped/window_011",
+        "distinct": false,
+        "overhang_flag": true,
+        "overhang_gap_m": 14.379133224487305,
+        "overhang_qc_cells": 616,
+        "track_len_m": 17.6
+      },
+      {
+        "window": "keble-college-02-unclamped/window_012",
+        "distinct": false,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.039821624755859375,
+        "overhang_qc_cells": 802,
+        "track_len_m": 22.8
+      },
+      {
+        "window": "keble-college-02-unclamped/window_013",
+        "distinct": false,
+        "overhang_flag": true,
+        "overhang_gap_m": 1.0585250854492188,
+        "overhang_qc_cells": 650,
+        "track_len_m": 18.2
+      },
+      {
+        "window": "keble-college-02-unclamped/window_014",
+        "distinct": false,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.015025615692138672,
+        "overhang_qc_cells": 420,
+        "track_len_m": 12.100000000000001
+      },
+      {
+        "window": "keble-college-03-default/window_000",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.011945724487304688,
+        "overhang_qc_cells": 571,
+        "track_len_m": 16.3
+      },
+      {
+        "window": "keble-college-03-default/window_001",
+        "distinct": true,
+        "overhang_flag": true,
+        "overhang_gap_m": 14.321243286132812,
+        "overhang_qc_cells": 857,
+        "track_len_m": 24.400000000000002
+      },
+      {
+        "window": "keble-college-03-default/window_002",
+        "distinct": true,
+        "overhang_flag": true,
+        "overhang_gap_m": 13.530195474624634,
+        "overhang_qc_cells": 553,
+        "track_len_m": 15.5
+      },
+      {
+        "window": "keble-college-03-default/window_003",
+        "distinct": true,
+        "overhang_flag": true,
+        "overhang_gap_m": 16.71214008331299,
+        "overhang_qc_cells": 445,
+        "track_len_m": 13.0
+      },
+      {
+        "window": "keble-college-03-default/window_004",
+        "distinct": true,
+        "overhang_flag": true,
+        "overhang_gap_m": 14.152000427246094,
+        "overhang_qc_cells": 450,
+        "track_len_m": 13.200000000000001
+      },
+      {
+        "window": "keble-college-03-default/window_005",
+        "distinct": true,
+        "overhang_flag": true,
+        "overhang_gap_m": 13.530195474624634,
+        "overhang_qc_cells": 351,
+        "track_len_m": 10.0
+      },
+      {
+        "window": "keble-college-03-default/window_006",
+        "distinct": true,
+        "overhang_flag": true,
+        "overhang_gap_m": 13.89681100845337,
+        "overhang_qc_cells": 472,
+        "track_len_m": 13.9
+      },
+      {
+        "window": "keble-college-03-default/window_007",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.019413471221923828,
+        "overhang_qc_cells": 821,
+        "track_len_m": 24.1
+      },
+      {
+        "window": "keble-college-03-default/window_008",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.04029989242553711,
+        "overhang_qc_cells": 842,
+        "track_len_m": 25.5
+      },
+      {
+        "window": "keble-college-03-default/window_009",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.020381927490234375,
+        "overhang_qc_cells": 856,
+        "track_len_m": 24.6
+      },
+      {
+        "window": "keble-college-03-default/window_010",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.0212554931640625,
+        "overhang_qc_cells": 835,
+        "track_len_m": 24.8
+      },
+      {
+        "window": "keble-college-03-default/window_011",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.011875152587890625,
+        "overhang_qc_cells": 719,
+        "track_len_m": 23.5
+      },
+      {
+        "window": "keble-college-03-default/window_012",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.013648509979248047,
+        "overhang_qc_cells": 753,
+        "track_len_m": 22.8
+      },
+      {
+        "window": "keble-college-03-default/window_013",
+        "distinct": true,
+        "overhang_flag": false,
+        "overhang_gap_m": 0.01409769058227539,
+        "overhang_qc_cells": 778,
+        "track_len_m": 22.200000000000003
+      }
+    ]
+  },
+  "pair": [
+    "keble-college-02-default",
+    "keble-college-02-unclamped"
+  ],
+  "layers_compared": [
+    "mu",
+    "sigma",
+    "raw_h",
+    "raw_sd",
+    "meas_sd",
+    "count"
+  ],
+  "n_windows": 15,
+  "n_gt_poses_identical": 15,
+  "n_map_layers_identical": 15,
+  "clamp_ablation_is_a_no_op": true,
+  "per_window": [
+    {
+      "window": "window_000",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_001",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_002",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_003",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_004",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_005",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_006",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_007",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_008",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_009",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_010",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_011",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_012",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_013",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    },
+    {
+      "window": "window_014",
+      "gt_poses_identical": true,
+      "map_layers_identical": true
+    }
+  ]
+}
