@@ -1,0 +1,4675 @@
+{
+  "experiment": "E1 DESIGN-SITE DRY RUN -- NOT the pre-registered held-out test",
+  "prereg": "clark_paper/PREREG_risk_calibration.md frozen 2026-08-28 + amendments A1, A2",
+  "site_filter": "virgin-*",
+  "held_out_touched": false,
+  "truth_raster": "tls_max_raster.npz",
+  "qc_raster": "tls_mean_raster.npz",
+  "overhang_threshold_m": 1.0,
+  "resample_m": 0.1,
+  "cost_weights": {
+    "wz": 1.0,
+    "wpitch": 0.7,
+    "wroll": 0.5
+  },
+  "recalibration": {
+    "amendment": "A2",
+    "model": "Var' = var_scale * Var + (offset_sd * n_steps)^2",
+    "var_scale": 2.396213379859416,
+    "offset_sd_m": 0.0,
+    "fit_arm": "clark",
+    "note": "IN-SAMPLE on this design site: these windows are the fitting set."
+  },
+  "n_windows_computed": 76,
+  "primary": {
+    "n": 31,
+    "clark": {
+      "mean_nll": 5.657033914216964,
+      "cov1": 0.7419354838709677,
+      "cov2": 0.9032258064516129,
+      "sd_ratio": 0.9173248681216398,
+      "rms_z": 1.1020797975509495,
+      "mean_z": -0.6326449566148582,
+      "median_z": -0.4779476306144949,
+      "median_sd": 58.72487840378716
+    },
+    "clark-diag": {
+      "mean_nll": 90.02550576303184,
+      "cov1": 0.03225806451612903,
+      "cov2": 0.03225806451612903,
+      "sd_ratio": 6.551212224904823,
+      "rms_z": 13.17713920087081,
+      "mean_z": -11.493610391277072,
+      "median_z": -10.2437677976115,
+      "median_sd": 9.061218567145085
+    },
+    "fosm": {
+      "mean_nll": 5.468656685692974,
+      "cov1": 0.8387096774193549,
+      "cov2": 0.9032258064516129,
+      "sd_ratio": 0.8666355040236113,
+      "rms_z": 0.8857678245010675,
+      "mean_z": -0.24032309579412242,
+      "median_z": -0.12310183688226393,
+      "median_sd": 58.78933260320448
+    },
+    "nll_diff_clark_minus_fosm": {
+      "mean": 0.18837722852398936,
+      "median": 0.0986070056262296,
+      "n_negative": 10
+    },
+    "nll_diff_clark_minus_clark-diag": {
+      "mean": -84.36847184881485,
+      "median": -50.276304554738545,
+      "n_negative": 30
+    },
+    "mean-map": {
+      "median_abs_err": 30.114784454294238,
+      "mean_err": -19.51801519082055
+    }
+  },
+  "primary_pre_recalibration": {
+    "n": 31,
+    "clark": {
+      "mean_nll": 6.067995387522379,
+      "cov1": 0.5483870967741935,
+      "cov2": 0.8387096774193549,
+      "sd_ratio": 1.4199920454342005,
+      "rms_z": 1.705987268349697,
+      "mean_z": -0.9793158751017743,
+      "median_z": -0.739848942497775,
+      "median_sd": 37.93668528667093
+    },
+    "clark-diag": {
+      "mean_nll": 210.80571048394663,
+      "cov1": 0.03225806451612903,
+      "cov2": 0.03225806451612903,
+      "sd_ratio": 10.14108476789117,
+      "rms_z": 20.39782578349826,
+      "mean_z": -17.79177246372124,
+      "median_z": -15.85705271205457,
+      "median_sd": 5.8536110493394204
+    },
+    "fosm": {
+      "mean_nll": 5.579435604444813,
+      "cov1": 0.6451612903225806,
+      "cov2": 0.8709677419354839,
+      "sd_ratio": 1.3415263935057784,
+      "rms_z": 1.3711426655952024,
+      "mean_z": -0.37201311794866077,
+      "median_z": -0.1905580402601424,
+      "median_sd": 37.97832315370722
+    },
+    "nll_diff_clark_minus_fosm": {
+      "mean": 0.4885597830775675,
+      "median": 0.23680160983238663,
+      "n_negative": 10
+    },
+    "nll_diff_clark_minus_clark-diag": {
+      "mean": -204.7377150964243,
+      "median": -123.47188878570036,
+      "n_negative": 30
+    },
+    "mean-map": {
+      "median_abs_err": 30.114784454294238,
+      "mean_err": -19.51801519082055
+    }
+  },
+  "groups": {
+    "distinct_unflagged": {
+      "n": 31,
+      "clark": {
+        "mean_nll": 5.657033914216964,
+        "cov1": 0.7419354838709677,
+        "cov2": 0.9032258064516129,
+        "sd_ratio": 0.9173248681216398,
+        "rms_z": 1.1020797975509495,
+        "mean_z": -0.6326449566148582,
+        "median_z": -0.4779476306144949,
+        "median_sd": 58.72487840378716
+      },
+      "clark-diag": {
+        "mean_nll": 90.02550576303184,
+        "cov1": 0.03225806451612903,
+        "cov2": 0.03225806451612903,
+        "sd_ratio": 6.551212224904823,
+        "rms_z": 13.17713920087081,
+        "mean_z": -11.493610391277072,
+        "median_z": -10.2437677976115,
+        "median_sd": 9.061218567145085
+      },
+      "fosm": {
+        "mean_nll": 5.468656685692974,
+        "cov1": 0.8387096774193549,
+        "cov2": 0.9032258064516129,
+        "sd_ratio": 0.8666355040236113,
+        "rms_z": 0.8857678245010675,
+        "mean_z": -0.24032309579412242,
+        "median_z": -0.12310183688226393,
+        "median_sd": 58.78933260320448
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 0.18837722852398936,
+        "median": 0.0986070056262296,
+        "n_negative": 10
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -84.36847184881485,
+        "median": -50.276304554738545,
+        "n_negative": 30
+      },
+      "mean-map": {
+        "median_abs_err": 30.114784454294238,
+        "mean_err": -19.51801519082055
+      }
+    },
+    "distinct_flagged": {
+      "n": 45,
+      "clark": {
+        "mean_nll": 45.105909817465644,
+        "cov1": 0.35555555555555557,
+        "cov2": 0.5111111111111111,
+        "sd_ratio": 8.457093114889418,
+        "rms_z": 8.838578314744462,
+        "mean_z": 2.8613685311292723,
+        "median_z": 1.0158335045468974,
+        "median_sd": 179.03601625491441
+      },
+      "clark-diag": {
+        "mean_nll": 884.9725733850826,
+        "cov1": 0.044444444444444446,
+        "cov2": 0.06666666666666667,
+        "sd_ratio": 41.86981559818861,
+        "rms_z": 41.964911383934975,
+        "mean_z": 6.850525160420866,
+        "median_z": -1.0622280781501672,
+        "median_sd": 37.053456817565646
+      },
+      "fosm": {
+        "mean_nll": 42.54918146168781,
+        "cov1": 0.35555555555555557,
+        "cov2": 0.4666666666666667,
+        "sd_ratio": 8.038106445078968,
+        "rms_z": 8.545129339165827,
+        "mean_z": 3.1374963984106303,
+        "median_z": 1.4700778465247863,
+        "median_sd": 195.9227768468759
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 2.556728355777844,
+        "median": -0.1726434494119653,
+        "n_negative": 28
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -839.8666635676173,
+        "median": -57.55661834582185,
+        "n_negative": 42
+      },
+      "mean-map": {
+        "median_abs_err": 407.1901940296938,
+        "mean_err": 520.2483172848662
+      }
+    },
+    "distinct_all": {
+      "n": 76,
+      "clark": {
+        "mean_nll": 29.01492096219315,
+        "cov1": 0.5131578947368421,
+        "cov2": 0.6710526315789473,
+        "sd_ratio": 6.729353257516365,
+        "rms_z": 6.837467381284136,
+        "mean_z": 1.4361788190231135,
+        "median_z": -0.14248853563519825,
+        "median_sd": 97.95268931851301
+      },
+      "clark-diag": {
+        "mean_nll": 560.7178484339829,
+        "cov1": 0.039473684210526314,
+        "cov2": 0.05263157894736842,
+        "sd_ratio": 33.58567468911567,
+        "rms_z": 33.369969039081006,
+        "mean_z": -0.6319511830348721,
+        "median_z": -6.590304046794882,
+        "median_sd": 20.86319497579214
+      },
+      "fosm": {
+        "mean_nll": 27.42423056621622,
+        "cov1": 0.5526315789473685,
+        "cov2": 0.6447368421052632,
+        "sd_ratio": 6.402967996986626,
+        "rms_z": 6.599628894914461,
+        "mean_z": 1.7597016047218497,
+        "median_z": 0.36761745814690727,
+        "median_sd": 97.86149297537156
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 1.5906903959769292,
+        "median": 0.014262187976490814,
+        "n_negative": 38
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -531.70292747179,
+        "median": -54.58021678531169,
+        "n_negative": 72
+      },
+      "mean-map": {
+        "median_abs_err": 95.02662823914346,
+        "mean_err": 300.0804711434677
+      }
+    },
+    "ablation_unclamped": {
+      "n": 0
+    }
+  },
+  "groups_pre_recalibration": {
+    "distinct_unflagged": {
+      "n": 31,
+      "clark": {
+        "mean_nll": 6.067995387522379,
+        "cov1": 0.5483870967741935,
+        "cov2": 0.8387096774193549,
+        "sd_ratio": 1.4199920454342005,
+        "rms_z": 1.705987268349697,
+        "mean_z": -0.9793158751017743,
+        "median_z": -0.739848942497775,
+        "median_sd": 37.93668528667093
+      },
+      "clark-diag": {
+        "mean_nll": 210.80571048394663,
+        "cov1": 0.03225806451612903,
+        "cov2": 0.03225806451612903,
+        "sd_ratio": 10.14108476789117,
+        "rms_z": 20.39782578349826,
+        "mean_z": -17.79177246372124,
+        "median_z": -15.85705271205457,
+        "median_sd": 5.8536110493394204
+      },
+      "fosm": {
+        "mean_nll": 5.579435604444813,
+        "cov1": 0.6451612903225806,
+        "cov2": 0.8709677419354839,
+        "sd_ratio": 1.3415263935057784,
+        "rms_z": 1.3711426655952024,
+        "mean_z": -0.37201311794866077,
+        "median_z": -0.1905580402601424,
+        "median_sd": 37.97832315370722
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 0.4885597830775675,
+        "median": 0.23680160983238663,
+        "n_negative": 10
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -204.7377150964243,
+        "median": -123.47188878570036,
+        "n_negative": 30
+      },
+      "mean-map": {
+        "median_abs_err": 30.114784454294238,
+        "mean_err": -19.51801519082055
+      }
+    },
+    "distinct_flagged": {
+      "n": 45,
+      "clark": {
+        "mean_nll": 99.2053853229215,
+        "cov1": 0.3111111111111111,
+        "cov2": 0.4,
+        "sd_ratio": 13.09133259979047,
+        "rms_z": 13.681860522961534,
+        "mean_z": 4.4293147329355165,
+        "median_z": 1.5724805312384322,
+        "median_sd": 115.65852817847593
+      },
+      "clark-diag": {
+        "mean_nll": 2113.939058871522,
+        "cov1": 0.022222222222222223,
+        "cov2": 0.06666666666666667,
+        "sd_ratio": 64.81324900192367,
+        "rms_z": 64.9604544947723,
+        "mean_z": 10.604412431076227,
+        "median_z": -1.6442979731909801,
+        "median_sd": 23.936794222133067
+      },
+      "fosm": {
+        "mean_nll": 93.08745333759184,
+        "cov1": 0.24444444444444444,
+        "cov2": 0.4,
+        "sd_ratio": 12.442753498809518,
+        "rms_z": 13.227610098119433,
+        "mean_z": 4.856752589128298,
+        "median_z": 2.2756374767302483,
+        "median_sd": 126.56749452292196
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 6.117931985329632,
+        "median": -0.5292682354366605,
+        "n_negative": 28
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -2014.7336735486003,
+        "median": -140.2934350536538,
+        "n_negative": 42
+      },
+      "mean-map": {
+        "median_abs_err": 407.1901940296938,
+        "mean_err": 520.2483172848662
+      }
+    },
+    "distinct_all": {
+      "n": 76,
+      "clark": {
+        "mean_nll": 61.21513416506132,
+        "cov1": 0.40789473684210525,
+        "cov2": 0.5789473684210527,
+        "sd_ratio": 10.416841872123827,
+        "rms_z": 10.584199371178313,
+        "mean_z": 2.22316277439399,
+        "median_z": -0.2205680824742661,
+        "median_sd": 63.27812757837634
+      },
+      "clark-diag": {
+        "mean_nll": 1337.660982555537,
+        "cov1": 0.02631578947368421,
+        "cov2": 0.05263157894736842,
+        "sd_ratio": 51.98964135436587,
+        "rms_z": 51.65573532189164,
+        "mean_z": -0.9782419339069484,
+        "median_z": -10.20159776394575,
+        "median_sd": 13.477770978577933
+      },
+      "fosm": {
+        "mean_nll": 57.39339347275555,
+        "cov1": 0.40789473684210525,
+        "cov2": 0.5921052631578947,
+        "sd_ratio": 9.911607042233937,
+        "rms_z": 10.21603235589331,
+        "mean_z": 2.7239665770311174,
+        "median_z": 0.5690610649204899,
+        "median_sd": 63.21921409804074
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 3.821740692305763,
+        "median": 0.01867189437933936,
+        "n_negative": 38
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -1276.4458483904764,
+        "median": -133.18805828586238,
+        "n_negative": 72
+      },
+      "mean-map": {
+        "median_abs_err": 95.02662823914346,
+        "mean_err": 300.0804711434677
+      }
+    },
+    "ablation_unclamped": {
+      "n": 0
+    }
+  },
+  "by_sequence_distinct_unflagged": {
+    "virgin-2024-03-14-blenheim-palace-01": {
+      "n": 12,
+      "clark": {
+        "mean_nll": 5.579922648259366,
+        "cov1": 0.6666666666666666,
+        "cov2": 0.9166666666666666,
+        "sd_ratio": 0.9386525309069763,
+        "rms_z": 1.0389221552677441,
+        "mean_z": -0.5212610210597712,
+        "median_z": -0.3879115381373338,
+        "median_sd": 57.44372375677901
+      },
+      "clark-diag": {
+        "mean_nll": 91.78918325993486,
+        "cov1": 0.08333333333333333,
+        "cov2": 0.08333333333333333,
+        "sd_ratio": 7.76577615864354,
+        "rms_z": 13.312369331143163,
+        "mean_z": -11.042531615294761,
+        "median_z": -10.696278090479861,
+        "median_sd": 8.966823988090393
+      },
+      "fosm": {
+        "mean_nll": 5.454738650494594,
+        "cov1": 0.75,
+        "cov2": 0.9166666666666666,
+        "sd_ratio": 0.9080497928073202,
+        "rms_z": 0.8834935116431294,
+        "mean_z": -0.15722349617516693,
+        "median_z": -0.008916784562304228,
+        "median_sd": 57.660500144897206
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 0.12518399776477343,
+        "median": 0.05745839975196043,
+        "n_negative": 5
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -86.2092606116755,
+        "median": -55.251510077008604,
+        "n_negative": 11
+      },
+      "mean-map": {
+        "median_abs_err": 31.573402708397282,
+        "mean_err": -12.874422008662599
+      }
+    },
+    "virgin-2024-03-14-blenheim-palace-02": {
+      "n": 14,
+      "clark": {
+        "mean_nll": 5.786989010902057,
+        "cov1": 0.7142857142857143,
+        "cov2": 0.8571428571428571,
+        "sd_ratio": 1.0762777193017317,
+        "rms_z": 1.2647110417337917,
+        "mean_z": -0.7237826128510958,
+        "median_z": -0.518892225638555,
+        "median_sd": 54.45001590852882
+      },
+      "clark-diag": {
+        "mean_nll": 91.46846383537397,
+        "cov1": 0.0,
+        "cov2": 0.0,
+        "sd_ratio": 6.718808605597024,
+        "rms_z": 13.291575762108614,
+        "mean_z": -11.608102925284085,
+        "median_z": -9.592873153880408,
+        "median_sd": 7.403782676447842
+      },
+      "fosm": {
+        "mean_nll": 5.542683986453123,
+        "cov1": 0.8571428571428571,
+        "cov2": 0.8571428571428571,
+        "sd_ratio": 1.006536074368196,
+        "rms_z": 1.017123199099381,
+        "mean_z": -0.3062516627345209,
+        "median_z": -0.149597332399623,
+        "median_sd": 54.67710667169338
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 0.24430502444893307,
+        "median": 0.10036643866543127,
+        "n_negative": 5
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -85.6814748244719,
+        "median": -44.05072072269178,
+        "n_negative": 14
+      },
+      "mean-map": {
+        "median_abs_err": 33.80201489599776,
+        "mean_err": -24.124746180455197
+      }
+    },
+    "virgin-2024-03-18-christ-church-02": {
+      "n": 5,
+      "clark": {
+        "mean_nll": 5.478226681796925,
+        "cov1": 1.0,
+        "cov2": 1.0,
+        "sd_ratio": 0.23876590041920948,
+        "rms_z": 0.679227367179341,
+        "mean_z": -0.6447809644856014,
+        "median_z": -0.6880658937561089,
+        "median_sd": 73.73161982105961
+      },
+      "clark-diag": {
+        "mean_nll": 81.7523971679065,
+        "cov1": 0.0,
+        "cov2": 0.0,
+        "sd_ratio": 2.8192125399469448,
+        "rms_z": 12.512337824959447,
+        "mean_z": -12.255620358414975,
+        "median_z": -11.896350497338942,
+        "median_sd": 13.395077258906962
+      },
+      "fosm": {
+        "mean_nll": 5.29478352804066,
+        "cov1": 1.0,
+        "cov2": 1.0,
+        "sd_ratio": 0.19124679584381157,
+        "rms_z": 0.3071937353298876,
+        "mean_z": -0.25516214744649995,
+        "median_z": -0.36758253550532943,
+        "median_sd": 74.53192922807281
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 0.18344315375626524,
+        "median": 0.2007318897468311,
+        "n_negative": 0
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -76.27417048610958,
+        "median": -68.66463708124107,
+        "n_negative": 5
+      },
+      "mean-map": {
+        "median_abs_err": 27.396635521758775,
+        "mean_err": -22.563792057022642
+      }
+    },
+    "virgin-2024-03-18-christ-church-03": {
+      "n": 0
+    }
+  },
+  "skipped": [
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_002",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.009535551071166992,
+      "overhang_qc_cells": 864,
+      "track_len_m": 23.5,
+      "n_steps": 85,
+      "n_steps_total": 235,
+      "retained": 0.3617021276595745,
+      "n_cells": 933,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.35662028193473816,
+      "median_raw_sd_on_candidates_m": 0.20597247779369354,
+      "median_meas_sd_on_candidates_m": 0.004154669586569071,
+      "reason": "retained 0.362 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_009",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 18.558445930480957,
+      "overhang_qc_cells": 397,
+      "track_len_m": 20.8,
+      "n_steps": 61,
+      "n_steps_total": 208,
+      "retained": 0.2932692307692308,
+      "n_cells": 914,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.7433059215545654,
+      "median_raw_sd_on_candidates_m": 0.2743755728006363,
+      "median_meas_sd_on_candidates_m": 0.015335148200392723,
+      "reason": "retained 0.293 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_005",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.6553333550691605,
+      "overhang_qc_cells": 403,
+      "track_len_m": 26.1,
+      "n_steps": 1,
+      "n_steps_total": 261,
+      "retained": 0.0038314176245210726,
+      "n_cells": 42,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.2573986202478409,
+      "median_raw_sd_on_candidates_m": 0.04028322733938694,
+      "median_meas_sd_on_candidates_m": 0.0061214822344481945,
+      "reason": "retained 0.004 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_006",
+      "reason": "empty track"
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_007",
+      "reason": "empty track"
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_010",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.21557143330574036,
+      "overhang_qc_cells": 935,
+      "track_len_m": 28.1,
+      "n_steps": 90,
+      "n_steps_total": 281,
+      "retained": 0.3202846975088968,
+      "n_cells": 963,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 3.022930860519409,
+      "median_raw_sd_on_candidates_m": 0.2793680727481842,
+      "median_meas_sd_on_candidates_m": 0.00772486999630928,
+      "reason": "retained 0.320 < MIN_RETAINED 0.5"
+    }
+  ],
+  "windows": [
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_000",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.01538538932800293,
+      "overhang_qc_cells": 628,
+      "track_len_m": 19.5,
+      "n_steps": 188,
+      "n_steps_total": 195,
+      "retained": 0.9641025641025641,
+      "n_cells": 1864,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.4152327924966812,
+      "median_raw_sd_on_candidates_m": 0.09167707711458206,
+      "median_meas_sd_on_candidates_m": 0.005585584789514542,
+      "J_tls": -467.1633077921944,
+      "clark": {
+        "E": -446.62550079303145,
+        "residual": -20.537806999162967,
+        "sd": 27.759459829497196,
+        "z": -0.739848942497775,
+        "nll": 4.516203438919894,
+        "sd_recal": 42.970831287012786,
+        "z_recal": -0.4779476306144949,
+        "nll_recal": 4.793677045362603
+      },
+      "clark-diag": {
+        "E": -390.8265437779489,
+        "residual": -76.33676401424549,
+        "sd": 5.731651922791968,
+        "z": -13.31845775747331,
+        "nll": 91.35560083486415,
+        "sd_recal": 8.872429409035702,
+        "z_recal": -8.603817567317465,
+        "nll_recal": 40.114725548399214
+      },
+      "fosm": {
+        "E": -468.6218485079573,
+        "residual": 1.4585407157628651,
+        "sd": 28.867875292604765,
+        "z": 0.05052469920210952,
+        "nll": 4.282944301102017,
+        "sd_recal": 44.686625980197,
+        "z_recal": 0.03263931173522076,
+        "nll_recal": 4.7191454573178016
+      },
+      "mean-map": {
+        "E": -468.6218485079573,
+        "sd": null,
+        "err": 1.4585407157628651
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_001",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.01228785514831543,
+      "overhang_qc_cells": 823,
+      "track_len_m": 22.6,
+      "n_steps": 216,
+      "n_steps_total": 226,
+      "retained": 0.9557522123893806,
+      "n_cells": 2290,
+      "frac_cells_count0": 0.0008733624454148472,
+      "median_sigma_on_candidates_m": 0.553613543510437,
+      "median_raw_sd_on_candidates_m": 0.12814902514219284,
+      "median_meas_sd_on_candidates_m": 0.004674890544265509,
+      "J_tls": -462.3640374192412,
+      "clark": {
+        "E": -446.25679645877597,
+        "residual": -16.10724096046522,
+        "sd": 49.249489215678594,
+        "z": -0.3270539698376704,
+        "nll": 4.869319679107021,
+        "sd_recal": 76.23676775618343,
+        "z_recal": -0.211279169284545,
+        "nll_recal": 5.275101839695758
+      },
+      "clark-diag": {
+        "E": -335.07396405201655,
+        "residual": -127.29007336722464,
+        "sd": 7.375714883871133,
+        "z": -17.25799808850754,
+        "nll": 151.83638037560405,
+        "sd_recal": 11.417390750491283,
+        "z_recal": -11.14878838334822,
+        "nll_recal": 65.50181743897443
+      },
+      "fosm": {
+        "E": -488.3024531702123,
+        "residual": 25.938415750971103,
+        "sd": 50.23226883303124,
+        "z": 0.5163695838065505,
+        "nll": 4.968914932370578,
+        "sd_recal": 77.75808183754394,
+        "z_recal": 0.33357839002719913,
+        "nll_recal": 5.328178296472114
+      },
+      "mean-map": {
+        "E": -488.3024531702123,
+        "sd": null,
+        "err": 25.938415750971103
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_003",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.38513922691345215,
+      "overhang_qc_cells": 831,
+      "track_len_m": 22.900000000000002,
+      "n_steps": 229,
+      "n_steps_total": 229,
+      "retained": 1.0,
+      "n_cells": 2259,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.3861410319805145,
+      "median_raw_sd_on_candidates_m": 0.1419699490070343,
+      "median_meas_sd_on_candidates_m": 0.005259172525256872,
+      "J_tls": -339.1620700568907,
+      "clark": {
+        "E": -307.55044739581575,
+        "residual": -31.611622661074932,
+        "sd": 45.244311218119975,
+        "z": -0.6986872340409226,
+        "nll": 4.9750974020166225,
+        "sd_recal": 70.03686944891638,
+        "z_recal": -0.45135687688228093,
+        "nll_recal": 5.269821858160451
+      },
+      "clark-diag": {
+        "E": -227.55077031170248,
+        "residual": -111.6112997451882,
+        "sd": 6.156994964993529,
+        "z": -18.12756066551461,
+        "nll": 167.0407552023202,
+        "sd_recal": 9.530847988424863,
+        "z_recal": -11.710531935955668,
+        "nll_recal": 71.74175133937801
+      },
+      "fosm": {
+        "E": -330.4771175170785,
+        "residual": -8.684952539812173,
+        "sd": 45.57641612999281,
+        "z": -0.1905580402601424,
+        "nll": 4.756485109158222,
+        "sd_recal": 70.55095813166919,
+        "z_recal": -0.12310183688226393,
+        "nll_recal": 5.1828508234214645
+      },
+      "mean-map": {
+        "E": -330.4771175170785,
+        "sd": null,
+        "err": -8.684952539812173
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_004",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.011666655540466309,
+      "overhang_qc_cells": 862,
+      "track_len_m": 23.200000000000003,
+      "n_steps": 232,
+      "n_steps_total": 232,
+      "retained": 1.0,
+      "n_cells": 2232,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.3423621356487274,
+      "median_raw_sd_on_candidates_m": 0.1310618445277214,
+      "median_meas_sd_on_candidates_m": 0.004393220180645585,
+      "J_tls": -282.7453560159421,
+      "clark": {
+        "E": -298.29010514024816,
+        "residual": 15.544749124306065,
+        "sd": 33.35410992935007,
+        "z": 0.46605198451503,
+        "nll": 4.5347217603709105,
+        "sd_recal": 51.6311858842298,
+        "z_recal": 0.30107286629366464,
+        "nll_recal": 4.908386836140095
+      },
+      "clark-diag": {
+        "E": -240.47990996008576,
+        "residual": -42.26544605585633,
+        "sd": 5.8536110493394204,
+        "z": -7.220405609393194,
+        "nll": 28.753125859483283,
+        "sd_recal": 9.061218567145085,
+        "z_recal": -4.664432906309741,
+        "nll_recal": 14.001409312632745
+      },
+      "fosm": {
+        "E": -312.4159252805761,
+        "residual": 29.670569264634025,
+        "sd": 33.181963592848454,
+        "z": 0.8941776209720385,
+        "nll": 4.820721805153027,
+        "sd_recal": 51.36470839410848,
+        "z_recal": 0.5776450444725435,
+        "nll_recal": 5.024726761426505
+      },
+      "mean-map": {
+        "E": -312.4159252805761,
+        "sd": null,
+        "err": 29.670569264634025
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_005",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.10768139362335205,
+      "overhang_qc_cells": 777,
+      "track_len_m": 22.8,
+      "n_steps": 228,
+      "n_steps_total": 228,
+      "retained": 1.0,
+      "n_cells": 2135,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.3550627529621124,
+      "median_raw_sd_on_candidates_m": 0.10610406845808029,
+      "median_meas_sd_on_candidates_m": 0.004087768029421568,
+      "J_tls": -257.0673674406626,
+      "clark": {
+        "E": -158.1873553173275,
+        "residual": -98.88001212333512,
+        "sd": 48.353021001475376,
+        "z": -2.044960378387072,
+        "nll": 6.888398709671867,
+        "sd_recal": 74.84906120053341,
+        "z_recal": -1.3210588153994167,
+        "nll_recal": 6.107010298452866
+      },
+      "clark-diag": {
+        "E": -74.48315908332121,
+        "residual": -182.58420835734142,
+        "sd": 8.653286865465763,
+        "z": -21.09998330068234,
+        "nll": 225.68152541095634,
+        "sd_recal": 13.3950347830233,
+        "z_recal": -13.63073790511887,
+        "nll_recal": 96.41233055193699
+      },
+      "fosm": {
+        "E": -185.40068018961182,
+        "residual": -71.6666872510508,
+        "sd": 51.08256310161528,
+        "z": -1.4029579351468493,
+        "nll": 5.836527225189425,
+        "sd_recal": 79.0743124769029,
+        "z_recal": -0.9063207128355897,
+        "nll_recal": 5.700035225046317
+      },
+      "mean-map": {
+        "E": -185.40068018961182,
+        "sd": null,
+        "err": -71.6666872510508
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_006",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.1171606183052063,
+      "overhang_qc_cells": 889,
+      "track_len_m": 24.5,
+      "n_steps": 237,
+      "n_steps_total": 245,
+      "retained": 0.9673469387755103,
+      "n_cells": 2282,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.25013940036296844,
+      "median_raw_sd_on_candidates_m": 0.14189615845680237,
+      "median_meas_sd_on_candidates_m": 0.004204744938760996,
+      "J_tls": -94.39243153816614,
+      "clark": {
+        "E": -117.74269595055804,
+        "residual": 23.35026441239191,
+        "sd": 38.207587767772445,
+        "z": 0.6111420735147148,
+        "nll": 4.748719978766479,
+        "sd_recal": 59.14422751512242,
+        "z_recal": 0.3948020862462283,
+        "nll_recal": 5.076851871903976
+      },
+      "clark-diag": {
+        "E": -63.301280552696056,
+        "residual": -31.09115098547008,
+        "sd": 5.495016694060666,
+        "z": -5.658063062679173,
+        "nll": 18.629618969728472,
+        "sd_recal": 8.506125001355135,
+        "z_recal": -3.6551486112086122,
+        "nll_recal": 9.739780710606626
+      },
+      "fosm": {
+        "E": -129.59103636164238,
+        "residual": 35.198604823476245,
+        "sd": 38.356972085244486,
+        "z": 0.9176585874727262,
+        "nll": 4.986923487515812,
+        "sd_recal": 59.37547006603818,
+        "z_recal": 0.5928139143038007,
+        "nll_recal": 5.178533880925932
+      },
+      "mean-map": {
+        "E": -129.59103636164238,
+        "sd": null,
+        "err": 35.198604823476245
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_007",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 20.364303588867188,
+      "overhang_qc_cells": 749,
+      "track_len_m": 21.200000000000003,
+      "n_steps": 212,
+      "n_steps_total": 212,
+      "retained": 1.0,
+      "n_cells": 2104,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.1162857413291931,
+      "median_raw_sd_on_candidates_m": 0.17929716408252716,
+      "median_meas_sd_on_candidates_m": 0.008005070965737104,
+      "J_tls": 2889.1693720206094,
+      "clark": {
+        "E": 958.6844605436452,
+        "residual": 1930.4849114769643,
+        "sd": 209.44036789000637,
+        "z": 9.217348741914043,
+        "nll": 48.7431365069382,
+        "sd_recal": 324.2075591012813,
+        "z_recal": 5.9544722424990955,
+        "nll_recal": 24.428192301747348
+      },
+      "clark-diag": {
+        "E": 1371.5675442475256,
+        "residual": 1517.6018277730839,
+        "sd": 40.77792773804209,
+        "z": 37.21625673384329,
+        "nll": 697.1519621210838,
+        "sd_recal": 63.12303855435447,
+        "z_recal": 24.04196411530943,
+        "nll_recal": 294.07204360882434
+      },
+      "fosm": {
+        "E": 882.8860458022446,
+        "residual": 2006.283326218365,
+        "sd": 225.00098929219877,
+        "z": 8.916775577430435,
+        "nll": 46.089486681383576,
+        "sd_recal": 348.2949455670719,
+        "z_recal": 5.760299860085137,
+        "nll_recal": 23.362515437797313
+      },
+      "mean-map": {
+        "E": 882.8860458022446,
+        "sd": null,
+        "err": 2006.283326218365
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_008",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 15.918452739715576,
+      "overhang_qc_cells": 733,
+      "track_len_m": 21.1,
+      "n_steps": 173,
+      "n_steps_total": 211,
+      "retained": 0.8199052132701422,
+      "n_cells": 1845,
+      "frac_cells_count0": 0.0016260162601626016,
+      "median_sigma_on_candidates_m": 2.9889066219329834,
+      "median_raw_sd_on_candidates_m": 0.20469865947961807,
+      "median_meas_sd_on_candidates_m": 0.010327530093491077,
+      "J_tls": 3710.808439875409,
+      "clark": {
+        "E": 1739.49960099436,
+        "residual": 1971.308838881049,
+        "sd": 275.2136934898288,
+        "z": 7.16282977741405,
+        "nll": 32.18955160645126,
+        "sd_recal": 426.02274192167846,
+        "z_recal": 4.62723851311079,
+        "nll_recal": 17.679099391449675
+      },
+      "clark-diag": {
+        "E": 2341.770734258383,
+        "residual": 1369.037705617026,
+        "sd": 58.88139365063373,
+        "z": 23.250769398225533,
+        "nll": 275.2936024814138,
+        "sd_recal": 91.14667389229949,
+        "z_recal": 15.02016088085348,
+        "nll_recal": 118.23402498653923
+      },
+      "fosm": {
+        "E": 1593.568517381574,
+        "residual": 2117.239922493835,
+        "sd": 276.3827456912967,
+        "z": 7.6605358167281095,
+        "nll": 35.88262969769673,
+        "sd_recal": 427.83240051098596,
+        "z_recal": 4.948760121872696,
+        "nll_recal": 19.222783436423605
+      },
+      "mean-map": {
+        "E": 1593.568517381574,
+        "sd": null,
+        "err": 2117.239922493835
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_010",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 18.558445930480957,
+      "overhang_qc_cells": 719,
+      "track_len_m": 19.8,
+      "n_steps": 198,
+      "n_steps_total": 198,
+      "retained": 1.0,
+      "n_cells": 2277,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.6534233093261719,
+      "median_raw_sd_on_candidates_m": 0.18596786260604858,
+      "median_meas_sd_on_candidates_m": 0.01933857798576355,
+      "J_tls": 3777.1921429223216,
+      "clark": {
+        "E": 3865.4401771929984,
+        "residual": -88.24803427067673,
+        "sd": 131.2103126884658,
+        "z": -0.6725693465894338,
+        "nll": 6.02191477241992,
+        "sd_recal": 203.10972347023446,
+        "z_recal": -0.43448453753426236,
+        "nll_recal": 6.327073282607475
+      },
+      "clark-diag": {
+        "E": 4180.895945120316,
+        "residual": -403.7038021979947,
+        "sd": 23.936794222133067,
+        "z": -16.86540805972721,
+        "nll": 146.31534982607374,
+        "sd_recal": 37.053456817565646,
+        "z_recal": -10.895172458150086,
+        "nll_recal": 63.883691628429325
+      },
+      "fosm": {
+        "E": 3769.678515774572,
+        "residual": 7.513627147749503,
+        "sd": 129.95914801189048,
+        "z": 0.057815300136178575,
+        "nll": 5.787829992677152,
+        "sd_recal": 201.17295717292134,
+        "z_recal": 0.03734909131594187,
+        "nll_recal": 6.22380103201854
+      },
+      "mean-map": {
+        "E": 3769.678515774572,
+        "sd": null,
+        "err": 7.513627147749503
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_011",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 19.698790550231934,
+      "overhang_qc_cells": 741,
+      "track_len_m": 20.5,
+      "n_steps": 205,
+      "n_steps_total": 205,
+      "retained": 1.0,
+      "n_cells": 2024,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.6419217884540558,
+      "median_raw_sd_on_candidates_m": 0.1189616248011589,
+      "median_meas_sd_on_candidates_m": 0.010186160914599895,
+      "J_tls": 2450.4170693352016,
+      "clark": {
+        "E": 1424.5705480161896,
+        "residual": 1025.846521319012,
+        "sd": 141.53656144436385,
+        "z": 7.247925983578869,
+        "nll": 32.13771213339705,
+        "sd_recal": 219.09445429147027,
+        "z_recal": 4.682211261971454,
+        "nll_recal": 17.269992619039595
+      },
+      "clark-diag": {
+        "E": 1665.0353075880744,
+        "residual": 785.3817617471273,
+        "sd": 29.680868358169224,
+        "z": 26.460875479438673,
+        "nll": 354.398406777606,
+        "sd_recal": 45.945115449100854,
+        "z_recal": 17.093912031131858,
+        "nll_recal": 150.84730033895906
+      },
+      "fosm": {
+        "E": 1363.8519442649736,
+        "residual": 1086.565125070228,
+        "sd": 141.04648239313207,
+        "z": 7.703596053120258,
+        "nll": 35.54072410644379,
+        "sd_recal": 218.33582626494783,
+        "z_recal": 4.976577338030153,
+        "nll_recal": 18.688133898811667
+      },
+      "mean-map": {
+        "E": 1363.8519442649736,
+        "sd": null,
+        "err": 1086.565125070228
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_012",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.015438854694366455,
+      "overhang_qc_cells": 807,
+      "track_len_m": 24.1,
+      "n_steps": 241,
+      "n_steps_total": 241,
+      "retained": 1.0,
+      "n_cells": 2212,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.4731403887271881,
+      "median_raw_sd_on_candidates_m": 0.1393936425447464,
+      "median_meas_sd_on_candidates_m": 0.004926743451505899,
+      "J_tls": -86.14494582773389,
+      "clark": {
+        "E": 113.879887160692,
+        "residual": -200.02483298842589,
+        "sd": 52.38066580687586,
+        "z": -3.8186767943329425,
+        "nll": 12.168622313081562,
+        "sd_recal": 81.08373746872839,
+        "z_recal": -2.4668921195889566,
+        "nll_recal": 8.357199314633393
+      },
+      "clark-diag": {
+        "E": 214.47442343828234,
+        "residual": -300.61936926601624,
+        "sd": 6.855612898520024,
+        "z": -43.85010847548194,
+        "nll": 964.2600129069632,
+        "sd_recal": 10.61228810073386,
+        "z_recal": -28.327479089568612,
+        "nll_recal": 404.5039869026654
+      },
+      "fosm": {
+        "E": 86.03636735945791,
+        "residual": -172.1813131871918,
+        "sd": 53.54494063165966,
+        "z": -3.215641126052266,
+        "nll": 10.069633772080234,
+        "sd_recal": 82.88600081876444,
+        "z_recal": -2.0773268282502526,
+        "nll_recal": 7.494048088480259
+      },
+      "mean-map": {
+        "E": 86.03636735945791,
+        "sd": null,
+        "err": -172.1813131871918
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_013",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.10909485816955566,
+      "overhang_qc_cells": 827,
+      "track_len_m": 23.900000000000002,
+      "n_steps": 237,
+      "n_steps_total": 239,
+      "retained": 0.9916317991631799,
+      "n_cells": 2299,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.5683994889259338,
+      "median_raw_sd_on_candidates_m": 0.10950299352407455,
+      "median_meas_sd_on_candidates_m": 0.004774129018187523,
+      "J_tls": -260.98596762701146,
+      "clark": {
+        "E": -228.0247491304878,
+        "residual": -32.96121849652366,
+        "sd": 65.62526225646914,
+        "z": -0.5022641794208516,
+        "nll": 5.22903390336218,
+        "sd_recal": 101.58598509875189,
+        "z_recal": -0.3244661993923867,
+        "nll_recal": 5.592483274166842
+      },
+      "clark-diag": {
+        "E": -83.8405860152615,
+        "residual": -177.14538161174997,
+        "sd": 20.865018842572823,
+        "z": -8.490065738656506,
+        "nll": 39.99762067367313,
+        "sd_recal": 32.298438441940654,
+        "z_recal": -5.484642297186742,
+        "nll_recal": 19.434607980858782
+      },
+      "fosm": {
+        "E": -281.1330138203305,
+        "residual": 20.147046193319056,
+        "sd": 75.52037616389146,
+        "z": 0.2667762955734847,
+        "nll": 5.278925831953201,
+        "sd_recal": 116.90333179401429,
+        "z_recal": 0.17233936692940885,
+        "nll_recal": 5.695136331205302
+      },
+      "mean-map": {
+        "E": -281.1330138203305,
+        "sd": null,
+        "err": 20.147046193319056
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_014",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.009516000747680664,
+      "overhang_qc_cells": 946,
+      "track_len_m": 25.200000000000003,
+      "n_steps": 252,
+      "n_steps_total": 252,
+      "retained": 1.0,
+      "n_cells": 2511,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.24208354949951172,
+      "median_raw_sd_on_candidates_m": 0.13095025718212128,
+      "median_meas_sd_on_candidates_m": 0.0033786927815526724,
+      "J_tls": -307.5513129052201,
+      "clark": {
+        "E": -291.9787001841224,
+        "residual": -15.572612721097698,
+        "sd": 34.29021229300068,
+        "z": -0.454141624672192,
+        "nll": 4.556920798395584,
+        "sd_recal": 53.08024494311902,
+        "z_recal": -0.2933786899021541,
+        "nll_recal": 4.933778885105229
+      },
+      "clark-diag": {
+        "E": -244.09034350106327,
+        "residual": -63.4609694041568,
+        "sd": 4.002065866623097,
+        "z": -15.85705271205457,
+        "nll": 128.02880958409594,
+        "sd_recal": 6.19508081967201,
+        "z_recal": -10.2437677976115,
+        "nll_recal": 55.21008343984377
+      },
+      "fosm": {
+        "E": -304.8685095256239,
+        "residual": -2.68280337959618,
+        "sd": 34.33744734944706,
+        "z": -0.07813054221222945,
+        "nll": 4.45822724211291,
+        "sd_recal": 53.153363427911486,
+        "z_recal": -0.05047288085982922,
+        "nll_recal": 4.89339367364611
+      },
+      "mean-map": {
+        "E": -304.8685095256239,
+        "sd": null,
+        "err": -2.68280337959618
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_015",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 2.394012928009033,
+      "overhang_qc_cells": 930,
+      "track_len_m": 25.5,
+      "n_steps": 251,
+      "n_steps_total": 255,
+      "retained": 0.984313725490196,
+      "n_cells": 2517,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.40950217843055725,
+      "median_raw_sd_on_candidates_m": 0.13158364593982697,
+      "median_meas_sd_on_candidates_m": 0.004098896402865648,
+      "J_tls": -293.35273225091237,
+      "clark": {
+        "E": -274.7175845368106,
+        "residual": -18.635147714101777,
+        "sd": 64.0979827300431,
+        "z": -0.29072908257637525,
+        "nll": 5.121613125693782,
+        "sd_recal": 99.22180109584758,
+        "z_recal": -0.1878130361300371,
+        "nll_recal": 5.533933160731364
+      },
+      "clark-diag": {
+        "E": -156.71822458838497,
+        "residual": -136.6345076625274,
+        "sd": 17.81034562102876,
+        "z": -7.671637068132041,
+        "nll": 33.22572568889621,
+        "sd_recal": 27.569893706338597,
+        "z_recal": -4.955931608510835,
+        "nll_recal": 16.516291956941064
+      },
+      "fosm": {
+        "E": -306.04225627767175,
+        "residual": 12.689524026759386,
+        "sd": 68.40535995415998,
+        "z": 0.18550482060562112,
+        "nll": 5.16159573589993,
+        "sd_recal": 105.88949496035028,
+        "z_recal": 0.11983742137509398,
+        "nll_recal": 5.588515086942126
+      },
+      "mean-map": {
+        "E": -306.04225627767175,
+        "sd": null,
+        "err": 12.689524026759386
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_016",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.012690544128417969,
+      "overhang_qc_cells": 867,
+      "track_len_m": 24.8,
+      "n_steps": 248,
+      "n_steps_total": 248,
+      "retained": 1.0,
+      "n_cells": 2443,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.26336103677749634,
+      "median_raw_sd_on_candidates_m": 0.11264873296022415,
+      "median_meas_sd_on_candidates_m": 0.005489579867571592,
+      "J_tls": -291.7101663122368,
+      "clark": {
+        "E": -350.0365331516853,
+        "residual": 58.3263668394485,
+        "sd": 36.01051294488394,
+        "z": 1.6197038606120437,
+        "nll": 5.814469753316974,
+        "sd_recal": 55.743219998435606,
+        "z_recal": 1.0463401081079526,
+        "nll_recal": 5.487108132689118
+      },
+      "clark-diag": {
+        "E": -294.02162735463816,
+        "residual": 2.3114610424013335,
+        "sd": 4.584549508549629,
+        "z": 0.5041849887520549,
+        "nll": 2.5687316322121436,
+        "sd_recal": 7.096748447875393,
+        "z_recal": 0.32570705575640535,
+        "nll_recal": 2.931617790350684
+      },
+      "fosm": {
+        "E": -365.88339544183833,
+        "residual": 74.17322912960151,
+        "sd": 36.14120677613364,
+        "z": 2.052317444435277,
+        "nll": 6.612375655880584,
+        "sd_recal": 55.94553022375623,
+        "z_recal": 1.3258115319122532,
+        "nll_recal": 5.822205185084911
+      },
+      "mean-map": {
+        "E": -365.88339544183833,
+        "sd": null,
+        "err": 74.17322912960151
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_017",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 3.6079221963882446,
+      "overhang_qc_cells": 744,
+      "track_len_m": 22.200000000000003,
+      "n_steps": 117,
+      "n_steps_total": 222,
+      "retained": 0.527027027027027,
+      "n_cells": 1493,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.5513235926628113,
+      "median_raw_sd_on_candidates_m": 0.12750212848186493,
+      "median_meas_sd_on_candidates_m": 0.00713973818346858,
+      "J_tls": -255.35441737912004,
+      "clark": {
+        "E": -121.63957915266715,
+        "residual": -133.71483822645288,
+        "sd": 31.05642027406971,
+        "z": -4.305545746948078,
+        "nll": 13.623606181852841,
+        "sd_recal": 48.07442955203156,
+        "z_recal": -2.7814128939737417,
+        "nll_recal": 8.659817802198434
+      },
+      "clark-diag": {
+        "E": -64.80398722924383,
+        "residual": -190.5504301498762,
+        "sd": 5.887230496194253,
+        "z": -32.36673513514645,
+        "nll": 526.4944958702679,
+        "sd_recal": 9.113260486823458,
+        "z_recal": -20.90913898767476,
+        "nll_recal": 221.7247156853517
+      },
+      "fosm": {
+        "E": -143.20159698135907,
+        "residual": -112.15282039776096,
+        "sd": 30.490687383089295,
+        "z": -3.6782647432200237,
+        "nll": 11.101175599100568,
+        "sd_recal": 47.19869159599246,
+        "z_recal": -2.3761849450776644,
+        "nll_recal": 7.5964321515949464
+      },
+      "mean-map": {
+        "E": -143.20159698135907,
+        "sd": null,
+        "err": -112.15282039776096
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_018",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.017073869705200195,
+      "overhang_qc_cells": 734,
+      "track_len_m": 21.400000000000002,
+      "n_steps": 195,
+      "n_steps_total": 214,
+      "retained": 0.9112149532710281,
+      "n_cells": 2011,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.23978903889656067,
+      "median_raw_sd_on_candidates_m": 0.11585234105587006,
+      "median_meas_sd_on_candidates_m": 0.005482199136167765,
+      "J_tls": -474.41679477158175,
+      "clark": {
+        "E": -426.5579425760442,
+        "residual": -47.858852195537565,
+        "sd": 31.14697368405457,
+        "z": -1.5365490298031266,
+        "nll": 5.538147081213088,
+        "sd_recal": 48.214603580158304,
+        "z_recal": -0.9926215014081928,
+        "nll_recal": 5.287249209742793
+      },
+      "clark-diag": {
+        "E": -377.23880143199113,
+        "residual": -97.17799333959061,
+        "sd": 3.979673083868262,
+        "z": -24.41858697728335,
+        "nll": 300.43383319297175,
+        "sd_recal": 6.16041744741207,
+        "z_recal": -15.774579266607025,
+        "nll_recal": 127.15575859512514
+      },
+      "fosm": {
+        "E": -440.9405586194212,
+        "residual": -33.47623615216054,
+        "sd": 31.176363651523918,
+        "z": -1.073769748337029,
+        "nll": 4.935089501865165,
+        "sd_recal": 48.26009838954628,
+        "z_recal": -0.6936628243470779,
+        "nll_recal": 5.036127689079106
+      },
+      "mean-map": {
+        "E": -440.9405586194212,
+        "sd": null,
+        "err": -33.47623615216054
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_019",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.018233060836791992,
+      "overhang_qc_cells": 634,
+      "track_len_m": 18.8,
+      "n_steps": 176,
+      "n_steps_total": 188,
+      "retained": 0.9361702127659575,
+      "n_cells": 1895,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.41133227944374084,
+      "median_raw_sd_on_candidates_m": 0.14130771160125732,
+      "median_meas_sd_on_candidates_m": 0.00743482168763876,
+      "J_tls": -469.0979649558893,
+      "clark": {
+        "E": -397.90593818394643,
+        "residual": -71.19202677194289,
+        "sd": 31.53609718469975,
+        "z": -2.2574774029578673,
+        "nll": 6.918173477749599,
+        "sd_recal": 48.81695536937677,
+        "z_recal": -1.4583463108926733,
+        "nll_recal": 5.870403213059278
+      },
+      "clark-diag": {
+        "E": -341.0838592029377,
+        "residual": -128.01410575295165,
+        "sd": 4.220974694641719,
+        "z": -30.328091261825872,
+        "nll": 462.25556439769673,
+        "sd_recal": 6.533945277907266,
+        "z_recal": -19.592160679061095,
+        "nll_recal": 194.72232950844642
+      },
+      "fosm": {
+        "E": -416.7104874839848,
+        "residual": -52.3874774719045,
+        "sd": 31.610225459644788,
+        "z": -1.6572952805662524,
+        "nll": 5.745733015442101,
+        "sd_recal": 48.93170376923129,
+        "z_recal": -1.0706244303074162,
+        "nll_recal": 5.382482393829297
+      },
+      "mean-map": {
+        "E": -416.7104874839848,
+        "sd": null,
+        "err": -52.3874774719045
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_000",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.018771648406982422,
+      "overhang_qc_cells": 612,
+      "track_len_m": 19.0,
+      "n_steps": 190,
+      "n_steps_total": 190,
+      "retained": 1.0,
+      "n_cells": 1734,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.1727246418595314,
+      "median_raw_sd_on_candidates_m": 0.07788029313087463,
+      "median_meas_sd_on_candidates_m": 0.0020905761048197746,
+      "J_tls": -479.55246463998685,
+      "clark": {
+        "E": -464.6600486517186,
+        "residual": -14.892415988268226,
+        "sd": 21.475104989558258,
+        "z": -0.693473489210381,
+        "nll": 4.22628563010191,
+        "sd_recal": 33.24283394004029,
+        "z_recal": -0.447988760980171,
+        "nll_recal": 4.523124721460617
+      },
+      "clark-diag": {
+        "E": -435.7941577211233,
+        "residual": -43.758306918863525,
+        "sd": 3.075955958738871,
+        "z": -14.225921146414674,
+        "nll": 103.23097049904447,
+        "sd_recal": 4.761489789826498,
+        "z_recal": -9.190045311523816,
+        "nll_recal": 44.70796554746607
+      },
+      "fosm": {
+        "E": -476.637206990245,
+        "residual": -2.915257649741875,
+        "sd": 21.353727896907518,
+        "z": -0.13652218777987085,
+        "nll": 3.9894840202695234,
+        "sd_recal": 33.05494575336668,
+        "z_recal": -0.08819429538603775,
+        "nll_recal": 4.420998849755984
+      },
+      "mean-map": {
+        "E": -476.637206990245,
+        "sd": null,
+        "err": -2.915257649741875
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_001",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.015697002410888672,
+      "overhang_qc_cells": 773,
+      "track_len_m": 23.1,
+      "n_steps": 210,
+      "n_steps_total": 231,
+      "retained": 0.9090909090909091,
+      "n_cells": 2047,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.2605493366718292,
+      "median_raw_sd_on_candidates_m": 0.12533752620220184,
+      "median_meas_sd_on_candidates_m": 0.004644577857106924,
+      "J_tls": -443.56397076391374,
+      "clark": {
+        "E": -424.53858531692157,
+        "residual": -19.025385446992175,
+        "sd": 30.185632584976023,
+        "z": -0.6302795011313256,
+        "nll": 4.524930726938102,
+        "sd_recal": 46.72647569757321,
+        "z_recal": -0.40716499934918654,
+        "nll_recal": 4.846141137007679
+      },
+      "clark-diag": {
+        "E": -377.6111849035278,
+        "residual": -65.95278586038592,
+        "sd": 4.262428863686595,
+        "z": -15.473052564528441,
+        "nll": 122.07645551913394,
+        "sd_recal": 6.598115118210781,
+        "z_recal": -9.995700996237,
+        "nll_recal": 52.762741756385786
+      },
+      "fosm": {
+        "E": -440.1847743345645,
+        "residual": -3.3791964293492356,
+        "sd": 30.71803682613974,
+        "z": -0.1100069138036088,
+        "nll": 4.3498392945853075,
+        "sd_recal": 47.55062187923724,
+        "z_recal": -0.07106524154260843,
+        "nll_recal": 4.783258534816007
+      },
+      "mean-map": {
+        "E": -440.1847743345645,
+        "sd": null,
+        "err": -3.3791964293492356
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_002",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.5085744857788086,
+      "overhang_qc_cells": 698,
+      "track_len_m": 21.5,
+      "n_steps": 179,
+      "n_steps_total": 215,
+      "retained": 0.8325581395348837,
+      "n_cells": 1766,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.31446367502212524,
+      "median_raw_sd_on_candidates_m": 0.11301266402006149,
+      "median_meas_sd_on_candidates_m": 0.004839651752263308,
+      "J_tls": -245.32091352880784,
+      "clark": {
+        "E": -218.31774842637148,
+        "residual": -27.003165102436355,
+        "sd": 29.57674197374035,
+        "z": -0.9129864650545709,
+        "nll": 4.722698984231996,
+        "sd_recal": 45.78393085382046,
+        "z_recal": -0.5897956902969389,
+        "nll_recal": 4.9168011861872385
+      },
+      "clark-diag": {
+        "E": -165.15192292910157,
+        "residual": -80.16899059970626,
+        "sd": 4.394044663512038,
+        "z": -18.24491937130867,
+        "nll": 168.83773010455167,
+        "sd_recal": 6.8018525239003065,
+        "z_recal": -11.786346486932636,
+        "nll_recal": 72.29511529328441
+      },
+      "fosm": {
+        "E": -235.65857697634877,
+        "residual": -9.662336552459067,
+        "sd": 29.58259040648331,
+        "z": -0.32662239579741037,
+        "nll": 4.359465654274689,
+        "sd_recal": 45.7929840565209,
+        "z_recal": -0.21100036941320827,
+        "nll_recal": 4.765330003997966
+      },
+      "mean-map": {
+        "E": -235.65857697634877,
+        "sd": null,
+        "err": -9.662336552459067
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_003",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.2366800308227539,
+      "overhang_qc_cells": 747,
+      "track_len_m": 20.1,
+      "n_steps": 201,
+      "n_steps_total": 201,
+      "retained": 1.0,
+      "n_cells": 2006,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.33101990818977356,
+      "median_raw_sd_on_candidates_m": 0.12824134528636932,
+      "median_meas_sd_on_candidates_m": 0.005846755811944604,
+      "J_tls": -255.01012652922506,
+      "clark": {
+        "E": -199.9892200488114,
+        "residual": -55.02090648041366,
+        "sd": 32.650361621584246,
+        "z": -1.6851545816889473,
+        "nll": 5.824667446658767,
+        "sd_recal": 50.54180410276617,
+        "z_recal": -1.088621735158883,
+        "nll_recal": 5.434287972190552
+      },
+      "clark-diag": {
+        "E": -144.51292212044007,
+        "residual": -110.497204408785,
+        "sd": 4.522163978432437,
+        "z": -24.434585949509895,
+        "nll": 300.9524244307651,
+        "sd_recal": 7.0001774733001545,
+        "z_recal": -15.784914715411114,
+        "nll_recal": 127.44664032166835
+      },
+      "fosm": {
+        "E": -217.52088119152378,
+        "residual": -37.48924533770128,
+        "sd": 32.8933703012652,
+        "z": -1.1397204054903216,
+        "nll": 5.06169096141568,
+        "sd_recal": 50.91797442596367,
+        "z_recal": -0.7362674136264359,
+        "nll_recal": 5.120199378749491
+      },
+      "mean-map": {
+        "E": -217.52088119152378,
+        "sd": null,
+        "err": -37.48924533770128
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_004",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.007998466491699219,
+      "overhang_qc_cells": 827,
+      "track_len_m": 22.0,
+      "n_steps": 220,
+      "n_steps_total": 220,
+      "retained": 1.0,
+      "n_cells": 2179,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.30100277066230774,
+      "median_raw_sd_on_candidates_m": 0.09581715613603592,
+      "median_meas_sd_on_candidates_m": 0.0050799367018043995,
+      "J_tls": -258.46760007540047,
+      "clark": {
+        "E": -262.5430863765946,
+        "residual": 4.0754863011941325,
+        "sd": 40.17625461065366,
+        "z": 0.10144017506583164,
+        "nll": 4.617359727540375,
+        "sd_recal": 62.19166616433899,
+        "z_recal": 0.0655310679476704,
+        "nll_recal": 5.051306699910105
+      },
+      "clark-diag": {
+        "E": -174.53382101434647,
+        "residual": -83.933779061054,
+        "sd": 5.9825000525464835,
+        "z": -14.029883547652812,
+        "nll": 101.12659326313795,
+        "sd_recal": 9.260734971483645,
+        "z_recal": -9.063403641234657,
+        "nll_recal": 44.217364731256495
+      },
+      "fosm": {
+        "E": -288.5823845296947,
+        "residual": 30.114784454294238,
+        "sd": 40.27249773050255,
+        "z": 0.7477754336425272,
+        "nll": 4.894191380320762,
+        "sd_recal": 62.340647696795465,
+        "z_recal": 0.4830681997524746,
+        "nll_recal": 5.1682296400424175
+      },
+      "mean-map": {
+        "E": -288.5823845296947,
+        "sd": null,
+        "err": 30.114784454294238
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_005",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.017499566078186035,
+      "overhang_qc_cells": 790,
+      "track_len_m": 21.700000000000003,
+      "n_steps": 217,
+      "n_steps_total": 217,
+      "retained": 1.0,
+      "n_cells": 2136,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.3476415276527405,
+      "median_raw_sd_on_candidates_m": 0.11019197106361389,
+      "median_meas_sd_on_candidates_m": 0.005346198100596666,
+      "J_tls": -256.30876276352546,
+      "clark": {
+        "E": -241.67266916140164,
+        "residual": -14.636093602123822,
+        "sd": 39.19320124103313,
+        "z": -0.3734345023799851,
+        "nll": 4.657168491014175,
+        "sd_recal": 60.669928322480615,
+        "z_recal": -0.2412413201533414,
+        "nll_recal": 5.053485381000186
+      },
+      "clark-diag": {
+        "E": -159.55568677510738,
+        "residual": -96.75307598841809,
+        "sd": 7.275837591314618,
+        "z": -13.297860868130853,
+        "nll": 91.32004930654462,
+        "sd_recal": 11.262783625056905,
+        "z_recal": -8.590511831654695,
+        "nll_recal": 40.23888910385659
+      },
+      "fosm": {
+        "E": -271.00692420908075,
+        "residual": 14.698161445555286,
+        "sd": 39.265234766718166,
+        "z": 0.3743301557441261,
+        "nll": 4.659339581796027,
+        "sd_recal": 60.781434111794695,
+        "z_recal": 0.24181991853830073,
+        "nll_recal": 5.055461352042493
+      },
+      "mean-map": {
+        "E": -271.00692420908075,
+        "sd": null,
+        "err": 14.698161445555286
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_006",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.11468565464019775,
+      "overhang_qc_cells": 692,
+      "track_len_m": 20.3,
+      "n_steps": 203,
+      "n_steps_total": 203,
+      "retained": 1.0,
+      "n_cells": 1900,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.26368163526058197,
+      "median_raw_sd_on_candidates_m": 0.09885715320706367,
+      "median_meas_sd_on_candidates_m": 0.0035505933919921517,
+      "J_tls": -139.27087644583042,
+      "clark": {
+        "E": 2.405189930087147,
+        "residual": -141.67606637591757,
+        "sd": 29.527948410501846,
+        "z": -4.798032846925775,
+        "nll": 15.814835351881925,
+        "sd_recal": 45.708399846131826,
+        "z_recal": -3.0995630311461717,
+        "nll_recal": 9.544866110311862
+      },
+      "clark-diag": {
+        "E": 56.63553222687214,
+        "residual": -195.90640867270255,
+        "sd": 5.661119241730054,
+        "z": -34.60559658037392,
+        "nll": 601.4262174935528,
+        "sd_recal": 8.763246883267977,
+        "z_recal": -22.355459258685798,
+        "nll_recal": 252.97278435163483
+      },
+      "fosm": {
+        "E": -29.452177113532613,
+        "residual": -109.81869933229781,
+        "sd": 30.18241093653588,
+        "z": -3.638499905233283,
+        "nll": 10.945538648784781,
+        "sd_recal": 46.721488680086644,
+        "z_recal": -2.3504965795129746,
+        "nll_recal": 7.525559820239817
+      },
+      "mean-map": {
+        "E": -29.452177113532613,
+        "sd": null,
+        "err": -109.81869933229781
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_007",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.7062892466783524,
+      "overhang_qc_cells": 740,
+      "track_len_m": 20.6,
+      "n_steps": 206,
+      "n_steps_total": 206,
+      "retained": 1.0,
+      "n_cells": 1968,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.37826940417289734,
+      "median_raw_sd_on_candidates_m": 0.1259535476565361,
+      "median_meas_sd_on_candidates_m": 0.0039936460088938475,
+      "J_tls": -46.6527164503005,
+      "clark": {
+        "E": 77.5829387678275,
+        "residual": -124.235655218128,
+        "sd": 74.66978368342146,
+        "z": -1.6638009257513278,
+        "nll": 6.616130801545869,
+        "sd_recal": 115.58663953138462,
+        "z_recal": -1.074827122942656,
+        "nll_recal": 6.246585579882217
+      },
+      "clark-diag": {
+        "E": 205.6001559841405,
+        "residual": -252.25287243444103,
+        "sd": 19.930130048660427,
+        "z": -12.656860332499226,
+        "nll": 84.00922793087578,
+        "sd_recal": 30.851257953484584,
+        "z_recal": -8.176420968466525,
+        "nll_recal": 37.77504598596433
+      },
+      "fosm": {
+        "E": 43.91840670621853,
+        "residual": -90.57112315651904,
+        "sd": 89.09653826850314,
+        "z": -1.016550417296484,
+        "nll": 5.925346390174146,
+        "sd_recal": 137.91883335296416,
+        "z_recal": -0.6566987332667462,
+        "nll_recal": 6.061230494353635
+      },
+      "mean-map": {
+        "E": 43.91840670621853,
+        "sd": null,
+        "err": -90.57112315651904
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_008",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 20.364303588867188,
+      "overhang_qc_cells": 670,
+      "track_len_m": 18.3,
+      "n_steps": 183,
+      "n_steps_total": 183,
+      "retained": 1.0,
+      "n_cells": 1785,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.8674882650375366,
+      "median_raw_sd_on_candidates_m": 0.1427529752254486,
+      "median_meas_sd_on_candidates_m": 0.008200913667678833,
+      "J_tls": 3475.5514871344085,
+      "clark": {
+        "E": 1258.8834924588257,
+        "residual": 2216.667994675583,
+        "sd": 261.89059849656553,
+        "z": 8.464099159728534,
+        "nll": 42.3073526796305,
+        "sd_recal": 405.3989808437335,
+        "z_recal": 5.467867704211194,
+        "nll_recal": 21.872598868645
+      },
+      "clark-diag": {
+        "E": 1747.6947731814828,
+        "residual": 1727.8567139529257,
+        "sd": 53.01003951502989,
+        "z": 32.59489579257959,
+        "nll": 536.1030357181916,
+        "sd_recal": 82.05798954696337,
+        "z_recal": 21.056532380238732,
+        "nll_recal": 227.01514266014638
+      },
+      "fosm": {
+        "E": 1153.8867276957371,
+        "residual": 2321.6647594386714,
+        "sd": 267.62443803754974,
+        "z": 8.675085042543552,
+        "nll": 44.13707342798076,
+        "sd_recal": 414.27479662169844,
+        "z_recal": 5.6041660713401695,
+        "nll_recal": 22.648806724374726
+      },
+      "mean-map": {
+        "E": 1153.8867276957371,
+        "sd": null,
+        "err": 2321.6647594386714
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_009",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 18.10489273071289,
+      "overhang_qc_cells": 702,
+      "track_len_m": 19.400000000000002,
+      "n_steps": 194,
+      "n_steps_total": 194,
+      "retained": 1.0,
+      "n_cells": 1925,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.6457046270370483,
+      "median_raw_sd_on_candidates_m": 0.10954473912715912,
+      "median_meas_sd_on_candidates_m": 0.005092488136142492,
+      "J_tls": 4196.006865695355,
+      "clark": {
+        "E": 432.82636164674443,
+        "residual": 3763.180504048611,
+        "sd": 44.506489858285896,
+        "z": 84.55352277906071,
+        "nll": 3579.363680725825,
+        "sd_recal": 68.89474358018117,
+        "z_recal": 54.622171569140704,
+        "nll_recal": 1496.942331882072
+      },
+      "clark-diag": {
+        "E": 520.17309414939,
+        "residual": 3675.8337715459656,
+        "sd": 9.034787578055164,
+        "z": 406.8533697985657,
+        "nll": 82767.9522791702,
+        "sd_recal": 13.985586719453085,
+        "z_recal": 262.8301440105554,
+        "nll_recal": 34543.3992661171
+      },
+      "fosm": {
+        "E": 392.5316178267593,
+        "residual": 3803.475247868596,
+        "sd": 46.78345926424742,
+        "z": 81.29957270550247,
+        "nll": 3309.5747292877722,
+        "sd_recal": 72.41942557292276,
+        "z_recal": 52.520096890836086,
+        "nll_recal": 1384.3817018170314
+      },
+      "mean-map": {
+        "E": 392.5316178267593,
+        "sd": null,
+        "err": 3803.475247868596
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_010",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 20.364303588867188,
+      "overhang_qc_cells": 677,
+      "track_len_m": 18.8,
+      "n_steps": 188,
+      "n_steps_total": 188,
+      "retained": 1.0,
+      "n_cells": 1791,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.7821593284606934,
+      "median_raw_sd_on_candidates_m": 0.08800866454839706,
+      "median_meas_sd_on_candidates_m": 0.01002019364386797,
+      "J_tls": 2453.51536031682,
+      "clark": {
+        "E": 1265.9151202450823,
+        "residual": 1187.6002400717377,
+        "sd": 184.21921287773299,
+        "z": 6.446668735144106,
+        "nll": 26.914833846368182,
+        "sd_recal": 285.16594937426567,
+        "z_recal": 4.164593432973561,
+        "nll_recal": 15.243929053504422
+      },
+      "clark-diag": {
+        "E": 1570.8583453412837,
+        "residual": 882.6570149755364,
+        "sd": 38.539765192144614,
+        "z": 22.90250110697209,
+        "nll": 266.83290758102584,
+        "sd_recal": 59.65842844510173,
+        "z_recal": 14.795177110435722,
+        "nll_recal": 114.45620683467276
+      },
+      "fosm": {
+        "E": 1183.5270330002468,
+        "residual": 1269.9883273165733,
+        "sd": 180.1991348882212,
+        "z": 7.047693808876252,
+        "nll": 30.947995089361434,
+        "sd_recal": 278.942986315583,
+        "z_recal": 4.552859866065132,
+        "nll_recal": 16.914212424033654
+      },
+      "mean-map": {
+        "E": 1183.5270330002468,
+        "sd": null,
+        "err": 1269.9883273165733
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_011",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.012489020824432373,
+      "overhang_qc_cells": 834,
+      "track_len_m": 22.400000000000002,
+      "n_steps": 224,
+      "n_steps_total": 224,
+      "retained": 1.0,
+      "n_cells": 2240,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.32126423716545105,
+      "median_raw_sd_on_candidates_m": 0.11604998633265495,
+      "median_meas_sd_on_candidates_m": 0.004416981711983681,
+      "J_tls": -83.17197465334293,
+      "clark": {
+        "E": 109.72411369941202,
+        "residual": -192.89608835275493,
+        "sd": 45.185299954749,
+        "z": -4.269000948227222,
+        "nll": 13.84189489288903,
+        "sd_recal": 69.94552174049832,
+        "z_recal": -2.7578046964666285,
+        "nll_recal": 8.969398583328509
+      },
+      "clark-diag": {
+        "E": 200.68993061289927,
+        "residual": -283.8619052662422,
+        "sd": 6.532567725382481,
+        "z": -43.453342881282126,
+        "nll": 946.8922423981519,
+        "sd_recal": 10.112223628361575,
+        "z_recal": -28.07116571968402,
+        "nll_recal": 397.2278559164928
+      },
+      "fosm": {
+        "E": 86.84449485295889,
+        "residual": -170.0164695063018,
+        "sd": 46.162032383903444,
+        "z": -3.6830369185734986,
+        "nll": 11.533476655336976,
+        "sd_recal": 71.45747495153132,
+        "z_recal": -2.379267803985822,
+        "nll_recal": 8.01849869158629
+      },
+      "mean-map": {
+        "E": 86.84449485295889,
+        "sd": null,
+        "err": -170.0164695063018
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_012",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.10768139362335205,
+      "overhang_qc_cells": 697,
+      "track_len_m": 21.3,
+      "n_steps": 213,
+      "n_steps_total": 213,
+      "retained": 1.0,
+      "n_cells": 1905,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.38116249442100525,
+      "median_raw_sd_on_candidates_m": 0.11294857412576675,
+      "median_meas_sd_on_candidates_m": 0.004080828744918108,
+      "J_tls": -206.62055135580033,
+      "clark": {
+        "E": -51.10437448857715,
+        "residual": -155.51617686722318,
+        "sd": 108.99593938614863,
+        "z": -1.4268070695392017,
+        "nll": 6.62813836824533,
+        "sd_recal": 168.72252382068416,
+        "z_recal": -0.921727421719364,
+        "nll_recal": 6.471984747871764
+      },
+      "clark-diag": {
+        "E": 181.03303476107538,
+        "residual": -387.6535861168757,
+        "sd": 21.886585427038433,
+        "z": -17.711926212024512,
+        "nll": 160.86097751487165,
+        "sd_recal": 33.87979361308401,
+        "z_recal": -11.442029149999547,
+        "nll_recal": 69.9017728459861
+      },
+      "fosm": {
+        "E": -146.69256751894875,
+        "residual": -59.92798383685158,
+        "sd": 145.80095902061953,
+        "z": -0.4110259921430038,
+        "nll": 5.985652113511021,
+        "sd_recal": 225.6956169191131,
+        "z_recal": -0.26552568744978833,
+        "nll_recal": 6.373377742245534
+      },
+      "mean-map": {
+        "E": -146.69256751894875,
+        "sd": null,
+        "err": -59.92798383685158
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_013",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 21.481391943991184,
+      "overhang_qc_cells": 852,
+      "track_len_m": 22.8,
+      "n_steps": 228,
+      "n_steps_total": 228,
+      "retained": 1.0,
+      "n_cells": 2258,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.28629443049430847,
+      "median_raw_sd_on_candidates_m": 0.13984664529561996,
+      "median_meas_sd_on_candidates_m": 0.004662524675950408,
+      "J_tls": 32.70143021715302,
+      "clark": {
+        "E": -209.19907048808238,
+        "residual": 241.9005007052354,
+        "sd": 37.91908057160537,
+        "z": 6.379387291536171,
+        "nll": 24.90268407147475,
+        "sd_recal": 58.69762682016181,
+        "z_recal": 4.1211291462663695,
+        "nll_recal": 13.483190550366478
+      },
+      "clark-diag": {
+        "E": -151.29326185008517,
+        "residual": 183.9946920672382,
+        "sd": 4.761748902814357,
+        "z": 38.640150042034136,
+        "nll": 749.01015118598,
+        "sd_recal": 7.37104792350926,
+        "z_recal": 24.9618092266643,
+        "nll_recal": 314.46245835121147
+      },
+      "fosm": {
+        "E": -226.77499178909272,
+        "residual": 259.47642200624574,
+        "sd": 38.30052313377742,
+        "z": 6.774748770400272,
+        "nll": 27.513012539163356,
+        "sd_recal": 59.28808874144761,
+        "z_recal": 4.3765354477492,
+        "nll_recal": 14.578378217341243
+      },
+      "mean-map": {
+        "E": -226.77499178909272,
+        "sd": null,
+        "err": 259.47642200624574
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_014",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.4929455518722534,
+      "overhang_qc_cells": 856,
+      "track_len_m": 23.1,
+      "n_steps": 231,
+      "n_steps_total": 231,
+      "retained": 1.0,
+      "n_cells": 2293,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.2773556709289551,
+      "median_raw_sd_on_candidates_m": 0.13658507168293,
+      "median_meas_sd_on_candidates_m": 0.0034851361997425556,
+      "J_tls": -282.23090766563587,
+      "clark": {
+        "E": -292.2651808219058,
+        "residual": 10.034273156269933,
+        "sd": 37.93668528667093,
+        "z": 0.2645005245040604,
+        "nll": 4.589837390379845,
+        "sd_recal": 58.72487840378716,
+        "z_recal": 0.17086920278106227,
+        "nll_recal": 5.006400135373144
+      },
+      "clark-diag": {
+        "E": -221.8195095787586,
+        "residual": -60.411398086877256,
+        "sd": 4.708957963540275,
+        "z": -12.829037454702386,
+        "nll": 84.76050618467092,
+        "sd_recal": 7.2893290947221425,
+        "z_recal": -8.28764860275252,
+        "nll_recal": 37.24790972544073
+      },
+      "fosm": {
+        "E": -308.32252138542935,
+        "residual": 26.091613719793486,
+        "sd": 37.97832315370722,
+        "z": 0.6870133158379472,
+        "nll": 4.7919477349121955,
+        "sd_recal": 58.78933260320448,
+        "z_recal": 0.4438154434563404,
+        "nll_recal": 5.091385027263286
+      },
+      "mean-map": {
+        "E": -308.32252138542935,
+        "sd": null,
+        "err": 26.091613719793486
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_015",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.03272581100463867,
+      "overhang_qc_cells": 893,
+      "track_len_m": 24.0,
+      "n_steps": 240,
+      "n_steps_total": 240,
+      "retained": 1.0,
+      "n_cells": 2270,
+      "frac_cells_count0": 0.000881057268722467,
+      "median_sigma_on_candidates_m": 0.2724868357181549,
+      "median_raw_sd_on_candidates_m": 0.13731682300567627,
+      "median_meas_sd_on_candidates_m": 0.003958254121243954,
+      "J_tls": -283.62273269633477,
+      "clark": {
+        "E": -321.1011307201135,
+        "residual": 37.47839802377871,
+        "sd": 37.69982635744679,
+        "z": 0.9941265423461468,
+        "nll": 5.042737812843315,
+        "sd_recal": 58.358227714291466,
+        "z_recal": 0.6422127520264045,
+        "nll_recal": 5.191757497672668
+      },
+      "clark-diag": {
+        "E": -266.4451955959736,
+        "residual": -17.177537100361178,
+        "sd": 4.495923299558002,
+        "z": -3.8206917591432035,
+        "nll": 9.720952345136087,
+        "sd_recal": 6.95955767047633,
+        "z_recal": -2.4681938010559663,
+        "nll_recal": 5.905044772224485
+      },
+      "fosm": {
+        "E": -334.37201943153576,
+        "residual": 50.749286735201,
+        "sd": 37.75022214441955,
+        "z": 1.3443440555409563,
+        "nll": 5.45356036333693,
+        "sd_recal": 58.43623891742308,
+        "z_recal": 0.8684557335545738,
+        "nll_recal": 5.3639824405699255
+      },
+      "mean-map": {
+        "E": -334.37201943153576,
+        "sd": null,
+        "err": 50.749286735201
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_016",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.42119812965393066,
+      "overhang_qc_cells": 685,
+      "track_len_m": 22.1,
+      "n_steps": 170,
+      "n_steps_total": 221,
+      "retained": 0.7692307692307693,
+      "n_cells": 1714,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.19442632049322128,
+      "median_raw_sd_on_candidates_m": 0.11676331982016563,
+      "median_meas_sd_on_candidates_m": 0.005465482361614704,
+      "J_tls": -307.79827734169174,
+      "clark": {
+        "E": -276.66991343132827,
+        "residual": -31.128363910363475,
+        "sd": 25.702661850435817,
+        "z": -1.2110949477334254,
+        "nll": 4.898908579902069,
+        "sd_recal": 39.78696821861834,
+        "z_recal": -0.7823758708962634,
+        "nll_recal": 4.90853396186494
+      },
+      "clark-diag": {
+        "E": -238.01547361322457,
+        "residual": -69.78280372846717,
+        "sd": 3.513373171635562,
+        "z": -19.862052881784134,
+        "nll": 199.42608746615542,
+        "sd_recal": 5.438598832036543,
+        "z_recal": -12.831026130738943,
+        "nll_recal": 84.93007577710873
+      },
+      "fosm": {
+        "E": -290.56990907314554,
+        "residual": -17.228368268546205,
+        "sd": 25.373650581649382,
+        "z": -0.6789865814975016,
+        "nll": 4.3831611790311005,
+        "sd_recal": 39.277668404811266,
+        "z_recal": -0.4386301165075226,
+        "nll_recal": 4.685792846153213
+      },
+      "mean-map": {
+        "E": -290.56990907314554,
+        "sd": null,
+        "err": -17.228368268546205
+      }
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-02/window_017",
+      "sequence": "virgin-2024-03-14-blenheim-palace-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.014903783798217773,
+      "overhang_qc_cells": 727,
+      "track_len_m": 23.3,
+      "n_steps": 225,
+      "n_steps_total": 233,
+      "retained": 0.9656652360515021,
+      "n_cells": 1933,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.29796046018600464,
+      "median_raw_sd_on_candidates_m": 0.11907381564378738,
+      "median_meas_sd_on_candidates_m": 0.004390111193060875,
+      "J_tls": -538.090903697184,
+      "clark": {
+        "E": -556.9496840554674,
+        "residual": 18.85878035828341,
+        "sd": 30.49224884154814,
+        "z": 0.6184778451823076,
+        "nll": 4.527668470667917,
+        "sd_recal": 47.20110868798232,
+        "z_recal": 0.3995410464391267,
+        "nll_recal": 4.85317243856732
+      },
+      "clark-diag": {
+        "E": -504.4800696023434,
+        "residual": -33.610834094840584,
+        "sd": 4.856833604252717,
+        "z": -6.920318222434145,
+        "nll": 26.444727386902883,
+        "sd_recal": 7.518236258173542,
+        "z_recal": -4.47057433959995,
+        "nll_recal": 12.92928756646585
+      },
+      "fosm": {
+        "E": -579.6992908857351,
+        "residual": 41.60838718855109,
+        "sd": 30.808516565301336,
+        "z": 1.3505482193652034,
+        "nll": 5.258719943237537,
+        "sd_recal": 47.690681867085935,
+        "z_recal": 0.872463667106161,
+        "nll_recal": 5.164270988527683
+      },
+      "mean-map": {
+        "E": -579.6992908857351,
+        "sd": null,
+        "err": 41.60838718855109
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_000",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.5154736805707216,
+      "overhang_qc_cells": 656,
+      "track_len_m": 18.400000000000002,
+      "n_steps": 161,
+      "n_steps_total": 184,
+      "retained": 0.875,
+      "n_cells": 1720,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.5319016873836517,
+      "median_raw_sd_on_candidates_m": 0.12299193814396858,
+      "median_meas_sd_on_candidates_m": 0.00611562211997807,
+      "J_tls": -31.09713619082423,
+      "clark": {
+        "E": -17.08075149379067,
+        "residual": -14.016384697033558,
+        "sd": 35.09116259423235,
+        "z": -0.3994277664467383,
+        "nll": 4.5566591243373225,
+        "sd_recal": 54.32009256533162,
+        "z_recal": -0.2580331519165921,
+        "nll_recal": 4.947123274272255
+      },
+      "clark-diag": {
+        "E": 61.49776538360434,
+        "residual": -92.59490157442858,
+        "sd": 6.504773495712408,
+        "z": -14.23491557937599,
+        "nll": 104.10788560051472,
+        "sd_recal": 10.069198974379075,
+        "z_recal": -9.195855778601148,
+        "nll_recal": 45.51030144144538
+      },
+      "fosm": {
+        "E": -32.030097197410754,
+        "residual": 0.9329610065865239,
+        "sd": 35.18404844674617,
+        "z": 0.026516590550932022,
+        "nll": 4.479882908757257,
+        "sd_recal": 54.46387714622178,
+        "z_recal": 0.017129904359944093,
+        "nll_recal": 4.916622927276967
+      },
+      "mean-map": {
+        "E": -32.030097197410754,
+        "sd": null,
+        "err": 0.9329610065865239
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_001",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.015500009059906006,
+      "overhang_qc_cells": 745,
+      "track_len_m": 25.5,
+      "n_steps": 154,
+      "n_steps_total": 255,
+      "retained": 0.6039215686274509,
+      "n_cells": 1549,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.6524824500083923,
+      "median_raw_sd_on_candidates_m": 0.20046810805797577,
+      "median_meas_sd_on_candidates_m": 0.006272273138165474,
+      "J_tls": -31.44297351790255,
+      "clark": {
+        "E": 24.738531340912125,
+        "residual": -56.18150485881468,
+        "sd": 47.63114599565727,
+        "z": -1.1795119282651099,
+        "nll": 5.478049602562751,
+        "sd_recal": 73.73161982105961,
+        "z_recal": -0.7619730177522537,
+        "nll_recal": 5.509671714489393
+      },
+      "clark-diag": {
+        "E": 112.58742195041921,
+        "residual": -144.03039546832176,
+        "sd": 7.821276826400715,
+        "z": -18.415202359561963,
+        "nll": 172.53562532327524,
+        "sd_recal": 12.107107595773972,
+        "z_recal": -11.896350497338942,
+        "nll_recal": 74.17430879573047
+      },
+      "fosm": {
+        "E": -4.046337996143777,
+        "residual": -27.396635521758775,
+        "sd": 48.148151512417336,
+        "z": -0.5690070056935254,
+        "nll": 4.955105766787408,
+        "sd_recal": 74.53192922807281,
+        "z_recal": -0.36758253550532943,
+        "nll_recal": 5.297724607222758
+      },
+      "mean-map": {
+        "E": -4.046337996143777,
+        "sd": null,
+        "err": -27.396635521758775
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_002",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 6.896750092506409,
+      "overhang_qc_cells": 889,
+      "track_len_m": 25.200000000000003,
+      "n_steps": 193,
+      "n_steps_total": 252,
+      "retained": 0.7658730158730159,
+      "n_cells": 1991,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.5639081597328186,
+      "median_raw_sd_on_candidates_m": 0.16388419270515442,
+      "median_meas_sd_on_candidates_m": 0.009710676968097687,
+      "J_tls": 13.70800291613859,
+      "clark": {
+        "E": 65.7382360688801,
+        "residual": -52.03023315274151,
+        "sd": 69.48339209686326,
+        "z": -0.74881538713897,
+        "nll": 5.440388536592281,
+        "sd_recal": 107.558257162879,
+        "z_recal": -0.48374001703979286,
+        "nll_recal": 5.71397336312231
+      },
+      "clark-diag": {
+        "E": 223.47172000335445,
+        "residual": -209.76371708721587,
+        "sd": 9.648964114070662,
+        "z": -21.73950639751335,
+        "nll": 239.48885830086334,
+        "sd_recal": 14.936314020044145,
+        "z_recal": -14.043874332430237,
+        "nll_recal": 102.2379370961431
+      },
+      "fosm": {
+        "E": 34.76896074073715,
+        "residual": -21.06095782459856,
+        "sd": 72.12573146557314,
+        "z": -0.29200338626238154,
+        "nll": 5.239982388412922,
+        "sd_recal": 111.6485211634491,
+        "z_recal": -0.18863624529129353,
+        "nll_recal": 5.652086082632613
+      },
+      "mean-map": {
+        "E": 34.76896074073715,
+        "sd": null,
+        "err": -21.06095782459856
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_003",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.02514547109603882,
+      "overhang_qc_cells": 943,
+      "track_len_m": 25.700000000000003,
+      "n_steps": 257,
+      "n_steps_total": 257,
+      "retained": 1.0,
+      "n_cells": 2526,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.5951994061470032,
+      "median_raw_sd_on_candidates_m": 0.1748136281967163,
+      "median_meas_sd_on_candidates_m": 0.0065039461478590965,
+      "J_tls": -40.161925660913425,
+      "clark": {
+        "E": 39.626703014964036,
+        "residual": -79.78862867587746,
+        "sd": 74.91145378331048,
+        "z": -1.065105863606315,
+        "nll": 5.802470583386379,
+        "sd_recal": 115.9607377722449,
+        "z_recal": -0.6880658937561089,
+        "nll_recal": 5.90890753661254
+      },
+      "clark-diag": {
+        "E": 200.1912473690191,
+        "residual": -240.35317302993252,
+        "sd": 9.602206601099684,
+        "z": -25.031035366642318,
+        "nll": 316.4572972225965,
+        "sd_recal": 14.863934758573748,
+        "z_recal": -16.17022524209433,
+        "nll_recal": 134.35596851607477
+      },
+      "fosm": {
+        "E": 4.053030597251535,
+        "residual": -44.21495625816496,
+        "sd": 75.23850509746838,
+        "z": -0.5876639388420372,
+        "nll": 5.412276121493091,
+        "sd_recal": 116.46700363365555,
+        "z_recal": -0.37963504579582175,
+        "nll_recal": 5.748607919478863
+      },
+      "mean-map": {
+        "E": 4.053030597251535,
+        "sd": null,
+        "err": -44.21495625816496
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_004",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.009891867637634277,
+      "overhang_qc_cells": 976,
+      "track_len_m": 28.3,
+      "n_steps": 188,
+      "n_steps_total": 283,
+      "retained": 0.6643109540636042,
+      "n_cells": 1978,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.6521401405334473,
+      "median_raw_sd_on_candidates_m": 0.19858786463737488,
+      "median_meas_sd_on_candidates_m": 0.007461318513378501,
+      "J_tls": -30.6155311186035,
+      "clark": {
+        "E": 10.937687929440216,
+        "residual": -41.553219048043715,
+        "sd": 43.19647219312059,
+        "z": -0.9619586262107168,
+        "nll": 5.14737956219452,
+        "sd_recal": 66.8668745791782,
+        "z_recal": -0.6214320515136361,
+        "nll_recal": 5.314731126743382
+      },
+      "clark-diag": {
+        "E": 105.43375396043494,
+        "residual": -136.04928507903844,
+        "sd": 8.653314305185937,
+        "z": -15.722216977315156,
+        "nll": 126.67093427832005,
+        "sd_recal": 13.395077258906962,
+        "z_recal": -10.156662962774137,
+        "nll_recal": 55.09272707362078
+      },
+      "fosm": {
+        "E": -22.349567326871565,
+        "residual": -8.265963791731934,
+        "sd": 42.53103922785362,
+        "z": -0.1943513241575942,
+        "nll": 4.688058895944315,
+        "sd_recal": 65.83680382639938,
+        "z_recal": -0.1255523250115224,
+        "nll_recal": 5.113999236996551
+      },
+      "mean-map": {
+        "E": -22.349567326871565,
+        "sd": null,
+        "err": -8.265963791731934
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_008",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 2.1545000076293945,
+      "overhang_qc_cells": 1027,
+      "track_len_m": 28.900000000000002,
+      "n_steps": 166,
+      "n_steps_total": 289,
+      "retained": 0.5743944636678201,
+      "n_cells": 1737,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 2.3751046657562256,
+      "median_raw_sd_on_candidates_m": 0.1545095443725586,
+      "median_meas_sd_on_candidates_m": 0.0074701132252812386,
+      "J_tls": 10.148789303496486,
+      "clark": {
+        "E": 573.2969880417198,
+        "residual": -563.1481987382233,
+        "sd": 211.38799360914433,
+        "z": -2.6640500679498493,
+        "nll": 9.821215192641,
+        "sd_recal": 327.2224267068243,
+        "z_recal": -1.7209951176200318,
+        "nll_recal": 8.190490774300438
+      },
+      "clark-diag": {
+        "E": 1147.1243640273995,
+        "residual": -1136.975574723903,
+        "sd": 33.84582793188314,
+        "z": -33.59278363679381,
+        "nll": 568.6783105075449,
+        "sd_recal": 52.392350959393966,
+        "z_recal": -21.701174959778037,
+        "nll_recal": 240.34819645726768
+      },
+      "fosm": {
+        "E": 417.3389833331903,
+        "residual": -407.1901940296938,
+        "sd": 218.56614983867985,
+        "z": -1.8630066656261015,
+        "nll": 8.041424165262978,
+        "sd_recal": 338.3340024430146,
+        "z_recal": -1.2035154347168422,
+        "nll_recal": 7.467196814475412
+      },
+      "mean-map": {
+        "E": 417.3389833331903,
+        "sd": null,
+        "err": -407.1901940296938
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_009",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.015619993209838867,
+      "overhang_qc_cells": 1009,
+      "track_len_m": 28.0,
+      "n_steps": 213,
+      "n_steps_total": 280,
+      "retained": 0.7607142857142857,
+      "n_cells": 2206,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.6414316296577454,
+      "median_raw_sd_on_candidates_m": 0.11925583332777023,
+      "median_meas_sd_on_candidates_m": 0.006117790937423706,
+      "J_tls": -43.36515115283933,
+      "clark": {
+        "E": 28.888548021248816,
+        "residual": -72.25369917408815,
+        "sd": 52.18734561798015,
+        "z": -1.3845061157736778,
+        "nll": 5.832207169900386,
+        "sd_recal": 80.78448347486703,
+        "z_recal": -0.8944007074894166,
+        "nll_recal": 5.710699756867054
+      },
+      "clark-diag": {
+        "E": 157.50024668220783,
+        "residual": -200.86539783504716,
+        "sd": 9.362897327195205,
+        "z": -21.453337659873643,
+        "nll": 233.2785416935756,
+        "sd_recal": 14.493491007235335,
+        "z_recal": -13.85900731126632,
+        "nll_recal": 99.62868001266112
+      },
+      "fosm": {
+        "E": -9.490785432795263,
+        "residual": -33.87436572004407,
+        "sd": 52.08139723322972,
+        "z": -0.6504119996694532,
+        "nll": 5.083264243997156,
+        "sd_recal": 80.62047847641945,
+        "z_recal": -0.42017073527977045,
+        "nll_recal": 5.39696294922816
+      },
+      "mean-map": {
+        "E": -9.490785432795263,
+        "sd": null,
+        "err": -33.87436572004407
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_011",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 1.3962461352348328,
+      "overhang_qc_cells": 849,
+      "track_len_m": 23.400000000000002,
+      "n_steps": 225,
+      "n_steps_total": 234,
+      "retained": 0.9615384615384616,
+      "n_cells": 2282,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.6651380062103271,
+      "median_raw_sd_on_candidates_m": 0.14199910312891006,
+      "median_meas_sd_on_candidates_m": 0.008236163295805454,
+      "J_tls": -36.949660416550444,
+      "clark": {
+        "E": 165.47642229128792,
+        "residual": -202.42608270783836,
+        "sd": 88.5997791402014,
+        "z": -2.2847244617564653,
+        "nll": 8.013050831112535,
+        "sd_recal": 137.14986476266563,
+        "z_recal": -1.4759481028882644,
+        "nll_recal": 6.929224165743326
+      },
+      "clark-diag": {
+        "E": 389.3303607209588,
+        "residual": -426.28002113750927,
+        "sd": 15.166019039606352,
+        "z": -28.10757523277999,
+        "nll": 398.65588860209004,
+        "sd_recal": 23.476553558655915,
+        "z_recal": -18.157691676184633,
+        "nll_recal": 168.92582423908408
+      },
+      "fosm": {
+        "E": 90.84005487416431,
+        "residual": -127.78971529071475,
+        "sd": 92.13584963503914,
+        "z": -1.3869706069559757,
+        "nll": 6.404046379860619,
+        "sd_recal": 142.6235983866606,
+        "z_recal": -0.8959927861606019,
+        "nll_recal": 6.2805490505018655
+      },
+      "mean-map": {
+        "E": 90.84005487416431,
+        "sd": null,
+        "err": -127.78971529071475
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_012",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 17.540132999420166,
+      "overhang_qc_cells": 958,
+      "track_len_m": 26.6,
+      "n_steps": 244,
+      "n_steps_total": 266,
+      "retained": 0.9172932330827067,
+      "n_cells": 2420,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 2.126528263092041,
+      "median_raw_sd_on_candidates_m": 0.21820424497127533,
+      "median_meas_sd_on_candidates_m": 0.010136901400983334,
+      "J_tls": 892.6650857629354,
+      "clark": {
+        "E": 966.6219325295564,
+        "residual": -73.95684676662097,
+        "sd": 302.09415148291646,
+        "z": -0.24481389793076896,
+        "nll": 6.659644184179765,
+        "sd_recal": 467.63290409461894,
+        "z_recal": -0.15815150328184957,
+        "nll_recal": 7.079128077360133
+      },
+      "clark-diag": {
+        "E": 1740.8473776753115,
+        "residual": -848.1822919123761,
+        "sd": 53.04200419818905,
+        "z": -15.990766275406587,
+        "nll": 132.74232570225075,
+        "sd_recal": 82.10746994087636,
+        "z_recal": -10.330147701824597,
+        "nll_recal": 58.682943302161654
+      },
+      "fosm": {
+        "E": 801.8352721096061,
+        "residual": 90.82981365332932,
+        "sd": 323.67968725379455,
+        "z": 0.2806163538526606,
+        "nll": 6.7380657094280645,
+        "sd_recal": 501.0466816517949,
+        "z_recal": 0.18128014210949708,
+        "nll_recal": 7.1520690518601455
+      },
+      "mean-map": {
+        "E": 801.8352721096061,
+        "sd": null,
+        "err": 90.82981365332932
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_013",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 8.76055383682251,
+      "overhang_qc_cells": 631,
+      "track_len_m": 17.8,
+      "n_steps": 178,
+      "n_steps_total": 178,
+      "retained": 1.0,
+      "n_cells": 1762,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.20303235948085785,
+      "median_raw_sd_on_candidates_m": 0.0831918753683567,
+      "median_meas_sd_on_candidates_m": 0.009968116879463196,
+      "J_tls": 2051.4284271325587,
+      "clark": {
+        "E": 2046.054898327539,
+        "residual": 5.37352880501976,
+        "sd": 20.26538763634492,
+        "z": 0.2651579580635613,
+        "nll": 3.9630072928306097,
+        "sd_recal": 31.370226886113926,
+        "z_recal": 0.1712939094934745,
+        "nll_recal": 4.379468589678413
+      },
+      "clark-diag": {
+        "E": 2072.1060242554663,
+        "residual": -20.677597122907628,
+        "sd": 2.746261578673168,
+        "z": -7.529361836281388,
+        "nll": 30.274823924913722,
+        "sd_recal": 4.25113253975402,
+        "z_recal": -4.864020806113017,
+        "nll_recal": 14.195473161733812
+      },
+      "fosm": {
+        "E": 2037.7633493673477,
+        "residual": 13.665077765210981,
+        "sd": 20.106641477340293,
+        "z": 0.6796300506283557,
+        "nll": 4.15093721830923,
+        "sd_recal": 31.12449247853008,
+        "z_recal": 0.4390458021006209,
+        "nll_recal": 4.45331419011701
+      },
+      "mean-map": {
+        "E": 2037.7633493673477,
+        "sd": null,
+        "err": 13.665077765210981
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_014",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 17.915212154388428,
+      "overhang_qc_cells": 613,
+      "track_len_m": 17.3,
+      "n_steps": 173,
+      "n_steps_total": 173,
+      "retained": 1.0,
+      "n_cells": 1719,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.0418654680252075,
+      "median_raw_sd_on_candidates_m": 0.2235688865184784,
+      "median_meas_sd_on_candidates_m": 0.00915321335196495,
+      "J_tls": 2583.8525948912143,
+      "clark": {
+        "E": 1584.083214222038,
+        "residual": 999.7693806691764,
+        "sd": 113.25736716991638,
+        "z": 8.827411458093094,
+        "nll": 44.61019787296162,
+        "sd_recal": 175.3190892964825,
+        "z_recal": 5.702570009238778,
+        "nll_recal": 22.345198569355023
+      },
+      "clark-diag": {
+        "E": 1812.163525308138,
+        "residual": 771.6890695830762,
+        "sd": 21.145180475883507,
+        "z": 36.49479702777674,
+        "nll": 669.9054555885601,
+        "sd_recal": 32.732120449877094,
+        "z_recal": 23.57589606101959,
+        "nll_recal": 282.318732945744
+      },
+      "fosm": {
+        "E": 1526.4863901290469,
+        "residual": 1057.3662047621674,
+        "sd": 119.67178101404068,
+        "z": 8.83555167143464,
+        "nll": 44.73717803968621,
+        "sd_recal": 185.24841417506164,
+        "z_recal": 5.707828644422,
+        "nll_recal": 22.430290153927867
+      },
+      "mean-map": {
+        "E": 1526.4863901290469,
+        "sd": null,
+        "err": 1057.3662047621674
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_015",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 7.6207075119018555,
+      "overhang_qc_cells": 710,
+      "track_len_m": 19.200000000000003,
+      "n_steps": 192,
+      "n_steps_total": 192,
+      "retained": 1.0,
+      "n_cells": 1910,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 4.8057861328125,
+      "median_raw_sd_on_candidates_m": 0.17761242389678955,
+      "median_meas_sd_on_candidates_m": 0.014024603180587292,
+      "J_tls": 3432.6316775910136,
+      "clark": {
+        "E": 3244.924451087455,
+        "residual": 187.70722650355856,
+        "sd": 278.7413576457109,
+        "z": 0.6734100317547438,
+        "nll": 6.775963386970756,
+        "sd_recal": 431.48346277902647,
+        "z_recal": 0.4350276260754127,
+        "nll_recal": 7.08079223575644
+      },
+      "clark-diag": {
+        "E": 3853.6373060809187,
+        "residual": -421.0056284899051,
+        "sd": 62.829122191474326,
+        "z": -6.700803923487475,
+        "nll": 27.50974383886586,
+        "sd_recal": 97.25764212213261,
+        "z_recal": -4.328766555549656,
+        "nll_recal": 14.86541204107115
+      },
+      "fosm": {
+        "E": 3052.2145219213476,
+        "residual": 380.41715566966604,
+        "sd": 254.7187489977323,
+        "z": 1.4934792086037327,
+        "nll": 7.574338597830418,
+        "sd_recal": 394.2971677420701,
+        "z_recal": 0.9647980933977095,
+        "nll_recal": 7.361461071571773
+      },
+      "mean-map": {
+        "E": 3052.2145219213476,
+        "sd": null,
+        "err": 380.41715566966604
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_016",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 12.584363460540771,
+      "overhang_qc_cells": 702,
+      "track_len_m": 20.0,
+      "n_steps": 149,
+      "n_steps_total": 200,
+      "retained": 0.745,
+      "n_cells": 1628,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.5880225598812103,
+      "median_raw_sd_on_candidates_m": 0.09657436609268188,
+      "median_meas_sd_on_candidates_m": 0.013993135653436184,
+      "J_tls": 2633.0193472709843,
+      "clark": {
+        "E": 2668.304911458038,
+        "residual": -35.28556418705375,
+        "sd": 60.3645735261596,
+        "z": -0.5845409339595913,
+        "nll": 5.1901849867821594,
+        "sd_recal": 93.44259292642245,
+        "z_recal": -0.37761756263375446,
+        "nll_recal": 5.527583313344955
+      },
+      "clark-diag": {
+        "E": 2726.33673311365,
+        "residual": -93.31738584266577,
+        "sd": 18.238894667062375,
+        "z": -5.116394800568022,
+        "nll": 16.911242794260875,
+        "sd_recal": 28.23327508581893,
+        "z_recal": -3.305227096715302,
+        "nll_recal": 9.721702863546906
+      },
+      "fosm": {
+        "E": 2638.301079037655,
+        "residual": -5.281731766670873,
+        "sd": 52.02643490454184,
+        "z": -0.1015201555970883,
+        "nll": 4.875843657158238,
+        "sd_recal": 80.53539840037709,
+        "z_recal": -0.06558273593448993,
+        "nll_recal": 5.309785900283578
+      },
+      "mean-map": {
+        "E": 2638.301079037655,
+        "sd": null,
+        "err": -5.281731766670873
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_017",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 12.69312310218811,
+      "overhang_qc_cells": 778,
+      "track_len_m": 21.400000000000002,
+      "n_steps": 202,
+      "n_steps_total": 214,
+      "retained": 0.9439252336448598,
+      "n_cells": 2085,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 3.5771517753601074,
+      "median_raw_sd_on_candidates_m": 0.11370742321014404,
+      "median_meas_sd_on_candidates_m": 0.014084059745073318,
+      "J_tls": 3378.6048497500383,
+      "clark": {
+        "E": 3032.3687833081476,
+        "residual": 346.23606644189067,
+        "sd": 231.27036625663249,
+        "z": 1.4971051935710815,
+        "nll": 7.48318795632695,
+        "sd_recal": 357.99975760116996,
+        "z_recal": 0.9671405052391554,
+        "nll_recal": 7.267151220950565
+      },
+      "clark-diag": {
+        "E": 3560.1384420390063,
+        "residual": -181.53359228896807,
+        "sd": 50.277018885309666,
+        "z": -3.6106673846967086,
+        "nll": 11.354946106356962,
+        "sd_recal": 77.82735360862134,
+        "z_recal": -2.332516575108866,
+        "nll_recal": 7.993748277974717
+      },
+      "fosm": {
+        "E": 2878.970219176254,
+        "residual": 499.6346305737843,
+        "sd": 219.55809555908914,
+        "z": 2.2756374767302483,
+        "nll": 8.899818365700959,
+        "sd_recal": 339.8695053836118,
+        "z_recal": 1.4700778465247863,
+        "nll_recal": 7.828064706868072
+      },
+      "mean-map": {
+        "E": 2878.970219176254,
+        "sd": null,
+        "err": 499.6346305737843
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_018",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 17.97935724258423,
+      "overhang_qc_cells": 621,
+      "track_len_m": 17.400000000000002,
+      "n_steps": 174,
+      "n_steps_total": 174,
+      "retained": 1.0,
+      "n_cells": 1698,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.034782886505127,
+      "median_raw_sd_on_candidates_m": 0.21031295508146286,
+      "median_meas_sd_on_candidates_m": 0.011350980959832668,
+      "J_tls": 2224.0624393950566,
+      "clark": {
+        "E": 1656.621426159569,
+        "residual": 567.4410132354876,
+        "sd": 92.72414653018825,
+        "z": 6.119668225263692,
+        "nll": 24.173737045877196,
+        "sd_recal": 143.53426476069657,
+        "z_recal": 3.9533487991981393,
+        "nll_recal": 13.699995682782093
+      },
+      "clark-diag": {
+        "E": 1848.8953092661325,
+        "residual": 375.1671301289241,
+        "sd": 19.909143254279662,
+        "z": 18.84396155762646,
+        "nll": 181.45756121208169,
+        "sd_recal": 30.818771010073938,
+        "z_recal": 12.173331960781002,
+        "nll_recal": 78.4420679996111
+      },
+      "fosm": {
+        "E": 1622.7902551869342,
+        "residual": 601.2721842081223,
+        "sd": 94.35110240523989,
+        "z": 6.372709686269973,
+        "nll": 25.77167586190082,
+        "sd_recal": 146.0527448337119,
+        "z_recal": 4.116815366206912,
+        "nll_recal": 14.376990735375168
+      },
+      "mean-map": {
+        "E": 1622.7902551869342,
+        "sd": null,
+        "err": 601.2721842081223
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_019",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 6.504132270812988,
+      "overhang_qc_cells": 478,
+      "track_len_m": 13.700000000000001,
+      "n_steps": 137,
+      "n_steps_total": 137,
+      "retained": 1.0,
+      "n_cells": 1413,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.6842453479766846,
+      "median_raw_sd_on_candidates_m": 0.2579939663410187,
+      "median_meas_sd_on_candidates_m": 0.009191872552037239,
+      "J_tls": 1556.7192598566373,
+      "clark": {
+        "E": 1395.1551147861899,
+        "residual": 161.56414507044747,
+        "sd": 92.8402194501156,
+        "z": 1.7402387244168271,
+        "nll": 6.96403388733339,
+        "sd_recal": 143.71394224324936,
+        "z_recal": 1.1242064795424298,
+        "nll_recal": 6.51868344917127
+      },
+      "clark-diag": {
+        "E": 1476.5988784503672,
+        "residual": 80.1203814062701,
+        "sd": 22.259198515603334,
+        "z": 3.5994279555980877,
+        "nll": 10.49963467658602,
+        "sd_recal": 34.45658776766771,
+        "z_recal": 2.3252558247062103,
+        "nll_recal": 7.162046064475827
+      },
+      "fosm": {
+        "E": 1371.0400529483275,
+        "residual": 185.67920690830988,
+        "sd": 91.52836325254354,
+        "z": 2.028652106407572,
+        "nll": 7.49330212277005,
+        "sd_recal": 141.68322724789522,
+        "z_recal": 1.3105235567752658,
+        "nll_recal": 6.7312683012807994
+      },
+      "mean-map": {
+        "E": 1371.0400529483275,
+        "sd": null,
+        "err": 185.67920690830988
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_020",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 6.76626443862915,
+      "overhang_qc_cells": 555,
+      "track_len_m": 15.4,
+      "n_steps": 154,
+      "n_steps_total": 154,
+      "retained": 1.0,
+      "n_cells": 1544,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.41099511086940765,
+      "median_raw_sd_on_candidates_m": 0.07894272357225418,
+      "median_meas_sd_on_candidates_m": 0.013719444628804922,
+      "J_tls": 1714.3802284005376,
+      "clark": {
+        "E": 1767.7256911576703,
+        "residual": -53.345462757132736,
+        "sd": 97.35354650540653,
+        "z": -0.5479560290509827,
+        "nll": 5.647415599707259,
+        "sd_recal": 150.70044041818628,
+        "z_recal": -0.35398345624672173,
+        "nll_recal": 5.996884704964027
+      },
+      "clark-diag": {
+        "E": 1883.0582920689965,
+        "residual": -168.6780636684589,
+        "sd": 25.348846872661735,
+        "z": -6.654269699754077,
+        "nll": 26.291324392481933,
+        "sd_recal": 39.23927298931158,
+        "z_recal": -4.29870511908835,
+        "nll_recal": 13.828049490882757
+      },
+      "fosm": {
+        "E": 1666.3359045377379,
+        "residual": 48.04432386279973,
+        "sd": 90.40320473258505,
+        "z": 0.5314449195127102,
+        "nll": 5.564435101794075,
+        "sd_recal": 139.94151479278088,
+        "z_recal": 0.34331716313019484,
+        "nll_recal": 5.919096454301265
+      },
+      "mean-map": {
+        "E": 1666.3359045377379,
+        "sd": null,
+        "err": 48.04432386279973
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_021",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 23.53689455986023,
+      "overhang_qc_cells": 724,
+      "track_len_m": 20.0,
+      "n_steps": 200,
+      "n_steps_total": 200,
+      "retained": 1.0,
+      "n_cells": 2058,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.6446407437324524,
+      "median_raw_sd_on_candidates_m": 0.21688605099916458,
+      "median_meas_sd_on_candidates_m": 0.012912290170788765,
+      "J_tls": 2236.905542128833,
+      "clark": {
+        "E": 1785.8162505865312,
+        "residual": 451.0892915423019,
+        "sd": 107.10271157668588,
+        "z": 4.2117448279478955,
+        "nll": 14.462124076387138,
+        "sd_recal": 165.7918625870726,
+        "z_recal": 2.7208168392787875,
+        "nll_recal": 9.731093831460962
+      },
+      "clark-diag": {
+        "E": 2000.2418471751378,
+        "residual": 236.6636949536953,
+        "sd": 20.334559058497522,
+        "z": 11.638496525686744,
+        "nll": 71.65856107766967,
+        "sd_recal": 31.477302222934558,
+        "z_recal": 7.518550772793377,
+        "nll_recal": 32.63250811648965
+      },
+      "fosm": {
+        "E": 1703.7086933635485,
+        "residual": 533.1968487652846,
+        "sd": 99.9736439625859,
+        "z": 5.33337415374024,
+        "nll": 19.746285055972695,
+        "sd_recal": 154.75627459073564,
+        "z_recal": 3.4453972879313803,
+        "nll_recal": 11.896171226418183
+      },
+      "mean-map": {
+        "E": 1703.7086933635485,
+        "sd": null,
+        "err": 533.1968487652846
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_022",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 4.871222257614136,
+      "overhang_qc_cells": 821,
+      "track_len_m": 23.200000000000003,
+      "n_steps": 232,
+      "n_steps_total": 232,
+      "retained": 1.0,
+      "n_cells": 2284,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.9245227873325348,
+      "median_raw_sd_on_candidates_m": 0.15455838292837143,
+      "median_meas_sd_on_candidates_m": 0.0073679727502167225,
+      "J_tls": 147.1815999330946,
+      "clark": {
+        "E": 319.92332802309295,
+        "residual": -172.74172808999836,
+        "sd": 115.65852817847593,
+        "z": -1.4935494235534084,
+        "nll": 6.784925600736918,
+        "sd_recal": 179.03601625491441,
+        "z_recal": -0.964843452750009,
+        "nll_recal": 6.57198697109108
+      },
+      "clark-diag": {
+        "E": 601.400059082895,
+        "residual": -454.2184591498004,
+        "sd": 20.740353691146602,
+        "z": -21.90022725329375,
+        "nll": 243.76099666239082,
+        "sd_recal": 32.10546043652523,
+        "z_recal": -14.147701137874117,
+        "nll_recal": 104.46668839923323
+      },
+      "fosm": {
+        "E": 261.9555624248569,
+        "residual": -114.77396249176232,
+        "sd": 126.84933594104186,
+        "z": -0.9048053869600702,
+        "nll": 6.171274978378484,
+        "sd_recal": 196.3590591125291,
+        "z_recal": -0.5845106561953317,
+        "nll_recal": 6.369709804340694
+      },
+      "mean-map": {
+        "E": 261.9555624248569,
+        "sd": null,
+        "err": -114.77396249176232
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_023",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 4.991812705993652,
+      "overhang_qc_cells": 832,
+      "track_len_m": 23.1,
+      "n_steps": 231,
+      "n_steps_total": 231,
+      "retained": 1.0,
+      "n_cells": 2308,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.4348440021276474,
+      "median_raw_sd_on_candidates_m": 0.13965801894664764,
+      "median_meas_sd_on_candidates_m": 0.006914553698152304,
+      "J_tls": 512.6017058715036,
+      "clark": {
+        "E": 545.0817831166112,
+        "residual": -32.48007724510762,
+        "sd": 52.95854233571558,
+        "z": -0.6133113906196556,
+        "nll": 5.076523351514104,
+        "sd_recal": 81.97827342072519,
+        "z_recal": -0.3962034803833308,
+        "nll_recal": 5.403881386011371
+      },
+      "clark-diag": {
+        "E": 687.6204670506393,
+        "residual": -175.0187611791357,
+        "sd": 7.315212072420558,
+        "z": -23.9253161010851,
+        "nll": 289.11926982712254,
+        "sd_recal": 11.323734169304137,
+        "z_recal": -15.455922804472804,
+        "nll_recal": 122.78861429410804
+      },
+      "fosm": {
+        "E": 514.7821024220209,
+        "residual": -2.1803965505173437,
+        "sd": 52.02707740402794,
+        "z": -0.041908880131493555,
+        "nll": 4.871581012684015,
+        "sd_recal": 80.5363929707754,
+        "z_recal": -0.02707343189939676,
+        "nll_recal": 5.308014187419724
+      },
+      "mean-map": {
+        "E": 514.7821024220209,
+        "sd": null,
+        "err": -2.1803965505173437
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_024",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 8.212461769580841,
+      "overhang_qc_cells": 872,
+      "track_len_m": 23.8,
+      "n_steps": 238,
+      "n_steps_total": 238,
+      "retained": 1.0,
+      "n_cells": 2374,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.8371638357639313,
+      "median_raw_sd_on_candidates_m": 0.14960219711065292,
+      "median_meas_sd_on_candidates_m": 0.008026879746466875,
+      "J_tls": 304.03866161664104,
+      "clark": {
+        "E": 492.0190606584523,
+        "residual": -187.98039904181127,
+        "sd": 86.61633674872314,
+        "z": -2.1702649419029187,
+        "nll": 7.73545193606723,
+        "sd_recal": 134.07955399670627,
+        "z_recal": -1.4020064464596078,
+        "nll_recal": 6.800182881493181
+      },
+      "clark-diag": {
+        "E": 691.0431332038785,
+        "residual": -387.00447158723745,
+        "sd": 19.83393935865221,
+        "z": -19.512234286347837,
+        "nll": 194.2699765351838,
+        "sd_recal": 30.702357580886833,
+        "z_recal": -12.605040852893971,
+        "nll_recal": 83.78680543057799
+      },
+      "fosm": {
+        "E": 387.2992052201676,
+        "residual": -83.26054360352657,
+        "sd": 91.67348274254802,
+        "z": -0.9082293059308328,
+        "nll": 5.849611932706009,
+        "sd_recal": 141.90786797072417,
+        "z_recal": -0.5867225319790116,
+        "nll_recal": 6.046238227891381
+      },
+      "mean-map": {
+        "E": 387.2992052201676,
+        "sd": null,
+        "err": -83.26054360352657
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_025",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 14.392958641052246,
+      "overhang_qc_cells": 700,
+      "track_len_m": 21.400000000000002,
+      "n_steps": 214,
+      "n_steps_total": 214,
+      "retained": 1.0,
+      "n_cells": 1819,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 2.364450693130493,
+      "median_raw_sd_on_candidates_m": 0.2625081241130829,
+      "median_meas_sd_on_candidates_m": 0.01471827831119299,
+      "J_tls": -446.6509199971681,
+      "clark": {
+        "E": 766.6999419115767,
+        "residual": -1213.3508619087447,
+        "sd": 207.1351588859673,
+        "z": -5.857773583366996,
+        "nll": 23.40906573187071,
+        "sd_recal": 320.6391630372985,
+        "z_recal": -3.784163014945249,
+        "nll_recal": 13.849199783209603
+      },
+      "clark-diag": {
+        "E": 1261.5102408069679,
+        "residual": -1708.161160804136,
+        "sd": 37.939141634500736,
+        "z": -45.023716594863195,
+        "nll": 1018.122449880447,
+        "sd_recal": 58.72868075832954,
+        "z_recal": -29.085638205177393,
+        "nll_recal": 427.9790416408999
+      },
+      "fosm": {
+        "E": 660.9718934770956,
+        "residual": -1107.6228134742637,
+        "sd": 206.2525842948949,
+        "z": -5.370225140503509,
+        "nll": 20.66769911810357,
+        "sd_recal": 319.2729634035838,
+        "z_recal": -3.469203285071619,
+        "nll_recal": 12.702670671326704
+      },
+      "mean-map": {
+        "E": 660.9718934770956,
+        "sd": null,
+        "err": -1107.6228134742637
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_026",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 17.935128211975098,
+      "overhang_qc_cells": 786,
+      "track_len_m": 21.700000000000003,
+      "n_steps": 217,
+      "n_steps_total": 217,
+      "retained": 1.0,
+      "n_cells": 2232,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 2.6738691329956055,
+      "median_raw_sd_on_candidates_m": 0.2218099907040596,
+      "median_meas_sd_on_candidates_m": 0.011306675150990486,
+      "J_tls": 2589.7127776164125,
+      "clark": {
+        "E": 1631.7463827836064,
+        "residual": 957.9663948328061,
+        "sd": 238.62587462630998,
+        "z": 4.0145118224626275,
+        "nll": 14.451988066865235,
+        "sd_recal": 369.3858692591412,
+        "z_recal": 2.593402927822203,
+        "nll_recal": 10.193649720032761
+      },
+      "clark-diag": {
+        "E": 2226.27053118711,
+        "residual": 363.4422464293025,
+        "sd": 41.999686479287405,
+        "z": 8.65345141584659,
+        "nll": 42.09771138988998,
+        "sd_recal": 65.01428532449872,
+        "z_recal": 5.590190596040436,
+        "nll_recal": 20.718661003206016
+      },
+      "fosm": {
+        "E": 1525.7648198691627,
+        "residual": 1063.9479577472498,
+        "sd": 237.71436336607147,
+        "z": 4.47574114866929,
+        "nll": 16.406137747136366,
+        "sd_recal": 367.97487650854373,
+        "z_recal": 2.891360322863093,
+        "nll_recal": 11.006935456999344
+      },
+      "mean-map": {
+        "E": 1525.7648198691627,
+        "sd": null,
+        "err": 1063.9479577472498
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_027",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 14.24949598312378,
+      "overhang_qc_cells": 583,
+      "track_len_m": 16.0,
+      "n_steps": 159,
+      "n_steps_total": 160,
+      "retained": 0.99375,
+      "n_cells": 1674,
+      "frac_cells_count0": 0.007168458781362007,
+      "median_sigma_on_candidates_m": 0.6682938933372498,
+      "median_raw_sd_on_candidates_m": 0.09179127588868141,
+      "median_meas_sd_on_candidates_m": 0.01236726762726903,
+      "J_tls": 1863.5713837558446,
+      "clark": {
+        "E": 1478.9240319905239,
+        "residual": 384.64735176532076,
+        "sd": 62.45827242670958,
+        "z": 6.158469275894199,
+        "nll": 24.016809136869178,
+        "sd_recal": 96.68357754117844,
+        "z_recal": 3.978414551338834,
+        "nll_recal": 13.404273263450296
+      },
+      "clark-diag": {
+        "E": 1562.4142106942884,
+        "residual": 301.15717306155625,
+        "sd": 17.8269784201248,
+        "z": 16.893338061237635,
+        "nll": 146.49208691028736,
+        "sd_recal": 27.59564079249145,
+        "z_recal": 10.913215435950255,
+        "nll_recal": 63.785731926884
+      },
+      "fosm": {
+        "E": 1418.0352598520471,
+        "residual": 445.5361239037975,
+        "sd": 58.795562520113506,
+        "z": 7.577716834521024,
+        "nll": 33.70390113000811,
+        "sd_recal": 91.01380981456123,
+        "z_recal": 4.8952584757364646,
+        "nll_recal": 17.41172755654653
+      },
+      "mean-map": {
+        "E": 1418.0352598520471,
+        "sd": null,
+        "err": 445.5361239037975
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_000",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 17.915212154388428,
+      "overhang_qc_cells": 732,
+      "track_len_m": 19.900000000000002,
+      "n_steps": 199,
+      "n_steps_total": 199,
+      "retained": 1.0,
+      "n_cells": 2038,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 5.225098371505737,
+      "median_raw_sd_on_candidates_m": 0.12039283290505409,
+      "median_meas_sd_on_candidates_m": 0.011779570020735264,
+      "J_tls": 3604.5800866305462,
+      "clark": {
+        "E": 2794.0221596543606,
+        "residual": 810.5579269761856,
+        "sd": 331.01911109536707,
+        "z": 2.4486741091594038,
+        "nll": 9.719117090797031,
+        "sd_recal": 512.4078949310593,
+        "z_recal": 1.581860730473796,
+        "nll_recal": 8.40920119616602
+      },
+      "clark-diag": {
+        "E": 3646.9738631216906,
+        "residual": -42.39377649114431,
+        "sd": 68.8679717156114,
+        "z": -0.6155804423311371,
+        "nll": 5.3405993919047425,
+        "sd_recal": 106.60560442626986,
+        "z_recal": -0.39766930377909465,
+        "nll_recal": 5.66714505549376
+      },
+      "fosm": {
+        "E": 2590.4323169830295,
+        "residual": 1014.1477696475167,
+        "sd": 325.9283274456316,
+        "z": 3.111566820827157,
+        "nll": 11.546540076174804,
+        "sd_recal": 504.5275108502778,
+        "z_recal": 2.0100940936568126,
+        "nll_recal": 9.162800035110836
+      },
+      "mean-map": {
+        "E": 2590.4323169830295,
+        "sd": null,
+        "err": 1014.1477696475167
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_001",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 12.306087970733643,
+      "overhang_qc_cells": 637,
+      "track_len_m": 18.6,
+      "n_steps": 146,
+      "n_steps_total": 186,
+      "retained": 0.7849462365591398,
+      "n_cells": 1622,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 2.442582368850708,
+      "median_raw_sd_on_candidates_m": 0.13170062750577927,
+      "median_meas_sd_on_candidates_m": 0.015884785912930965,
+      "J_tls": 2553.5637611631996,
+      "clark": {
+        "E": 2584.043136942898,
+        "residual": -30.47937577969833,
+        "sd": 155.2517513305842,
+        "z": -0.19632226701776323,
+        "nll": 5.983257750930428,
+        "sd_recal": 240.32516678695882,
+        "z_recal": -0.12682556798854694,
+        "nll_recal": 6.408973763509983
+      },
+      "clark-diag": {
+        "E": 2918.259993682801,
+        "residual": -364.6962325196014,
+        "sd": 32.13852809177755,
+        "z": -11.347633329010693,
+        "nll": 68.7733851805314,
+        "sd_recal": 49.749500780170926,
+        "z_recal": -7.33065109800984,
+        "nll_recal": 31.695161722565935
+      },
+      "fosm": {
+        "E": 2476.7781466677948,
+        "residual": 76.78561449540484,
+        "sd": 126.56749452292196,
+        "z": 0.6066772103282696,
+        "nll": 5.943742871389897,
+        "sd_recal": 195.9227768468759,
+        "z_recal": 0.39191775316361965,
+        "nll_recal": 6.273458881741704
+      },
+      "mean-map": {
+        "E": 2476.7781466677948,
+        "sd": null,
+        "err": 76.78561449540484
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_002",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 12.857863903045654,
+      "overhang_qc_cells": 780,
+      "track_len_m": 21.3,
+      "n_steps": 213,
+      "n_steps_total": 213,
+      "retained": 1.0,
+      "n_cells": 2150,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 2.0566813945770264,
+      "median_raw_sd_on_candidates_m": 0.189585343003273,
+      "median_meas_sd_on_candidates_m": 0.013761723414063454,
+      "J_tls": 3719.985247112558,
+      "clark": {
+        "E": 3678.224904929468,
+        "residual": 41.760342183090415,
+        "sd": 183.63944244287902,
+        "z": 0.22740399136247624,
+        "nll": 6.157769104082855,
+        "sd_recal": 284.26848171119406,
+        "z_recal": 0.14690458095005177,
+        "nll_recal": 6.57964816088636
+      },
+      "clark-diag": {
+        "E": 4110.079776832389,
+        "residual": -390.0945297198309,
+        "sd": 39.81073114515262,
+        "z": -9.798728094129189,
+        "nll": 52.61061116725325,
+        "sd_recal": 61.62584653874241,
+        "z_recal": -6.330047401046079,
+        "nll_recal": 25.074769952155286
+      },
+      "fosm": {
+        "E": 3506.009647282166,
+        "residual": 213.97559983039218,
+        "sd": 167.67052600884853,
+        "z": 1.2761670457161922,
+        "nll": 6.855240596602809,
+        "sd_recal": 259.5490664870557,
+        "z_recal": 0.8244129047602011,
+        "nll_recal": 6.817712617579631
+      },
+      "mean-map": {
+        "E": 3506.009647282166,
+        "sd": null,
+        "err": 213.97559983039218
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_003",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 16.24746322631836,
+      "overhang_qc_cells": 668,
+      "track_len_m": 18.1,
+      "n_steps": 181,
+      "n_steps_total": 181,
+      "retained": 1.0,
+      "n_cells": 1851,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.9488743543624878,
+      "median_raw_sd_on_candidates_m": 0.15997081995010376,
+      "median_meas_sd_on_candidates_m": 0.01468531135469675,
+      "J_tls": 3478.098187530431,
+      "clark": {
+        "E": 2997.366534025999,
+        "residual": 480.73165350443196,
+        "sd": 200.31634013280603,
+        "z": 2.3998624035648604,
+        "nll": 9.098506128867756,
+        "sd_recal": 310.08383119660255,
+        "z_recal": 1.550328024680634,
+        "nll_recal": 7.857539709396023
+      },
+      "clark-diag": {
+        "E": 3421.5165796304354,
+        "residual": 56.58160789999556,
+        "sd": 41.75835563357945,
+        "z": 1.3549769151948163,
+        "nll": 5.568819319768678,
+        "sd_recal": 64.64071223918063,
+        "z_recal": 0.8753246358213824,
+        "nll_recal": 5.470879574946407
+      },
+      "fosm": {
+        "E": 2836.7366105402803,
+        "residual": 641.3615769901508,
+        "sd": 202.04454005058219,
+        "z": 3.1743573809496897,
+        "nll": 11.26569909259516,
+        "sd_recal": 312.7590340843071,
+        "z_recal": 2.0506572379849013,
+        "nll_recal": 8.766969121945447
+      },
+      "mean-map": {
+        "E": 2836.7366105402803,
+        "sd": null,
+        "err": 641.3615769901508
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_004",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 17.915212154388428,
+      "overhang_qc_cells": 462,
+      "track_len_m": 13.100000000000001,
+      "n_steps": 121,
+      "n_steps_total": 131,
+      "retained": 0.9236641221374046,
+      "n_cells": 1322,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.6968680024147034,
+      "median_raw_sd_on_candidates_m": 0.33320988714694977,
+      "median_meas_sd_on_candidates_m": 0.014520672149956226,
+      "J_tls": 2297.7010720056833,
+      "clark": {
+        "E": 1587.8488857133666,
+        "residual": 709.8521862923167,
+        "sd": 109.98163454816171,
+        "z": 6.45427929134357,
+        "nll": 26.448112511738096,
+        "sd_recal": 170.24835107984,
+        "z_recal": 4.169509905910472,
+        "nll_recal": 14.748603220642883
+      },
+      "clark-diag": {
+        "E": 1765.345126247548,
+        "residual": 532.3559457581352,
+        "sd": 19.120981498397857,
+        "z": 27.841454990306918,
+        "nll": 391.44303276175157,
+        "sd_recal": 29.59871968173776,
+        "z_recal": 17.98577612418134,
+        "nll_recal": 166.0507410341896
+      },
+      "fosm": {
+        "E": 1557.555105814641,
+        "residual": 740.1459661910424,
+        "sd": 113.1072485332701,
+        "z": 6.543753612513446,
+        "nll": 27.05763067451015,
+        "sd_recal": 175.0867100409788,
+        "z_recal": 4.227310947917248,
+        "nll_recal": 15.019298795554517
+      },
+      "mean-map": {
+        "E": 1557.555105814641,
+        "sd": null,
+        "err": 740.1459661910424
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_005",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 11.493419647216797,
+      "overhang_qc_cells": 679,
+      "track_len_m": 18.900000000000002,
+      "n_steps": 151,
+      "n_steps_total": 189,
+      "retained": 0.798941798941799,
+      "n_cells": 1695,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 3.343909502029419,
+      "median_raw_sd_on_candidates_m": 0.12527954578399658,
+      "median_meas_sd_on_candidates_m": 0.013399887830018997,
+      "J_tls": 2599.9282682259764,
+      "clark": {
+        "E": 2525.063663647189,
+        "residual": 74.8646045787873,
+        "sd": 181.6531505924271,
+        "z": 0.4121294033966968,
+        "nll": 6.20596295859536,
+        "sd_recal": 281.1937600661481,
+        "z_recal": 0.2662384988954809,
+        "nll_recal": 6.593423971665603
+      },
+      "clark-diag": {
+        "E": 2933.2204591257723,
+        "residual": -333.29219089979597,
+        "sd": 41.01033858031275,
+        "z": -8.127028511288488,
+        "nll": 37.657058940265294,
+        "sd_recal": 63.48280373544323,
+        "z_recal": -5.250117689961366,
+        "nll_recal": 18.851575474335178
+      },
+      "fosm": {
+        "E": 2356.5457711709455,
+        "residual": 243.38249705503085,
+        "sd": 156.4054720431515,
+        "z": 1.5560996292244995,
+        "nll": 7.182113376228329,
+        "sd_recal": 242.11109268020624,
+        "z_recal": 1.0052513264086744,
+        "nll_recal": 6.913600329310458
+      },
+      "mean-map": {
+        "E": 2356.5457711709455,
+        "sd": null,
+        "err": 243.38249705503085
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_006",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 11.803300380706787,
+      "overhang_qc_cells": 658,
+      "track_len_m": 18.5,
+      "n_steps": 165,
+      "n_steps_total": 185,
+      "retained": 0.8918918918918919,
+      "n_cells": 1729,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.0183173418045044,
+      "median_raw_sd_on_candidates_m": 0.1233823224902153,
+      "median_meas_sd_on_candidates_m": 0.011079099029302597,
+      "J_tls": 2863.343412009434,
+      "clark": {
+        "E": 2259.6431892063993,
+        "residual": 603.7002228030346,
+        "sd": 149.25099503220412,
+        "z": 4.044865648451947,
+        "nll": 14.105037009350895,
+        "sd_recal": 231.03617168129145,
+        "z_recal": 2.613011713316579,
+        "nll_recal": 9.775427925797665
+      },
+      "clark-diag": {
+        "E": 2555.6817184288366,
+        "residual": 307.66169358059733,
+        "sd": 27.81345776693088,
+        "z": 11.061612553128692,
+        "nll": 65.42409466686914,
+        "sd_recal": 43.05441851362172,
+        "z_recal": 7.145879661184093,
+        "nll_recal": 30.2132014616595
+      },
+      "fosm": {
+        "E": 2191.303407600497,
+        "residual": 672.040004408937,
+        "sd": 150.38883081151513,
+        "z": 4.468682951935547,
+        "nll": 15.91672634120115,
+        "sd_recal": 232.7975081628157,
+        "z_recal": 2.886800678033549,
+        "nll_recal": 10.535916622584175
+      },
+      "mean-map": {
+        "E": 2191.303407600497,
+        "sd": null,
+        "err": 672.040004408937
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_007",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 12.857863903045654,
+      "overhang_qc_cells": 764,
+      "track_len_m": 20.8,
+      "n_steps": 208,
+      "n_steps_total": 208,
+      "retained": 1.0,
+      "n_cells": 2128,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 2.0927807092666626,
+      "median_raw_sd_on_candidates_m": 0.168984517455101,
+      "median_meas_sd_on_candidates_m": 0.013364565093070269,
+      "J_tls": 3572.8863070926222,
+      "clark": {
+        "E": 3505.2481624272673,
+        "residual": 67.63814466535496,
+        "sd": 203.17900467060016,
+        "z": 0.3328992814735554,
+        "nll": 6.288436885902111,
+        "sd_recal": 314.5151521099207,
+        "z_recal": 0.21505528179359681,
+        "nll_recal": 6.693095173708209
+      },
+      "clark-diag": {
+        "E": 3998.6986888748775,
+        "residual": -425.8123817822552,
+        "sd": 40.1540562448767,
+        "z": -10.604467433762313,
+        "nll": 60.839026772626916,
+        "sd_recal": 62.157303743870145,
+        "z_recal": -6.850560692543684,
+        "nll_recal": 28.51369776337173
+      },
+      "fosm": {
+        "E": 3339.196823102251,
+        "residual": 233.68948399037117,
+        "sd": 169.6017806397129,
+        "z": 1.3778716420837618,
+        "nll": 7.001656886591572,
+        "sd_recal": 262.5385921271387,
+        "z_recal": 0.8901147907321874,
+        "nll_recal": 6.8854887923976165
+      },
+      "mean-map": {
+        "E": 3339.196823102251,
+        "sd": null,
+        "err": 233.68948399037117
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_008",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 16.24746322631836,
+      "overhang_qc_cells": 657,
+      "track_len_m": 18.3,
+      "n_steps": 168,
+      "n_steps_total": 183,
+      "retained": 0.9180327868852459,
+      "n_cells": 1826,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.6292954683303833,
+      "median_raw_sd_on_candidates_m": 0.1759108379483223,
+      "median_meas_sd_on_candidates_m": 0.015522527042776346,
+      "J_tls": 3019.216383696571,
+      "clark": {
+        "E": 2251.8625349190124,
+        "residual": 767.3538487775586,
+        "sd": 164.2170456518574,
+        "z": 4.672802666322229,
+        "nll": 16.93766991433279,
+        "sd_recal": 254.20317997900523,
+        "z_recal": 3.0186634519715088,
+        "nll_recal": 11.013236919768236
+      },
+      "clark-diag": {
+        "E": 2573.7894337671255,
+        "residual": 445.4269499294455,
+        "sd": 31.434774296598526,
+        "z": 14.169879055808712,
+        "nll": 104.7595895031339,
+        "sd_recal": 48.660110504352275,
+        "z_recal": 9.153841726060312,
+        "nll_recal": 46.700207314387356
+      },
+      "fosm": {
+        "E": 2187.410592077308,
+        "residual": 831.8057916192629,
+        "sd": 161.9788876021837,
+        "z": 5.135272898417219,
+        "nll": 19.1919184071101,
+        "sd_recal": 250.7385768297753,
+        "z_recal": 3.317422480960998,
+        "nll_recal": 11.945995361588862
+      },
+      "mean-map": {
+        "E": 2187.410592077308,
+        "sd": null,
+        "err": 831.8057916192629
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_009",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 17.688942432403564,
+      "overhang_qc_cells": 612,
+      "track_len_m": 16.900000000000002,
+      "n_steps": 169,
+      "n_steps_total": 169,
+      "retained": 1.0,
+      "n_cells": 1706,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.4909137934446335,
+      "median_raw_sd_on_candidates_m": 0.26245734095573425,
+      "median_meas_sd_on_candidates_m": 0.015640839003026485,
+      "J_tls": 1927.666737011682,
+      "clark": {
+        "E": 1858.1036080085005,
+        "residual": 69.56312900318153,
+        "sd": 74.02203128164994,
+        "z": 0.9397624977150043,
+        "nll": 5.664878078177099,
+        "sd_recal": 114.58393777338051,
+        "z_recal": 0.6070931960879253,
+        "nll_recal": 5.844527242984696
+      },
+      "clark-diag": {
+        "E": 1987.3540009010685,
+        "residual": -59.687263889386486,
+        "sd": 14.430631527877816,
+        "z": -4.136150505546458,
+        "nll": 12.142162172224603,
+        "sd_recal": 22.338195215548506,
+        "z_recal": -2.671982374289627,
+        "nll_recal": 7.594981440710952
+      },
+      "fosm": {
+        "E": 1828.4432941867244,
+        "residual": 99.2234428249576,
+        "sd": 66.0232761469421,
+        "z": 1.5028554869668216,
+        "nll": 6.238233189304244,
+        "sd_recal": 102.20209895119895,
+        "z_recal": 0.9708552352954742,
+        "nll_recal": 6.017170692396661
+      },
+      "mean-map": {
+        "E": 1828.4432941867244,
+        "sd": null,
+        "err": 99.2234428249576
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_010",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 5.844152927398682,
+      "overhang_qc_cells": 352,
+      "track_len_m": 10.100000000000001,
+      "n_steps": 101,
+      "n_steps_total": 101,
+      "retained": 1.0,
+      "n_cells": 1016,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.7248286306858063,
+      "median_raw_sd_on_candidates_m": 0.1253805011510849,
+      "median_meas_sd_on_candidates_m": 0.00839906744658947,
+      "J_tls": 1141.2752264214423,
+      "clark": {
+        "E": 299.0733184480788,
+        "residual": 842.2019079733635,
+        "sd": 47.15464912197976,
+        "z": 17.86042147816122,
+        "nll": 164.2696988290037,
+        "sd_recal": 72.99401660783613,
+        "z_recal": 11.53795813837912,
+        "nll_recal": 71.77155500821206
+      },
+      "clark-diag": {
+        "E": 371.1377414219911,
+        "residual": 770.1374849994512,
+        "sd": 12.524910429278052,
+        "z": 61.48846248027362,
+        "nll": 1893.8621671228032,
+        "sd_recal": 19.388194736035775,
+        "z_recal": 39.72198007522788,
+        "nll_recal": 792.8014534436907
+      },
+      "fosm": {
+        "E": 255.621725145532,
+        "residual": 885.6535012759103,
+        "sd": 53.97710223878209,
+        "z": 16.40794826958265,
+        "nll": 139.5178816658767,
+        "sd_recal": 83.55497433706934,
+        "z_recal": 10.599650209969466,
+        "nll_recal": 61.52073561057467
+      },
+      "mean-map": {
+        "E": 255.621725145532,
+        "sd": null,
+        "err": 885.6535012759103
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_011",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 8.06995701789856,
+      "overhang_qc_cells": 158,
+      "track_len_m": 5.4,
+      "n_steps": 54,
+      "n_steps_total": 54,
+      "retained": 1.0,
+      "n_cells": 496,
+      "frac_cells_count0": 0.012096774193548387,
+      "median_sigma_on_candidates_m": 1.3738654851913452,
+      "median_raw_sd_on_candidates_m": 0.20795988291502,
+      "median_meas_sd_on_candidates_m": 0.009834771044552326,
+      "J_tls": 600.2612085943333,
+      "clark": {
+        "E": 201.06773006521382,
+        "residual": 399.1934785291195,
+        "sd": 57.19051546216372,
+        "z": 6.980064356881329,
+        "nll": 29.325975817345878,
+        "sd_recal": 88.52924394914086,
+        "z_recal": 4.50917076348751,
+        "nll_recal": 15.5685819578838
+      },
+      "clark-diag": {
+        "E": 279.7784647032496,
+        "residual": 320.4827438910837,
+        "sd": 12.002205860684308,
+        "z": 26.701986918995516,
+        "nll": 359.902081698927,
+        "sd_recal": 18.579063363597275,
+        "z_recal": 17.2496717202127,
+        "nll_recal": 152.61656108187134
+      },
+      "fosm": {
+        "E": 178.90736405059909,
+        "residual": 421.3538445437342,
+        "sd": 60.41515204913937,
+        "z": 6.974307441964577,
+        "nll": 29.34066061594686,
+        "sd_recal": 93.52088699954417,
+        "z_recal": 4.505451755881955,
+        "nll_recal": 15.606671097210754
+      },
+      "mean-map": {
+        "E": 178.90736405059909,
+        "sd": null,
+        "err": 421.3538445437342
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_012",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 4.717380523681641,
+      "overhang_qc_cells": 23,
+      "track_len_m": 1.2000000000000002,
+      "n_steps": 12,
+      "n_steps_total": 12,
+      "retained": 1.0,
+      "n_cells": 205,
+      "frac_cells_count0": 0.9219512195121952,
+      "median_sigma_on_candidates_m": 0.9014983773231506,
+      "median_raw_sd_on_candidates_m": 0.18456248939037323,
+      "median_meas_sd_on_candidates_m": 0.011692816857248545,
+      "J_tls": 148.54835660754554,
+      "clark": {
+        "E": 24.617320271260827,
+        "residual": 123.93103633628472,
+        "sd": 9.845956263153475,
+        "z": 12.586998461497526,
+        "nll": 82.42226450730847,
+        "sd_recal": 15.241252100795588,
+        "z_recal": 8.131289707478532,
+        "nll_recal": 36.70188039240632
+      },
+      "clark-diag": {
+        "E": 36.91927944344083,
+        "residual": 111.62907716410471,
+        "sd": 3.762135801415271,
+        "z": 29.671729851461283,
+        "nll": 442.4497015506778,
+        "sd_recal": 5.823676101566794,
+        "z_recal": 19.168146582546406,
+        "nll_recal": 186.38979193311647
+      },
+      "fosm": {
+        "E": 19.08509907859572,
+        "residual": 129.4632575289498,
+        "sd": 11.475624606076225,
+        "z": 11.281587013607986,
+        "nll": 66.99626649237617,
+        "sd_recal": 17.76393099468052,
+        "z_recal": 7.28798471282725,
+        "nll_recal": 30.35346917326908
+      },
+      "mean-map": {
+        "E": 19.08509907859572,
+        "sd": null,
+        "err": 129.4632575289498
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_013",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 7.461342096328735,
+      "overhang_qc_cells": 584,
+      "track_len_m": 16.6,
+      "n_steps": 166,
+      "n_steps_total": 166,
+      "retained": 1.0,
+      "n_cells": 1665,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.3156134784221649,
+      "median_raw_sd_on_candidates_m": 0.1069352924823761,
+      "median_meas_sd_on_candidates_m": 0.012385211884975433,
+      "J_tls": 1944.9376940741402,
+      "clark": {
+        "E": 2103.230177695011,
+        "residual": -158.29248362087105,
+        "sd": 28.807334454906414,
+        "z": -5.494867422345317,
+        "nll": 19.37635255107311,
+        "sd_recal": 44.59291053549134,
+        "z_recal": -3.549723077503242,
+        "nll_recal": 11.016780386471961
+      },
+      "clark-diag": {
+        "E": 2152.81389659995,
+        "residual": -207.87620252580996,
+        "sd": 4.844077987005996,
+        "z": -42.913471476600456,
+        "nll": 923.2797125449786,
+        "sd_recal": 7.498490936036973,
+        "z_recal": -27.722404987752725,
+        "nll_recal": 387.19950947746196
+      },
+      "fosm": {
+        "E": 2088.0221419771515,
+        "residual": -143.08444790301132,
+        "sd": 28.976587653927172,
+        "z": -4.937932982720248,
+        "nll": 16.477017785770883,
+        "sd_recal": 44.85490953347544,
+        "z_recal": -3.18993950475425,
+        "nll_recal": 9.810228603343777
+      },
+      "mean-map": {
+        "E": 2088.0221419771515,
+        "sd": null,
+        "err": -143.08444790301132
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_014",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 17.97935724258423,
+      "overhang_qc_cells": 949,
+      "track_len_m": 26.5,
+      "n_steps": 265,
+      "n_steps_total": 265,
+      "retained": 1.0,
+      "n_cells": 2595,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.6259000301361084,
+      "median_raw_sd_on_candidates_m": 0.17286869883537292,
+      "median_meas_sd_on_candidates_m": 0.010426360182464123,
+      "J_tls": 4061.901684672985,
+      "clark": {
+        "E": 3113.75213299923,
+        "residual": 948.149551673755,
+        "sd": 265.0792719776321,
+        "z": 3.576852858392344,
+        "nll": 12.895905639290559,
+        "sd_recal": 410.3349540588422,
+        "z_recal": 2.3106721528232033,
+        "nll_recal": 9.60551521940737
+      },
+      "clark-diag": {
+        "E": 3732.3925268262687,
+        "residual": 329.50915784671633,
+        "sd": 51.80206407443381,
+        "z": 6.360927189566198,
+        "nll": 25.097065884154294,
+        "sd_recal": 80.18807892278214,
+        "z_recal": 4.109203790304295,
+        "nll_recal": 13.746091290293865
+      },
+      "fosm": {
+        "E": 2980.123925214177,
+        "residual": 1081.7777594588083,
+        "sd": 263.86280765140083,
+        "z": 4.099773549321077,
+        "nll": 14.898439411146036,
+        "sd_recal": 408.45190288817025,
+        "z_recal": 2.648482604217387,
+        "nll_recal": 10.438542752205962
+      },
+      "mean-map": {
+        "E": 2980.123925214177,
+        "sd": null,
+        "err": 1081.7777594588083
+      }
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-03/window_015",
+      "sequence": "virgin-2024-03-18-christ-church-03",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 10.021000385284424,
+      "overhang_qc_cells": 605,
+      "track_len_m": 16.5,
+      "n_steps": 165,
+      "n_steps_total": 165,
+      "retained": 1.0,
+      "n_cells": 1676,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 2.306254029273987,
+      "median_raw_sd_on_candidates_m": 0.1004074476659298,
+      "median_meas_sd_on_candidates_m": 0.013433240819722414,
+      "J_tls": 2978.800765910742,
+      "clark": {
+        "E": 2698.5281617100986,
+        "residual": 280.2726042006434,
+        "sd": 178.23597725557227,
+        "z": 1.5724805312384322,
+        "nll": 7.3383944309935165,
+        "sd_recal": 275.90407576254955,
+        "z_recal": 1.0158335045468974,
+        "nll_recal": 7.0549506414068235
+      },
+      "clark-diag": {
+        "E": 3050.034982539108,
+        "residual": -71.23421662836608,
+        "sd": 43.321963409178544,
+        "z": -1.6442979731909801,
+        "nll": 6.039456190018612,
+        "sd_recal": 67.06113130846434,
+        "z_recal": -1.0622280781501672,
+        "nll_recal": 5.68870738919917
+      },
+      "fosm": {
+        "E": 2532.520824026454,
+        "residual": 446.27994188428784,
+        "sd": 192.69999106576185,
+        "z": 2.3159313055286437,
+        "nll": 8.86184196822534,
+        "sd_recal": 298.29394577400564,
+        "z_recal": 1.496107943881636,
+        "nll_recal": 7.736187418629646
+      },
+      "mean-map": {
+        "E": 2532.520824026454,
+        "sd": null,
+        "err": 446.27994188428784
+      }
+    }
+  ],
+  "runtime_s": 24.53030276298523,
+  "drift_rates_frozen": {
+    "q_x": 0.004202,
+    "q_y": 0.01061,
+    "q_z": 0.00743,
+    "q_yaw": 0.0003651
+  }
+}

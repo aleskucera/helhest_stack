@@ -1,0 +1,458 @@
+{
+  "evaluated_artifact": "studies/out/risk_calibration_heldout/e1_heldout.json",
+  "prereg": "clark_paper/PREREG_risk_calibration.md, frozen 2026-08-28, amendments A1-A3",
+  "pipeline_frozen_at": "spires e54c12a",
+  "recalibration": {
+    "amendment": "A2",
+    "model": "Var' = var_scale * Var + (offset_sd * n_steps)^2",
+    "var_scale": 2.396213379859416,
+    "offset_sd_m": 0.0,
+    "fit_arm": "clark",
+    "note": "IN-SAMPLE on this design site: these windows are the fitting set."
+  },
+  "counts": {
+    "windows_on_disk": 82,
+    "scored": 76,
+    "skipped_by_retention_or_empty": 6,
+    "unflagged_scored": 31,
+    "flagged_scored": 45,
+    "sequences": [
+      "virgin-2024-03-14-blenheim-palace-01",
+      "virgin-2024-03-14-blenheim-palace-02",
+      "virgin-2024-03-18-christ-church-02",
+      "virgin-2024-03-18-christ-church-03"
+    ]
+  },
+  "E1-i": {
+    "criterion": "clark |z|<=1 coverage in [0.55, 0.85]",
+    "value": 0.7419354838709677,
+    "band": [
+      0.55,
+      0.85
+    ],
+    "n_windows": 31,
+    "verdict": "PASS"
+  },
+  "E1-ii": {
+    "criterion": "clark sd-ratio in [0.7, 1.4]",
+    "value": 0.9173248681216398,
+    "band": [
+      0.7,
+      1.4
+    ],
+    "n_windows": 31,
+    "verdict": "PASS"
+  },
+  "E1-iii": {
+    "criterion": "clark mean NLL below fosm's AND below clark-diag's, in at least 3 of the 4 held-out sequences each; pooled paired difference reported with a by-sequence cluster-robust test",
+    "sequences_total": 4,
+    "sequences_with_unflagged_windows": 3,
+    "per_sequence": {
+      "virgin-2024-03-14-blenheim-palace-01": {
+        "n_unflagged": 12,
+        "evaluable": true,
+        "nll_clark": 5.579922648259366,
+        "nll_fosm": 5.454738650494594,
+        "nll_clark_diag": 91.78918325993486,
+        "clark_below_fosm": false,
+        "clark_below_clark_diag": true
+      },
+      "virgin-2024-03-14-blenheim-palace-02": {
+        "n_unflagged": 14,
+        "evaluable": true,
+        "nll_clark": 5.786989010902057,
+        "nll_fosm": 5.542683986453123,
+        "nll_clark_diag": 91.46846383537397,
+        "clark_below_fosm": false,
+        "clark_below_clark_diag": true
+      },
+      "virgin-2024-03-18-christ-church-02": {
+        "n_unflagged": 5,
+        "evaluable": true,
+        "nll_clark": 5.478226681796925,
+        "nll_fosm": 5.29478352804066,
+        "nll_clark_diag": 81.7523971679065,
+        "clark_below_fosm": false,
+        "clark_below_clark_diag": true
+      },
+      "virgin-2024-03-18-christ-church-03": {
+        "n_unflagged": 0,
+        "evaluable": false
+      }
+    },
+    "sequences_clark_below_fosm": 0,
+    "sequences_clark_below_clark_diag": 3,
+    "required": 3,
+    "vs_fosm_verdict": "FAIL",
+    "vs_clark_diag_verdict": "PASS",
+    "verdict": "FAIL",
+    "pooled_cluster_robust_clark_minus_fosm": {
+      "n_windows": 31,
+      "n_clusters": 3,
+      "clusters": [
+        "virgin-2024-03-14-blenheim-palace-01",
+        "virgin-2024-03-14-blenheim-palace-02",
+        "virgin-2024-03-18-christ-church-02"
+      ],
+      "mean_difference": 0.18837722852398936,
+      "cluster_robust_se": 0.0430749893192066,
+      "t": 4.3732391232420875,
+      "dof": 2,
+      "p_two_sided": 0.048513567275171844,
+      "note": "CR1, clustered by sequence; low power with few clusters"
+    },
+    "pooled_cluster_robust_clark_minus_clark_diag": {
+      "n_windows": 31,
+      "n_clusters": 3,
+      "clusters": [
+        "virgin-2024-03-14-blenheim-palace-01",
+        "virgin-2024-03-14-blenheim-palace-02",
+        "virgin-2024-03-18-christ-church-02"
+      ],
+      "mean_difference": -84.36847184881485,
+      "cluster_robust_se": 1.9610356862458114,
+      "t": -43.022405171182314,
+      "dof": 2,
+      "p_two_sided": 0.0005398322771733087,
+      "note": "CR1, clustered by sequence; low power with few clusters"
+    }
+  },
+  "E1-iv": {
+    "criterion": "clark |z|<=2 coverage, reported unconditionally",
+    "value_unflagged": 0.9032258064516129,
+    "value_flagged": 0.5111111111111111,
+    "value_all": 0.6710526315789473,
+    "verdict": "REPORTED (no band)"
+  },
+  "arms_unflagged": {
+    "clark": {
+      "mean_nll": 5.657033914216964,
+      "cov1": 0.7419354838709677,
+      "cov2": 0.9032258064516129,
+      "sd_ratio": 0.9173248681216398,
+      "rms_z": 1.1020797975509495,
+      "mean_z": -0.6326449566148582,
+      "median_z": -0.4779476306144949,
+      "median_sd": 58.72487840378716
+    },
+    "clark-diag": {
+      "mean_nll": 90.02550576303184,
+      "cov1": 0.03225806451612903,
+      "cov2": 0.03225806451612903,
+      "sd_ratio": 6.551212224904823,
+      "rms_z": 13.17713920087081,
+      "mean_z": -11.493610391277072,
+      "median_z": -10.2437677976115,
+      "median_sd": 9.061218567145085
+    },
+    "fosm": {
+      "mean_nll": 5.468656685692974,
+      "cov1": 0.8387096774193549,
+      "cov2": 0.9032258064516129,
+      "sd_ratio": 0.8666355040236113,
+      "rms_z": 0.8857678245010675,
+      "mean_z": -0.24032309579412242,
+      "median_z": -0.12310183688226393,
+      "median_sd": 58.78933260320448
+    }
+  },
+  "arms_flagged": {
+    "clark": {
+      "mean_nll": 45.105909817465644,
+      "cov1": 0.35555555555555557,
+      "cov2": 0.5111111111111111,
+      "sd_ratio": 8.457093114889418,
+      "rms_z": 8.838578314744462,
+      "mean_z": 2.8613685311292723,
+      "median_z": 1.0158335045468974,
+      "median_sd": 179.03601625491441
+    },
+    "clark-diag": {
+      "mean_nll": 884.9725733850826,
+      "cov1": 0.044444444444444446,
+      "cov2": 0.06666666666666667,
+      "sd_ratio": 41.86981559818861,
+      "rms_z": 41.964911383934975,
+      "mean_z": 6.850525160420866,
+      "median_z": -1.0622280781501672,
+      "median_sd": 37.053456817565646
+    },
+    "fosm": {
+      "mean_nll": 42.54918146168781,
+      "cov1": 0.35555555555555557,
+      "cov2": 0.4666666666666667,
+      "sd_ratio": 8.038106445078968,
+      "rms_z": 8.545129339165827,
+      "mean_z": 3.1374963984106303,
+      "median_z": 1.4700778465247863,
+      "median_sd": 195.9227768468759
+    }
+  },
+  "arms_all": {
+    "clark": {
+      "mean_nll": 29.01492096219315,
+      "cov1": 0.5131578947368421,
+      "cov2": 0.6710526315789473,
+      "sd_ratio": 6.729353257516365,
+      "rms_z": 6.837467381284136,
+      "mean_z": 1.4361788190231135,
+      "median_z": -0.14248853563519825,
+      "median_sd": 97.95268931851301
+    },
+    "clark-diag": {
+      "mean_nll": 560.7178484339829,
+      "cov1": 0.039473684210526314,
+      "cov2": 0.05263157894736842,
+      "sd_ratio": 33.58567468911567,
+      "rms_z": 33.369969039081006,
+      "mean_z": -0.6319511830348721,
+      "median_z": -6.590304046794882,
+      "median_sd": 20.86319497579214
+    },
+    "fosm": {
+      "mean_nll": 27.42423056621622,
+      "cov1": 0.5526315789473685,
+      "cov2": 0.6447368421052632,
+      "sd_ratio": 6.402967996986626,
+      "rms_z": 6.599628894914461,
+      "mean_z": 1.7597016047218497,
+      "median_z": 0.36761745814690727,
+      "median_sd": 97.86149297537156
+    }
+  },
+  "by_sequence_unflagged": {
+    "virgin-2024-03-14-blenheim-palace-01": {
+      "n": 12,
+      "clark": {
+        "mean_nll": 5.579922648259366,
+        "cov1": 0.6666666666666666,
+        "cov2": 0.9166666666666666,
+        "sd_ratio": 0.9386525309069763,
+        "rms_z": 1.0389221552677441,
+        "mean_z": -0.5212610210597712,
+        "median_z": -0.3879115381373338,
+        "median_sd": 57.44372375677901
+      },
+      "clark-diag": {
+        "mean_nll": 91.78918325993486,
+        "cov1": 0.08333333333333333,
+        "cov2": 0.08333333333333333,
+        "sd_ratio": 7.76577615864354,
+        "rms_z": 13.312369331143163,
+        "mean_z": -11.042531615294761,
+        "median_z": -10.696278090479861,
+        "median_sd": 8.966823988090393
+      },
+      "fosm": {
+        "mean_nll": 5.454738650494594,
+        "cov1": 0.75,
+        "cov2": 0.9166666666666666,
+        "sd_ratio": 0.9080497928073202,
+        "rms_z": 0.8834935116431294,
+        "mean_z": -0.15722349617516693,
+        "median_z": -0.008916784562304228,
+        "median_sd": 57.660500144897206
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 0.12518399776477343,
+        "median": 0.05745839975196043,
+        "n_negative": 5
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -86.2092606116755,
+        "median": -55.251510077008604,
+        "n_negative": 11
+      },
+      "mean-map": {
+        "median_abs_err": 31.573402708397282,
+        "mean_err": -12.874422008662599
+      }
+    },
+    "virgin-2024-03-14-blenheim-palace-02": {
+      "n": 14,
+      "clark": {
+        "mean_nll": 5.786989010902057,
+        "cov1": 0.7142857142857143,
+        "cov2": 0.8571428571428571,
+        "sd_ratio": 1.0762777193017317,
+        "rms_z": 1.2647110417337917,
+        "mean_z": -0.7237826128510958,
+        "median_z": -0.518892225638555,
+        "median_sd": 54.45001590852882
+      },
+      "clark-diag": {
+        "mean_nll": 91.46846383537397,
+        "cov1": 0.0,
+        "cov2": 0.0,
+        "sd_ratio": 6.718808605597024,
+        "rms_z": 13.291575762108614,
+        "mean_z": -11.608102925284085,
+        "median_z": -9.592873153880408,
+        "median_sd": 7.403782676447842
+      },
+      "fosm": {
+        "mean_nll": 5.542683986453123,
+        "cov1": 0.8571428571428571,
+        "cov2": 0.8571428571428571,
+        "sd_ratio": 1.006536074368196,
+        "rms_z": 1.017123199099381,
+        "mean_z": -0.3062516627345209,
+        "median_z": -0.149597332399623,
+        "median_sd": 54.67710667169338
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 0.24430502444893307,
+        "median": 0.10036643866543127,
+        "n_negative": 5
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -85.6814748244719,
+        "median": -44.05072072269178,
+        "n_negative": 14
+      },
+      "mean-map": {
+        "median_abs_err": 33.80201489599776,
+        "mean_err": -24.124746180455197
+      }
+    },
+    "virgin-2024-03-18-christ-church-02": {
+      "n": 5,
+      "clark": {
+        "mean_nll": 5.478226681796925,
+        "cov1": 1.0,
+        "cov2": 1.0,
+        "sd_ratio": 0.23876590041920948,
+        "rms_z": 0.679227367179341,
+        "mean_z": -0.6447809644856014,
+        "median_z": -0.6880658937561089,
+        "median_sd": 73.73161982105961
+      },
+      "clark-diag": {
+        "mean_nll": 81.7523971679065,
+        "cov1": 0.0,
+        "cov2": 0.0,
+        "sd_ratio": 2.8192125399469448,
+        "rms_z": 12.512337824959447,
+        "mean_z": -12.255620358414975,
+        "median_z": -11.896350497338942,
+        "median_sd": 13.395077258906962
+      },
+      "fosm": {
+        "mean_nll": 5.29478352804066,
+        "cov1": 1.0,
+        "cov2": 1.0,
+        "sd_ratio": 0.19124679584381157,
+        "rms_z": 0.3071937353298876,
+        "mean_z": -0.25516214744649995,
+        "median_z": -0.36758253550532943,
+        "median_sd": 74.53192922807281
+      },
+      "nll_diff_clark_minus_fosm": {
+        "mean": 0.18344315375626524,
+        "median": 0.2007318897468311,
+        "n_negative": 0
+      },
+      "nll_diff_clark_minus_clark-diag": {
+        "mean": -76.27417048610958,
+        "median": -68.66463708124107,
+        "n_negative": 5
+      },
+      "mean-map": {
+        "median_abs_err": 27.396635521758775,
+        "mean_err": -22.563792057022642
+      }
+    },
+    "virgin-2024-03-18-christ-church-03": {
+      "n": 0
+    }
+  },
+  "skipped": [
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_002",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.009535551071166992,
+      "overhang_qc_cells": 864,
+      "track_len_m": 23.5,
+      "n_steps": 85,
+      "n_steps_total": 235,
+      "retained": 0.3617021276595745,
+      "n_cells": 933,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.35662028193473816,
+      "median_raw_sd_on_candidates_m": 0.20597247779369354,
+      "median_meas_sd_on_candidates_m": 0.004154669586569071,
+      "reason": "retained 0.362 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "virgin-2024-03-14-blenheim-palace-01/window_009",
+      "sequence": "virgin-2024-03-14-blenheim-palace-01",
+      "distinct": true,
+      "overhang_flag": true,
+      "overhang_gap_m": 18.558445930480957,
+      "overhang_qc_cells": 397,
+      "track_len_m": 20.8,
+      "n_steps": 61,
+      "n_steps_total": 208,
+      "retained": 0.2932692307692308,
+      "n_cells": 914,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 1.7433059215545654,
+      "median_raw_sd_on_candidates_m": 0.2743755728006363,
+      "median_meas_sd_on_candidates_m": 0.015335148200392723,
+      "reason": "retained 0.293 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_005",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.6553333550691605,
+      "overhang_qc_cells": 403,
+      "track_len_m": 26.1,
+      "n_steps": 1,
+      "n_steps_total": 261,
+      "retained": 0.0038314176245210726,
+      "n_cells": 42,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.2573986202478409,
+      "median_raw_sd_on_candidates_m": 0.04028322733938694,
+      "median_meas_sd_on_candidates_m": 0.0061214822344481945,
+      "reason": "retained 0.004 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_006",
+      "reason": "empty track"
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_007",
+      "reason": "empty track"
+    },
+    {
+      "window": "virgin-2024-03-18-christ-church-02/window_010",
+      "sequence": "virgin-2024-03-18-christ-church-02",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.21557143330574036,
+      "overhang_qc_cells": 935,
+      "track_len_m": 28.1,
+      "n_steps": 90,
+      "n_steps_total": 281,
+      "retained": 0.3202846975088968,
+      "n_cells": 963,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 3.022930860519409,
+      "median_raw_sd_on_candidates_m": 0.2793680727481842,
+      "median_meas_sd_on_candidates_m": 0.00772486999630928,
+      "reason": "retained 0.320 < MIN_RETAINED 0.5"
+    }
+  ],
+  "POST-HOC_exploratory_not_a_criterion": {
+    "note": "computed for the report only; no pre-registered criterion uses these",
+    "sign_test_windows_clark_below_fosm": 10,
+    "sign_test_windows_total": 31,
+    "median_paired_nll_clark_minus_fosm": 0.0986070056262296,
+    "median_paired_nll_clark_minus_clark_diag": -50.276304554738545
+  }
+}
