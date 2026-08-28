@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Detached entry point for the E2 runner. Everything heavy runs nice -n 15 ionice -c3.
 #
-#   ./runner.sh              design phase -> freeze evaluation -> FREEZE.json / STOPPED_AT.md
-#                            -> DESIGN_PHASE_DONE.md -> EXIT.  Never touches held-out.
-#   ./runner.sh --heldout    additionally runs the gated held-out stages. Refuses unless
-#                            FREEZE.json AND $BASEPROD_ROOT/out/HELDOUT_GO both exist.
+#   ./runner.sh                 the whole chain: design phase -> C1-C4 -> FREEZE.json ->
+#                               held-out streaming run -> scoring -> FINAL_REPORT.md.
+#                               If any gate fails it writes STOPPED_AT.md and exits before
+#                               unlock, leaving the held-out set untouched.
+#   ./runner.sh --design-only   stop after the freeze record (dry run).
 #
 # Re-running is safe and resumes: every stage has a done-marker under out/state/.
 set -uo pipefail

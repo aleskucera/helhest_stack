@@ -2,21 +2,27 @@
 PREREG_baseprod.md's "Authorized autonomous execution" section orders.
 
   1  commit        record the pipeline commit hash (the hash F1 records)
-  2  design        v4 design phase: register both design traverses, re-check the two pinned
-                   calibration constants, build BOTH belief conditions, fit (k, tau) per
-                   condition, draw the belief referee
-  3  freeze_eval   evaluate C1-C4
+  2  design        design phase: register both design traverses, re-check the two pinned
+                   calibration constants, rebuild the LEGACY 10 m hindsight path for the
+                   C1(a) code-parity check, build BOTH belief conditions at 4 m, fit (k, tau)
+                   per condition, draw the belief referee (all seven arms)
+  3  freeze_eval   evaluate C1-C4. C1 is now two parts -- (a) the 10 m hindsight path still
+                   reproduces rehearsal v3 exactly, so the window-length change is a
+                   configuration change and not a code change, and (b) the 4 m pipeline runs
+                   both conditions end to end with finite outputs. C2 is re-evaluated on the
+                   4 m windows under the same rule; C3 and C4 are unchanged.
   4  freeze        write FREEZE.json (all conditions hold) or STOPPED_AT.md (any fails), then
                    write DESIGN_PHASE_DONE.md and EXIT
-  --- authorization boundary, narrowed by the author 2026-08-28 ---------------------------
-  5  heldout       stream the 22 held-out traverses, both conditions   [MANUAL START ONLY]
-  6  score         score them once
-  7  report        artifacts + FINAL_REPORT.md
+  5  heldout       stream the 22 held-out traverses, both conditions
+  6  score         score them once, at the frozen (k, tau)
+  7  report        artifacts + FINAL_REPORT.md, with the design tables as an appendix
 
-Stages 5-7 are implemented but GATED: they run only when the runner is started with
-`--heldout` AND FREEZE.json exists AND a GO file is present. The author narrowed the
-authorization on 2026-08-28: the runner freezes and stops so the design-phase results can be
-discussed before the held-out set is spent. There is no second draw.
+The chain is UNCONDITIONAL on success: if C1-C4 all hold the runner writes FREEZE.json and
+goes straight on to the held-out run, unattended, with no GO file and no stop (the author
+restored the chained authorization on the evening of 2026-08-28; PREREG_baseprod.md,
+clark_paper 0506da2). If ANY gate fails it writes STOPPED_AT.md and exits before unlock, and
+the held-out set stays untouched. There is no second draw. `--design-only` stops after the
+freeze record, for a dry run.
 
 Every stage appends to RUN_LOG.md with a timestamp. Every stage writes a done-marker under
 out/state/, so rerunning the same script after a crash or a disk-pressure stop resumes rather
@@ -48,7 +54,8 @@ HELD_OUT = [m for m in MANIFEST if m["name"] not in DESIGN_TRAVERSES]
 
 RUN_LOG = OUT / "RUN_LOG.md"
 STATE = OUT / "state"
-GO_FILE = OUT / "HELDOUT_GO"
+# GO_FILE is retired: the author restored the chained authorization on 2026-08-28 evening.
+PARITY_TAG = "parity10m"   # the C1(a) code-parity build, never scored as the experiment
 DISK_CAP_GB = 100.0
 DL_MARGIN_GB = 12.0
 
@@ -119,10 +126,12 @@ def held_out_untouched() -> tuple[bool, list]:
                 continue
             evidence.append(f"{p} exists")
     names = {m["name"] for m in HELD_OUT}
-    for cond in CONDITIONS:
-        d = OUT / "windows" / cond
-        if d.exists():
-            for p in sorted(d.iterdir()):
+    wroot = OUT / "windows"
+    if wroot.exists():
+        for cond in sorted(wroot.iterdir()):   # every tag, the parity build included
+            if not cond.is_dir():
+                continue
+            for p in sorted(cond.iterdir()):
                 if p.name in names:
                     evidence.append(f"{p} exists")
     return (not evidence), evidence
@@ -190,29 +199,53 @@ def stage_design(mc_draws: int) -> dict:
                                       "sigma": sig["refit_pooled"]})
     calcheck = json.loads((OUT / "calibration_check.json").read_text())
 
+    # --- C1(a): the LEGACY 10 m hindsight path, rebuilt and rescored -----------------------
+    # Not part of the experiment. It exists to show that dropping the window length to 4 m is
+    # a CONFIGURATION change and not a code change: at 10 m this same code must still land on
+    # rehearsal v3 exactly. Legacy arm set, no MC -- v3 had neither.
+    if not done("2c-parity10m"):
+        log(f"C1(a) code parity: rebuilding the {K.LEGACY_WIN_LEN_M:g} m hindsight windows",
+            stage)
+        metas = {KEY[n]: build(n, "hindsight", win_len_m=K.LEGACY_WIN_LEN_M, tag=PARITY_TAG)
+                 for n in names}
+        write_json(OUT / "parity10m_build.json", metas)
+        r = score_condition([window_dir(n, PARITY_TAG) for n in names], PARITY_TAG,
+                            mc_n=0, arms=K.ARMS_LEGACY,
+                            label=f"C1(a) code parity, hindsight at {K.LEGACY_WIN_LEN_M:g} m")
+        write_json(OUT / "parity10m_score.json", r)
+        log(f"  parity: {r['qc']['n_retained']} retained, {r['qc']['n_unflagged']} unflagged, "
+            f"k={r['fit'].get('k')!r}", stage)
+        mark("2c-parity10m", {"n_unflagged": r["qc"]["n_unflagged"], "k": r["fit"].get("k")})
+    parity = json.loads((OUT / "parity10m_score.json").read_text())
+
     design = {}
     for cond in CONDITIONS:
-        st = f"2c-build-{cond}"
+        st = f"2d-build-{cond}"
         if not done(st):
-            log(f"building the {cond} belief on both design traverses", stage)
+            log(f"building the {cond} belief at {K.WIN_LEN_M:g} m on both design traverses",
+                stage)
             metas = {KEY[n]: build(n, cond) for n in names}
             write_json(OUT / f"design_build_{cond}.json", metas)
             log(f"  {cond}: " + ", ".join(
                 f"{k}={m['n_windows']} windows" for k, m in metas.items()), stage)
             mark(st, {k: m["n_windows"] for k, m in metas.items()})
-        st = f"2d-score-{cond}"
+        st = f"2e-score-{cond}"
         if not done(st):
-            log(f"scoring the {cond} condition (MC draws per window: {mc_draws})", stage)
-            r = score_condition([window_dir(n, cond) for n in names], cond,
-                                mc_draws=mc_draws,
-                                label=f"v4 design phase, {cond}")
+            log(f"scoring the {cond} condition, seven arms, {mc_draws} MC draws per window",
+                stage)
+            r = score_condition([window_dir(n, cond) for n in names], cond, mc_n=mc_draws,
+                                label=f"v5 design phase ({K.WIN_LEN_M:g} m windows), {cond}")
             write_json(OUT / f"design_score_{cond}.json", r)
             log(f"  {cond}: {r['qc']['n_retained']} retained, {r['qc']['n_unflagged']} "
                 f"unflagged, k={r['fit'].get('k')!r} tau={r['fit'].get('tau_m')!r}", stage)
             mark(st, {"n_unflagged": r["qc"]["n_unflagged"], "k": r["fit"].get("k")})
         design[cond] = json.loads((OUT / f"design_score_{cond}.json").read_text())
+    design["_parity10m"] = parity
 
     out = {"registration": reg, "calibration_check": calcheck,
+           "win_len_m": K.WIN_LEN_M, "legacy_win_len_m": K.LEGACY_WIN_LEN_M,
+           "step_form_formula": K.STEP_FORM_FORMULA,
+           "parity10m": {kk: vv for kk, vv in parity.items() if kk != "windows"},
            "conditions": {c: {kk: vv for kk, vv in design[c].items() if kk != "windows"}
                           for c in CONDITIONS}}
     write_json(OUT / "design_phase.json", out)
@@ -221,6 +254,93 @@ def stage_design(mc_draws: int) -> dict:
 
 
 # ------------------------------------------------------------------ stage 3
+def _finite(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and np.isfinite(v)
+
+
+def _scan_degenerate(d: dict, cond: str, limit: int = 40) -> list:
+    """Every NaN / inf / degenerate value in one condition's design tables.
+
+    A finding here FAILS C3. The scan covers exactly the numbers the held-out run and the
+    report are built from: the per-window arm moments, the pooled arm table, the
+    belief-referee table (both moments, the sd-ratio, the CVaR error) and the regime
+    statistics. It does not police diagnostics that are legitimately undefined (a window with
+    zero relief has no sigma/relief), which are reported as notes by the report writer.
+    """
+    bad = []
+    for w in d.get("windows", []):
+        if not w.get("scoreable"):
+            continue
+        if not _finite(w.get("j_truth")):
+            bad.append(f"{cond}/{w['name']}: j_truth = {w.get('j_truth')!r}")
+        for a, v in (w.get("arms") or {}).items():
+            if v is None:
+                bad.append(f"{cond}/{w['name']}: arm {a} missing")
+                continue
+            E, sd = v
+            if not _finite(E):
+                bad.append(f"{cond}/{w['name']}: {a} E = {E!r}")
+            if a == "mean-map":
+                continue
+            if not _finite(sd):
+                bad.append(f"{cond}/{w['name']}: {a} sd = {sd!r}")
+            elif sd <= 0.0:
+                bad.append(f"{cond}/{w['name']}: {a} sd = {sd!r} is not positive")
+        mc = w.get("mc")
+        if mc:
+            for nm in ("E_mc", "sd_mc", "cvar_mc"):
+                if not _finite(mc.get(nm)):
+                    bad.append(f"{cond}/{w['name']}: mc.{nm} = {mc.get(nm)!r}")
+            if _finite(mc.get("sd_mc")) and mc["sd_mc"] <= 0:
+                bad.append(f"{cond}/{w['name']}: mc.sd_mc = {mc['sd_mc']!r} is not positive")
+            for a, r in (mc.get("arms") or {}).items():
+                for nm in ("rel_err_E", "rel_err_sd", "sd_ratio_to_mc", "cvar_abs_err"):
+                    if not _finite(r.get(nm)):
+                        bad.append(f"{cond}/{w['name']}: mc.{a}.{nm} = {r.get(nm)!r}")
+    p = d.get("pooled", {})
+    for a in p.get("arms_scored", []):
+        for suf in ("raw", "recal"):
+            for nm, v in (p[a][suf] or {}).items():
+                if v is None or isinstance(v, str):
+                    continue
+                if not _finite(v):
+                    bad.append(f"{cond}: pooled.{a}.{suf}.{nm} = {v!r}")
+    for nm in ("alpha_weighted_median", "sigma_med_m", "relief_p95_p5_m",
+               "frac_nodes_alpha_lt_1", "retained", "qc_observed_frac"):
+        blk = p.get(nm)
+        if isinstance(blk, dict):
+            for q, v in blk.items():
+                if not _finite(v):
+                    bad.append(f"{cond}: pooled.{nm}.{q} = {v!r}")
+    mcs = d.get("belief_referee", {})
+    for a, r in (mcs.get("arms") or {}).items():
+        for nm in ("median_rel_err_E", "median_rel_err_sd", "p95_rel_err_E", "p95_rel_err_sd"):
+            v = r.get(nm)
+            if v is None:
+                continue
+            if not _finite(v):
+                bad.append(f"{cond}: belief_referee.{a}.{nm} = {v!r}")
+        sr = r.get("sd_ratio_to_mc")
+        if isinstance(sr, dict):
+            for q, v in sr.items():
+                if not _finite(v):
+                    bad.append(f"{cond}: belief_referee.{a}.sd_ratio_to_mc.{q} = {v!r}")
+    for a, r in ((mcs.get("cvar_error") or {}).get("arms") or {}).items():
+        for q, v in r.items():
+            if not _finite(v):
+                bad.append(f"{cond}: cvar_error.{a}.{q} = {v!r}")
+    for b in (mcs.get("sd_deficit_vs_alpha") or {}).get("bins", []):
+        if not b.get("n"):
+            continue
+        for q in ("alpha_median", "clark_sd_ratio_median"):
+            if not _finite(b.get(q)):
+                bad.append(f"{cond}: sd_deficit_vs_alpha bin "
+                           f"[{b['alpha_lo']}, {b['alpha_hi']}).{q} = {b.get(q)!r}")
+    if len(bad) > limit:
+        bad = bad[:limit] + [f"... and {len(bad) - limit} more degenerate values"]
+    return bad
+
+
 def _rel(a, b) -> float:
     if b == 0:
         return abs(a - b)
@@ -232,41 +352,47 @@ def stage_freeze_eval(design: dict) -> dict:
     stage = "3-freeze-eval"
     h = design["hindsight"]
     f = design["foresight"]
+    par = design["_parity10m"]
 
-    # --- C1: v3 hindsight reproduction within numerical tolerance ----------------------
+    # --- C1, two parts -------------------------------------------------------------------
+    # (a) CODE PARITY: the legacy 10 m hindsight scoring path still reproduces rehearsal v3
+    #     exactly, so the drop to 4 m windows is a configuration change and not a code change.
+    # (b) the 4 m pipeline runs BOTH conditions end to end with finite outputs.
     c1_checks, tol = [], K.C1_REL_TOL
 
     def chk(nm, got, want, kind="rel"):
         d = _rel(got, want) if kind == "rel" else abs(got - want)
         ok = bool(d <= tol) if kind != "eq" else bool(got == want)
-        c1_checks.append({"quantity": nm, "v4": got, "v3": want,
-                          ("rel_diff" if kind == "rel" else "abs_diff"): d if kind != "eq" else None,
+        c1_checks.append({"part": "a", "quantity": nm, "got": got, "v3": want,
+                          ("rel_diff" if kind == "rel" else "abs_diff"):
+                              d if kind != "eq" else None,
                           "pass": ok})
         return ok
 
     ref = C1_REF
-    chk("fit.k", h["fit"]["k"], ref["fit"]["k"])
-    chk("fit.tau_m", h["fit"]["tau_m"], ref["fit"]["tau_m"], "abs")
-    chk("fit.mean_NLL_at_fit", h["fit"]["mean_NLL_at_fit"], ref["fit"]["mean_NLL_at_fit"])
-    chk("qc.n_retained", h["qc"]["n_retained"], ref["qc"]["n_retained"], "eq")
-    chk("qc.n_unflagged", h["qc"]["n_unflagged"], ref["qc"]["n_unflagged"], "eq")
-    for a in K.ARMS_SCORED:
+    chk("fit.k", par["fit"]["k"], ref["fit"]["k"])
+    chk("fit.tau_m", par["fit"]["tau_m"], ref["fit"]["tau_m"], "abs")
+    chk("fit.mean_NLL_at_fit", par["fit"]["mean_NLL_at_fit"], ref["fit"]["mean_NLL_at_fit"])
+    chk("qc.n_retained", par["qc"]["n_retained"], ref["qc"]["n_retained"], "eq")
+    chk("qc.n_unflagged", par["qc"]["n_unflagged"], ref["qc"]["n_unflagged"], "eq")
+    for a in K.ARMS_LEGACY:
         for suf in ("raw", "recal"):
-            got = h["pooled"][a][suf]["mean_NLL"]
+            got = par["pooled"][a][suf]["mean_NLL"]
             want = ref["pooled_arm_table"][a][suf]["mean_NLL"]
             # the v3 reference is published to 4 dp, so the tolerance is the rounding
             # half-ulp plus the 1e-6 relative tolerance
             d = abs(got - want)
-            c1_checks.append({"quantity": f"pooled.{a}.{suf}.mean_NLL", "v4": got, "v3": want,
-                              "abs_diff": d, "pass": bool(d <= 5e-5 + tol * abs(want))})
+            c1_checks.append({"part": "a", "quantity": f"pooled.{a}.{suf}.mean_NLL",
+                              "got": got, "v3": want, "abs_diff": d,
+                              "pass": bool(d <= 5e-5 + tol * abs(want))})
     for pair in ("nll_clark_minus_fosm", "nll_clark_minus_clark-diag"):
         for suf in ("raw", "recal"):
-            got = h["pooled"][pair][suf]["n_windows_clark_better"]
+            got = par["pooled"][pair][suf]["n_windows_clark_better"]
             want = ref[pair][suf]["n_windows_clark_better"]
-            c1_checks.append({"quantity": f"{pair}.{suf}.n_windows_clark_better",
-                              "v4": got, "v3": want, "pass": bool(got == want)})
-    # per-window j_truth and arm moments, full precision
-    byname = {w["name"]: w for w in h["windows"]}
+            c1_checks.append({"part": "a", "quantity": f"{pair}.{suf}.n_windows_clark_better",
+                              "got": got, "v3": want, "pass": bool(got == want)})
+    # per-window j_truth and the legacy arm moments, full precision
+    byname = {w["name"]: w for w in par["windows"]}
     wmax = {"j_truth": 0.0, "arm_E": 0.0, "arm_sd": 0.0, "n_missing": 0}
     for wref in ref["windows"]:
         w = byname.get(wref["name"])
@@ -279,35 +405,66 @@ def stage_freeze_eval(design: dict) -> dict:
             wmax["arm_E"] = max(wmax["arm_E"], _rel(gE, E))
             if sd is not None:
                 wmax["arm_sd"] = max(wmax["arm_sd"], _rel(gsd, sd))
-    c1_checks.append({"quantity": "per-window max relative difference",
-                      "v4": wmax, "v3": "rehearsal_v3 windows",
+    c1_checks.append({"part": "a", "quantity": "per-window max relative difference",
+                      "got": wmax, "v3": "rehearsal_v3 windows",
                       "pass": bool(wmax["n_missing"] == 0 and wmax["j_truth"] <= tol
                                    and wmax["arm_E"] <= tol and wmax["arm_sd"] <= tol)})
-    C1 = all(c["pass"] for c in c1_checks)
+    C1a = all(c["pass"] for c in c1_checks)
 
-    # --- C2: >= 60% of the 19 design windows unflagged under foresight -----------------
-    n_ref = len(ref["windows"])
+    # (b) the 4 m pipeline ran both conditions end to end with finite outputs
+    c1b = []
+    for cond in CONDITIONS:
+        d = design[cond]
+        n_ok = d["qc"]["n_window_products"] > 0 and d["qc"]["n_retained"] > 0
+        vals = [d["fit"].get("k"), d["fit"].get("tau_m"), d["fit"].get("mean_NLL_at_fit")]
+        fin = all(v is not None and np.isfinite(v) for v in vals)
+        arms_ok = True
+        for w in d["windows"]:
+            if not w.get("scoreable"):
+                continue
+            for a in K.ARMS_VARIANCE:
+                v = w["arms"].get(a)
+                if v is None or not (np.isfinite(v[0]) and np.isfinite(v[1])):
+                    arms_ok = False
+        mc_ok = d["belief_referee"].get("n_windows", 0) > 0
+        c1b.append({"part": "b", "quantity": f"{cond}: products/retained > 0", "pass": n_ok,
+                    "n_window_products": d["qc"]["n_window_products"],
+                    "n_retained": d["qc"]["n_retained"]})
+        c1b.append({"part": "b", "quantity": f"{cond}: (k, tau, NLL) finite", "pass": fin,
+                    "values": vals})
+        c1b.append({"part": "b", "quantity": f"{cond}: all seven arms finite on every "
+                                             "scoreable window", "pass": arms_ok})
+        c1b.append({"part": "b", "quantity": f"{cond}: belief referee drawn", "pass": mc_ok,
+                    "n_windows": d["belief_referee"].get("n_windows", 0)})
+    c1_checks += c1b
+    C1b = all(c["pass"] for c in c1b)
+    C1 = bool(C1a and C1b)
+
+    # --- C2: >= 60% of the design windows unflagged under foresight, on the 4 m windows --
+    # The denominator is the number of 4 m HINDSIGHT design windows -- "the design windows",
+    # the same set foresight is the paired condition on.
+    n_ref = h["qc"]["n_window_products"]
     n_unf = f["qc"]["n_unflagged"]
-    C2 = bool(n_unf >= K.C2_MIN_UNFLAGGED_FRAC * n_ref)
-    # Diagnostic only -- NOT a criterion, and it changes nothing. The prereg's QC section
-    # anticipates foresight windows being FLAGGED on coverage; on this data the binding rule
-    # turns out to be flag 1 (retention < 50%), because a step is scoreable only when all 12
-    # of its candidate cells carry a belief and the far half of a 10 m window is never seen
-    # from before its start. Both counts are reported so the author can see which rule bites.
+    C2 = bool(n_ref and n_unf >= K.C2_MIN_UNFLAGGED_FRAC * n_ref)
+    # Diagnostic only -- NOT a criterion, and it changes nothing. It records which QC rule
+    # binds under foresight: flag 1 (retention < 50%) or flags 2-3 (coverage / sigma /
+    # void-fill). At 10 m windows retention was the binding rule, which is what the window
+    # length change addresses.
     f_rows = [w for w in f["windows"] if w.get("scoreable")]
     c2_diag = {
         "note": "diagnostic, not a criterion; recorded so the binding QC rule is legible",
+        "win_len_m": K.WIN_LEN_M,
         "n_scoreable": len(f_rows),
         "n_excluded_by_retention": sum(1 for w in f_rows if w["retained"] < K.MIN_RETAINED),
         "n_unflagged_ignoring_retention": sum(1 for w in f_rows if not w["flagged"]),
         "per_window": [{"name": w["name"], "retained": round(w["retained"], 4),
                         "qc_observed_frac": w["qc_observed_frac"],
                         "qc_sigma_med_m": w["qc_sigma_med_m"],
-                        "qc_flags": w["qc_flags"],
-                        "n_frames_fused": None} for w in f_rows],
+                        "qc_flags": w["qc_flags"]} for w in f_rows],
     }
 
-    # --- C3: all fits finite; QC/registration machinery ran on both conditions ---------
+    # --- C3: all fits finite; QC/registration ran; NO NaN OR DEGENERATE VALUE anywhere in
+    # the design tables. A broken number must not ride into the held-out run.
     c3_notes = []
     finite = True
     for cond in CONDITIONS:
@@ -317,6 +474,9 @@ def stage_freeze_eval(design: dict) -> dict:
             if v is None or not np.isfinite(v):
                 finite = False
                 c3_notes.append(f"{cond}.fit.{nm} = {v!r}")
+        if d["fit"].get("k") is not None and not (d["fit"]["k"] > 0):
+            finite = False
+            c3_notes.append(f"{cond}.fit.k = {d['fit']['k']!r} is not positive")
         if d["qc"]["n_window_products"] == 0:
             finite = False
             c3_notes.append(f"{cond}: no window products built")
@@ -324,6 +484,10 @@ def stage_freeze_eval(design: dict) -> dict:
             if w.get("qc_observed_frac") is None:
                 finite = False
                 c3_notes.append(f"{cond}/{w['name']}: QC did not run")
+        bad = _scan_degenerate(d, cond)
+        if bad:
+            finite = False
+            c3_notes += bad
     cal = json.loads((OUT / "calibration_check.json").read_text())
     for nm, v in (("pitch refit", cal["pitch"]["refit_MOUNT_PITCH_OFFSET_DEG"]),
                   ("sigma refit a", cal["sigma"]["refit_pooled"]["a"]),
@@ -343,10 +507,14 @@ def stage_freeze_eval(design: dict) -> dict:
 
     res = {
         "evaluated_at": now(),
-        "C1": {"statement": "v3 hindsight reproduction within numerical tolerance "
-                            f"(relative {tol:g})", "pass": C1, "checks": c1_checks},
+        "C1": {"statement": f"(a) the {K.LEGACY_WIN_LEN_M:g} m hindsight scoring path still "
+                            f"reproduces rehearsal v3 within {tol:g} relative -- code parity "
+                            f"preserved on the old configuration -- AND (b) the "
+                            f"{K.WIN_LEN_M:g} m pipeline runs both conditions end to end "
+                            f"with finite outputs",
+               "pass": C1, "a_pass": C1a, "b_pass": C1b, "checks": c1_checks},
         "C2": {"statement": f"at least {K.C2_MIN_UNFLAGGED_FRAC:.0%} of the {n_ref} design "
-                            "windows unflagged under foresight",
+                            f"windows ({K.WIN_LEN_M:g} m) unflagged under foresight",
                "n_unflagged_foresight": n_unf, "n_design_windows": n_ref,
                "fraction": round(n_unf / n_ref, 4) if n_ref else None,
                "n_window_products_foresight": f["qc"]["n_window_products"],
@@ -354,8 +522,12 @@ def stage_freeze_eval(design: dict) -> dict:
                "n_excluded_foresight": f["qc"]["n_excluded"],
                "flagged_foresight": f["qc"]["flagged"], "pass": C2,
                "diagnostic": c2_diag},
-        "C3": {"statement": "all fits finite and the QC/registration machinery ran on both "
-                            "conditions without error", "pass": C3, "notes": c3_notes},
+        "C3": {"statement": "all fits finite, the QC/registration machinery ran on both "
+                            "conditions without error, and NO NaN or degenerate value "
+                            "appears anywhere in the design tables (arm moments, pooled arm "
+                            "table, belief-referee table, regime statistics)",
+               "pass": C3, "notes": c3_notes,
+               "n_degenerate_findings": len(c3_notes)},
         "C4": {"statement": "no held-out path accessed before the freeze record is written",
                "pass": C4, "evidence_of_access": c4_ev},
         "ALL_PASS": bool(C1 and C2 and C3 and C4),
@@ -388,7 +560,8 @@ def stage_freeze(design: dict, cond_res: dict, commit: dict) -> bool:
                     "conditions: `DESIGN_PHASE_DONE.md`, `design_score_hindsight.json`, "
                     "`design_score_foresight.json`.\n")
         body.append("\nHeld-out access remains blocked: stages 5-7 refuse to run without "
-                    "FREEZE.json.\n")
+                    "FREEZE.json. Rerunning the same script resumes from the last "
+                    "done-marker and will re-evaluate the gates.\n")
         (OUT / "STOPPED_AT.md").write_text("\n".join(body))
         log(f"STOPPED_AT.md written; failed {failed}; held-out untouched", stage)
         mark(stage, {"frozen": False, "failed": failed})
@@ -444,11 +617,30 @@ def stage_freeze(design: dict, cond_res: dict, commit: dict) -> bool:
                 "n_windows_fitted": design[c]["fit"]["n_windows_fitted"],
                 "pinned_tau_alternative": design[c]["fit_pinned_tau_alternative"]}
             for c in CONDITIONS},
+        "windowing": {"win_len_m": K.WIN_LEN_M, "lookback_m": K.LOOKBACK_M,
+                      "legacy_win_len_m": K.LEGACY_WIN_LEN_M,
+                      "rationale": "4 m is the depth camera's range cap and the horizon a "
+                                   "planner predicts over"},
+        "arms": {"variance_arms": list(K.ARMS_VARIANCE), "point_arm": "mean-map",
+                 "fit_arm": K.FIT_ARM,
+                 "step_form_formula": K.STEP_FORM_FORMULA,
+                 "mc_n_arms": list(K.MC_N_ARMS),
+                 "mc_subsample": "N draws taken without replacement from the reference draws "
+                                 f"with seed {K.MC_SUBSAMPLE_SEED}",
+                 "fosm_label": "the canonical first-order route, constructed as the strongest "
+                               "derivative baseline; no published system runs it"},
         "criteria": {"E2-i_cov1_band": list(K.E2_I_COV1_BAND),
                      "E2-ii_sd_ratio_band": list(K.E2_II_SD_RATIO_BAND),
-                     "E2-iii_max_median_rel_err": K.E2_III_MAX_MEDIAN_REL_ERR,
+                     "E2-iii_a_max_median_rel_err_E": K.E2_III_MAX_MEDIAN_REL_ERR,
+                     "E2-iii_b_sd_ratio_band": list(K.E2_III_SD_BAND),
+                     "E2-iii_b_pooling": K.E2_III_SD_POOL,
                      "E2-iii_sign_test_alpha": K.E2_III_SIGN_TEST_ALPHA,
+                     "E2-v": "clark below mc-32 on BOTH belief-referee moments, majority, "
+                             "exact sign test p < 0.05",
                      "mc_draws_per_window": K.N_MC_DRAWS, "mc_seed": K.MC_SEED},
+        "reported_characterizations": {
+            "sd_deficit_vs_alpha_bins": list(K.ALPHA_BIN_EDGES),
+            "cvar_q": K.CVAR_Q, "cvar_gaussian_factor": K.CVAR_GAUSS_FACTOR},
         "banned_corrections": list(K.BANNED_CORRECTIONS),
         "freeze_conditions": {c: cond_res[c]["pass"] for c in ("C1", "C2", "C3", "C4")},
         "held_out_traverses": [m["name"] for m in HELD_OUT],
@@ -469,7 +661,7 @@ def _arm_table(d: dict) -> list[str]:
         return ["_no unflagged windows to pool_", ""]
     out = ["| arm | | mean NLL | \\|z\\|<=1 | \\|z\\|<=2 | sd-ratio | mean z | median sd |",
            "|---|---|---|---|---|---|---|---|"]
-    for a in K.ARMS_SCORED:
+    for a in p.get("arms_scored", K.ARMS_VARIANCE):
         for suf in ("raw", "recal"):
             r = p[a][suf]
             out.append(f"| {a} | {suf} | {r['mean_NLL']} | {r['cov1']} | {r['cov2']} | "
@@ -480,6 +672,94 @@ def _arm_table(d: dict) -> list[str]:
                 f"{mm.get('median_abs_err_per_step_m')} m", ""]
     return out
 
+
+def _belief_referee_block(d: dict) -> list[str]:
+    """The belief referee: the E2-iii and E2-v machinery plus the two characterizations."""
+    mc = d.get("belief_referee", {})
+    L = ["### Belief referee — E2-iii / E2-v machinery, exercised in-sample\n"]
+    if not mc.get("n_windows"):
+        return L + ["_no MC drawn_\n"]
+    L.append(f"{mc['n_windows']} unflagged windows, {mc['n_draws_per_window']} draws each "
+             f"(seed {mc['mc_seed']}; the mc-N arms are subsampled without replacement with "
+             f"seed {mc['subsample_seed']}). Raw Var, no truth, no recalibration.\n")
+    L += ["| arm | median rel err E | median rel err sd | p95 E | p95 sd | sd-ratio to MC (median) |",
+          "|---|---|---|---|---|---|"]
+    for a in K.ARMS_VARIANCE:
+        r = mc["arms"][a]
+        L.append(f"| {a} | {r['median_rel_err_E']:.3e} | {r['median_rel_err_sd']:.3e} | "
+                 f"{r['p95_rel_err_E']:.3e} | {r['p95_rel_err_sd']:.3e} | "
+                 f"{r['sd_ratio_to_mc']['median']:.4f} |")
+    mm = mc["arms"].get("mean-map", {})
+    if mm:
+        L.append(f"| mean-map | {mm['median_rel_err_E']:.3e} | — (no predicted sd) | — | — | — |")
+    L.append("")
+
+    ck = mc["arms"]["clark"]
+    cf = mc.get("clark_vs_fosm", {})
+    lo, hi = K.E2_III_SD_BAND
+    a1 = ck["median_rel_err_E"] <= K.E2_III_MAX_MEDIAN_REL_ERR
+    a2 = (cf.get("n_clark_better_E", 0) > cf.get("n", 0) / 2
+          and cf.get("sign_test_p_E", 1) < K.E2_III_SIGN_TEST_ALPHA)
+    sdr = ck["sd_ratio_to_mc"][K.E2_III_SD_POOL]
+    L.append("**E2-iii preview** (in-sample; the criterion is held-out only):\n")
+    L.append(f"- (a) MEAN — clark's median relative error {ck['median_rel_err_E']:.3e} "
+             f"({'<=' if a1 else '>'} 5%), below fosm's in "
+             f"{cf.get('n_clark_better_E')} of {cf.get('n')} windows, two-sided sign test "
+             f"p = {cf.get('sign_test_p_E')} ({'majority + significant' if a2 else 'not both'})")
+    L.append(f"- (b) SD — clark's sd-ratio to the belief MC, {K.E2_III_SD_POOL} "
+             f"**{sdr:.4f}** against the band [{lo}, {hi}] "
+             f"({'inside' if lo <= sdr <= hi else 'OUTSIDE'}); mean "
+             f"{ck['sd_ratio_to_mc']['mean']:.4f}, p5 {ck['sd_ratio_to_mc']['p5']:.4f}, "
+             f"p95 {ck['sd_ratio_to_mc']['p95']:.4f}. No sd criterion against fosm.\n")
+    cm = mc.get("clark_vs_mc-32", {})
+    c2m = mc.get("clark_vs_mc-2", {})
+    L.append(f"**E2-v preview** — clark below mc-32 on BOTH moments in "
+             f"{cm.get('n_clark_better_BOTH_moments')} of {cm.get('n')} windows, exact "
+             f"two-sided sign test p = {cm.get('sign_test_p_both')} (E alone "
+             f"{cm.get('n_clark_better_E')}, sd alone {cm.get('n_clark_better_sd')}). "
+             f"Against mc-2: both moments {c2m.get('n_clark_better_BOTH_moments')} of "
+             f"{c2m.get('n')}, p = {c2m.get('sign_test_p_both')}.\n")
+    for b in ("step-form", "clark-diag"):
+        r = mc.get(f"clark_vs_{b}", {})
+        if r:
+            L.append(f"- clark vs {b}: both moments {r['n_clark_better_BOTH_moments']} of "
+                     f"{r['n']} (p = {r['sign_test_p_both']}), E alone "
+                     f"{r['n_clark_better_E']}, sd alone {r['n_clark_better_sd']}")
+    L.append("")
+
+    cur = mc.get("sd_deficit_vs_alpha", {})
+    if cur.get("bins"):
+        L.append("#### Reported characterization — the sd-deficit-vs-contest-depth curve\n")
+        L.append("clark's belief-referee sd-ratio (sd_clark / sd_MC) binned by the window's "
+                 "cost-weighted median alpha. No criterion attaches. The historical record is "
+                 "0.90-0.94; the derived worst case is ~0.89 at alpha ~ 0.\n")
+        L += ["| alpha bin | n | alpha median | clark sd-ratio median | p5 | p95 |",
+              "|---|---|---|---|---|---|"]
+        for b in cur["bins"]:
+            if not b["n"]:
+                L.append(f"| [{b['alpha_lo']}, {b['alpha_hi']}) | 0 | — | — | — | — |")
+                continue
+            L.append(f"| [{b['alpha_lo']}, {b['alpha_hi']}) | {b['n']} | {b['alpha_median']} | "
+                     f"**{b['clark_sd_ratio_median']}** | {b['clark_sd_ratio_p5']} | "
+                     f"{b['clark_sd_ratio_p95']} |")
+        L.append(f"\ncorr(alpha, clark sd-ratio) = {cur.get('corr_alpha_vs_sd_ratio')}\n")
+
+    cv = mc.get("cvar_error", {})
+    if cv.get("arms"):
+        L.append(f"#### Reported characterization — belief-referee CVaR error (q = {cv['q']})\n")
+        L.append("|CVaR_q(arm) − CVaR_q(MC)| per window: the single number a planner "
+                 "consumes, fusing both moments through the decision rule's own tail weight. "
+                 "The arm CVaR is the Gaussian form E + phi(z_q)/(1−q) · sd; the MC CVaR is "
+                 "the mean of the empirical upper tail. mean-map has no sd, so its CVaR is "
+                 "its point prediction — the floor a risk-blind planner sits at. No criterion "
+                 "attaches.\n")
+        L += ["| arm | median | mean | p95 | max |", "|---|---|---|---|---|"]
+        for a, r in cv["arms"].items():
+            L.append(f"| {a} | **{r['median']:.4f}** | {r['mean']:.4f} | {r['p95']:.4f} | "
+                     f"{r['max']:.4f} |")
+        L.append(f"\nLowest median absolute CVaR error: "
+                 f"**{cv['lowest_median_abs_cvar_error']}**\n")
+    return L
 
 def _stat_table(d: dict, fields) -> list[str]:
     p = d.get("pooled", {})
@@ -499,13 +779,19 @@ def write_design_report(design: dict, cond_res: dict, commit: dict, frozen: bool
     cal = json.loads((OUT / "calibration_check.json").read_text())
     reg = json.loads((OUT / "registration" / "registration.json").read_text())
     L = []
-    L += [f"# E2 design phase (v4) — complete, {'FROZEN' if frozen else 'STOPPED'}\n",
+    L += [f"# E2 design phase (v2, {K.WIN_LEN_M:g} m windows) — "
+          f"{'FROZEN' if frozen else 'STOPPED'}\n",
           f"Written {now()} by the detached E2 runner on `{os.uname().nodename}`, "
           f"pipeline commit `{commit.get('pipeline_commit')}`.\n",
           "> **DESIGN-PHASE / IN-SAMPLE.** Two design traverses. Per-condition (k, tau) is "
           "fitted on the same windows it is scored on. No pre-registered criterion is "
-          "evaluated here and none is implied; E2-i..E2-iv are held-out criteria. These "
+          "evaluated here and none is implied; E2-i, E2-ii, E2-iii, E2-iv and E2-v are "
+          "HELD-OUT criteria and the previews below only exercise their machinery. These "
           "numbers set the freeze record, they are not results.\n",
+          f"Six author-approved prereg edits are in force (clark_paper `fab1a70`): windows "
+          f"{K.LEGACY_WIN_LEN_M:g} m -> {K.WIN_LEN_M:g} m (the depth range cap), step-form "
+          f"and mc-2/mc-32 join the arms, E2-iii splits by moment, E2-v is new, and two "
+          f"reported characterizations are added.\n",
           "**The runner has stopped here by design.** The author narrowed the autonomous "
           "authorization on 2026-08-28: the held-out set is not touched until an explicit "
           "manual start (see *Starting the held-out run* below).\n"]
@@ -516,13 +802,22 @@ def write_design_report(design: dict, cond_res: dict, commit: dict, frozen: bool
         r = cond_res[c]
         L.append(f"| {c} | **{'PASS' if r['pass'] else 'FAIL'}** | {r['statement']} |")
     L.append("")
-    if not cond_res["C1"]["pass"]:
-        L.append("C1 detail — the checks that did not reproduce rehearsal v3:\n")
-        L += ["| quantity | v4 | v3 | diff |", "|---|---|---|---|"]
-        for c in cond_res["C1"]["checks"]:
-            if not c["pass"]:
-                d = c.get("rel_diff", c.get("abs_diff"))
-                L.append(f"| {c['quantity']} | {c['v4']} | {c['v3']} | {d} |")
+    c1 = cond_res["C1"]
+    npar = json.loads((OUT / "parity10m_score.json").read_text())["qc"]["n_retained"]
+    L.append(f"C1(a) code parity — the {K.LEGACY_WIN_LEN_M:g} m hindsight path was rebuilt and "
+             f"rescored by this same code ({npar} windows) and compared against rehearsal v3 "
+             f"at {K.C1_REL_TOL:g} relative: **{'PASS' if c1['a_pass'] else 'FAIL'}**. That is "
+             f"what makes the drop to {K.WIN_LEN_M:g} m a configuration change and not a code "
+             f"change. C1(b) end-to-end at {K.WIN_LEN_M:g} m: "
+             f"**{'PASS' if c1['b_pass'] else 'FAIL'}**.\n")
+    bad = [c for c in c1["checks"] if not c["pass"]]
+    if bad:
+        L.append("C1 checks that did not hold:\n")
+        L += ["| part | quantity | got | expected | diff |", "|---|---|---|---|---|"]
+        for c in bad:
+            d = c.get("rel_diff", c.get("abs_diff"))
+            L.append(f"| {c.get('part')} | {c['quantity']} | {c.get('got')} | "
+                     f"{c.get('v3', '-')} | {d} |")
         L.append("")
     c2 = cond_res["C2"]
     L.append(f"C2 detail — foresight produced {c2['n_window_products_foresight']} window "
@@ -541,10 +836,12 @@ def write_design_report(design: dict, cond_res: dict, commit: dict, frozen: bool
                  f"{K.MIN_RETAINED:.0%} retention floor (QC flag 1) and "
                  f"{dg['n_scoreable'] - dg['n_unflagged_ignoring_retention']} carry a "
                  f"coverage/sigma/void-fill flag (QC flags 2-3). A step is scoreable only "
-                 f"when all twelve of its candidate cells carry a belief, and the far half of "
-                 f"a 10 m window is never observed from before its own start, so on this data "
-                 f"the retention floor is the binding rule rather than the coverage flag the "
-                 f"prereg's QC section anticipates.\n")
+                 f"when all twelve of its candidate cells carry a belief. At "
+                 f"{K.LEGACY_WIN_LEN_M:g} m windows the retention floor was the binding rule "
+                 f"and 11 of 17 windows failed it, because a {K.LEGACY_WIN_LEN_M:g} m window "
+                 f"is never observed past the {K.R_MAX:g} m range cap from before its own "
+                 f"start; matching the window length to the perception horizon is what this "
+                 f"configuration change addresses.\n")
         L += ["| foresight window | retention | element-cell observed frac | median sigma (m) | flags |",
               "|---|---|---|---|---|"]
         for w in dg["per_window"]:
@@ -599,7 +896,8 @@ def write_design_report(design: dict, cond_res: dict, commit: dict, frozen: bool
         L.append("### Reality referee — arm table (pooled, unflagged)\n")
         L += _arm_table(d)
         p = d.get("pooled", {})
-        for a, b in (("clark", "fosm"), ("clark", "clark-diag")):
+        for a, b in (("clark", "fosm"), ("clark", "clark-diag"), ("clark", "step-form"),
+                     ("clark", "mc-32"), ("clark", "mc-2")):
             r = p.get(f"nll_{a}_minus_{b}", {}).get("recal")
             if r:
                 L.append(f"- {a} minus {b} (recalibrated, negative = clark better): mean "
@@ -612,24 +910,7 @@ def write_design_report(design: dict, cond_res: dict, commit: dict, frozen: bool
                      f"recalibrated ({sp['compression_factor']}x compression)")
         L.append("\n_No pass/fail criterion attaches to any reality-side arm comparison "
                  "(PREREG_baseprod.md)._\n")
-        L.append("### Belief referee — E2-iii machinery, exercised in-sample\n")
-        mc = d.get("belief_referee_E2iii", {})
-        if mc.get("n_windows"):
-            L.append(f"{mc['n_windows']} windows, {mc['n_draws_per_window']} draws each, "
-                     f"seed {mc['mc_seed']}; raw Var, no truth, no recalibration.\n")
-            L += ["| arm | median rel err E | median rel err sd | p95 E | p95 sd |",
-                  "|---|---|---|---|---|"]
-            for a in K.ARMS_SCORED:
-                r = mc["arms"][a]
-                L.append(f"| {a} | {r['median_rel_err_E']:.3e} | {r['median_rel_err_sd']:.3e} | "
-                         f"{r['p95_rel_err_E']:.3e} | {r['p95_rel_err_sd']:.3e} |")
-            cf = mc.get("clark_vs_fosm", {})
-            L.append(f"\nclark better than fosm on BOTH moments in "
-                     f"{cf.get('n_clark_better_BOTH_moments')} of {cf.get('n')} windows "
-                     f"(two-sided sign test p = {cf.get('sign_test_p_both')}); on E alone "
-                     f"{cf.get('n_clark_better_E')}, on sd alone {cf.get('n_clark_better_sd')}.\n")
-        else:
-            L.append("_no MC drawn_\n")
+        L += _belief_referee_block(d)
         L.append("### Regime\n")
         L += _stat_table(d, [("sigma_med_m", "belief sigma on element cells (m)"),
                              ("relief_p95_p5_m", "truth relief p95-p5 (m)"),
@@ -645,24 +926,28 @@ def write_design_report(design: dict, cond_res: dict, commit: dict, frozen: bool
     for f in ("RUN_LOG.md", "FREEZE.json" if frozen else "STOPPED_AT.md",
               "freeze_conditions.json", "design_phase.json", "design_score_hindsight.json",
               "design_score_foresight.json", "design_build_hindsight.json",
-              "design_build_foresight.json", "calibration_check.json",
-              "registration/registration.json", "pipeline_commit.json"):
+              "design_build_foresight.json", "parity10m_score.json", "parity10m_build.json",
+              "calibration_check.json", "registration/registration.json",
+              "pipeline_commit.json"):
         L.append(f"- `{OUT / f}`")
     L.append("")
-    L.append("## Starting the held-out run\n")
-    L.append("The held-out stages (download-extract-build-delete streaming loop, scoring, "
-             "FINAL_REPORT.md) are implemented in the same runner and are gated. To start "
-             "them after the author's go:\n")
-    L.append("```sh\n"
-             f"ssh dasenka\n"
-             f"touch {GO_FILE}\n"
-             f"tmux new -d -s e2_heldout '{ROOT}/studies/baseprod/runner.sh --heldout'\n"
-             "```\n")
-    fz = ("FREEZE.json exists." if frozen else
-          "**FREEZE.json does not exist**, so the held-out stages cannot start until the "
-          "freeze conditions are met or the pre-registration is amended.")
-    L.append(f"They refuse to run unless **all** of: `--heldout` was passed, "
-             f"`{freeze_path()}` exists, and `{GO_FILE}` exists. {fz}\n")
+    L.append("## The held-out run\n")
+    if frozen:
+        L.append("C1-C4 all hold, so this runner proceeded **directly** into the held-out "
+                 "run under the author's restored chained authorization — no GO file, no "
+                 "stop. Follow it in `RUN_LOG.md`; the result lands in `FINAL_REPORT.md`, "
+                 "which reproduces these design tables as an appendix.\n")
+    else:
+        L.append("A freeze condition failed, so the runner stopped before unlock and the "
+                 "held-out set is untouched. To start the held-out stages after the "
+                 "pre-registration is amended or the gate is met:\n")
+    if not frozen:
+        L.append("```sh\n"
+                 f"ssh dasenka\n"
+                 f"tmux new -d -s e2_heldout '{ROOT}/studies/baseprod/runner.sh'\n"
+                 "```\n")
+    L.append(f"The held-out stages refuse to run without `{freeze_path()}`. "
+             + ("It exists.\n" if frozen else "**It does not exist.**\n"))
     L.append(f"Expected cost once started: {sum(m['size_gib'] for m in HELD_OUT):.0f} GiB "
              f"streamed across {len(HELD_OUT)} traverses, one archive resident at a time, "
              f"deleted after extraction; disk cap {DISK_CAP_GB:.0f} GB.\n")
@@ -687,10 +972,15 @@ def stage_heldout() -> None:
     stage = "5-heldout"
     from . import register
     from .build import build
-    for m in HELD_OUT:
+    todo = [m for m in HELD_OUT if not done(f"5-{m['name']}")]
+    log(f"streaming loop: {len(todo)} of {len(HELD_OUT)} traverses still to do "
+        f"({sum(m['size_gib'] for m in todo):.1f} GiB), {free_gb():.1f} GB free on /local",
+        stage)
+    for i, m in enumerate(HELD_OUT, 1):
         name = m["name"]
         st = f"5-{name}"
         if done(st):
+            log(f"[{i}/{len(HELD_OUT)}] {name}: already done, skipping", stage)
             continue
         if free_gb() < m["size_gib"] * 1.074 + DL_MARGIN_GB:
             log(f"STOPPING on disk pressure before {name}: {free_gb():.1f} GB free, need "
@@ -698,7 +988,8 @@ def stage_heldout() -> None:
             return
         url = f"https://roboshare.esa.int/index.php/s/{m['token']}/download"
         arc = DATA / f"{name}.7z"
-        log(f"downloading {name} ({m['size_gib']} GiB)", stage)
+        log(f"[{i}/{len(HELD_OUT)}] {name}: downloading {m['size_gib']} GiB from "
+            f"roboshare token {m['token']}; {free_gb():.1f} GB free", stage)
         r = subprocess.run(["nice", "-n", "15", "ionice", "-c3", "curl", "-sSL", "-C", "-",
                             "--retry", "8", "--retry-delay", "20", "-o", str(arc), url])
         if r.returncode != 0:
@@ -723,7 +1014,9 @@ def stage_heldout() -> None:
                 f"{reg[name]['residual_after_registration']['sd_m']} m", stage)
             for cond in CONDITIONS:
                 meta = build(name, cond)
-                log(f"  built {cond}: {meta['n_windows']} windows", stage)
+                log(f"  {name} {cond}: {meta['n_windows']} windows built from "
+                    f"{meta.get('n_depth_frames')} depth frames over "
+                    f"{meta.get('path_length_m')} m of track", stage)
         except Exception as e:
             log(f"build FAILED for {name}: {e}\n{traceback.format_exc()}", stage)
             shutil.rmtree(HELDOUT_DIR / name, ignore_errors=True)
@@ -747,9 +1040,9 @@ def stage_score_heldout() -> dict:
             dirs = [OUT / "windows" / cond / m["name"] for m in HELD_OUT]
             dirs = [d for d in dirs if d.exists()]
             log(f"scoring held-out under {cond} at the FROZEN (k={k}, tau={tau})", stage)
-            r = score_condition(dirs, cond, k=k, tau=tau, mc_draws=K.N_MC_DRAWS,
+            r = score_condition(dirs, cond, k=k, tau=tau, mc_n=K.N_MC_DRAWS,
                                 label=f"HELD-OUT, {cond}, frozen recalibration")
-            r["criteria"] = evaluate_criteria(r["pooled"], r["belief_referee_E2iii"],
+            r["criteria"] = evaluate_criteria(r["pooled"], r["belief_referee"],
                                               r["windows"])
             write_json(OUT / f"heldout_score_{cond}.json", r)
             mark(st, {"n_unflagged": r["qc"]["n_unflagged"]})
@@ -764,7 +1057,16 @@ def stage_report(heldout: dict) -> None:
     L = [f"# E2 FINAL REPORT — BASEPROD risk calibration on contested terrain\n",
          f"Written {now()}. Pipeline commit `{fr['pipeline_commit']}`. "
          f"Frozen at {fr['written_at']}. The held-out run happened once; there is no "
-         f"second draw.\n"]
+         f"second draw.\n",
+         "The author ran this chain unattended, without prior review of the design tables "
+         "(PREREG_baseprod.md, authorization update 2026-08-28 evening). The full "
+         "design-phase tables are therefore reproduced in this report, after the held-out "
+         "results, for post-hoc review.\n",
+         f"Configuration: {fr['windowing']['win_len_m']:g} m windows, "
+         f"{fr['windowing']['lookback_m']:g} m look-back, arms "
+         f"{fr['arms']['variance_arms']} + mean-map.\n",
+         "**Contents** — held-out results per condition, then the criteria, then the "
+         "design-phase appendix.\n"]
     for cond in CONDITIONS:
         d = heldout[cond]
         L.append(f"## {cond.upper()}"
@@ -780,25 +1082,47 @@ def stage_report(heldout: dict) -> None:
         for c, r in d["criteria"].items():
             if c == "reality_side_arm_comparisons":
                 continue
-            v = r.get("value", {k2: r[k2] for k2 in r if k2.startswith(("a_", "b_"))})
+            v = r.get("value")
+            if v is None:
+                v = {k2: r[k2] for k2 in r
+                     if k2.startswith(("a_", "b_", "n_", "sign_")) and k2 != "statement"}
             p = r.get("pass")
             L.append(f"| {c} | {v} | "
                      f"{'PASS' if p else ('FAIL' if p is False else 'reported, no criterion')} |")
         L.append("")
+        L += _belief_referee_block(d)
         L.append(d["criteria"]["reality_side_arm_comparisons"]["interpretation"] + "\n")
         L += _stat_table(d, [("sigma_over_relief", "sigma / relief"),
                              ("alpha_weighted_median", "alpha (cost-weighted median)"),
                              ("frac_nodes_alpha_lt_1", "fraction |alpha| < 1")])
+    # --- appendix: the full design-phase tables, for post-hoc review -------------------
+    L.append("---\n")
+    L.append("# Appendix — the design phase, in full\n")
+    L.append("> **DESIGN-PHASE / IN-SAMPLE.** Two design traverses; per-condition (k, tau) "
+             "was fitted on the same windows it is scored on. These numbers set the freeze "
+             "record; they are not results. They are reproduced here because the chain ran "
+             "without prior review of them.\n")
+    dpd = OUT / "DESIGN_PHASE_DONE.md"
+    if dpd.exists():
+        body = dpd.read_text().split("\n")
+        # drop the design report's own H1 and demote its headings one level
+        body = [("#" + ln if ln.startswith("#") else ln) for ln in body[1:]]
+        L += body
+    else:
+        L.append("_DESIGN_PHASE_DONE.md missing_\n")
     (OUT / "FINAL_REPORT.md").write_text("\n".join(L))
-    log("FINAL_REPORT.md written", stage)
+    log(f"FINAL_REPORT.md written ({len(L)} lines, design-phase appendix included)", stage)
     mark(stage)
 
 
 # ------------------------------------------------------------------ main
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--design-only", action="store_true",
+                    help="stop after the freeze record instead of chaining into held-out")
     ap.add_argument("--heldout", action="store_true",
-                    help="run the gated held-out stages (needs FREEZE.json and the GO file)")
+                    help="accepted and ignored; the chain is the default since the author "
+                         "restored the chained authorization")
     ap.add_argument("--mc-draws", type=int, default=K.N_MC_DRAWS)
     args = ap.parse_args()
 
@@ -809,7 +1133,20 @@ def main() -> int:
             "# E2 RUN_LOG\n\nDetached runner for PREREG_baseprod.md, "
             "`studies/baseprod/runner.py`. Append-only, one line per stage event.\n\n")
     log(f"runner start (pid {os.getpid()}, host {os.uname().nodename}, "
-        f"BASEPROD_ROOT={ROOT}, --heldout={args.heldout})", "0-init")
+        f"BASEPROD_ROOT={ROOT}, argv={sys.argv[1:]}, design_only={args.design_only}). "
+        f"Chained authorization: if C1-C4 all pass, FREEZE.json is written and the "
+        f"{len(HELD_OUT)}-traverse held-out run starts immediately, unattended. Any gate "
+        f"failure stops before unlock.", "0-init")
+    log(f"configuration: windows {K.WIN_LEN_M:g} m (legacy parity build "
+        f"{K.LEGACY_WIN_LEN_M:g} m), look-back {K.LOOKBACK_M:g} m, cell {K.CELL:g} m, arms "
+        f"{list(K.ARMS_VARIANCE)} + mean-map, {K.N_MC_DRAWS} MC draws/window (seed "
+        f"{K.MC_SEED}, subsample seed {K.MC_SUBSAMPLE_SEED}), QC thresholds "
+        f"retained>={K.MIN_RETAINED}, obs_frac>={K.FLAG_MIN_OBS_FRAC}, "
+        f"sigma<={K.FLAG_MAX_SIGMA_M} m, voidfill<={K.FLAG_MAX_INVALID_FRAC}", "0-init")
+    log(f"pins: fx=fy={K.FX}, cx={K.CX}, cy={K.CY}, mount pitch offset "
+        f"{K.MOUNT_PITCH_OFFSET_DEG} deg (total {K.TOTAL_MOUNT_PITCH_DEG} deg), "
+        f"sigma_z(r) = {K.SIG_A} + {K.SIG_B} r^2, r_wheel {K.R_WHEEL} m", "0-init")
+    log(f"step-form formula: {K.STEP_FORM_FORMULA}", "0-init")
 
     try:
         commit = stage_commit() if not done("1-commit") else json.loads(
@@ -822,25 +1159,25 @@ def main() -> int:
             frozen = stage_freeze(design, cond_res, commit)
         write_design_report(design, cond_res, commit, frozen)
 
-        if not args.heldout:
-            log("design phase complete; STOPPING before held-out by the author's narrowed "
-                "authorization (2026-08-28). Start the held-out run manually — see "
-                "DESIGN_PHASE_DONE.md.", "4-freeze")
+        if args.design_only:
+            log("design phase complete; --design-only was passed, so STOPPING before "
+                "held-out.", "4-freeze")
             return 0
         if not frozen:
-            log("REFUSING held-out: no FREEZE.json. The held-out set stays untouched.",
-                "5-heldout")
+            log("STOPPING before unlock: a freeze condition failed, so no FREEZE.json was "
+                "written. The held-out set remains untouched. See STOPPED_AT.md and "
+                "DESIGN_PHASE_DONE.md.", "5-heldout")
             return 4
-        if not GO_FILE.exists():
-            log(f"REFUSING held-out: GO file {GO_FILE} absent. The held-out set stays "
-                f"untouched.", "5-heldout")
-            return 5
-        log("held-out authorized (--heldout + FREEZE.json + GO file); starting the "
-            "streaming loop", "5-heldout")
+        log("C1-C4 all hold and FREEZE.json is written. Proceeding DIRECTLY into the "
+            "held-out run under the author's restored chained authorization "
+            "(PREREG_baseprod.md, 2026-08-28 evening; clark_paper 0506da2). "
+            f"{len(HELD_OUT)} traverses, "
+            f"{sum(m['size_gib'] for m in HELD_OUT):.1f} GiB to stream, one archive resident "
+            f"at a time, disk cap {DISK_CAP_GB:.0f} GB.", "5-heldout")
         stage_heldout()
         heldout = stage_score_heldout()
         stage_report(heldout)
-        log("ALL STAGES COMPLETE", "7-report")
+        log("ALL STAGES COMPLETE — FINAL_REPORT.md written", "7-report")
         return 0
     except SystemExit:
         raise

@@ -22,8 +22,14 @@ without the shared look-back would let late windows fuse the entire preceding tr
 would make "foresight" richer than "hindsight" for those windows, which is not the condition
 the prereg defines.
 
-The hindsight branch is byte-for-byte the rehearsal-v3 build (`build_v3.py`) at the pinned
-constants, which is what freeze condition C1 checks.
+Windows are WIN_LEN_M = 4 m long: the depth camera's range cap, and the horizon a planner
+predicts over. The first design phase ran at 10 m and failed C2 for a structural reason -- a
+10 m window is never observed past ~4 m from before its own start, so foresight retention
+clustered at 0.40-0.55 and 11 of 17 windows fell below the retention floor.
+
+At the LEGACY 10 m length the hindsight branch is byte-for-byte the rehearsal-v3 build
+(`build_v3.py`) at the pinned constants. Freeze condition C1 exercises exactly that path, so
+the window-length change is demonstrably a configuration change and not a code change.
 """
 from __future__ import annotations
 
@@ -65,10 +71,18 @@ def frame_mask(fs: np.ndarray, a: float, b: float, condition: str) -> np.ndarray
     raise ValueError(f"unknown belief condition {condition!r}")
 
 
-def build(name: str, condition: str) -> dict:
-    """Build every window product of one traverse under one belief condition."""
+def build(name: str, condition: str, win_len_m: float | None = None,
+          tag: str | None = None) -> dict:
+    """Build every window product of one traverse under one belief condition.
+
+    `win_len_m` defaults to the pinned WIN_LEN_M (4 m, the perception horizon). The only other
+    value it is ever given is LEGACY_WIN_LEN_M (10 m), for the C1 code-parity check against
+    rehearsal v3; `tag` then routes those products into their own directory so they cannot be
+    confused with the scored ones.
+    """
+    win_len = K.WIN_LEN_M if win_len_m is None else float(win_len_m)
     key = KEY.get(name, name)
-    wdir = window_dir(name, condition)
+    wdir = window_dir(name, tag or condition)
     wdir.mkdir(parents=True, exist_ok=True)
 
     s, sx_, sy_, t, z = smoothed_track(name)
@@ -77,6 +91,7 @@ def build(name: str, condition: str) -> dict:
     ps = frame_paths(name)
     if not ps:
         return {"traverse": str(name), "key": key, "condition": condition,
+                "win_len_m": win_len, "tag": tag or condition,
                 "path_length_m": round(float(s[-1]), 2), "n_windows": 0,
                 "windows": [], "note": "no RS_DEPTH_16bit frames"}
     fts = np.array([frame_time(p) for p in ps], np.float64)
@@ -88,8 +103,8 @@ def build(name: str, condition: str) -> dict:
     u, v = uv_grid()
     wins, skipped = [], []
 
-    for w in range(int(np.floor(s[-1] / K.WIN_LEN_M))):
-        a, b = w * K.WIN_LEN_M, (w + 1) * K.WIN_LEN_M
+    for w in range(int(np.floor(s[-1] / win_len))):
+        a, b = w * win_len, (w + 1) * win_len
         fm = frame_mask(fs, a, b, condition)
         if fm.sum() < K.MIN_FRAMES_PER_WINDOW:
             skipped.append({"w": w, "n_frames": int(fm.sum()),
@@ -159,22 +174,23 @@ def build(name: str, condition: str) -> dict:
                      "n_frames": int(len(idx)), "n_points": int(npts),
                      "map_observed_frac": round(float((o["count"] > 0).mean()), 4),
                      "truth_valid_frac": round(float(np.isfinite(truth_max).mean()), 4)})
-        print(f"  [{condition}] {key} w{w:02d} grid={ny}x{nx} frames={len(idx)} pts={npts} "
+        print(f"  [{tag or condition}] {key} w{w:02d} grid={ny}x{nx} frames={len(idx)} pts={npts} "
               f"obs={(o['count'] > 0).mean():.3f}", flush=True)
 
     meta = {"traverse": str(name), "key": key, "condition": condition,
+            "tag": tag or condition, "win_len_m": win_len,
             "path_length_m": round(float(s[-1]), 2),
             "n_depth_frames": int(len(ps)),
             "cutoff_rule": ("frames with a - LOOKBACK_M <= s < a (arc length strictly before "
                             "the window start)") if condition == "foresight" else
                            "frames with a - LOOKBACK_M <= s <= b (full trajectory)",
-            "lookback_m": K.LOOKBACK_M, "win_len_m": K.WIN_LEN_M, "cell": K.CELL,
+            "lookback_m": K.LOOKBACK_M, "cell": K.CELL,
             "alpha": K.ALPHA, "max_variance": K.MAX_VARIANCE,
             "intrinsics": {"fx": K.FX, "fy": K.FY, "cx": K.CX, "cy": K.CY},
             "mount_pitch_offset_deg": K.MOUNT_PITCH_OFFSET_DEG,
             "sigma_model": {"a": K.SIG_A, "b": K.SIG_B},
             "n_windows": len(wins), "windows": wins, "skipped": skipped}
-    d = OUT / "build_meta" / condition
+    d = OUT / "build_meta" / (tag or condition)
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{key}.json").write_text(json.dumps(meta, indent=2))
     return meta
