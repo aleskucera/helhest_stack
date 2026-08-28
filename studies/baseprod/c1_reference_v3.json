@@ -1,0 +1,736 @@
+{
+ "source": "~/data/baseprod_audit/spike/rehearsal_v3/rehearsal_v3.json (rehearsal v3, BASEPROD_SPIKE.md)",
+ "fit": {
+  "arm": "clark",
+  "k": 405.06688140217034,
+  "tau_m": 0.0,
+  "sd_multiplier_sqrt_k": 20.126273410698026,
+  "mean_NLL_at_fit": 4.339594567403188,
+  "n_windows_fitted": 19
+ },
+ "qc": {
+  "n_retained": 19,
+  "n_unflagged": 19,
+  "excluded": [],
+  "flagged": {}
+ },
+ "pooled_arm_table": {
+  "clark": {
+   "raw": {
+    "mean_NLL": 203.371,
+    "cov1": 0.0,
+    "cov2": 0.0526,
+    "sd_ratio": 17.9276,
+    "mean_z": -10.0292,
+    "median_z": -9.35,
+    "median_sd": 0.9936
+   },
+   "recal": {
+    "mean_NLL": 4.3396,
+    "cov1": 0.6316,
+    "cov2": 0.9474,
+    "sd_ratio": 0.8908,
+    "mean_z": -0.4983,
+    "median_z": -0.4646,
+    "median_sd": 19.9974
+   }
+  },
+  "clark-diag": {
+   "raw": {
+    "mean_NLL": 451.4037,
+    "cov1": 0.0,
+    "cov2": 0.0526,
+    "sd_ratio": 25.456,
+    "mean_z": -16.9666,
+    "median_z": -16.5852,
+    "median_sd": 0.807
+   },
+   "recal": {
+    "mean_NLL": 4.6347,
+    "cov1": 0.5263,
+    "cov2": 0.7368,
+    "sd_ratio": 1.2648,
+    "mean_z": -0.843,
+    "median_z": -0.8241,
+    "median_sd": 16.2425
+   }
+  },
+  "fosm": {
+   "raw": {
+    "mean_NLL": 169.4144,
+    "cov1": 0.0526,
+    "cov2": 0.0526,
+    "sd_ratio": 16.6379,
+    "mean_z": -8.6472,
+    "median_z": -8.3798,
+    "median_sd": 1.1367
+   },
+   "recal": {
+    "mean_NLL": 4.3199,
+    "cov1": 0.6316,
+    "cov2": 1.0,
+    "sd_ratio": 0.8267,
+    "mean_z": -0.4296,
+    "median_z": -0.4164,
+    "median_sd": 22.8774
+   }
+  }
+ },
+ "nll_clark_minus_fosm": {
+  "raw": {
+   "mean": 33.9566,
+   "median": 18.288,
+   "n_windows_clark_better": 3,
+   "n": 19,
+   "sign_test_p_two_sided": 0.0044
+  },
+  "recal": {
+   "mean": 0.0197,
+   "median": -0.0092,
+   "n_windows_clark_better": 11,
+   "n": 19,
+   "sign_test_p_two_sided": 0.6476
+  }
+ },
+ "nll_clark_minus_clark-diag": {
+  "raw": {
+   "mean": -248.0327,
+   "median": -42.0692,
+   "n_windows_clark_better": 18,
+   "n": 19,
+   "sign_test_p_two_sided": 0.0001
+  },
+  "recal": {
+   "mean": -0.2951,
+   "median": 0.0392,
+   "n_windows_clark_better": 9,
+   "n": 19,
+   "sign_test_p_two_sided": 1.0
+  }
+ },
+ "arm_NLL_spread": {
+  "raw_nats": 281.9893,
+  "recal_nats": 0.3148,
+  "compression_factor": 895.8,
+  "note": "max-min mean NLL across the three variance arms, before and after the recalibration; the factor is how much of the scale a ranking is read on the k-rescale destroys"
+ },
+ "pins": {
+  "fx": 422.28125,
+  "cx": 425.4715881347656,
+  "cy": 236.69622802734375,
+  "mount_pitch_offset_deg": -1.4092,
+  "total_mount_pitch_deg": 18.5908,
+  "sigma_a": 0.05185,
+  "sigma_b": 0.00343
+ },
+ "windows": [
+  {
+   "name": "t1/window_000",
+   "traverse": "t1",
+   "n_steps": 72,
+   "n_steps_total": 96,
+   "n_cells": 735,
+   "n_nodes": 864,
+   "j_truth": 28354.277693662614,
+   "arms": {
+    "clark": [
+     28346.864555301345,
+     0.37708871520097176
+    ],
+    "clark-diag": [
+     28346.86166582687,
+     0.38223096506120613
+    ],
+    "fosm": [
+     28346.643544389794,
+     0.43032401293545214
+    ],
+    "mean-map": [
+     28346.643544389794,
+     null
+    ]
+   },
+   "qc_observed_frac": 0.8662,
+   "qc_sigma_med_m": 0.01148,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 0.75
+  },
+  {
+   "name": "t1/window_001",
+   "traverse": "t1",
+   "n_steps": 99,
+   "n_steps_total": 99,
+   "n_cells": 1015,
+   "n_nodes": 1188,
+   "j_truth": 38963.20646446287,
+   "arms": {
+    "clark": [
+     38952.62150212542,
+     0.48823505788255045
+    ],
+    "clark-diag": [
+     38952.6290134276,
+     0.477337193458289
+    ],
+    "fosm": [
+     38952.2193662097,
+     0.5059955125989167
+    ],
+    "mean-map": [
+     38952.2193662097,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01297,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t1/window_002",
+   "traverse": "t1",
+   "n_steps": 99,
+   "n_steps_total": 99,
+   "n_cells": 1028,
+   "n_nodes": 1188,
+   "j_truth": 38987.456076952774,
+   "arms": {
+    "clark": [
+     38990.94038833092,
+     0.9393931945496082
+    ],
+    "clark-diag": [
+     38990.977506191826,
+     0.6794984266421205
+    ],
+    "fosm": [
+     38990.23158248556,
+     0.9658137022107576
+    ],
+    "mean-map": [
+     38990.23158248556,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01477,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t1/window_003",
+   "traverse": "t1",
+   "n_steps": 99,
+   "n_steps_total": 99,
+   "n_cells": 964,
+   "n_nodes": 1188,
+   "j_truth": 38925.67033645708,
+   "arms": {
+    "clark": [
+     38922.16340963338,
+     0.7420938360586821
+    ],
+    "clark-diag": [
+     38922.218848291304,
+     0.47590424238052165
+    ],
+    "fosm": [
+     38921.304347932484,
+     0.7769231467760425
+    ],
+    "mean-map": [
+     38921.304347932484,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.0134,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t1/window_004",
+   "traverse": "t1",
+   "n_steps": 96,
+   "n_steps_total": 96,
+   "n_cells": 1036,
+   "n_nodes": 1152,
+   "j_truth": 37673.95611082362,
+   "arms": {
+    "clark": [
+     37659.38522864788,
+     0.9931520497001458
+    ],
+    "clark-diag": [
+     37659.40556308495,
+     0.9058946216004956
+    ],
+    "fosm": [
+     37659.31973528762,
+     1.1133261324764672
+    ],
+    "mean-map": [
+     37659.31973528762,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01564,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_000",
+   "traverse": "t2",
+   "n_steps": 63,
+   "n_steps_total": 92,
+   "n_cells": 723,
+   "n_nodes": 756,
+   "j_truth": 25509.92988353168,
+   "arms": {
+    "clark": [
+     25510.257197314837,
+     0.2946122655234535
+    ],
+    "clark-diag": [
+     25510.26678211583,
+     0.26759588405473356
+    ],
+    "fosm": [
+     25509.607930253125,
+     0.3301830318883187
+    ],
+    "mean-map": [
+     25509.607930253125,
+     null
+    ]
+   },
+   "qc_observed_frac": 0.951,
+   "qc_sigma_med_m": 0.01525,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 0.6847826086956522
+  },
+  {
+   "name": "t2/window_001",
+   "traverse": "t2",
+   "n_steps": 99,
+   "n_steps_total": 99,
+   "n_cells": 1017,
+   "n_nodes": 1188,
+   "j_truth": 40086.25260389891,
+   "arms": {
+    "clark": [
+     40083.42157429871,
+     0.7078930095557079
+    ],
+    "clark-diag": [
+     40083.460006159985,
+     0.5690433336377887
+    ],
+    "fosm": [
+     40082.87928943857,
+     0.7667055364875277
+    ],
+    "mean-map": [
+     40082.87928943857,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01192,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_002",
+   "traverse": "t2",
+   "n_steps": 99,
+   "n_steps_total": 99,
+   "n_cells": 1002,
+   "n_nodes": 1188,
+   "j_truth": 40112.03174967046,
+   "arms": {
+    "clark": [
+     40170.25972822034,
+     1.4131721517700462
+    ],
+    "clark-diag": [
+     40170.36131794489,
+     0.9058583778825081
+    ],
+    "fosm": [
+     40168.94677008061,
+     1.4844739970552603
+    ],
+    "mean-map": [
+     40168.94677008061,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01625,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_003",
+   "traverse": "t2",
+   "n_steps": 99,
+   "n_steps_total": 99,
+   "n_cells": 972,
+   "n_nodes": 1188,
+   "j_truth": 40087.7516988224,
+   "arms": {
+    "clark": [
+     40118.463897022986,
+     1.397287347120429
+    ],
+    "clark-diag": [
+     40118.61684317435,
+     0.7176196074841287
+    ],
+    "fosm": [
+     40117.01680025296,
+     1.4338247834308706
+    ],
+    "mean-map": [
+     40117.01680025296,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01839,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_004",
+   "traverse": "t2",
+   "n_steps": 89,
+   "n_steps_total": 89,
+   "n_cells": 752,
+   "n_nodes": 1068,
+   "j_truth": 36003.51301868826,
+   "arms": {
+    "clark": [
+     36010.53264235505,
+     0.508494372895955
+    ],
+    "clark-diag": [
+     36010.56024006516,
+     0.42491103424724647
+    ],
+    "fosm": [
+     36009.74897377213,
+     0.536047152957251
+    ],
+    "mean-map": [
+     36009.74897377213,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01781,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_005",
+   "traverse": "t2",
+   "n_steps": 96,
+   "n_steps_total": 96,
+   "n_cells": 978,
+   "n_nodes": 1152,
+   "j_truth": 38822.968800443596,
+   "arms": {
+    "clark": [
+     38829.720018468055,
+     1.1049487250487369
+    ],
+    "clark-diag": [
+     38829.86070718572,
+     0.846490388998163
+    ],
+    "fosm": [
+     38828.67847153215,
+     1.2301291463865334
+    ],
+    "mean-map": [
+     38828.67847153215,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.0155,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_006",
+   "traverse": "t2",
+   "n_steps": 99,
+   "n_steps_total": 99,
+   "n_cells": 1066,
+   "n_nodes": 1188,
+   "j_truth": 40012.62446745723,
+   "arms": {
+    "clark": [
+     40022.61328945524,
+     1.06832502239472
+    ],
+    "clark-diag": [
+     40022.66818475721,
+     0.8742747876583067
+    ],
+    "fosm": [
+     40021.69285481255,
+     1.1846555788037827
+    ],
+    "mean-map": [
+     40021.69285481255,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01558,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_007",
+   "traverse": "t2",
+   "n_steps": 93,
+   "n_steps_total": 93,
+   "n_cells": 945,
+   "n_nodes": 1116,
+   "j_truth": 37581.01570125931,
+   "arms": {
+    "clark": [
+     37613.39448217363,
+     0.9935964047935096
+    ],
+    "clark-diag": [
+     37613.42775326261,
+     0.9516063395854683
+    ],
+    "fosm": [
+     37610.53523979297,
+     1.1544313785340208
+    ],
+    "mean-map": [
+     37610.53523979297,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.04656,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_008",
+   "traverse": "t2",
+   "n_steps": 99,
+   "n_steps_total": 99,
+   "n_cells": 1004,
+   "n_nodes": 1188,
+   "j_truth": 39990.44066020486,
+   "arms": {
+    "clark": [
+     40046.32465655113,
+     1.8205981629946986
+    ],
+    "clark-diag": [
+     40046.472361742,
+     1.0746167730366232
+    ],
+    "fosm": [
+     40044.34380463059,
+     1.8939431116024807
+    ],
+    "mean-map": [
+     40044.34380463059,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01618,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_009",
+   "traverse": "t2",
+   "n_steps": 99,
+   "n_steps_total": 99,
+   "n_cells": 1053,
+   "n_nodes": 1188,
+   "j_truth": 39974.959025514145,
+   "arms": {
+    "clark": [
+     39996.90783966723,
+     1.1243803300008606
+    ],
+    "clark-diag": [
+     39996.967224852895,
+     0.8115658186553866
+    ],
+    "fosm": [
+     39996.05580176959,
+     1.1366951448404874
+    ],
+    "mean-map": [
+     39996.05580176959,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01435,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_010",
+   "traverse": "t2",
+   "n_steps": 98,
+   "n_steps_total": 98,
+   "n_cells": 1038,
+   "n_nodes": 1176,
+   "j_truth": 39550.61763916165,
+   "arms": {
+    "clark": [
+     39599.77033378525,
+     1.8329900525093554
+    ],
+    "clark-diag": [
+     39599.866185549276,
+     1.075247320608374
+    ],
+    "fosm": [
+     39598.23807251759,
+     1.865237875041842
+    ],
+    "mean-map": [
+     39598.23807251759,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01627,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_011",
+   "traverse": "t2",
+   "n_steps": 99,
+   "n_steps_total": 99,
+   "n_cells": 1039,
+   "n_nodes": 1188,
+   "j_truth": 39923.32577735929,
+   "arms": {
+    "clark": [
+     39940.97538394818,
+     1.459759503555961
+    ],
+    "clark-diag": [
+     39941.121398169555,
+     0.8070276925291882
+    ],
+    "fosm": [
+     39939.50938058616,
+     1.5396243989335048
+    ],
+    "mean-map": [
+     39939.50938058616,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01591,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_012",
+   "traverse": "t2",
+   "n_steps": 98,
+   "n_steps_total": 98,
+   "n_cells": 1027,
+   "n_nodes": 1176,
+   "j_truth": 39512.86776219592,
+   "arms": {
+    "clark": [
+     39521.344485472764,
+     0.935064781836865
+    ],
+    "clark-diag": [
+     39521.46723746188,
+     0.5156014564169867
+    ],
+    "fosm": [
+     39520.85448480362,
+     0.9530960353473722
+    ],
+    "mean-map": [
+     39520.85448480362,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01381,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  },
+  {
+   "name": "t2/window_013",
+   "traverse": "t2",
+   "n_steps": 98,
+   "n_steps_total": 98,
+   "n_cells": 1042,
+   "n_nodes": 1176,
+   "j_truth": 39518.101929713266,
+   "arms": {
+    "clark": [
+     39554.31206212996,
+     1.328988646683294
+    ],
+    "clark-diag": [
+     39554.38055098312,
+     0.8200621239100861
+    ],
+    "fosm": [
+     39553.260602115995,
+     1.3882556795463918
+    ],
+    "mean-map": [
+     39553.260602115995,
+     null
+    ]
+   },
+   "qc_observed_frac": 1.0,
+   "qc_sigma_med_m": 0.01517,
+   "qc_truth_invalid_frac": 0.0,
+   "qc_flags": [],
+   "retained": 1.0
+  }
+ ]
+}
