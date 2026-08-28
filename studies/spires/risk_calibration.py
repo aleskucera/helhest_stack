@@ -108,6 +108,38 @@ cell), so the model reproduces the published marginal in every cell and only add
   window the retained fraction is recorded, and a window enters the metrics only if at least
   `MIN_RETAINED` of its steps survive.
 
+DESIGN-PHASE RECALIBRATION (prereg amendment A2, 2026-08-28)
+-----------------------------------------------------------
+The first design-site dry run measured clark's sd-ratio at 1.61 and its |z|<=1 coverage at
+0.538: the covariance model above underpredicts the spread of the real errors. A2 authorizes
+ONE recalibration pass with at most two scalars, fitted on UNFLAGGED design windows only and
+applied identically to every arm that predicts a variance. The two scalars are
+
+    Var'[J] = RECAL_VAR_SCALE * Var[J] + (RECAL_OFFSET_SD * n_steps)^2
+
+  * RECAL_VAR_SCALE is the global variance scale A2 names first: everything the model does get
+    right about the SHAPE of the covariance is kept, only its overall size is refitted.
+  * RECAL_OFFSET_SD is the bias-variance term, and its `n_steps` scaling is derived, not
+    chosen. A uniform vertical offset `delta` of the whole window shifts every contact height
+    by `delta`, so it shifts the cost by `delta * sum(c_eff)`; the settle weights sum to W_Z = 1
+    per step and each node's blend weights sum to 1, so `sum(c_eff) = n_steps` exactly. An
+    unmodelled window-common vertical offset of sd `tau` therefore contributes exactly
+    `(tau * n_steps)^2` of cost variance. `tau` is in METRES and is directly comparable with
+    the audit's measured -0.11 m flat-ground offset.
+
+This is a recalibration of the BELIEF, not of one estimator, and the algebra says so: the same
+two scalars applied at the cell level, `C' = RECAL_VAR_SCALE * C + RECAL_OFFSET_SD^2 * 11^T`,
+give exactly the formula above for EVERY arm, because every arm's contraction weights satisfy
+`sum_k lam[n,k] = 1` (a common shift of all candidates shifts the max by the same amount, so
+the fold's weights are a partition of unity -- true for clark's fold trace, for clark-diag's,
+and trivially for fosm's one-hot). The recalibration therefore cannot favour one arm: it adds
+the same absolute variance `(tau n)^2` to all of them and scales what each already predicted.
+
+It is applied to the predicted MOMENT and not fed back into the fold's own alpha, deliberately:
+E[J] stays exactly as the uncalibrated fold produced it, and E0 -- which isolates the fold's
+moment-matching error against Monte Carlo from the same belief -- keeps measuring the thing it
+was defined to measure. See `fit_recalibration` for the fit and its counterfactuals.
+
 ARMS (prereg section E1; identical inputs, identical element, identical cost)
   clark       full covariance through the fold, node weights from the fold trace
   clark-diag  same fold with a DIAGONAL Sigma (ablation: what the off-diagonal buys)
@@ -155,6 +187,23 @@ SIGMA_FLOOR = 1.0e-4  # [m] a cell with sigma below this is treated as unusable 
 N_MC_DEFAULT = 20_000  # prereg E0: >= 20,000 draws
 MC_CHUNK = 250
 MC_SEED = 20260828
+
+# --- prereg amendment A2: the two design-phase recalibration scalars -------------------------
+# Fitted by maximum likelihood on the 13 UNFLAGGED DISTINCT design windows (the -unclamped
+# duplicates and the overhang-flagged and low-retention windows all excluded), on the `clark`
+# arm -- the arm that consumes the belief faithfully, so that the fit is a property of the
+# belief and the baselines inherit it. Reproduce with `risk_calibration.py fit`, which refits
+# from scratch and asserts these constants.
+# The ML answer uses only ONE of the two authorized scalars: the offset term's maximum-
+# likelihood value is exactly 0 (it is bounded below by 0 and the unconstrained optimum is
+# negative -- the model's own rank-1 common mode already grows with n_steps faster than the
+# residuals do). The ridge is nearly flat: forcing offset_sd to the audit's 0.11 m and
+# refitting the scale gives var_scale 1.962 and a mean NLL of 5.2415 against 5.2247, a
+# difference of 0.017 nats. Both are recorded in recalibration_fit.json; the fitted point is
+# used, because picking 0.11 m by hand would be choosing a parameter instead of fitting it.
+RECAL_VAR_SCALE = 2.396213379859416  # dimensionless; multiplies every arm's predicted Var[J]
+RECAL_OFFSET_SD = 0.0  # [m]; sd of an unmodelled window-common vertical offset
+RECAL_FIT_ARM = "clark"
 
 
 class HeldOutViolation(RuntimeError):
@@ -675,6 +724,44 @@ def _load_all_cases(site: str, root: Path, limit: int | None = None):
     return cases, skipped
 
 
+def recalibrate_sd(
+    sd: float, n_steps: int,
+    var_scale: float = RECAL_VAR_SCALE, offset_sd: float = RECAL_OFFSET_SD,
+) -> float:
+    """A2's two-scalar recalibration of a predicted sd. Identical for every arm."""
+    return math.sqrt(var_scale * sd * sd + (offset_sd * n_steps) ** 2)
+
+
+def _mean_nll(resid: np.ndarray, sd: np.ndarray, n: np.ndarray, k: np.ndarray, t: np.ndarray):
+    """Mean Gaussian NLL of the residuals under Var' = k Var + (t n)^2, broadcast over (k, t)."""
+    v = k[..., None] * sd**2 + (t[..., None] * n) ** 2
+    return (0.5 * np.log(2.0 * np.pi * v) + 0.5 * resid**2 / v).mean(axis=-1)
+
+
+def _fit_scalars(resid: np.ndarray, sd: np.ndarray, n: np.ndarray) -> tuple[float, float, float]:
+    """(var_scale, offset_sd, mean NLL) minimising the mean Gaussian NLL.
+
+    A dense log-grid followed by two local refinements. A grid rather than an optimiser because
+    the objective is two-dimensional, cheap, and mildly non-convex where the two terms trade
+    off; a grid is deterministic, has no dependency, and its resolution is auditable. The final
+    refinement step is 1e-7 relative, well below the precision at which these two numbers are
+    recorded in the freeze amendment.
+    """
+    k_lo, k_hi, t_lo, t_hi = 1e-3, 1e3, 1e-6, 1e1
+    ks = np.concatenate([[1e-12], np.geomspace(k_lo, k_hi, 900)])
+    ts = np.concatenate([[0.0], np.geomspace(t_lo, t_hi, 900)])
+    for _ in range(4):
+        K, T = np.meshgrid(ks, ts, indexing="ij")
+        nll = _mean_nll(resid, sd, n, K.ravel(), T.ravel()).reshape(K.shape)
+        i, j = np.unravel_index(np.argmin(nll), nll.shape)
+        k0, t0 = ks[i], ts[j]
+        dk = max(ks[min(i + 1, len(ks) - 1)] - ks[max(i - 1, 0)], k0 * 1e-9) / 2
+        dt = max(ts[min(j + 1, len(ts) - 1)] - ts[max(j - 1, 0)], max(t0, 1e-9) * 1e-9) / 2
+        ks = np.linspace(max(k0 - dk, 1e-12), k0 + dk, 601)
+        ts = np.linspace(max(t0 - dt, 0.0), t0 + dt, 601)
+    return float(k0), float(t0), float(nll[i, j])
+
+
 def _meta(c: WindowCase) -> dict:
     return {
         "window": c.name, "sequence": c.seq, "distinct": c.distinct,
@@ -763,9 +850,10 @@ def run_e0(site: str, root: Path, n_draws: int, out_dir: Path, limit: int | None
 ARMS_SCORED = ("clark", "clark-diag", "fosm")
 
 
-def run_e1(site: str, root: Path, out_dir: Path, limit: int | None = None) -> dict:
-    t_start = time.time()
-    cases, skipped = _load_all_cases(site, root, limit)
+def _score_rows(cases: list[WindowCase]) -> list[dict]:
+    """One metrics row per window: every arm's (E, sd), and both the raw and the A2-recalibrated
+    z / NLL. The recalibration is applied to EVERY arm that predicts a variance, with the same
+    two scalars, so the `_recal` columns differ from the raw ones by one fixed transform."""
     rows = []
     for c in cases:
         arms = case_arms(c)
@@ -773,58 +861,161 @@ def run_e1(site: str, root: Path, out_dir: Path, limit: int | None = None) -> di
         row["J_tls"] = c.j_tls
         for arm in ARMS_SCORED:
             e, sd = arms[arm]
-            z = (c.j_tls - e) / sd
-            row[arm] = {"E": e, "sd": sd, "z": z,
-                        "nll": 0.5 * math.log(2.0 * math.pi * sd * sd) + 0.5 * z * z}
+            sd_r = recalibrate_sd(sd, c.n_steps)
+            z, z_r = (c.j_tls - e) / sd, (c.j_tls - e) / sd_r
+            row[arm] = {
+                "E": e, "residual": c.j_tls - e,
+                "sd": sd, "z": z,
+                "nll": 0.5 * math.log(2.0 * math.pi * sd * sd) + 0.5 * z * z,
+                "sd_recal": sd_r, "z_recal": z_r,
+                "nll_recal": 0.5 * math.log(2.0 * math.pi * sd_r * sd_r) + 0.5 * z_r * z_r,
+            }
         e_mm, _ = arms["mean-map"]
         row["mean-map"] = {"E": e_mm, "sd": None, "err": c.j_tls - e_mm}
         rows.append(row)
-        print(f"  {c.name}{' [overhang]' if c.overhang else ''}: J_tls {c.j_tls:.2f}  "
-              f"clark z {row['clark']['z']:+.2f}  diag z {row['clark-diag']['z']:+.2f}  "
-              f"fosm z {row['fosm']['z']:+.2f}", flush=True)
+    return rows
 
-    def summary(pick: list[dict]) -> dict:
-        if not pick:
-            return {"n": 0}
-        agg = {"n": len(pick)}
-        for arm in ARMS_SCORED:
-            z = np.array([r[arm]["z"] for r in pick])
-            nll = np.array([r[arm]["nll"] for r in pick])
-            agg[arm] = {
-                "mean_nll": float(nll.mean()),
-                "cov1": float(np.mean(np.abs(z) <= 1)),
-                "cov2": float(np.mean(np.abs(z) <= 2)),
-                "sd_ratio": float(np.std(z, ddof=1)) if len(z) > 1 else float("nan"),
-                "mean_z": float(z.mean()), "median_z": float(np.median(z)),
-                "median_sd": float(np.median([r[arm]["sd"] for r in pick])),
-            }
-        # paired NLL differences, the E1-iii statistic (design-site dry run only)
-        for a, b in (("clark", "fosm"), ("clark", "clark-diag")):
-            d = np.array([r[a]["nll"] - r[b]["nll"] for r in pick])
-            agg[f"nll_diff_{a}_minus_{b}"] = {
-                "mean": float(d.mean()), "median": float(np.median(d)),
-                "n_negative": int((d < 0).sum()),
-            }
-        err = np.array([r["mean-map"]["err"] for r in pick])
-        agg["mean-map"] = {"median_abs_err": float(np.median(np.abs(err))),
-                           "mean_err": float(err.mean())}
-        return agg
+
+def _summary(pick: list[dict], suffix: str = "") -> dict:
+    """Metrics over a group of window rows. `suffix` selects the raw ("") or recalibrated
+    ("_recal") columns; the arms, the criteria and the definitions are identical for both."""
+    if not pick:
+        return {"n": 0}
+    zk, nk = "z" + suffix, "nll" + suffix
+    agg = {"n": len(pick)}
+    for arm in ARMS_SCORED:
+        z = np.array([r[arm][zk] for r in pick])
+        nll = np.array([r[arm][nk] for r in pick])
+        agg[arm] = {
+            "mean_nll": float(nll.mean()),
+            "cov1": float(np.mean(np.abs(z) <= 1)),
+            "cov2": float(np.mean(np.abs(z) <= 2)),
+            "sd_ratio": float(np.std(z, ddof=1)) if len(z) > 1 else float("nan"),
+            "rms_z": float(np.sqrt((z**2).mean())),
+            "mean_z": float(z.mean()), "median_z": float(np.median(z)),
+            "median_sd": float(np.median([r[arm]["sd" + suffix] for r in pick])),
+        }
+    for a, b in (("clark", "fosm"), ("clark", "clark-diag")):
+        d = np.array([r[a][nk] - r[b][nk] for r in pick])
+        agg[f"nll_diff_{a}_minus_{b}"] = {
+            "mean": float(d.mean()), "median": float(np.median(d)),
+            "n_negative": int((d < 0).sum()),
+        }
+    err = np.array([r["mean-map"]["err"] for r in pick])
+    agg["mean-map"] = {"median_abs_err": float(np.median(np.abs(err))),
+                       "mean_err": float(err.mean())}
+    return agg
+
+
+def fit_group(rows: list[dict]) -> list[dict]:
+    """A2's fitting set: distinct tracks, unflagged, already past the retention filter."""
+    return [r for r in rows if r["distinct"] and not r["overhang_flag"]]
+
+
+def fit_recalibration(site: str, root: Path, out_dir: Path, limit: int | None = None) -> dict:
+    """Fit A2's two scalars and write `recalibration_fit.json`.
+
+    Fitted on the `clark` arm because the recalibration is a correction to the BELIEF's
+    covariance, and clark is the arm that consumes that covariance faithfully; the baselines
+    are alternative estimators of the same belief and inherit the same correction. To show that
+    this choice does not quietly buy clark an advantage, the fit is ALSO run separately on each
+    other arm and the counterfactuals are recorded: how much each arm's own post-fit NLL would
+    improve if the scalars had been fitted on it instead.
+    """
+    cases, skipped = _load_all_cases(site, root, limit)
+    rows = _score_rows(cases)
+    fit_rows = fit_group(rows)
+    n = np.array([r["n_steps"] for r in fit_rows], float)
+
+    per_arm = {}
+    for arm in ARMS_SCORED:
+        resid = np.array([r[arm]["residual"] for r in fit_rows])
+        sd = np.array([r[arm]["sd"] for r in fit_rows])
+        k, t, nll = _fit_scalars(resid, sd, n)
+        per_arm[arm] = {"var_scale": k, "offset_sd_m": t, "mean_nll_at_own_optimum": nll}
+
+    k, t = per_arm[RECAL_FIT_ARM]["var_scale"], per_arm[RECAL_FIT_ARM]["offset_sd_m"]
+    for arm in ARMS_SCORED:
+        resid = np.array([r[arm]["residual"] for r in fit_rows])
+        sd = np.array([r[arm]["sd"] for r in fit_rows])
+        nll_at_shared = float(
+            _mean_nll(resid, sd, n, np.array([k]), np.array([t]))[0]
+        )
+        per_arm[arm]["mean_nll_at_shared_optimum"] = nll_at_shared
+        per_arm[arm]["nll_cost_of_sharing"] = (
+            nll_at_shared - per_arm[arm]["mean_nll_at_own_optimum"]
+        )
+
+    # the audit-anchored alternative, refit with offset_sd PINNED to the measured -0.11 m
+    resid_c = np.array([r[RECAL_FIT_ARM]["residual"] for r in fit_rows])
+    sd_c = np.array([r[RECAL_FIT_ARM]["sd"] for r in fit_rows])
+    ks = np.geomspace(1e-4, 1e3, 40001)
+    nll_pin = _mean_nll(resid_c, sd_c, n, ks, np.full(len(ks), 0.11))
+    i_pin = int(np.argmin(nll_pin))
+    pinned = {"offset_sd_m": 0.11, "var_scale": float(ks[i_pin]),
+              "mean_nll": float(nll_pin[i_pin])}
+    pinned["nll_penalty_vs_fitted"] = (
+        pinned["mean_nll"] - per_arm[RECAL_FIT_ARM]["mean_nll_at_own_optimum"]
+    )
+
+    res = {
+        "amendment": "A2 (2026-08-28), design-phase covariance recalibration",
+        "model": "Var'[J] = var_scale * Var[J] + (offset_sd * n_steps)^2",
+        "n_parameters": 2,
+        "objective": "mean Gaussian NLL of the per-window cost residual",
+        "fit_arm": RECAL_FIT_ARM,
+        "fit_set": {
+            "rule": "distinct tracks, overhang-unflagged, retention >= MIN_RETAINED",
+            "n_windows": len(fit_rows),
+            "windows": [r["window"] for r in fit_rows],
+        },
+        "fitted": {"var_scale": k, "offset_sd_m": t,
+                   "sd_scale": math.sqrt(k), "mean_nll": per_arm[RECAL_FIT_ARM]["mean_nll_at_own_optimum"]},
+        "frozen_in_code": {"RECAL_VAR_SCALE": RECAL_VAR_SCALE, "RECAL_OFFSET_SD": RECAL_OFFSET_SD},
+        "per_arm_counterfactual": per_arm,
+        "alternative_offset_pinned_to_audit_bias": pinned,
+        "held_out_touched": False,
+        "skipped": skipped,
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "recalibration_fit.json").write_text(json.dumps(res, indent=2))
+    return res
+
+
+def run_e1(site: str, root: Path, out_dir: Path, limit: int | None = None) -> dict:
+    t_start = time.time()
+    cases, skipped = _load_all_cases(site, root, limit)
+    rows = _score_rows(cases)
+    for r in rows:
+        print(f"  {r['window']}{' [overhang]' if r['overhang_flag'] else ''}: "
+              f"J_tls {r['J_tls']:.2f}  clark z {r['clark']['z']:+.2f} -> "
+              f"{r['clark']['z_recal']:+.2f}  fosm z {r['fosm']['z']:+.2f} -> "
+              f"{r['fosm']['z_recal']:+.2f}", flush=True)
 
     groups = _groups(rows)
     seqs = sorted({r["sequence"] for r in rows if r["distinct"]})
     res = {
         "experiment": "E1 DESIGN-SITE DRY RUN -- NOT the pre-registered held-out test",
-        "prereg": "clark_paper/PREREG_risk_calibration.md frozen 2026-08-28 + amendment A1",
+        "prereg": "clark_paper/PREREG_risk_calibration.md frozen 2026-08-28 + amendments A1, A2",
         "site_filter": site, "held_out_touched": False,
         "truth_raster": "tls_max_raster.npz", "qc_raster": "tls_mean_raster.npz",
         "overhang_threshold_m": OVERHANG_M,
         "resample_m": RESAMPLE_M,
         "cost_weights": {"wz": 1.0, "wpitch": 0.7, "wroll": 0.5},
+        "recalibration": {
+            "amendment": "A2", "model": "Var' = var_scale * Var + (offset_sd * n_steps)^2",
+            "var_scale": RECAL_VAR_SCALE, "offset_sd_m": RECAL_OFFSET_SD,
+            "fit_arm": RECAL_FIT_ARM,
+            "note": "IN-SAMPLE on this design site: these windows are the fitting set.",
+        },
         "n_windows_computed": len(rows),
-        "primary": summary(groups["distinct_unflagged"]),
-        "groups": {k: summary(v) for k, v in groups.items()},
+        "primary": _summary(groups["distinct_unflagged"], "_recal"),
+        "primary_pre_recalibration": _summary(groups["distinct_unflagged"]),
+        "groups": {k_: _summary(v, "_recal") for k_, v in groups.items()},
+        "groups_pre_recalibration": {k_: _summary(v) for k_, v in groups.items()},
         "by_sequence_distinct_unflagged": {
-            s_: summary([r for r in groups["distinct_unflagged"] if r["sequence"] == s_])
+            s_: _summary([r for r in groups["distinct_unflagged"] if r["sequence"] == s_],
+                         "_recal")
             for s_ in seqs
         },
         "skipped": skipped,
@@ -901,7 +1092,7 @@ def design_set_audit(root: Path = OUT_ROOT) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("experiment", choices=["e0", "e1", "both", "audit"])
+    ap.add_argument("experiment", choices=["e0", "e1", "both", "audit", "fit"])
     ap.add_argument("--site", default=DESIGN_SITE, help="site glob (DESIGN site only)")
     ap.add_argument("--root", default=str(OUT_ROOT))
     ap.add_argument("--draws", type=int, default=N_MC_DEFAULT)
@@ -913,6 +1104,16 @@ def main() -> None:
     args = ap.parse_args()
     out_dir = Path(args.out)
     root = Path(args.root)
+    if args.experiment == "fit":
+        f = fit_recalibration(args.site, root, out_dir, args.limit)
+        print(json.dumps({k: v for k, v in f.items() if k != "skipped"}, indent=2))
+        k, t = f["fitted"]["var_scale"], f["fitted"]["offset_sd_m"]
+        if not (abs(k - RECAL_VAR_SCALE) < 1e-9 and abs(t - RECAL_OFFSET_SD) < 1e-12):
+            print(f"\nWARNING: frozen constants differ from the fit. Set\n"
+                  f"  RECAL_VAR_SCALE = {k!r}\n  RECAL_OFFSET_SD = {t!r}")
+        else:
+            print("\nfrozen constants reproduce the fit")
+        return
     if args.experiment == "audit":
         a = design_set_audit(root)
         out_dir.mkdir(parents=True, exist_ok=True)

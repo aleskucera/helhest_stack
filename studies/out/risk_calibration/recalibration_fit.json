@@ -1,0 +1,176 @@
+{
+  "amendment": "A2 (2026-08-28), design-phase covariance recalibration",
+  "model": "Var'[J] = var_scale * Var[J] + (offset_sd * n_steps)^2",
+  "n_parameters": 2,
+  "objective": "mean Gaussian NLL of the per-window cost residual",
+  "fit_arm": "clark",
+  "fit_set": {
+    "rule": "distinct tracks, overhang-unflagged, retention >= MIN_RETAINED",
+    "n_windows": 13,
+    "windows": [
+      "keble-college-02-default/window_000",
+      "keble-college-02-default/window_001",
+      "keble-college-02-default/window_003",
+      "keble-college-02-default/window_004",
+      "keble-college-02-default/window_005",
+      "keble-college-02-default/window_012",
+      "keble-college-02-default/window_014",
+      "keble-college-03-default/window_000",
+      "keble-college-03-default/window_007",
+      "keble-college-03-default/window_009",
+      "keble-college-03-default/window_010",
+      "keble-college-03-default/window_012",
+      "keble-college-03-default/window_013"
+    ]
+  },
+  "fitted": {
+    "var_scale": 2.396213379859416,
+    "offset_sd_m": 0.0,
+    "sd_scale": 1.5479707296520229,
+    "mean_nll": 5.224654269363584
+  },
+  "frozen_in_code": {
+    "RECAL_VAR_SCALE": 2.396213379859416,
+    "RECAL_OFFSET_SD": 0.0
+  },
+  "per_arm_counterfactual": {
+    "clark": {
+      "var_scale": 2.396213379859416,
+      "offset_sd_m": 0.0,
+      "mean_nll_at_own_optimum": 5.224654269363584,
+      "mean_nll_at_shared_optimum": 5.224654269363584,
+      "nll_cost_of_sharing": 0.0
+    },
+    "clark-diag": {
+      "var_scale": 162.37471270306187,
+      "offset_sd_m": 0.11416879260580227,
+      "mean_nll_at_own_optimum": 5.522470231622261,
+      "mean_nll_at_shared_optimum": 45.44857863874485,
+      "nll_cost_of_sharing": 39.926108407122584
+    },
+    "fosm": {
+      "var_scale": 0.4601710705323965,
+      "offset_sd_m": 0.2146182254905249,
+      "mean_nll_at_own_optimum": 5.24272857395981,
+      "mean_nll_at_shared_optimum": 5.257907603232912,
+      "nll_cost_of_sharing": 0.015179029273101996
+    }
+  },
+  "alternative_offset_pinned_to_audit_bias": {
+    "offset_sd_m": 0.11,
+    "var_scale": 1.9614398748958035,
+    "mean_nll": 5.241481867534845,
+    "nll_penalty_vs_fitted": 0.016827598171261116
+  },
+  "held_out_touched": false,
+  "skipped": [
+    {
+      "window": "keble-college-02-default/window_002",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.010250091552734375,
+      "overhang_qc_cells": 642,
+      "track_len_m": 22.6,
+      "n_steps": 21,
+      "n_steps_total": 226,
+      "retained": 0.09292035398230089,
+      "n_cells": 253,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.517576277256012,
+      "median_raw_sd_on_candidates_m": 0.22153674066066742,
+      "median_meas_sd_on_candidates_m": 0.0037000731099396944,
+      "reason": "retained 0.093 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "keble-college-02-default/window_006",
+      "sequence": "keble-college-02-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.011800289154052734,
+      "overhang_qc_cells": 723,
+      "track_len_m": 24.0,
+      "n_steps": 11,
+      "n_steps_total": 240,
+      "retained": 0.04583333333333333,
+      "n_cells": 310,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.14899584650993347,
+      "median_raw_sd_on_candidates_m": 0.12997058779001236,
+      "median_meas_sd_on_candidates_m": 0.003006818355061114,
+      "reason": "retained 0.046 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "keble-college-02-unclamped/window_002",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.010250091552734375,
+      "overhang_qc_cells": 642,
+      "track_len_m": 22.6,
+      "n_steps": 21,
+      "n_steps_total": 226,
+      "retained": 0.09292035398230089,
+      "n_cells": 253,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.517576277256012,
+      "median_raw_sd_on_candidates_m": 0.22153674066066742,
+      "median_meas_sd_on_candidates_m": 0.0037000731099396944,
+      "reason": "retained 0.093 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "keble-college-02-unclamped/window_006",
+      "sequence": "keble-college-02-unclamped",
+      "distinct": false,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.011800289154052734,
+      "overhang_qc_cells": 723,
+      "track_len_m": 24.0,
+      "n_steps": 11,
+      "n_steps_total": 240,
+      "retained": 0.04583333333333333,
+      "n_cells": 310,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.14899584650993347,
+      "median_raw_sd_on_candidates_m": 0.12997058779001236,
+      "median_meas_sd_on_candidates_m": 0.003006818355061114,
+      "reason": "retained 0.046 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "keble-college-03-default/window_008",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.04029989242553711,
+      "overhang_qc_cells": 842,
+      "track_len_m": 25.5,
+      "n_steps": 126,
+      "n_steps_total": 255,
+      "retained": 0.49411764705882355,
+      "n_cells": 1245,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.12991972267627716,
+      "median_raw_sd_on_candidates_m": 0.0678224191069603,
+      "median_meas_sd_on_candidates_m": 0.002734139561653137,
+      "reason": "retained 0.494 < MIN_RETAINED 0.5"
+    },
+    {
+      "window": "keble-college-03-default/window_011",
+      "sequence": "keble-college-03-default",
+      "distinct": true,
+      "overhang_flag": false,
+      "overhang_gap_m": 0.011875152587890625,
+      "overhang_qc_cells": 719,
+      "track_len_m": 23.5,
+      "n_steps": 37,
+      "n_steps_total": 235,
+      "retained": 0.1574468085106383,
+      "n_cells": 413,
+      "frac_cells_count0": 0.0,
+      "median_sigma_on_candidates_m": 0.3268080949783325,
+      "median_raw_sd_on_candidates_m": 0.26003119349479675,
+      "median_meas_sd_on_candidates_m": 0.00282470416277647,
+      "reason": "retained 0.157 < MIN_RETAINED 0.5"
+    }
+  ]
+}

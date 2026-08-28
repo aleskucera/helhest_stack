@@ -8,7 +8,7 @@ It must be run there because it imports `studies.bench.clark` (the CPU reference
 modules under test are loaded from the spires worktree by file path, so the two `studies`
 packages never collide.
 
-Three checks, matching the three the pipeline is required to pass:
+Five checks:
 
   (a) FOLD PARITY. The universe-free fold in `risk_calibration.clark_fold` reproduces
       `clark.clark_build`'s mean and variance, its covariance-to-universe vector, and
@@ -16,12 +16,17 @@ Three checks, matching the three the pipeline is required to pass:
   (b) VENDOR PARITY. Every table `vehicle.py` vendors is bit-identical to the deployed one.
   (c) BELIEF IDENTITY. E0's Monte Carlo and the clark arm read the same bytes: the belief
       arrays are hashed before and after each consumer and the digests must match.
+  (e) RECALIBRATION NEUTRALITY. Amendment A2's two scalars act on every arm identically
+      (each arm's contraction weights are a partition of unity) and leave E0's reported
+      relative errors algebraically unchanged.
+  (d) HELD-OUT LOCK. Static proof that no held-out path can be loaded.
 """
 
 from __future__ import annotations
 
 import hashlib
 import importlib
+import json
 import sys
 import types
 from pathlib import Path
@@ -29,6 +34,7 @@ from pathlib import Path
 import numpy as np
 
 SPIRES = Path("/home/kuceral4/projects/helhest_stack-spires/studies/spires")
+OUT = Path("/home/kuceral4/projects/helhest_stack-spires/studies/out/risk_calibration")
 STUDY = Path("/home/kuceral4/projects/helhest_stack-study")  # the reference worktree
 sys.path.insert(0, str(STUDY))  # `studies.bench.clark`, `studies.adjoint.harness`, `helhest`
 
@@ -190,6 +196,49 @@ def check_belief_identity() -> None:
           f"MC E {e_mc:.4f} sd {sd_mc:.4f} over {n} draws)")
 
 
+def check_recalibration() -> None:
+    """(e) A2 recalibration: arm-neutral, and E0 relative errors invariant under it."""
+    RC = _load("risk_calibration")
+    rng = np.random.default_rng(11)
+
+    # Partition of unity: a common shift of every candidate shifts the max by the same
+    # amount, so each arm's contraction weights sum to 1 per node. That is what makes the
+    # cell-level statement C' = k C + tau^2 * 11^T reduce to the SAME closed form
+    # Var' = k Var + (tau n_steps)^2 for every arm -- the recalibration cannot favour one.
+    n, k = 40, 7
+    A = rng.normal(size=(20, 25))
+    Sig = A @ A.T / 25 * 0.02 + np.diag(rng.uniform(1e-5, 1e-3, 20))
+    idx = rng.integers(0, 20, size=(n, k))
+    means = rng.normal(-6.0, 0.3, size=(n, k))
+    means[:, -1] = means[:, 0] - 1000.0  # a sentinel-capped pad candidate
+    cov_self = Sig[idx[:, :, None], idx[:, None, :]]
+    _m, _v, lam = RC.clark_fold(means, cov_self)
+    cov_d = np.zeros_like(cov_self)
+    kk = np.arange(k)
+    cov_d[:, kk, kk] = np.diagonal(Sig)[idx]
+    _m2, _v2, lam_d = RC.clark_fold(means, cov_d)
+    print(f"(e) sum(lam) - 1: clark max {np.abs(lam.sum(1) - 1).max():.2e}, "
+          f"clark-diag max {np.abs(lam_d.sum(1) - 1).max():.2e}, fosm 0 by construction")
+    assert np.abs(lam.sum(1) - 1).max() < 1e-12
+    assert np.abs(lam_d.sum(1) - 1).max() < 1e-12
+
+    # E0 invariance: with offset_sd == 0 the recalibration is a pure common scale, so both of
+    # E0's reported relative errors are algebraically unchanged by it.
+    assert RC.RECAL_OFFSET_SD == 0.0
+    e0 = json.loads((OUT / "e0_design.json").read_text())
+    worst = 0.0
+    for w in e0["windows"]:
+        a = RC.recalibrate_sd(w["sd_clark"], w["n_steps"])
+        b = RC.recalibrate_sd(w["sd_mc"], w["n_steps"])
+        worst = max(worst, abs(abs(a - b) / b - w["rel_err_sd"]))
+    n_e0 = len(e0["windows"])
+    print(f"(e) E0 rel_err_sd under the recalibration: max change {worst:.2e} "
+          f"over {n_e0} windows")
+    assert worst < 1e-12
+    print("(e) PASS: recalibration is a partition-of-unity rescale, identical for every arm, "
+          "and leaves E0 reported errors unchanged")
+
+
 def check_no_held_out_path() -> None:
     """Static proof: no held-out path can be loaded."""
     src = (SPIRES / "risk_calibration.py").read_text()
@@ -207,5 +256,7 @@ if __name__ == "__main__":
     check_vendor_parity()
     print()
     check_belief_identity()
+    print()
+    check_recalibration()
     print()
     check_no_held_out_path()
