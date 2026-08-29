@@ -1,0 +1,101 @@
+{
+ "status": "POST-HOC analysis of a pre-registered FAILURE. E2-ii failed as pre-registered and that verdict stands; see module docstring for the warrant and its limits.",
+ "discriminator": {
+  "quantity": "per-traverse block-CV registration RMSE (register.py, computed before scoring, outcome-independent)",
+  "excluded_traverse_value_m": 3.3185,
+  "other_traverses_median_m": 0.0463,
+  "other_traverses_max_m": 0.3944,
+  "source": "FINAL_REPORT.md registration table",
+  "gate_insensitivity": "any threshold in (0.394, 3.319) m excludes exactly this traverse"
+ },
+ "conditions": {
+  "foresight": {
+   "k_frozen": 282.99667205586184,
+   "excluded_traverse": "2023-07-20_19-12-27",
+   "n_windows_excluded": 11,
+   "as_scored": {
+    "n_windows": 332,
+    "sd_ratio": 2.4785720426180693,
+    "coverage_1sigma": 0.713855421686747,
+    "mean_z": -0.5239542345726331
+   },
+   "excluding_defective_traverse_POSTHOC": {
+    "n_windows": 321,
+    "sd_ratio": 1.0230748036208328,
+    "coverage_1sigma": 0.735202492211838,
+    "mean_z": -0.4196234681080403
+   },
+   "criterion_band_sd_ratio": [
+    0.7,
+    1.4
+   ],
+   "belief_referee_as_scored": {
+    "n_windows": 332,
+    "E2-iii_a_median_rel_err_E": 3.148604710502136e-07,
+    "E2-iii_a_clark_below_fosm_E": 331,
+    "E2-iii_b_sd_ratio_to_mc": 0.9341397875929586,
+    "E2-v_clark_below_mc32_both_moments": 193,
+    "clark_cvar_abs_err_median": 0.03801389768523222
+   },
+   "belief_referee_excluding_POSTHOC": {
+    "n_windows": 321,
+    "E2-iii_a_median_rel_err_E": 3.0901509611092897e-07,
+    "E2-iii_a_clark_below_fosm_E": 320,
+    "E2-iii_b_sd_ratio_to_mc": 0.9322643221839092,
+    "E2-v_clark_below_mc32_both_moments": 184,
+    "clark_cvar_abs_err_median": 0.037998116180460784
+   },
+   "residual_vs_bias_x_steps_regression": {
+    "n": 332,
+    "slope": -0.9665437343661992,
+    "intercept": -3.4657013528261835,
+    "r2": 0.836871056023674,
+    "predicted_slope": -1.0
+   }
+  },
+  "hindsight": {
+   "k_frozen": 275.0293778920172,
+   "excluded_traverse": "2023-07-20_19-12-27",
+   "n_windows_excluded": 11,
+   "as_scored": {
+    "n_windows": 334,
+    "sd_ratio": 3.2470116042912296,
+    "coverage_1sigma": 0.6706586826347305,
+    "mean_z": -0.6582668567608829
+   },
+   "excluding_defective_traverse_POSTHOC": {
+    "n_windows": 323,
+    "sd_ratio": 1.1845502885268293,
+    "coverage_1sigma": 0.6904024767801857,
+    "mean_z": -0.3775795567825359
+   },
+   "criterion_band_sd_ratio": [
+    0.7,
+    1.4
+   ],
+   "belief_referee_as_scored": {
+    "n_windows": 334,
+    "E2-iii_a_median_rel_err_E": 3.2123584119804137e-07,
+    "E2-iii_a_clark_below_fosm_E": 334,
+    "E2-iii_b_sd_ratio_to_mc": 0.9564009949208846,
+    "E2-v_clark_below_mc32_both_moments": 216,
+    "clark_cvar_abs_err_median": 0.028038932031449804
+   },
+   "belief_referee_excluding_POSTHOC": {
+    "n_windows": 323,
+    "E2-iii_a_median_rel_err_E": 3.2085705331479787e-07,
+    "E2-iii_a_clark_below_fosm_E": 323,
+    "E2-iii_b_sd_ratio_to_mc": 0.9560716039813978,
+    "E2-v_clark_below_mc32_both_moments": 210,
+    "clark_cvar_abs_err_median": 0.02767994067107793
+   },
+   "residual_vs_bias_x_steps_regression": {
+    "n": 334,
+    "slope": -0.9476256442997734,
+    "intercept": -3.6358166130111966,
+    "r2": 0.7659466652216829,
+    "predicted_slope": -1.0
+   }
+  }
+ }
+}
