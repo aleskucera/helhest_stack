@@ -1,0 +1,3800 @@
+{
+  "registration": {
+    "t1": {
+      "traverse": "2023-07-23_13-05-11",
+      "key": "t1",
+      "n_fix": 3344,
+      "n_used": 3344,
+      "corridor_px": [
+        3444,
+        3176
+      ],
+      "corridor_MB": 43.8,
+      "voidfill_frac_corridor": 0.00078,
+      "dsm_nan_frac_corridor": 0.0,
+      "wheel_samples_hit_by_fill": 0.00074,
+      "audit_like_antenna_minus_dsm_median_m": -0.1795,
+      "audit_like_std_m": 0.2869,
+      "D_raw_median_m": -0.5545,
+      "D_raw_std_m": 0.2792,
+      "D_raw_p5_p95_m": [
+        -1.0201,
+        -0.2324
+      ],
+      "models": {
+        "constant": {
+          "n_par": 1,
+          "insample_rmse_m": 0.2792,
+          "insample_sd_m": 0.2792,
+          "blockcv_rmse_m": 0.3453,
+          "const_term_m": -0.6295
+        },
+        "plane": {
+          "n_par": 3,
+          "insample_rmse_m": 0.0449,
+          "insample_sd_m": 0.0449,
+          "blockcv_rmse_m": 0.0601,
+          "const_term_m": -0.6295,
+          "tilt_mm_per_m": [
+            38.18,
+            2.24
+          ]
+        },
+        "quadratic": {
+          "n_par": 6,
+          "insample_rmse_m": 0.0387,
+          "insample_sd_m": 0.0387,
+          "blockcv_rmse_m": 0.1212,
+          "const_term_m": -0.627,
+          "tilt_mm_per_m": [
+            33.88,
+            -0.52
+          ]
+        }
+      },
+      "selection_rule": "Fit each candidate in {plane, quadratic} by least squares on the six-wheel footprint statistic D(x, y); score each by leave-one-contiguous-block-out cross-validation with N_BLOCKS = 5 contiguous along-track blocks of equal fix count, taken in RTK time order with no shuffling; select the candidate with the minimum CV RMSE. 'constant' is fitted and reported as a reference row but is not a candidate.",
+      "selection_candidates": [
+        "plane",
+        "quadratic"
+      ],
+      "chosen_model": "plane",
+      "chosen_blockcv_rmse_m": 0.0601,
+      "plane_only_alternative": {
+        "sd_m": 0.0449,
+        "blockcv_rmse_m": 0.0601,
+        "penalty_vs_selected_blockcv_m": 0.0
+      },
+      "residual_after_registration": {
+        "sd_m": 0.0449,
+        "mad_m": 0.05,
+        "p5_p95_m": [
+          -0.0737,
+          0.0734
+        ]
+      },
+      "r_wheel_plus_offset_estimate_m": -0.6295,
+      "semivariogram": [
+        {
+          "lag_m": 0.25,
+          "gamma": 0.0003374540876432838,
+          "sd_equiv_m": 0.018369923452297883,
+          "n": 94177
+        },
+        {
+          "lag_m": 0.75,
+          "gamma": 0.0004857277285123021,
+          "sd_equiv_m": 0.022039231577173968,
+          "n": 56674
+        },
+        {
+          "lag_m": 1.5,
+          "gamma": 0.0009687494900426275,
+          "sd_equiv_m": 0.031124740802818383,
+          "n": 114495
+        },
+        {
+          "lag_m": 3.0,
+          "gamma": 0.0020048568724958496,
+          "sd_equiv_m": 0.04477562810833422,
+          "n": 246271
+        },
+        {
+          "lag_m": 6.0,
+          "gamma": 0.002315180426319144,
+          "sd_equiv_m": 0.048116321828659596,
+          "n": 555182
+        },
+        {
+          "lag_m": 12.0,
+          "gamma": 0.0021106178660324298,
+          "sd_equiv_m": 0.045941461296223805,
+          "n": 1042307
+        },
+        {
+          "lag_m": 24.0,
+          "gamma": 0.002167812184046165,
+          "sd_equiv_m": 0.04655977001710989,
+          "n": 989743
+        },
+        {
+          "lag_m": 48.0,
+          "gamma": 0.0009794642859684882,
+          "sd_equiv_m": 0.03129639413684088,
+          "n": 24901
+        }
+      ]
+    },
+    "t2": {
+      "traverse": "2023-07-22_14-18-23",
+      "key": "t2",
+      "n_fix": 8434,
+      "n_used": 8434,
+      "corridor_px": [
+        10961,
+        5854
+      ],
+      "corridor_MB": 256.7,
+      "voidfill_frac_corridor": 0.00339,
+      "dsm_nan_frac_corridor": 0.0,
+      "wheel_samples_hit_by_fill": 0.00128,
+      "audit_like_antenna_minus_dsm_median_m": 0.5587,
+      "audit_like_std_m": 0.3123,
+      "D_raw_median_m": 0.1105,
+      "D_raw_std_m": 0.3107,
+      "D_raw_p5_p95_m": [
+        -0.0807,
+        0.9392
+      ],
+      "models": {
+        "constant": {
+          "n_par": 1,
+          "insample_rmse_m": 0.3107,
+          "insample_sd_m": 0.3107,
+          "blockcv_rmse_m": 0.379,
+          "const_term_m": 0.2433
+        },
+        "plane": {
+          "n_par": 3,
+          "insample_rmse_m": 0.0437,
+          "insample_sd_m": 0.0437,
+          "blockcv_rmse_m": 0.0704,
+          "const_term_m": 0.2433,
+          "tilt_mm_per_m": [
+            37.42,
+            7.85
+          ]
+        },
+        "quadratic": {
+          "n_par": 6,
+          "insample_rmse_m": 0.0322,
+          "insample_sd_m": 0.0322,
+          "blockcv_rmse_m": 0.0654,
+          "const_term_m": 0.202,
+          "tilt_mm_per_m": [
+            30.0,
+            5.02
+          ]
+        }
+      },
+      "selection_rule": "Fit each candidate in {plane, quadratic} by least squares on the six-wheel footprint statistic D(x, y); score each by leave-one-contiguous-block-out cross-validation with N_BLOCKS = 5 contiguous along-track blocks of equal fix count, taken in RTK time order with no shuffling; select the candidate with the minimum CV RMSE. 'constant' is fitted and reported as a reference row but is not a candidate.",
+      "selection_candidates": [
+        "plane",
+        "quadratic"
+      ],
+      "chosen_model": "quadratic",
+      "chosen_blockcv_rmse_m": 0.0654,
+      "plane_only_alternative": {
+        "sd_m": 0.0437,
+        "blockcv_rmse_m": 0.0704,
+        "penalty_vs_selected_blockcv_m": 0.0049
+      },
+      "residual_after_registration": {
+        "sd_m": 0.0322,
+        "mad_m": 0.028,
+        "p5_p95_m": [
+          -0.0468,
+          0.0542
+        ]
+      },
+      "r_wheel_plus_offset_estimate_m": 0.202,
+      "semivariogram": [
+        {
+          "lag_m": 0.25,
+          "gamma": 0.0007618610193340701,
+          "sd_equiv_m": 0.02760182999973136,
+          "n": 26626
+        },
+        {
+          "lag_m": 0.75,
+          "gamma": 0.0007639363791219494,
+          "sd_equiv_m": 0.02763939903691738,
+          "n": 24177
+        },
+        {
+          "lag_m": 1.5,
+          "gamma": 0.0007596605232645723,
+          "sd_equiv_m": 0.027561939758742895,
+          "n": 47779
+        },
+        {
+          "lag_m": 3.0,
+          "gamma": 0.0008295295763815551,
+          "sd_equiv_m": 0.02880155510352792,
+          "n": 101450
+        },
+        {
+          "lag_m": 6.0,
+          "gamma": 0.0010147065116400393,
+          "sd_equiv_m": 0.031854458269448556,
+          "n": 258976
+        },
+        {
+          "lag_m": 12.0,
+          "gamma": 0.0011891553065291446,
+          "sd_equiv_m": 0.0344841312276987,
+          "n": 438082
+        },
+        {
+          "lag_m": 24.0,
+          "gamma": 0.0010611812535112676,
+          "sd_equiv_m": 0.03257577709758076,
+          "n": 776284
+        },
+        {
+          "lag_m": 48.0,
+          "gamma": 0.0009691818892992583,
+          "sd_equiv_m": 0.031131686258525384,
+          "n": 1003468
+        },
+        {
+          "lag_m": 96.0,
+          "gamma": 0.001172772419784368,
+          "sd_equiv_m": 0.034245764990497266,
+          "n": 446908
+        }
+      ]
+    }
+  },
+  "calibration_check": {
+    "pitch": {
+      "estimator": "delta at which the median residual against registered truth is flat in range, pooled over both design traverses by point count; fx pinned at CameraInfo; mount quaternion rebuilt as R_y(20 + delta)",
+      "refit_MOUNT_PITCH_OFFSET_DEG": -1.4092,
+      "pinned_MOUNT_PITCH_OFFSET_DEG": -1.4092,
+      "abs_diff_deg": 1e-05,
+      "per_traverse_at_refit": {
+        "2023-07-23_13-05-11": {
+          "bias_slope_m_per_m": -0.00289,
+          "bias_at_0m_m": -0.0779,
+          "median_resid_m": -0.0828,
+          "robust_sd_m": 0.0742,
+          "n_points": 918845
+        },
+        "2023-07-22_14-18-23": {
+          "bias_slope_m_per_m": 0.00242,
+          "bias_at_0m_m": -0.0026,
+          "median_resid_m": 0.0002,
+          "robust_sd_m": 0.0543,
+          "n_points": 1094471
+        }
+      },
+      "scan": [
+        {
+          "dpitch_deg": -4.0,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0836,
+              "bias_slope_m_per_m": 0.0429,
+              "median_resid_m": -0.0084,
+              "n": 918849
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": -0.0087,
+              "bias_slope_m_per_m": 0.0479,
+              "median_resid_m": 0.064,
+              "n": 1094468
+            }
+          },
+          "pooled_slope_m_per_m": 0.04563
+        },
+        {
+          "dpitch_deg": -3.0,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0816,
+              "bias_slope_m_per_m": 0.0252,
+              "median_resid_m": -0.0366,
+              "n": 918848
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": -0.0064,
+              "bias_slope_m_per_m": 0.0303,
+              "median_resid_m": 0.0403,
+              "n": 1094473
+            }
+          },
+          "pooled_slope_m_per_m": 0.02801
+        },
+        {
+          "dpitch_deg": -2.0,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0794,
+              "bias_slope_m_per_m": 0.0075,
+              "median_resid_m": -0.0658,
+              "n": 918846
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": -0.0041,
+              "bias_slope_m_per_m": 0.0128,
+              "median_resid_m": 0.0152,
+              "n": 1094468
+            }
+          },
+          "pooled_slope_m_per_m": 0.01042
+        },
+        {
+          "dpitch_deg": -1.5,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0781,
+              "bias_slope_m_per_m": -0.0013,
+              "median_resid_m": -0.0802,
+              "n": 918843
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": -0.0028,
+              "bias_slope_m_per_m": 0.004,
+              "median_resid_m": 0.0025,
+              "n": 1094471
+            }
+          },
+          "pooled_slope_m_per_m": 0.0016
+        },
+        {
+          "dpitch_deg": -1.0,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0769,
+              "bias_slope_m_per_m": -0.0101,
+              "median_resid_m": -0.0946,
+              "n": 918847
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": -0.0015,
+              "bias_slope_m_per_m": -0.0048,
+              "median_resid_m": -0.0105,
+              "n": 1094467
+            }
+          },
+          "pooled_slope_m_per_m": -0.00721
+        },
+        {
+          "dpitch_deg": -0.5,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0756,
+              "bias_slope_m_per_m": -0.0189,
+              "median_resid_m": -0.1092,
+              "n": 918841
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": -0.0001,
+              "bias_slope_m_per_m": -0.0136,
+              "median_resid_m": -0.0236,
+              "n": 1094469
+            }
+          },
+          "pooled_slope_m_per_m": -0.01601
+        },
+        {
+          "dpitch_deg": 0.0,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0742,
+              "bias_slope_m_per_m": -0.0277,
+              "median_resid_m": -0.1237,
+              "n": 918844
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": 0.0014,
+              "bias_slope_m_per_m": -0.0224,
+              "median_resid_m": -0.0363,
+              "n": 1094471
+            }
+          },
+          "pooled_slope_m_per_m": -0.02486
+        },
+        {
+          "dpitch_deg": 1.0,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0712,
+              "bias_slope_m_per_m": -0.0455,
+              "median_resid_m": -0.151,
+              "n": 918848
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": 0.0044,
+              "bias_slope_m_per_m": -0.0401,
+              "median_resid_m": -0.0604,
+              "n": 1094470
+            }
+          },
+          "pooled_slope_m_per_m": -0.04254
+        }
+      ]
+    },
+    "sigma": {
+      "refit_pooled": {
+        "a": 0.05185,
+        "b": 0.00343
+      },
+      "pinned": {
+        "a": 0.05185,
+        "b": 0.00343
+      },
+      "abs_diff": {
+        "a": 0.0,
+        "b": 0.0
+      },
+      "per_traverse": {
+        "2023-07-23_13-05-11": {
+          "a": 0.06313,
+          "b": 0.00265,
+          "profile": [
+            {
+              "r": 0.55,
+              "n": 12329,
+              "median_m": -0.0671,
+              "robust_sd_m": 0.069
+            },
+            {
+              "r": 0.875,
+              "n": 176219,
+              "median_m": -0.079,
+              "robust_sd_m": 0.0656
+            },
+            {
+              "r": 1.125,
+              "n": 144915,
+              "median_m": -0.0849,
+              "robust_sd_m": 0.0651
+            },
+            {
+              "r": 1.375,
+              "n": 106315,
+              "median_m": -0.0866,
+              "robust_sd_m": 0.0659
+            },
+            {
+              "r": 1.75,
+              "n": 143224,
+              "median_m": -0.0831,
+              "robust_sd_m": 0.0666
+            },
+            {
+              "r": 2.25,
+              "n": 91041,
+              "median_m": -0.0835,
+              "robust_sd_m": 0.0781
+            },
+            {
+              "r": 2.75,
+              "n": 65956,
+              "median_m": -0.0841,
+              "robust_sd_m": 0.0849
+            },
+            {
+              "r": 3.5,
+              "n": 84267,
+              "median_m": -0.0857,
+              "robust_sd_m": 0.0958
+            },
+            {
+              "r": 4.5,
+              "n": 55499,
+              "median_m": -0.0802,
+              "robust_sd_m": 0.1148
+            },
+            {
+              "r": 5.5,
+              "n": 39080,
+              "median_m": -0.0841,
+              "robust_sd_m": 0.1443
+            }
+          ]
+        },
+        "2023-07-22_14-18-23": {
+          "a": 0.04058,
+          "b": 0.00422,
+          "profile": [
+            {
+              "r": 0.55,
+              "n": 16709,
+              "median_m": 0.0119,
+              "robust_sd_m": 0.0394
+            },
+            {
+              "r": 0.875,
+              "n": 218354,
+              "median_m": -0.0019,
+              "robust_sd_m": 0.0394
+            },
+            {
+              "r": 1.125,
+              "n": 177450,
+              "median_m": -0.0015,
+              "robust_sd_m": 0.0427
+            },
+            {
+              "r": 1.375,
+              "n": 133621,
+              "median_m": 0.0016,
+              "robust_sd_m": 0.0462
+            },
+            {
+              "r": 1.75,
+              "n": 172459,
+              "median_m": 0.0029,
+              "robust_sd_m": 0.0525
+            },
+            {
+              "r": 2.25,
+              "n": 99704,
+              "median_m": 0.0051,
+              "robust_sd_m": 0.0629
+            },
+            {
+              "r": 2.75,
+              "n": 71073,
+              "median_m": 0.0013,
+              "robust_sd_m": 0.0759
+            },
+            {
+              "r": 3.5,
+              "n": 98566,
+              "median_m": -0.0005,
+              "robust_sd_m": 0.1058
+            },
+            {
+              "r": 4.5,
+              "n": 63156,
+              "median_m": -0.0045,
+              "robust_sd_m": 0.1304
+            },
+            {
+              "r": 5.5,
+              "n": 43379,
+              "median_m": -0.0159,
+              "robust_sd_m": 0.1592
+            }
+          ]
+        }
+      },
+      "sigma_at": {
+        "0.8": 0.0538,
+        "1.0": 0.0553,
+        "1.5": 0.0596,
+        "2.0": 0.0656,
+        "3.0": 0.0827,
+        "4.0": 0.1068
+      }
+    }
+  },
+  "win_len_m": 4.0,
+  "legacy_win_len_m": 10.0,
+  "step_form_formula": "E = cost(mean map); sd = sum over contact nodes n of |c_eff[n]| * sqrt(C[u(n), u(n)]), u(n) = u_idx[n, argmax_j means[n, j]] the mean-map winner cell of node n; no max, no covariance (per-step Gaussian-CVaR proxy)",
+  "parity10m": {
+    "condition": "parity10m",
+    "label": "C1(a) code parity, hindsight at 10 m",
+    "step_form_formula": "E = cost(mean map); sd = sum over contact nodes n of |c_eff[n]| * sqrt(C[u(n), u(n)]), u(n) = u_idx[n, argmax_j means[n, j]] the mean-map winner cell of node n; no max, no covariance (per-step Gaussian-CVaR proxy)",
+    "qc": {
+      "rule": "PREREG_baseprod.md QC flags",
+      "n_window_products": 19,
+      "n_retained": 19,
+      "n_unflagged": 19,
+      "n_excluded": 0,
+      "excluded": [],
+      "flagged": {}
+    },
+    "fit": {
+      "arm": "clark",
+      "k": 405.0668708279696,
+      "tau_m": 0.0,
+      "sd_multiplier_sqrt_k": 20.126273148001584,
+      "mean_NLL_at_fit": 4.339594567403208,
+      "n_windows_fitted": 19
+    },
+    "fit_pinned_tau_alternative": {
+      "k": 1.0,
+      "tau_m": 0.27343821782366456,
+      "mean_NLL_at_fit": 4.665060180223072,
+      "nll_penalty_vs_ML": 0.3255
+    },
+    "pooled": {
+      "label": "parity10m: pooled, UNFLAGGED windows",
+      "n_windows": 19,
+      "k_used": 405.0668708279696,
+      "tau_used_m": 0.0,
+      "arms_scored": [
+        "clark",
+        "clark-diag",
+        "fosm"
+      ],
+      "windows": [
+        "t1/window_000",
+        "t1/window_001",
+        "t1/window_002",
+        "t1/window_003",
+        "t1/window_004",
+        "t2/window_000",
+        "t2/window_001",
+        "t2/window_002",
+        "t2/window_003",
+        "t2/window_004",
+        "t2/window_005",
+        "t2/window_006",
+        "t2/window_007",
+        "t2/window_008",
+        "t2/window_009",
+        "t2/window_010",
+        "t2/window_011",
+        "t2/window_012",
+        "t2/window_013"
+      ],
+      "clark": {
+        "raw": {
+          "mean_NLL": 203.371,
+          "cov1": 0.0,
+          "cov2": 0.0526,
+          "sd_ratio": 17.9276,
+          "mean_z": -10.0292,
+          "median_z": -9.35,
+          "median_sd": 0.9936,
+          "mean_NLL_full": 203.37101174150754
+        },
+        "recal": {
+          "mean_NLL": 4.3396,
+          "cov1": 0.6316,
+          "cov2": 0.9474,
+          "sd_ratio": 0.8908,
+          "mean_z": -0.4983,
+          "median_z": -0.4646,
+          "median_sd": 19.9974,
+          "mean_NLL_full": 4.339594567403209
+        }
+      },
+      "clark-diag": {
+        "raw": {
+          "mean_NLL": 451.4037,
+          "cov1": 0.0,
+          "cov2": 0.0526,
+          "sd_ratio": 25.456,
+          "mean_z": -16.9666,
+          "median_z": -16.5852,
+          "median_sd": 0.807,
+          "mean_NLL_full": 451.4036883898982
+        },
+        "recal": {
+          "mean_NLL": 4.6347,
+          "cov1": 0.5263,
+          "cov2": 0.7368,
+          "sd_ratio": 1.2648,
+          "mean_z": -0.843,
+          "median_z": -0.8241,
+          "median_sd": 16.2425,
+          "mean_NLL_full": 4.634718993344747
+        }
+      },
+      "fosm": {
+        "raw": {
+          "mean_NLL": 169.4144,
+          "cov1": 0.0526,
+          "cov2": 0.0526,
+          "sd_ratio": 16.6379,
+          "mean_z": -8.6472,
+          "median_z": -8.3798,
+          "median_sd": 1.1367,
+          "mean_NLL_full": 169.4143686246972
+        },
+        "recal": {
+          "mean_NLL": 4.3199,
+          "cov1": 0.6316,
+          "cov2": 1.0,
+          "sd_ratio": 0.8267,
+          "mean_z": -0.4296,
+          "median_z": -0.4164,
+          "median_sd": 22.8774,
+          "mean_NLL_full": 4.319908934160691
+        }
+      },
+      "nll_clark_minus_fosm": {
+        "raw": {
+          "mean": 33.9566,
+          "median": 18.288,
+          "n_windows_clark_better": 3,
+          "n": 19,
+          "sign_test_p_two_sided": 0.0044
+        },
+        "recal": {
+          "mean": 0.0197,
+          "median": -0.0092,
+          "n_windows_clark_better": 11,
+          "n": 19,
+          "sign_test_p_two_sided": 0.6476
+        }
+      },
+      "nll_clark_minus_clark-diag": {
+        "raw": {
+          "mean": -248.0327,
+          "median": -42.0692,
+          "n_windows_clark_better": 18,
+          "n": 19,
+          "sign_test_p_two_sided": 0.0001
+        },
+        "recal": {
+          "mean": -0.2951,
+          "median": 0.0392,
+          "n_windows_clark_better": 9,
+          "n": 19,
+          "sign_test_p_two_sided": 1.0
+        }
+      },
+      "arm_NLL_spread": {
+        "raw_nats": 281.9893,
+        "recal_nats": 0.3148,
+        "compression_factor": 895.8,
+        "note": "max-min mean NLL across the variance arms, before and after the recalibration; the factor is how much of the scale a ranking is read on the k-rescale destroys"
+      },
+      "mean-map": {
+        "note": "point prediction, no predicted variance: mean_NLL / cov1 / cov2 / sd_ratio / mean_z do not exist for this arm and are null by construction, not omitted",
+        "mean_NLL": null,
+        "cov1": null,
+        "cov2": null,
+        "sd_ratio": null,
+        "mean_z": null,
+        "mean_err": -14.7431,
+        "median_abs_err": 10.9871,
+        "median_abs_err_per_step_m": 0.11098
+      },
+      "sigma_med_m": {
+        "min": 0.0111,
+        "p5": 0.0118,
+        "p25": 0.0138,
+        "median": 0.0155,
+        "p75": 0.0162,
+        "p95": 0.0212,
+        "max": 0.0466
+      },
+      "relief_p95_p5_m": {
+        "min": 0.1421,
+        "p5": 0.1441,
+        "p25": 0.1741,
+        "median": 0.277,
+        "p75": 0.4178,
+        "p95": 0.6836,
+        "max": 1.0282
+      },
+      "sigma_over_relief": {
+        "min": 0.0152,
+        "p5": 0.0202,
+        "p25": 0.0341,
+        "median": 0.0562,
+        "p75": 0.0894,
+        "p95": 0.1191,
+        "max": 0.1997
+      },
+      "truth_cell_sd_m": {
+        "min": 0.0422,
+        "p5": 0.0443,
+        "p25": 0.0555,
+        "median": 0.0902,
+        "p75": 0.1366,
+        "p95": 0.2338,
+        "max": 0.3671
+      },
+      "alpha_weighted_median": {
+        "min": 0.336,
+        "p5": 0.4121,
+        "p25": 0.5409,
+        "median": 0.5948,
+        "p75": 0.6893,
+        "p95": 0.8788,
+        "max": 0.9787
+      },
+      "frac_nodes_alpha_lt_1": {
+        "min": 0.5157,
+        "p5": 0.5416,
+        "p25": 0.6265,
+        "median": 0.7029,
+        "p75": 0.7408,
+        "p95": 0.8148,
+        "max": 0.9231
+      },
+      "frac_nodes_alpha_lt_2": {
+        "min": 0.7899,
+        "p5": 0.8049,
+        "p25": 0.8408,
+        "median": 0.8614,
+        "p75": 0.9044,
+        "p95": 0.9483,
+        "max": 0.9625
+      },
+      "mu_minus_truth_med_m": {
+        "min": -0.0847,
+        "p5": -0.0826,
+        "p25": -0.0215,
+        "median": 0.015,
+        "p75": 0.0342,
+        "p95": 0.0783,
+        "max": 0.1935
+      },
+      "retained": {
+        "min": 0.6848,
+        "p5": 0.7435,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 1.0
+      },
+      "qc_observed_frac": {
+        "min": 0.8662,
+        "p5": 0.9425,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 1.0
+      },
+      "qc_sigma_med_m": {
+        "min": 0.0115,
+        "p5": 0.0119,
+        "p25": 0.0141,
+        "median": 0.0155,
+        "p75": 0.0162,
+        "p95": 0.0212,
+        "max": 0.0466
+      }
+    },
+    "pooled_all_retained": {
+      "label": "parity10m: pooled, all retained windows",
+      "n_windows": 19,
+      "k_used": 405.0668708279696,
+      "tau_used_m": 0.0,
+      "arms_scored": [
+        "clark",
+        "clark-diag",
+        "fosm"
+      ],
+      "windows": [
+        "t1/window_000",
+        "t1/window_001",
+        "t1/window_002",
+        "t1/window_003",
+        "t1/window_004",
+        "t2/window_000",
+        "t2/window_001",
+        "t2/window_002",
+        "t2/window_003",
+        "t2/window_004",
+        "t2/window_005",
+        "t2/window_006",
+        "t2/window_007",
+        "t2/window_008",
+        "t2/window_009",
+        "t2/window_010",
+        "t2/window_011",
+        "t2/window_012",
+        "t2/window_013"
+      ],
+      "clark": {
+        "raw": {
+          "mean_NLL": 203.371,
+          "cov1": 0.0,
+          "cov2": 0.0526,
+          "sd_ratio": 17.9276,
+          "mean_z": -10.0292,
+          "median_z": -9.35,
+          "median_sd": 0.9936,
+          "mean_NLL_full": 203.37101174150754
+        },
+        "recal": {
+          "mean_NLL": 4.3396,
+          "cov1": 0.6316,
+          "cov2": 0.9474,
+          "sd_ratio": 0.8908,
+          "mean_z": -0.4983,
+          "median_z": -0.4646,
+          "median_sd": 19.9974,
+          "mean_NLL_full": 4.339594567403209
+        }
+      },
+      "clark-diag": {
+        "raw": {
+          "mean_NLL": 451.4037,
+          "cov1": 0.0,
+          "cov2": 0.0526,
+          "sd_ratio": 25.456,
+          "mean_z": -16.9666,
+          "median_z": -16.5852,
+          "median_sd": 0.807,
+          "mean_NLL_full": 451.4036883898982
+        },
+        "recal": {
+          "mean_NLL": 4.6347,
+          "cov1": 0.5263,
+          "cov2": 0.7368,
+          "sd_ratio": 1.2648,
+          "mean_z": -0.843,
+          "median_z": -0.8241,
+          "median_sd": 16.2425,
+          "mean_NLL_full": 4.634718993344747
+        }
+      },
+      "fosm": {
+        "raw": {
+          "mean_NLL": 169.4144,
+          "cov1": 0.0526,
+          "cov2": 0.0526,
+          "sd_ratio": 16.6379,
+          "mean_z": -8.6472,
+          "median_z": -8.3798,
+          "median_sd": 1.1367,
+          "mean_NLL_full": 169.4143686246972
+        },
+        "recal": {
+          "mean_NLL": 4.3199,
+          "cov1": 0.6316,
+          "cov2": 1.0,
+          "sd_ratio": 0.8267,
+          "mean_z": -0.4296,
+          "median_z": -0.4164,
+          "median_sd": 22.8774,
+          "mean_NLL_full": 4.319908934160691
+        }
+      },
+      "nll_clark_minus_fosm": {
+        "raw": {
+          "mean": 33.9566,
+          "median": 18.288,
+          "n_windows_clark_better": 3,
+          "n": 19,
+          "sign_test_p_two_sided": 0.0044
+        },
+        "recal": {
+          "mean": 0.0197,
+          "median": -0.0092,
+          "n_windows_clark_better": 11,
+          "n": 19,
+          "sign_test_p_two_sided": 0.6476
+        }
+      },
+      "nll_clark_minus_clark-diag": {
+        "raw": {
+          "mean": -248.0327,
+          "median": -42.0692,
+          "n_windows_clark_better": 18,
+          "n": 19,
+          "sign_test_p_two_sided": 0.0001
+        },
+        "recal": {
+          "mean": -0.2951,
+          "median": 0.0392,
+          "n_windows_clark_better": 9,
+          "n": 19,
+          "sign_test_p_two_sided": 1.0
+        }
+      },
+      "arm_NLL_spread": {
+        "raw_nats": 281.9893,
+        "recal_nats": 0.3148,
+        "compression_factor": 895.8,
+        "note": "max-min mean NLL across the variance arms, before and after the recalibration; the factor is how much of the scale a ranking is read on the k-rescale destroys"
+      },
+      "mean-map": {
+        "note": "point prediction, no predicted variance: mean_NLL / cov1 / cov2 / sd_ratio / mean_z do not exist for this arm and are null by construction, not omitted",
+        "mean_NLL": null,
+        "cov1": null,
+        "cov2": null,
+        "sd_ratio": null,
+        "mean_z": null,
+        "mean_err": -14.7431,
+        "median_abs_err": 10.9871,
+        "median_abs_err_per_step_m": 0.11098
+      },
+      "sigma_med_m": {
+        "min": 0.0111,
+        "p5": 0.0118,
+        "p25": 0.0138,
+        "median": 0.0155,
+        "p75": 0.0162,
+        "p95": 0.0212,
+        "max": 0.0466
+      },
+      "relief_p95_p5_m": {
+        "min": 0.1421,
+        "p5": 0.1441,
+        "p25": 0.1741,
+        "median": 0.277,
+        "p75": 0.4178,
+        "p95": 0.6836,
+        "max": 1.0282
+      },
+      "sigma_over_relief": {
+        "min": 0.0152,
+        "p5": 0.0202,
+        "p25": 0.0341,
+        "median": 0.0562,
+        "p75": 0.0894,
+        "p95": 0.1191,
+        "max": 0.1997
+      },
+      "truth_cell_sd_m": {
+        "min": 0.0422,
+        "p5": 0.0443,
+        "p25": 0.0555,
+        "median": 0.0902,
+        "p75": 0.1366,
+        "p95": 0.2338,
+        "max": 0.3671
+      },
+      "alpha_weighted_median": {
+        "min": 0.336,
+        "p5": 0.4121,
+        "p25": 0.5409,
+        "median": 0.5948,
+        "p75": 0.6893,
+        "p95": 0.8788,
+        "max": 0.9787
+      },
+      "frac_nodes_alpha_lt_1": {
+        "min": 0.5157,
+        "p5": 0.5416,
+        "p25": 0.6265,
+        "median": 0.7029,
+        "p75": 0.7408,
+        "p95": 0.8148,
+        "max": 0.9231
+      },
+      "frac_nodes_alpha_lt_2": {
+        "min": 0.7899,
+        "p5": 0.8049,
+        "p25": 0.8408,
+        "median": 0.8614,
+        "p75": 0.9044,
+        "p95": 0.9483,
+        "max": 0.9625
+      },
+      "mu_minus_truth_med_m": {
+        "min": -0.0847,
+        "p5": -0.0826,
+        "p25": -0.0215,
+        "median": 0.015,
+        "p75": 0.0342,
+        "p95": 0.0783,
+        "max": 0.1935
+      },
+      "retained": {
+        "min": 0.6848,
+        "p5": 0.7435,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 1.0
+      },
+      "qc_observed_frac": {
+        "min": 0.8662,
+        "p5": 0.9425,
+        "p25": 1.0,
+        "median": 1.0,
+        "p75": 1.0,
+        "p95": 1.0,
+        "max": 1.0
+      },
+      "qc_sigma_med_m": {
+        "min": 0.0115,
+        "p5": 0.0119,
+        "p25": 0.0141,
+        "median": 0.0155,
+        "p75": 0.0162,
+        "p95": 0.0212,
+        "max": 0.0466
+      }
+    },
+    "belief_referee": {
+      "n_windows": 0,
+      "note": "no MC drawn"
+    },
+    "belief_referee_all_retained": {
+      "n_windows": 0,
+      "note": "no MC drawn"
+    }
+  },
+  "conditions": {
+    "hindsight": {
+      "condition": "hindsight",
+      "label": "v5 design phase (4 m windows), hindsight",
+      "step_form_formula": "E = cost(mean map); sd = sum over contact nodes n of |c_eff[n]| * sqrt(C[u(n), u(n)]), u(n) = u_idx[n, argmax_j means[n, j]] the mean-map winner cell of node n; no max, no covariance (per-step Gaussian-CVaR proxy)",
+      "qc": {
+        "rule": "PREREG_baseprod.md QC flags",
+        "n_window_products": 48,
+        "n_retained": 46,
+        "n_unflagged": 46,
+        "n_excluded": 2,
+        "excluded": [
+          "t1/window_000",
+          "t2/window_000"
+        ],
+        "flagged": {}
+      },
+      "fit": {
+        "arm": "clark",
+        "k": 275.0293778920172,
+        "tau_m": 0.0,
+        "sd_multiplier_sqrt_k": 16.584009704893965,
+        "mean_NLL_at_fit": 3.4083805194530123,
+        "n_windows_fitted": 46
+      },
+      "fit_pinned_tau_alternative": {
+        "k": 1.0,
+        "tau_m": 0.34684467696608323,
+        "mean_NLL_at_fit": 4.009170942762865,
+        "nll_penalty_vs_ML": 0.6008
+      },
+      "pooled": {
+        "label": "hindsight: pooled, UNFLAGGED windows",
+        "n_windows": 46,
+        "k_used": 275.0293778920172,
+        "tau_used_m": 0.0,
+        "arms_scored": [
+          "clark",
+          "clark-diag",
+          "fosm",
+          "step-form",
+          "mc-2",
+          "mc-32"
+        ],
+        "windows": [
+          "t1/window_001",
+          "t1/window_002",
+          "t1/window_003",
+          "t1/window_004",
+          "t1/window_005",
+          "t1/window_006",
+          "t1/window_007",
+          "t1/window_008",
+          "t1/window_009",
+          "t1/window_010",
+          "t1/window_011",
+          "t1/window_012",
+          "t2/window_001",
+          "t2/window_002",
+          "t2/window_003",
+          "t2/window_004",
+          "t2/window_005",
+          "t2/window_006",
+          "t2/window_007",
+          "t2/window_008",
+          "t2/window_009",
+          "t2/window_010",
+          "t2/window_011",
+          "t2/window_012",
+          "t2/window_013",
+          "t2/window_014",
+          "t2/window_015",
+          "t2/window_016",
+          "t2/window_017",
+          "t2/window_018",
+          "t2/window_019",
+          "t2/window_020",
+          "t2/window_021",
+          "t2/window_022",
+          "t2/window_023",
+          "t2/window_024",
+          "t2/window_025",
+          "t2/window_026",
+          "t2/window_027",
+          "t2/window_028",
+          "t2/window_029",
+          "t2/window_030",
+          "t2/window_031",
+          "t2/window_032",
+          "t2/window_033",
+          "t2/window_034"
+        ],
+        "clark": {
+          "raw": {
+            "mean_NLL": 137.6146,
+            "cov1": 0.0652,
+            "cov2": 0.1087,
+            "sd_ratio": 15.6239,
+            "mean_z": -6.019,
+            "median_z": -7.7206,
+            "median_sd": 0.4195,
+            "mean_NLL_full": 137.61463573236782
+          },
+          "recal": {
+            "mean_NLL": 3.4084,
+            "cov1": 0.7826,
+            "cov2": 0.9565,
+            "sd_ratio": 0.9421,
+            "mean_z": -0.3629,
+            "median_z": -0.4655,
+            "median_sd": 6.9572,
+            "mean_NLL_full": 3.4083805194530123
+          }
+        },
+        "clark-diag": {
+          "raw": {
+            "mean_NLL": 244.3254,
+            "cov1": 0.0652,
+            "cov2": 0.087,
+            "sd_ratio": 20.5979,
+            "mean_z": -8.5878,
+            "median_z": -8.462,
+            "median_sd": 0.361,
+            "mean_NLL_full": 244.32540338297468
+          },
+          "recal": {
+            "mean_NLL": 3.6236,
+            "cov1": 0.6739,
+            "cov2": 0.8696,
+            "sd_ratio": 1.242,
+            "mean_z": -0.5178,
+            "median_z": -0.5103,
+            "median_sd": 5.9871,
+            "mean_NLL_full": 3.6235808983161344
+          }
+        },
+        "fosm": {
+          "raw": {
+            "mean_NLL": 112.8933,
+            "cov1": 0.087,
+            "cov2": 0.1087,
+            "sd_ratio": 14.3366,
+            "mean_z": -4.9361,
+            "median_z": -5.4391,
+            "median_sd": 0.4509,
+            "mean_NLL_full": 112.89325510904874
+          },
+          "recal": {
+            "mean_NLL": 3.394,
+            "cov1": 0.8043,
+            "cov2": 0.9565,
+            "sd_ratio": 0.8645,
+            "mean_z": -0.2976,
+            "median_z": -0.328,
+            "median_sd": 7.4784,
+            "mean_NLL_full": 3.393961690576535
+          }
+        },
+        "step-form": {
+          "raw": {
+            "mean_NLL": 6.3664,
+            "cov1": 0.3043,
+            "cov2": 0.5435,
+            "sd_ratio": 2.834,
+            "mean_z": -1.0444,
+            "median_z": -0.8703,
+            "median_sd": 2.3541,
+            "mean_NLL_full": 6.3664003142709875
+          },
+          "recal": {
+            "mean_NLL": 4.7173,
+            "cov1": 1.0,
+            "cov2": 1.0,
+            "sd_ratio": 0.1709,
+            "mean_z": -0.063,
+            "median_z": -0.0525,
+            "median_sd": 39.0411,
+            "mean_NLL_full": 4.717291762515957
+          }
+        },
+        "mc-2": {
+          "raw": {
+            "mean_NLL": 7883.7218,
+            "cov1": 0.087,
+            "cov2": 0.087,
+            "sd_ratio": 126.2067,
+            "mean_z": -13.6788,
+            "median_z": -8.7213,
+            "median_sd": 0.2231,
+            "mean_NLL_full": 7883.721756707039
+          },
+          "recal": {
+            "mean_NLL": 30.7074,
+            "cov1": 0.4565,
+            "cov2": 0.6522,
+            "sd_ratio": 7.6101,
+            "mean_z": -0.8248,
+            "median_z": -0.5259,
+            "median_sd": 3.6991,
+            "mean_NLL_full": 30.707422065403303
+          }
+        },
+        "mc-32": {
+          "raw": {
+            "mean_NLL": 133.168,
+            "cov1": 0.0652,
+            "cov2": 0.1087,
+            "sd_ratio": 15.3699,
+            "mean_z": -5.9081,
+            "median_z": -7.5155,
+            "median_sd": 0.4552,
+            "mean_NLL_full": 133.16804976528093
+          },
+          "recal": {
+            "mean_NLL": 3.4582,
+            "cov1": 0.7609,
+            "cov2": 0.9348,
+            "sd_ratio": 0.9268,
+            "mean_z": -0.3563,
+            "median_z": -0.4532,
+            "median_sd": 7.5485,
+            "mean_NLL_full": 3.4582070459153456
+          }
+        },
+        "nll_clark_minus_fosm": {
+          "raw": {
+            "mean": 24.7214,
+            "median": 8.1107,
+            "n_windows_clark_better": 8,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          },
+          "recal": {
+            "mean": 0.0144,
+            "median": -0.0171,
+            "n_windows_clark_better": 29,
+            "n": 46,
+            "sign_test_p_two_sided": 0.1038
+          }
+        },
+        "nll_clark_minus_clark-diag": {
+          "raw": {
+            "mean": -106.7108,
+            "median": -10.7837,
+            "n_windows_clark_better": 39,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          },
+          "recal": {
+            "mean": -0.2152,
+            "median": 0.0205,
+            "n_windows_clark_better": 17,
+            "n": 46,
+            "sign_test_p_two_sided": 0.1038
+          }
+        },
+        "nll_clark_minus_step-form": {
+          "raw": {
+            "mean": 131.2482,
+            "median": 63.7065,
+            "n_windows_clark_better": 5,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          },
+          "recal": {
+            "mean": -1.3089,
+            "median": -1.5006,
+            "n_windows_clark_better": 43,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          }
+        },
+        "nll_clark_minus_mc-32": {
+          "raw": {
+            "mean": 4.4466,
+            "median": 4.4913,
+            "n_windows_clark_better": 15,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0259
+          },
+          "recal": {
+            "mean": -0.0498,
+            "median": -0.0411,
+            "n_windows_clark_better": 36,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0002
+          }
+        },
+        "nll_clark_minus_mc-2": {
+          "raw": {
+            "mean": -7746.1071,
+            "median": -78.2379,
+            "n_windows_clark_better": 33,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0045
+          },
+          "recal": {
+            "mean": -27.299,
+            "median": -0.3038,
+            "n_windows_clark_better": 34,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0016
+          }
+        },
+        "arm_NLL_spread": {
+          "raw_nats": 7877.3554,
+          "recal_nats": 27.3134,
+          "compression_factor": 288.4,
+          "note": "max-min mean NLL across the variance arms, before and after the recalibration; the factor is how much of the scale a ranking is read on the k-rescale destroys"
+        },
+        "mean-map": {
+          "note": "point prediction, no predicted variance: mean_NLL / cov1 / cov2 / sd_ratio / mean_z do not exist for this arm and are null by construction, not omitted",
+          "mean_NLL": null,
+          "cov1": null,
+          "cov2": null,
+          "sd_ratio": null,
+          "mean_z": null,
+          "mean_err": -5.408,
+          "median_abs_err": 3.9989,
+          "median_abs_err_per_step_m": 0.10302
+        },
+        "sigma_med_m": {
+          "min": 0.0108,
+          "p5": 0.0113,
+          "p25": 0.013,
+          "median": 0.0146,
+          "p75": 0.0162,
+          "p95": 0.0277,
+          "max": 0.0537
+        },
+        "relief_p95_p5_m": {
+          "min": 0.0519,
+          "p5": 0.0753,
+          "p25": 0.1183,
+          "median": 0.1591,
+          "p75": 0.2614,
+          "p95": 0.3857,
+          "max": 0.604
+        },
+        "sigma_over_relief": {
+          "min": 0.0277,
+          "p5": 0.034,
+          "p25": 0.0585,
+          "median": 0.0903,
+          "p75": 0.1316,
+          "p95": 0.2199,
+          "max": 0.2704
+        },
+        "truth_cell_sd_m": {
+          "min": 0.0148,
+          "p5": 0.0233,
+          "p25": 0.0383,
+          "median": 0.0505,
+          "p75": 0.0853,
+          "p95": 0.1304,
+          "max": 0.1975
+        },
+        "alpha_weighted_median": {
+          "min": 0.291,
+          "p5": 0.3692,
+          "p25": 0.4997,
+          "median": 0.6199,
+          "p75": 0.8233,
+          "p95": 1.1975,
+          "max": 1.5111
+        },
+        "frac_nodes_alpha_lt_1": {
+          "min": 0.3208,
+          "p5": 0.4321,
+          "p25": 0.5869,
+          "median": 0.6704,
+          "p75": 0.7977,
+          "p95": 0.8852,
+          "max": 0.9082
+        },
+        "frac_nodes_alpha_lt_2": {
+          "min": 0.7008,
+          "p5": 0.7458,
+          "p25": 0.8279,
+          "median": 0.8648,
+          "p75": 0.9217,
+          "p95": 0.9589,
+          "max": 1.0
+        },
+        "mu_minus_truth_med_m": {
+          "min": -0.112,
+          "p5": -0.0884,
+          "p25": -0.0124,
+          "median": 0.0134,
+          "p75": 0.0331,
+          "p95": 0.1518,
+          "max": 0.7106
+        },
+        "retained": {
+          "min": 1.0,
+          "p5": 1.0,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "qc_observed_frac": {
+          "min": 1.0,
+          "p5": 1.0,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "qc_sigma_med_m": {
+          "min": 0.0108,
+          "p5": 0.0113,
+          "p25": 0.013,
+          "median": 0.0146,
+          "p75": 0.0162,
+          "p95": 0.0277,
+          "max": 0.0537
+        }
+      },
+      "pooled_all_retained": {
+        "label": "hindsight: pooled, all retained windows",
+        "n_windows": 46,
+        "k_used": 275.0293778920172,
+        "tau_used_m": 0.0,
+        "arms_scored": [
+          "clark",
+          "clark-diag",
+          "fosm",
+          "step-form",
+          "mc-2",
+          "mc-32"
+        ],
+        "windows": [
+          "t1/window_001",
+          "t1/window_002",
+          "t1/window_003",
+          "t1/window_004",
+          "t1/window_005",
+          "t1/window_006",
+          "t1/window_007",
+          "t1/window_008",
+          "t1/window_009",
+          "t1/window_010",
+          "t1/window_011",
+          "t1/window_012",
+          "t2/window_001",
+          "t2/window_002",
+          "t2/window_003",
+          "t2/window_004",
+          "t2/window_005",
+          "t2/window_006",
+          "t2/window_007",
+          "t2/window_008",
+          "t2/window_009",
+          "t2/window_010",
+          "t2/window_011",
+          "t2/window_012",
+          "t2/window_013",
+          "t2/window_014",
+          "t2/window_015",
+          "t2/window_016",
+          "t2/window_017",
+          "t2/window_018",
+          "t2/window_019",
+          "t2/window_020",
+          "t2/window_021",
+          "t2/window_022",
+          "t2/window_023",
+          "t2/window_024",
+          "t2/window_025",
+          "t2/window_026",
+          "t2/window_027",
+          "t2/window_028",
+          "t2/window_029",
+          "t2/window_030",
+          "t2/window_031",
+          "t2/window_032",
+          "t2/window_033",
+          "t2/window_034"
+        ],
+        "clark": {
+          "raw": {
+            "mean_NLL": 137.6146,
+            "cov1": 0.0652,
+            "cov2": 0.1087,
+            "sd_ratio": 15.6239,
+            "mean_z": -6.019,
+            "median_z": -7.7206,
+            "median_sd": 0.4195,
+            "mean_NLL_full": 137.61463573236782
+          },
+          "recal": {
+            "mean_NLL": 3.4084,
+            "cov1": 0.7826,
+            "cov2": 0.9565,
+            "sd_ratio": 0.9421,
+            "mean_z": -0.3629,
+            "median_z": -0.4655,
+            "median_sd": 6.9572,
+            "mean_NLL_full": 3.4083805194530123
+          }
+        },
+        "clark-diag": {
+          "raw": {
+            "mean_NLL": 244.3254,
+            "cov1": 0.0652,
+            "cov2": 0.087,
+            "sd_ratio": 20.5979,
+            "mean_z": -8.5878,
+            "median_z": -8.462,
+            "median_sd": 0.361,
+            "mean_NLL_full": 244.32540338297468
+          },
+          "recal": {
+            "mean_NLL": 3.6236,
+            "cov1": 0.6739,
+            "cov2": 0.8696,
+            "sd_ratio": 1.242,
+            "mean_z": -0.5178,
+            "median_z": -0.5103,
+            "median_sd": 5.9871,
+            "mean_NLL_full": 3.6235808983161344
+          }
+        },
+        "fosm": {
+          "raw": {
+            "mean_NLL": 112.8933,
+            "cov1": 0.087,
+            "cov2": 0.1087,
+            "sd_ratio": 14.3366,
+            "mean_z": -4.9361,
+            "median_z": -5.4391,
+            "median_sd": 0.4509,
+            "mean_NLL_full": 112.89325510904874
+          },
+          "recal": {
+            "mean_NLL": 3.394,
+            "cov1": 0.8043,
+            "cov2": 0.9565,
+            "sd_ratio": 0.8645,
+            "mean_z": -0.2976,
+            "median_z": -0.328,
+            "median_sd": 7.4784,
+            "mean_NLL_full": 3.393961690576535
+          }
+        },
+        "step-form": {
+          "raw": {
+            "mean_NLL": 6.3664,
+            "cov1": 0.3043,
+            "cov2": 0.5435,
+            "sd_ratio": 2.834,
+            "mean_z": -1.0444,
+            "median_z": -0.8703,
+            "median_sd": 2.3541,
+            "mean_NLL_full": 6.3664003142709875
+          },
+          "recal": {
+            "mean_NLL": 4.7173,
+            "cov1": 1.0,
+            "cov2": 1.0,
+            "sd_ratio": 0.1709,
+            "mean_z": -0.063,
+            "median_z": -0.0525,
+            "median_sd": 39.0411,
+            "mean_NLL_full": 4.717291762515957
+          }
+        },
+        "mc-2": {
+          "raw": {
+            "mean_NLL": 7883.7218,
+            "cov1": 0.087,
+            "cov2": 0.087,
+            "sd_ratio": 126.2067,
+            "mean_z": -13.6788,
+            "median_z": -8.7213,
+            "median_sd": 0.2231,
+            "mean_NLL_full": 7883.721756707039
+          },
+          "recal": {
+            "mean_NLL": 30.7074,
+            "cov1": 0.4565,
+            "cov2": 0.6522,
+            "sd_ratio": 7.6101,
+            "mean_z": -0.8248,
+            "median_z": -0.5259,
+            "median_sd": 3.6991,
+            "mean_NLL_full": 30.707422065403303
+          }
+        },
+        "mc-32": {
+          "raw": {
+            "mean_NLL": 133.168,
+            "cov1": 0.0652,
+            "cov2": 0.1087,
+            "sd_ratio": 15.3699,
+            "mean_z": -5.9081,
+            "median_z": -7.5155,
+            "median_sd": 0.4552,
+            "mean_NLL_full": 133.16804976528093
+          },
+          "recal": {
+            "mean_NLL": 3.4582,
+            "cov1": 0.7609,
+            "cov2": 0.9348,
+            "sd_ratio": 0.9268,
+            "mean_z": -0.3563,
+            "median_z": -0.4532,
+            "median_sd": 7.5485,
+            "mean_NLL_full": 3.4582070459153456
+          }
+        },
+        "nll_clark_minus_fosm": {
+          "raw": {
+            "mean": 24.7214,
+            "median": 8.1107,
+            "n_windows_clark_better": 8,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          },
+          "recal": {
+            "mean": 0.0144,
+            "median": -0.0171,
+            "n_windows_clark_better": 29,
+            "n": 46,
+            "sign_test_p_two_sided": 0.1038
+          }
+        },
+        "nll_clark_minus_clark-diag": {
+          "raw": {
+            "mean": -106.7108,
+            "median": -10.7837,
+            "n_windows_clark_better": 39,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          },
+          "recal": {
+            "mean": -0.2152,
+            "median": 0.0205,
+            "n_windows_clark_better": 17,
+            "n": 46,
+            "sign_test_p_two_sided": 0.1038
+          }
+        },
+        "nll_clark_minus_step-form": {
+          "raw": {
+            "mean": 131.2482,
+            "median": 63.7065,
+            "n_windows_clark_better": 5,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          },
+          "recal": {
+            "mean": -1.3089,
+            "median": -1.5006,
+            "n_windows_clark_better": 43,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          }
+        },
+        "nll_clark_minus_mc-32": {
+          "raw": {
+            "mean": 4.4466,
+            "median": 4.4913,
+            "n_windows_clark_better": 15,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0259
+          },
+          "recal": {
+            "mean": -0.0498,
+            "median": -0.0411,
+            "n_windows_clark_better": 36,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0002
+          }
+        },
+        "nll_clark_minus_mc-2": {
+          "raw": {
+            "mean": -7746.1071,
+            "median": -78.2379,
+            "n_windows_clark_better": 33,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0045
+          },
+          "recal": {
+            "mean": -27.299,
+            "median": -0.3038,
+            "n_windows_clark_better": 34,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0016
+          }
+        },
+        "arm_NLL_spread": {
+          "raw_nats": 7877.3554,
+          "recal_nats": 27.3134,
+          "compression_factor": 288.4,
+          "note": "max-min mean NLL across the variance arms, before and after the recalibration; the factor is how much of the scale a ranking is read on the k-rescale destroys"
+        },
+        "mean-map": {
+          "note": "point prediction, no predicted variance: mean_NLL / cov1 / cov2 / sd_ratio / mean_z do not exist for this arm and are null by construction, not omitted",
+          "mean_NLL": null,
+          "cov1": null,
+          "cov2": null,
+          "sd_ratio": null,
+          "mean_z": null,
+          "mean_err": -5.408,
+          "median_abs_err": 3.9989,
+          "median_abs_err_per_step_m": 0.10302
+        },
+        "sigma_med_m": {
+          "min": 0.0108,
+          "p5": 0.0113,
+          "p25": 0.013,
+          "median": 0.0146,
+          "p75": 0.0162,
+          "p95": 0.0277,
+          "max": 0.0537
+        },
+        "relief_p95_p5_m": {
+          "min": 0.0519,
+          "p5": 0.0753,
+          "p25": 0.1183,
+          "median": 0.1591,
+          "p75": 0.2614,
+          "p95": 0.3857,
+          "max": 0.604
+        },
+        "sigma_over_relief": {
+          "min": 0.0277,
+          "p5": 0.034,
+          "p25": 0.0585,
+          "median": 0.0903,
+          "p75": 0.1316,
+          "p95": 0.2199,
+          "max": 0.2704
+        },
+        "truth_cell_sd_m": {
+          "min": 0.0148,
+          "p5": 0.0233,
+          "p25": 0.0383,
+          "median": 0.0505,
+          "p75": 0.0853,
+          "p95": 0.1304,
+          "max": 0.1975
+        },
+        "alpha_weighted_median": {
+          "min": 0.291,
+          "p5": 0.3692,
+          "p25": 0.4997,
+          "median": 0.6199,
+          "p75": 0.8233,
+          "p95": 1.1975,
+          "max": 1.5111
+        },
+        "frac_nodes_alpha_lt_1": {
+          "min": 0.3208,
+          "p5": 0.4321,
+          "p25": 0.5869,
+          "median": 0.6704,
+          "p75": 0.7977,
+          "p95": 0.8852,
+          "max": 0.9082
+        },
+        "frac_nodes_alpha_lt_2": {
+          "min": 0.7008,
+          "p5": 0.7458,
+          "p25": 0.8279,
+          "median": 0.8648,
+          "p75": 0.9217,
+          "p95": 0.9589,
+          "max": 1.0
+        },
+        "mu_minus_truth_med_m": {
+          "min": -0.112,
+          "p5": -0.0884,
+          "p25": -0.0124,
+          "median": 0.0134,
+          "p75": 0.0331,
+          "p95": 0.1518,
+          "max": 0.7106
+        },
+        "retained": {
+          "min": 1.0,
+          "p5": 1.0,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "qc_observed_frac": {
+          "min": 1.0,
+          "p5": 1.0,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "qc_sigma_med_m": {
+          "min": 0.0108,
+          "p5": 0.0113,
+          "p25": 0.013,
+          "median": 0.0146,
+          "p75": 0.0162,
+          "p95": 0.0277,
+          "max": 0.0537
+        }
+      },
+      "belief_referee": {
+        "n_windows": 46,
+        "n_draws_per_window": 20000,
+        "mc_seed": 20260828,
+        "subsample_seed": 20260828,
+        "referee": "belief MC, raw Var, no truth, no recalibration",
+        "arms": {
+          "clark": {
+            "median_rel_err_E": 4.0247394231464144e-07,
+            "median_rel_err_sd": 0.03884757605438341,
+            "p95_rel_err_E": 1.1209966081655697e-06,
+            "p95_rel_err_sd": 0.14187816144902393,
+            "max_rel_err_E": 2.3778422119294423e-06,
+            "max_rel_err_sd": 0.22121073602355049,
+            "sd_ratio_to_mc": {
+              "median": 0.9611524239456166,
+              "mean": 0.9481601341476747,
+              "p5": 0.858121838550976,
+              "p95": 0.9914299325112941
+            }
+          },
+          "clark-diag": {
+            "median_rel_err_E": 1.350624896697532e-06,
+            "median_rel_err_sd": 0.1718982083629918,
+            "p95_rel_err_E": 7.4875828985526506e-06,
+            "p95_rel_err_sd": 0.3872061312017263,
+            "max_rel_err_E": 1.0077935234384294e-05,
+            "max_rel_err_sd": 0.5025889505928147,
+            "sd_ratio_to_mc": {
+              "median": 0.8281017916370081,
+              "mean": 0.805463930883205,
+              "p5": 0.6127938687982737,
+              "p95": 0.9450249723741527
+            }
+          },
+          "fosm": {
+            "median_rel_err_E": 1.7548082498680768e-05,
+            "median_rel_err_sd": 0.019862196896305438,
+            "p95_rel_err_E": 7.03289226613478e-05,
+            "p95_rel_err_sd": 0.07685487599431268,
+            "max_rel_err_E": 9.86402447661799e-05,
+            "max_rel_err_sd": 0.10465573839629115,
+            "sd_ratio_to_mc": {
+              "median": 1.018486432604668,
+              "mean": 1.0219546806510797,
+              "p5": 0.990983575391723,
+              "p95": 1.0768548759943126
+            }
+          },
+          "step-form": {
+            "median_rel_err_E": 1.7548082498680768e-05,
+            "median_rel_err_sd": 4.401397436965167,
+            "p95_rel_err_E": 7.03289226613478e-05,
+            "p95_rel_err_sd": 6.813199610576492,
+            "max_rel_err_E": 9.86402447661799e-05,
+            "max_rel_err_sd": 7.6560742978407506,
+            "sd_ratio_to_mc": {
+              "median": 5.401397436965167,
+              "mean": 5.810609289802843,
+              "p5": 4.126288767023761,
+              "p95": 7.8131996105764925
+            }
+          },
+          "mc-2": {
+            "median_rel_err_E": 1.4100783592289214e-05,
+            "median_rel_err_sd": 0.6654470568932913,
+            "p95_rel_err_E": 4.680822256438034e-05,
+            "p95_rel_err_sd": 0.972241125423871,
+            "max_rel_err_E": 9.981603560779724e-05,
+            "max_rel_err_sd": 1.432700053012204,
+            "sd_ratio_to_mc": {
+              "median": 0.5372972507740287,
+              "mean": 0.6917320952927356,
+              "p5": 0.04865935670366635,
+              "p95": 1.740789084303548
+            }
+          },
+          "mc-32": {
+            "median_rel_err_E": 4.345664439746172e-06,
+            "median_rel_err_sd": 0.08521718894153676,
+            "p95_rel_err_E": 1.120948106070203e-05,
+            "p95_rel_err_sd": 0.19598573496301752,
+            "max_rel_err_E": 2.770466592155848e-05,
+            "max_rel_err_sd": 0.28365346418127574,
+            "sd_ratio_to_mc": {
+              "median": 1.01365746659937,
+              "mean": 1.0176475289041726,
+              "p5": 0.858785856857397,
+              "p95": 1.1959857349630176
+            }
+          },
+          "mean-map": {
+            "median_rel_err_E": 1.7548082498680768e-05,
+            "median_rel_err_sd": null,
+            "note": "no predicted sd"
+          }
+        },
+        "clark_vs_fosm": {
+          "n": 46,
+          "n_clark_better_E": 46,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 10,
+          "sign_test_p_sd": 0.00016,
+          "n_clark_better_BOTH_moments": 10,
+          "sign_test_p_both": 0.00016
+        },
+        "clark_vs_clark-diag": {
+          "n": 46,
+          "n_clark_better_E": 44,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 42,
+          "sign_test_p_sd": 0.0,
+          "n_clark_better_BOTH_moments": 42,
+          "sign_test_p_both": 0.0
+        },
+        "clark_vs_step-form": {
+          "n": 46,
+          "n_clark_better_E": 46,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 46,
+          "sign_test_p_sd": 0.0,
+          "n_clark_better_BOTH_moments": 46,
+          "sign_test_p_both": 0.0
+        },
+        "clark_vs_mc-2": {
+          "n": 46,
+          "n_clark_better_E": 44,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 45,
+          "sign_test_p_sd": 0.0,
+          "n_clark_better_BOTH_moments": 43,
+          "sign_test_p_both": 0.0
+        },
+        "clark_vs_mc-32": {
+          "n": 46,
+          "n_clark_better_E": 44,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 32,
+          "sign_test_p_sd": 0.01135,
+          "n_clark_better_BOTH_moments": 31,
+          "sign_test_p_both": 0.0259
+        },
+        "sd_deficit_vs_alpha": {
+          "note": "REPORTED CHARACTERIZATION, no criterion. clark's belief-referee sd-ratio (sd_clark / sd_MC) binned by the window's cost-weighted median alpha. The historical record is 0.90-0.94; the derived worst case is ~0.89 at alpha ~ 0.",
+          "bin_edges": [
+            0.0,
+            0.2,
+            0.4,
+            0.6,
+            0.8,
+            1.0,
+            1.5,
+            Infinity
+          ],
+          "bins": [
+            {
+              "alpha_lo": 0.0,
+              "alpha_hi": 0.2,
+              "n": 0
+            },
+            {
+              "alpha_lo": 0.2,
+              "alpha_hi": 0.4,
+              "n": 5,
+              "alpha_median": 0.3628,
+              "clark_sd_ratio_median": 0.9442,
+              "clark_sd_ratio_p5": 0.8758,
+              "clark_sd_ratio_p95": 0.9761
+            },
+            {
+              "alpha_lo": 0.4,
+              "alpha_hi": 0.6,
+              "n": 16,
+              "alpha_median": 0.5037,
+              "clark_sd_ratio_median": 0.9378,
+              "clark_sd_ratio_p5": 0.8176,
+              "clark_sd_ratio_p95": 0.9736
+            },
+            {
+              "alpha_lo": 0.6,
+              "alpha_hi": 0.8,
+              "n": 12,
+              "alpha_median": 0.688,
+              "clark_sd_ratio_median": 0.9673,
+              "clark_sd_ratio_p5": 0.9224,
+              "clark_sd_ratio_p95": 0.9902
+            },
+            {
+              "alpha_lo": 0.8,
+              "alpha_hi": 1.0,
+              "n": 7,
+              "alpha_median": 0.8482,
+              "clark_sd_ratio_median": 0.9826,
+              "clark_sd_ratio_p5": 0.9611,
+              "clark_sd_ratio_p95": 0.9927
+            },
+            {
+              "alpha_lo": 1.0,
+              "alpha_hi": 1.5,
+              "n": 5,
+              "alpha_median": 1.1763,
+              "clark_sd_ratio_median": 0.9838,
+              "clark_sd_ratio_p5": 0.9487,
+              "clark_sd_ratio_p95": 0.9915
+            },
+            {
+              "alpha_lo": 1.5,
+              "alpha_hi": Infinity,
+              "n": 1,
+              "alpha_median": 1.5111,
+              "clark_sd_ratio_median": 0.9843,
+              "clark_sd_ratio_p5": 0.9843,
+              "clark_sd_ratio_p95": 0.9843
+            }
+          ],
+          "corr_alpha_vs_sd_ratio": 0.4455
+        },
+        "cvar_error": {
+          "note": "REPORTED CHARACTERIZATION, no criterion. |CVaR_q(arm) - CVaR_q(MC)| per window under the belief referee -- the single number a planner consumes, fusing both moments through the decision rule's own tail weight. The arm CVaR is the Gaussian form E + phi(z_q)/(1-q) * sd; the MC CVaR is the mean of the empirical upper tail. mean-map has no sd, so its CVaR is its point prediction -- the floor a risk-blind planner sits at.",
+          "q": 0.9,
+          "gaussian_factor": 1.7549833193248683,
+          "arms": {
+            "clark": {
+              "median": 0.028744384589117544,
+              "p95": 0.1116268840551129,
+              "max": 0.24573363961098948,
+              "mean": 0.041744086614768174
+            },
+            "clark-diag": {
+              "median": 0.10105530350665504,
+              "p95": 0.6068657141968288,
+              "max": 0.8448549937456846,
+              "mean": 0.1871668544132737
+            },
+            "fosm": {
+              "median": 0.2556280439812326,
+              "p95": 1.0411848860421742,
+              "max": 1.5821774366286263,
+              "mean": 0.3822521766733189
+            },
+            "step-form": {
+              "median": 3.1032776654838017,
+              "p95": 8.809356227137414,
+              "max": 9.102171376467595,
+              "mean": 3.8578457972973172
+            },
+            "mc-2": {
+              "median": 0.524043719011388,
+              "p95": 1.5549700550718626,
+              "max": 2.1136499477088364,
+              "mean": 0.6813618941231375
+            },
+            "mc-32": {
+              "median": 0.06597415025953524,
+              "p95": 0.3973459021021881,
+              "max": 0.4929975752511382,
+              "mean": 0.10719080639623628
+            },
+            "mean-map": {
+              "median": 0.9948486361263349,
+              "p95": 2.9345822579934975,
+              "max": 4.003242255452278,
+              "mean": 1.3175330195335846
+            }
+          },
+          "lowest_median_abs_cvar_error": "clark"
+        }
+      },
+      "belief_referee_all_retained": {
+        "n_windows": 46,
+        "n_draws_per_window": 20000,
+        "mc_seed": 20260828,
+        "subsample_seed": 20260828,
+        "referee": "belief MC, raw Var, no truth, no recalibration",
+        "arms": {
+          "clark": {
+            "median_rel_err_E": 4.0247394231464144e-07,
+            "median_rel_err_sd": 0.03884757605438341,
+            "p95_rel_err_E": 1.1209966081655697e-06,
+            "p95_rel_err_sd": 0.14187816144902393,
+            "max_rel_err_E": 2.3778422119294423e-06,
+            "max_rel_err_sd": 0.22121073602355049,
+            "sd_ratio_to_mc": {
+              "median": 0.9611524239456166,
+              "mean": 0.9481601341476747,
+              "p5": 0.858121838550976,
+              "p95": 0.9914299325112941
+            }
+          },
+          "clark-diag": {
+            "median_rel_err_E": 1.350624896697532e-06,
+            "median_rel_err_sd": 0.1718982083629918,
+            "p95_rel_err_E": 7.4875828985526506e-06,
+            "p95_rel_err_sd": 0.3872061312017263,
+            "max_rel_err_E": 1.0077935234384294e-05,
+            "max_rel_err_sd": 0.5025889505928147,
+            "sd_ratio_to_mc": {
+              "median": 0.8281017916370081,
+              "mean": 0.805463930883205,
+              "p5": 0.6127938687982737,
+              "p95": 0.9450249723741527
+            }
+          },
+          "fosm": {
+            "median_rel_err_E": 1.7548082498680768e-05,
+            "median_rel_err_sd": 0.019862196896305438,
+            "p95_rel_err_E": 7.03289226613478e-05,
+            "p95_rel_err_sd": 0.07685487599431268,
+            "max_rel_err_E": 9.86402447661799e-05,
+            "max_rel_err_sd": 0.10465573839629115,
+            "sd_ratio_to_mc": {
+              "median": 1.018486432604668,
+              "mean": 1.0219546806510797,
+              "p5": 0.990983575391723,
+              "p95": 1.0768548759943126
+            }
+          },
+          "step-form": {
+            "median_rel_err_E": 1.7548082498680768e-05,
+            "median_rel_err_sd": 4.401397436965167,
+            "p95_rel_err_E": 7.03289226613478e-05,
+            "p95_rel_err_sd": 6.813199610576492,
+            "max_rel_err_E": 9.86402447661799e-05,
+            "max_rel_err_sd": 7.6560742978407506,
+            "sd_ratio_to_mc": {
+              "median": 5.401397436965167,
+              "mean": 5.810609289802843,
+              "p5": 4.126288767023761,
+              "p95": 7.8131996105764925
+            }
+          },
+          "mc-2": {
+            "median_rel_err_E": 1.4100783592289214e-05,
+            "median_rel_err_sd": 0.6654470568932913,
+            "p95_rel_err_E": 4.680822256438034e-05,
+            "p95_rel_err_sd": 0.972241125423871,
+            "max_rel_err_E": 9.981603560779724e-05,
+            "max_rel_err_sd": 1.432700053012204,
+            "sd_ratio_to_mc": {
+              "median": 0.5372972507740287,
+              "mean": 0.6917320952927356,
+              "p5": 0.04865935670366635,
+              "p95": 1.740789084303548
+            }
+          },
+          "mc-32": {
+            "median_rel_err_E": 4.345664439746172e-06,
+            "median_rel_err_sd": 0.08521718894153676,
+            "p95_rel_err_E": 1.120948106070203e-05,
+            "p95_rel_err_sd": 0.19598573496301752,
+            "max_rel_err_E": 2.770466592155848e-05,
+            "max_rel_err_sd": 0.28365346418127574,
+            "sd_ratio_to_mc": {
+              "median": 1.01365746659937,
+              "mean": 1.0176475289041726,
+              "p5": 0.858785856857397,
+              "p95": 1.1959857349630176
+            }
+          },
+          "mean-map": {
+            "median_rel_err_E": 1.7548082498680768e-05,
+            "median_rel_err_sd": null,
+            "note": "no predicted sd"
+          }
+        },
+        "clark_vs_fosm": {
+          "n": 46,
+          "n_clark_better_E": 46,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 10,
+          "sign_test_p_sd": 0.00016,
+          "n_clark_better_BOTH_moments": 10,
+          "sign_test_p_both": 0.00016
+        },
+        "clark_vs_clark-diag": {
+          "n": 46,
+          "n_clark_better_E": 44,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 42,
+          "sign_test_p_sd": 0.0,
+          "n_clark_better_BOTH_moments": 42,
+          "sign_test_p_both": 0.0
+        },
+        "clark_vs_step-form": {
+          "n": 46,
+          "n_clark_better_E": 46,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 46,
+          "sign_test_p_sd": 0.0,
+          "n_clark_better_BOTH_moments": 46,
+          "sign_test_p_both": 0.0
+        },
+        "clark_vs_mc-2": {
+          "n": 46,
+          "n_clark_better_E": 44,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 45,
+          "sign_test_p_sd": 0.0,
+          "n_clark_better_BOTH_moments": 43,
+          "sign_test_p_both": 0.0
+        },
+        "clark_vs_mc-32": {
+          "n": 46,
+          "n_clark_better_E": 44,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 32,
+          "sign_test_p_sd": 0.01135,
+          "n_clark_better_BOTH_moments": 31,
+          "sign_test_p_both": 0.0259
+        },
+        "sd_deficit_vs_alpha": {
+          "note": "REPORTED CHARACTERIZATION, no criterion. clark's belief-referee sd-ratio (sd_clark / sd_MC) binned by the window's cost-weighted median alpha. The historical record is 0.90-0.94; the derived worst case is ~0.89 at alpha ~ 0.",
+          "bin_edges": [
+            0.0,
+            0.2,
+            0.4,
+            0.6,
+            0.8,
+            1.0,
+            1.5,
+            Infinity
+          ],
+          "bins": [
+            {
+              "alpha_lo": 0.0,
+              "alpha_hi": 0.2,
+              "n": 0
+            },
+            {
+              "alpha_lo": 0.2,
+              "alpha_hi": 0.4,
+              "n": 5,
+              "alpha_median": 0.3628,
+              "clark_sd_ratio_median": 0.9442,
+              "clark_sd_ratio_p5": 0.8758,
+              "clark_sd_ratio_p95": 0.9761
+            },
+            {
+              "alpha_lo": 0.4,
+              "alpha_hi": 0.6,
+              "n": 16,
+              "alpha_median": 0.5037,
+              "clark_sd_ratio_median": 0.9378,
+              "clark_sd_ratio_p5": 0.8176,
+              "clark_sd_ratio_p95": 0.9736
+            },
+            {
+              "alpha_lo": 0.6,
+              "alpha_hi": 0.8,
+              "n": 12,
+              "alpha_median": 0.688,
+              "clark_sd_ratio_median": 0.9673,
+              "clark_sd_ratio_p5": 0.9224,
+              "clark_sd_ratio_p95": 0.9902
+            },
+            {
+              "alpha_lo": 0.8,
+              "alpha_hi": 1.0,
+              "n": 7,
+              "alpha_median": 0.8482,
+              "clark_sd_ratio_median": 0.9826,
+              "clark_sd_ratio_p5": 0.9611,
+              "clark_sd_ratio_p95": 0.9927
+            },
+            {
+              "alpha_lo": 1.0,
+              "alpha_hi": 1.5,
+              "n": 5,
+              "alpha_median": 1.1763,
+              "clark_sd_ratio_median": 0.9838,
+              "clark_sd_ratio_p5": 0.9487,
+              "clark_sd_ratio_p95": 0.9915
+            },
+            {
+              "alpha_lo": 1.5,
+              "alpha_hi": Infinity,
+              "n": 1,
+              "alpha_median": 1.5111,
+              "clark_sd_ratio_median": 0.9843,
+              "clark_sd_ratio_p5": 0.9843,
+              "clark_sd_ratio_p95": 0.9843
+            }
+          ],
+          "corr_alpha_vs_sd_ratio": 0.4455
+        },
+        "cvar_error": {
+          "note": "REPORTED CHARACTERIZATION, no criterion. |CVaR_q(arm) - CVaR_q(MC)| per window under the belief referee -- the single number a planner consumes, fusing both moments through the decision rule's own tail weight. The arm CVaR is the Gaussian form E + phi(z_q)/(1-q) * sd; the MC CVaR is the mean of the empirical upper tail. mean-map has no sd, so its CVaR is its point prediction -- the floor a risk-blind planner sits at.",
+          "q": 0.9,
+          "gaussian_factor": 1.7549833193248683,
+          "arms": {
+            "clark": {
+              "median": 0.028744384589117544,
+              "p95": 0.1116268840551129,
+              "max": 0.24573363961098948,
+              "mean": 0.041744086614768174
+            },
+            "clark-diag": {
+              "median": 0.10105530350665504,
+              "p95": 0.6068657141968288,
+              "max": 0.8448549937456846,
+              "mean": 0.1871668544132737
+            },
+            "fosm": {
+              "median": 0.2556280439812326,
+              "p95": 1.0411848860421742,
+              "max": 1.5821774366286263,
+              "mean": 0.3822521766733189
+            },
+            "step-form": {
+              "median": 3.1032776654838017,
+              "p95": 8.809356227137414,
+              "max": 9.102171376467595,
+              "mean": 3.8578457972973172
+            },
+            "mc-2": {
+              "median": 0.524043719011388,
+              "p95": 1.5549700550718626,
+              "max": 2.1136499477088364,
+              "mean": 0.6813618941231375
+            },
+            "mc-32": {
+              "median": 0.06597415025953524,
+              "p95": 0.3973459021021881,
+              "max": 0.4929975752511382,
+              "mean": 0.10719080639623628
+            },
+            "mean-map": {
+              "median": 0.9948486361263349,
+              "p95": 2.9345822579934975,
+              "max": 4.003242255452278,
+              "mean": 1.3175330195335846
+            }
+          },
+          "lowest_median_abs_cvar_error": "clark"
+        }
+      }
+    },
+    "foresight": {
+      "condition": "foresight",
+      "label": "v5 design phase (4 m windows), foresight",
+      "step_form_formula": "E = cost(mean map); sd = sum over contact nodes n of |c_eff[n]| * sqrt(C[u(n), u(n)]), u(n) = u_idx[n, argmax_j means[n, j]] the mean-map winner cell of node n; no max, no covariance (per-step Gaussian-CVaR proxy)",
+      "qc": {
+        "rule": "PREREG_baseprod.md QC flags",
+        "n_window_products": 46,
+        "n_retained": 46,
+        "n_unflagged": 46,
+        "n_excluded": 0,
+        "excluded": [],
+        "flagged": {}
+      },
+      "fit": {
+        "arm": "clark",
+        "k": 282.99667205586184,
+        "tau_m": 0.0,
+        "sd_multiplier_sqrt_k": 16.822504928097416,
+        "mean_NLL_at_fit": 3.2854412083375673,
+        "n_windows_fitted": 46
+      },
+      "fit_pinned_tau_alternative": {
+        "k": 1.0,
+        "tau_m": 0.34267602534331587,
+        "mean_NLL_at_fit": 3.9932561045305373,
+        "nll_penalty_vs_ML": 0.7078
+      },
+      "pooled": {
+        "label": "foresight: pooled, UNFLAGGED windows",
+        "n_windows": 46,
+        "k_used": 282.99667205586184,
+        "tau_used_m": 0.0,
+        "arms_scored": [
+          "clark",
+          "clark-diag",
+          "fosm",
+          "step-form",
+          "mc-2",
+          "mc-32"
+        ],
+        "windows": [
+          "t1/window_001",
+          "t1/window_002",
+          "t1/window_003",
+          "t1/window_004",
+          "t1/window_005",
+          "t1/window_006",
+          "t1/window_007",
+          "t1/window_008",
+          "t1/window_009",
+          "t1/window_010",
+          "t1/window_011",
+          "t1/window_012",
+          "t2/window_001",
+          "t2/window_002",
+          "t2/window_003",
+          "t2/window_004",
+          "t2/window_005",
+          "t2/window_006",
+          "t2/window_007",
+          "t2/window_008",
+          "t2/window_009",
+          "t2/window_010",
+          "t2/window_011",
+          "t2/window_012",
+          "t2/window_013",
+          "t2/window_014",
+          "t2/window_015",
+          "t2/window_016",
+          "t2/window_017",
+          "t2/window_018",
+          "t2/window_019",
+          "t2/window_020",
+          "t2/window_021",
+          "t2/window_022",
+          "t2/window_023",
+          "t2/window_024",
+          "t2/window_025",
+          "t2/window_026",
+          "t2/window_027",
+          "t2/window_028",
+          "t2/window_029",
+          "t2/window_030",
+          "t2/window_031",
+          "t2/window_032",
+          "t2/window_033",
+          "t2/window_034"
+        ],
+        "clark": {
+          "raw": {
+            "mean_NLL": 141.4611,
+            "cov1": 0.087,
+            "cov2": 0.1304,
+            "sd_ratio": 14.9245,
+            "mean_z": -8.0684,
+            "median_z": -6.4817,
+            "median_sd": 0.3698,
+            "mean_NLL_full": 141.46106276999188
+          },
+          "recal": {
+            "mean_NLL": 3.2854,
+            "cov1": 0.7609,
+            "cov2": 0.913,
+            "sd_ratio": 0.8872,
+            "mean_z": -0.4796,
+            "median_z": -0.3853,
+            "median_sd": 6.2215,
+            "mean_NLL_full": 3.2854412083375673
+          }
+        },
+        "clark-diag": {
+          "raw": {
+            "mean_NLL": 237.0687,
+            "cov1": 0.087,
+            "cov2": 0.1304,
+            "sd_ratio": 19.3049,
+            "mean_z": -10.4884,
+            "median_z": -7.1357,
+            "median_sd": 0.3359,
+            "mean_NLL_full": 237.0686541691336
+          },
+          "recal": {
+            "mean_NLL": 3.4372,
+            "cov1": 0.6739,
+            "cov2": 0.8696,
+            "sd_ratio": 1.1476,
+            "mean_z": -0.6235,
+            "median_z": -0.4242,
+            "median_sd": 5.6501,
+            "mean_NLL_full": 3.4372132714459185
+          }
+        },
+        "fosm": {
+          "raw": {
+            "mean_NLL": 115.6715,
+            "cov1": 0.087,
+            "cov2": 0.1522,
+            "sd_ratio": 13.8166,
+            "mean_z": -6.6691,
+            "median_z": -4.2578,
+            "median_sd": 0.4342,
+            "mean_NLL_full": 115.67151835348999
+          },
+          "recal": {
+            "mean_NLL": 3.2893,
+            "cov1": 0.8043,
+            "cov2": 0.9565,
+            "sd_ratio": 0.8213,
+            "mean_z": -0.3964,
+            "median_z": -0.2531,
+            "median_sd": 7.3035,
+            "mean_NLL_full": 3.2893044990688396
+          }
+        },
+        "step-form": {
+          "raw": {
+            "mean_NLL": 5.7496,
+            "cov1": 0.413,
+            "cov2": 0.6957,
+            "sd_ratio": 2.5179,
+            "mean_z": -1.2388,
+            "median_z": -0.5828,
+            "median_sd": 2.4986,
+            "mean_NLL_full": 5.749634577572674
+          },
+          "recal": {
+            "mean_NLL": 4.7177,
+            "cov1": 1.0,
+            "cov2": 1.0,
+            "sd_ratio": 0.1497,
+            "mean_z": -0.0736,
+            "median_z": -0.0346,
+            "median_sd": 42.0331,
+            "mean_NLL_full": 4.717656172899811
+          }
+        },
+        "mc-2": {
+          "raw": {
+            "mean_NLL": 1185.6744,
+            "cov1": 0.0652,
+            "cov2": 0.1304,
+            "sd_ratio": 48.4453,
+            "mean_z": -8.7403,
+            "median_z": -6.6022,
+            "median_sd": 0.2666,
+            "mean_NLL_full": 1185.6743774815027
+          },
+          "recal": {
+            "mean_NLL": 6.5289,
+            "cov1": 0.6522,
+            "cov2": 0.8043,
+            "sd_ratio": 2.8798,
+            "mean_z": -0.5196,
+            "median_z": -0.3925,
+            "median_sd": 4.4855,
+            "mean_NLL_full": 6.528886047055856
+          }
+        },
+        "mc-32": {
+          "raw": {
+            "mean_NLL": 128.6275,
+            "cov1": 0.087,
+            "cov2": 0.1304,
+            "sd_ratio": 14.2982,
+            "mean_z": -7.5642,
+            "median_z": -5.0439,
+            "median_sd": 0.4301,
+            "mean_NLL_full": 128.62753473816798
+          },
+          "recal": {
+            "mean_NLL": 3.2996,
+            "cov1": 0.7391,
+            "cov2": 0.913,
+            "sd_ratio": 0.8499,
+            "mean_z": -0.4496,
+            "median_z": -0.2998,
+            "median_sd": 7.2345,
+            "mean_NLL_full": 3.299620216454908
+          }
+        },
+        "nll_clark_minus_fosm": {
+          "raw": {
+            "mean": 25.7895,
+            "median": 10.6795,
+            "n_windows_clark_better": 8,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          },
+          "recal": {
+            "mean": -0.0039,
+            "median": -0.0498,
+            "n_windows_clark_better": 32,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0114
+          }
+        },
+        "nll_clark_minus_clark-diag": {
+          "raw": {
+            "mean": -95.6076,
+            "median": -7.5402,
+            "n_windows_clark_better": 39,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          },
+          "recal": {
+            "mean": -0.1518,
+            "median": 0.0115,
+            "n_windows_clark_better": 15,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0259
+          }
+        },
+        "nll_clark_minus_step-form": {
+          "raw": {
+            "mean": 135.7114,
+            "median": 50.5779,
+            "n_windows_clark_better": 6,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          },
+          "recal": {
+            "mean": -1.4322,
+            "median": -1.6852,
+            "n_windows_clark_better": 42,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          }
+        },
+        "nll_clark_minus_mc-32": {
+          "raw": {
+            "mean": 12.8335,
+            "median": 2.645,
+            "n_windows_clark_better": 13,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0045
+          },
+          "recal": {
+            "mean": -0.0142,
+            "median": -0.0174,
+            "n_windows_clark_better": 31,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0259
+          }
+        },
+        "nll_clark_minus_mc-2": {
+          "raw": {
+            "mean": -1044.2133,
+            "median": -9.1611,
+            "n_windows_clark_better": 31,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0259
+          },
+          "recal": {
+            "mean": -3.2434,
+            "median": -0.0096,
+            "n_windows_clark_better": 24,
+            "n": 46,
+            "sign_test_p_two_sided": 0.883
+          }
+        },
+        "arm_NLL_spread": {
+          "raw_nats": 1179.9248,
+          "recal_nats": 3.2435,
+          "compression_factor": 363.8,
+          "note": "max-min mean NLL across the variance arms, before and after the recalibration; the factor is how much of the scale a ranking is read on the k-rescale destroys"
+        },
+        "mean-map": {
+          "note": "point prediction, no predicted variance: mean_NLL / cov1 / cov2 / sd_ratio / mean_z do not exist for this arm and are null by construction, not omitted",
+          "mean_NLL": null,
+          "cov1": null,
+          "cov2": null,
+          "sd_ratio": null,
+          "mean_z": null,
+          "mean_err": -5.8118,
+          "median_abs_err": 3.2855,
+          "median_abs_err_per_step_m": 0.08424
+        },
+        "sigma_med_m": {
+          "min": 0.0121,
+          "p5": 0.0128,
+          "p25": 0.0148,
+          "median": 0.0178,
+          "p75": 0.0211,
+          "p95": 0.0379,
+          "max": 0.0621
+        },
+        "relief_p95_p5_m": {
+          "min": 0.0517,
+          "p5": 0.0754,
+          "p25": 0.1181,
+          "median": 0.1589,
+          "p75": 0.2613,
+          "p95": 0.3847,
+          "max": 0.5998
+        },
+        "sigma_over_relief": {
+          "min": 0.0339,
+          "p5": 0.0435,
+          "p25": 0.0705,
+          "median": 0.1134,
+          "p75": 0.179,
+          "p95": 0.2815,
+          "max": 0.3127
+        },
+        "truth_cell_sd_m": {
+          "min": 0.0146,
+          "p5": 0.0235,
+          "p25": 0.0385,
+          "median": 0.0507,
+          "p75": 0.0857,
+          "p95": 0.1294,
+          "max": 0.1963
+        },
+        "alpha_weighted_median": {
+          "min": 0.2767,
+          "p5": 0.3013,
+          "p25": 0.3999,
+          "median": 0.5528,
+          "p75": 0.6572,
+          "p95": 0.8136,
+          "max": 1.1459
+        },
+        "frac_nodes_alpha_lt_1": {
+          "min": 0.4706,
+          "p5": 0.5894,
+          "p25": 0.6637,
+          "median": 0.7776,
+          "p75": 0.8812,
+          "p95": 0.9484,
+          "max": 0.9995
+        },
+        "frac_nodes_alpha_lt_2": {
+          "min": 0.7443,
+          "p5": 0.8087,
+          "p25": 0.8987,
+          "median": 0.9344,
+          "p75": 0.9603,
+          "p95": 0.9977,
+          "max": 1.0
+        },
+        "mu_minus_truth_med_m": {
+          "min": -0.1329,
+          "p5": -0.0979,
+          "p25": -0.0211,
+          "median": 0.0062,
+          "p75": 0.0312,
+          "p95": 0.1536,
+          "max": 0.7132
+        },
+        "retained": {
+          "min": 0.8974,
+          "p5": 1.0,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "qc_observed_frac": {
+          "min": 0.9977,
+          "p5": 1.0,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "qc_sigma_med_m": {
+          "min": 0.0121,
+          "p5": 0.0128,
+          "p25": 0.0148,
+          "median": 0.0178,
+          "p75": 0.0211,
+          "p95": 0.0379,
+          "max": 0.0621
+        }
+      },
+      "pooled_all_retained": {
+        "label": "foresight: pooled, all retained windows",
+        "n_windows": 46,
+        "k_used": 282.99667205586184,
+        "tau_used_m": 0.0,
+        "arms_scored": [
+          "clark",
+          "clark-diag",
+          "fosm",
+          "step-form",
+          "mc-2",
+          "mc-32"
+        ],
+        "windows": [
+          "t1/window_001",
+          "t1/window_002",
+          "t1/window_003",
+          "t1/window_004",
+          "t1/window_005",
+          "t1/window_006",
+          "t1/window_007",
+          "t1/window_008",
+          "t1/window_009",
+          "t1/window_010",
+          "t1/window_011",
+          "t1/window_012",
+          "t2/window_001",
+          "t2/window_002",
+          "t2/window_003",
+          "t2/window_004",
+          "t2/window_005",
+          "t2/window_006",
+          "t2/window_007",
+          "t2/window_008",
+          "t2/window_009",
+          "t2/window_010",
+          "t2/window_011",
+          "t2/window_012",
+          "t2/window_013",
+          "t2/window_014",
+          "t2/window_015",
+          "t2/window_016",
+          "t2/window_017",
+          "t2/window_018",
+          "t2/window_019",
+          "t2/window_020",
+          "t2/window_021",
+          "t2/window_022",
+          "t2/window_023",
+          "t2/window_024",
+          "t2/window_025",
+          "t2/window_026",
+          "t2/window_027",
+          "t2/window_028",
+          "t2/window_029",
+          "t2/window_030",
+          "t2/window_031",
+          "t2/window_032",
+          "t2/window_033",
+          "t2/window_034"
+        ],
+        "clark": {
+          "raw": {
+            "mean_NLL": 141.4611,
+            "cov1": 0.087,
+            "cov2": 0.1304,
+            "sd_ratio": 14.9245,
+            "mean_z": -8.0684,
+            "median_z": -6.4817,
+            "median_sd": 0.3698,
+            "mean_NLL_full": 141.46106276999188
+          },
+          "recal": {
+            "mean_NLL": 3.2854,
+            "cov1": 0.7609,
+            "cov2": 0.913,
+            "sd_ratio": 0.8872,
+            "mean_z": -0.4796,
+            "median_z": -0.3853,
+            "median_sd": 6.2215,
+            "mean_NLL_full": 3.2854412083375673
+          }
+        },
+        "clark-diag": {
+          "raw": {
+            "mean_NLL": 237.0687,
+            "cov1": 0.087,
+            "cov2": 0.1304,
+            "sd_ratio": 19.3049,
+            "mean_z": -10.4884,
+            "median_z": -7.1357,
+            "median_sd": 0.3359,
+            "mean_NLL_full": 237.0686541691336
+          },
+          "recal": {
+            "mean_NLL": 3.4372,
+            "cov1": 0.6739,
+            "cov2": 0.8696,
+            "sd_ratio": 1.1476,
+            "mean_z": -0.6235,
+            "median_z": -0.4242,
+            "median_sd": 5.6501,
+            "mean_NLL_full": 3.4372132714459185
+          }
+        },
+        "fosm": {
+          "raw": {
+            "mean_NLL": 115.6715,
+            "cov1": 0.087,
+            "cov2": 0.1522,
+            "sd_ratio": 13.8166,
+            "mean_z": -6.6691,
+            "median_z": -4.2578,
+            "median_sd": 0.4342,
+            "mean_NLL_full": 115.67151835348999
+          },
+          "recal": {
+            "mean_NLL": 3.2893,
+            "cov1": 0.8043,
+            "cov2": 0.9565,
+            "sd_ratio": 0.8213,
+            "mean_z": -0.3964,
+            "median_z": -0.2531,
+            "median_sd": 7.3035,
+            "mean_NLL_full": 3.2893044990688396
+          }
+        },
+        "step-form": {
+          "raw": {
+            "mean_NLL": 5.7496,
+            "cov1": 0.413,
+            "cov2": 0.6957,
+            "sd_ratio": 2.5179,
+            "mean_z": -1.2388,
+            "median_z": -0.5828,
+            "median_sd": 2.4986,
+            "mean_NLL_full": 5.749634577572674
+          },
+          "recal": {
+            "mean_NLL": 4.7177,
+            "cov1": 1.0,
+            "cov2": 1.0,
+            "sd_ratio": 0.1497,
+            "mean_z": -0.0736,
+            "median_z": -0.0346,
+            "median_sd": 42.0331,
+            "mean_NLL_full": 4.717656172899811
+          }
+        },
+        "mc-2": {
+          "raw": {
+            "mean_NLL": 1185.6744,
+            "cov1": 0.0652,
+            "cov2": 0.1304,
+            "sd_ratio": 48.4453,
+            "mean_z": -8.7403,
+            "median_z": -6.6022,
+            "median_sd": 0.2666,
+            "mean_NLL_full": 1185.6743774815027
+          },
+          "recal": {
+            "mean_NLL": 6.5289,
+            "cov1": 0.6522,
+            "cov2": 0.8043,
+            "sd_ratio": 2.8798,
+            "mean_z": -0.5196,
+            "median_z": -0.3925,
+            "median_sd": 4.4855,
+            "mean_NLL_full": 6.528886047055856
+          }
+        },
+        "mc-32": {
+          "raw": {
+            "mean_NLL": 128.6275,
+            "cov1": 0.087,
+            "cov2": 0.1304,
+            "sd_ratio": 14.2982,
+            "mean_z": -7.5642,
+            "median_z": -5.0439,
+            "median_sd": 0.4301,
+            "mean_NLL_full": 128.62753473816798
+          },
+          "recal": {
+            "mean_NLL": 3.2996,
+            "cov1": 0.7391,
+            "cov2": 0.913,
+            "sd_ratio": 0.8499,
+            "mean_z": -0.4496,
+            "median_z": -0.2998,
+            "median_sd": 7.2345,
+            "mean_NLL_full": 3.299620216454908
+          }
+        },
+        "nll_clark_minus_fosm": {
+          "raw": {
+            "mean": 25.7895,
+            "median": 10.6795,
+            "n_windows_clark_better": 8,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          },
+          "recal": {
+            "mean": -0.0039,
+            "median": -0.0498,
+            "n_windows_clark_better": 32,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0114
+          }
+        },
+        "nll_clark_minus_clark-diag": {
+          "raw": {
+            "mean": -95.6076,
+            "median": -7.5402,
+            "n_windows_clark_better": 39,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          },
+          "recal": {
+            "mean": -0.1518,
+            "median": 0.0115,
+            "n_windows_clark_better": 15,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0259
+          }
+        },
+        "nll_clark_minus_step-form": {
+          "raw": {
+            "mean": 135.7114,
+            "median": 50.5779,
+            "n_windows_clark_better": 6,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          },
+          "recal": {
+            "mean": -1.4322,
+            "median": -1.6852,
+            "n_windows_clark_better": 42,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0
+          }
+        },
+        "nll_clark_minus_mc-32": {
+          "raw": {
+            "mean": 12.8335,
+            "median": 2.645,
+            "n_windows_clark_better": 13,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0045
+          },
+          "recal": {
+            "mean": -0.0142,
+            "median": -0.0174,
+            "n_windows_clark_better": 31,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0259
+          }
+        },
+        "nll_clark_minus_mc-2": {
+          "raw": {
+            "mean": -1044.2133,
+            "median": -9.1611,
+            "n_windows_clark_better": 31,
+            "n": 46,
+            "sign_test_p_two_sided": 0.0259
+          },
+          "recal": {
+            "mean": -3.2434,
+            "median": -0.0096,
+            "n_windows_clark_better": 24,
+            "n": 46,
+            "sign_test_p_two_sided": 0.883
+          }
+        },
+        "arm_NLL_spread": {
+          "raw_nats": 1179.9248,
+          "recal_nats": 3.2435,
+          "compression_factor": 363.8,
+          "note": "max-min mean NLL across the variance arms, before and after the recalibration; the factor is how much of the scale a ranking is read on the k-rescale destroys"
+        },
+        "mean-map": {
+          "note": "point prediction, no predicted variance: mean_NLL / cov1 / cov2 / sd_ratio / mean_z do not exist for this arm and are null by construction, not omitted",
+          "mean_NLL": null,
+          "cov1": null,
+          "cov2": null,
+          "sd_ratio": null,
+          "mean_z": null,
+          "mean_err": -5.8118,
+          "median_abs_err": 3.2855,
+          "median_abs_err_per_step_m": 0.08424
+        },
+        "sigma_med_m": {
+          "min": 0.0121,
+          "p5": 0.0128,
+          "p25": 0.0148,
+          "median": 0.0178,
+          "p75": 0.0211,
+          "p95": 0.0379,
+          "max": 0.0621
+        },
+        "relief_p95_p5_m": {
+          "min": 0.0517,
+          "p5": 0.0754,
+          "p25": 0.1181,
+          "median": 0.1589,
+          "p75": 0.2613,
+          "p95": 0.3847,
+          "max": 0.5998
+        },
+        "sigma_over_relief": {
+          "min": 0.0339,
+          "p5": 0.0435,
+          "p25": 0.0705,
+          "median": 0.1134,
+          "p75": 0.179,
+          "p95": 0.2815,
+          "max": 0.3127
+        },
+        "truth_cell_sd_m": {
+          "min": 0.0146,
+          "p5": 0.0235,
+          "p25": 0.0385,
+          "median": 0.0507,
+          "p75": 0.0857,
+          "p95": 0.1294,
+          "max": 0.1963
+        },
+        "alpha_weighted_median": {
+          "min": 0.2767,
+          "p5": 0.3013,
+          "p25": 0.3999,
+          "median": 0.5528,
+          "p75": 0.6572,
+          "p95": 0.8136,
+          "max": 1.1459
+        },
+        "frac_nodes_alpha_lt_1": {
+          "min": 0.4706,
+          "p5": 0.5894,
+          "p25": 0.6637,
+          "median": 0.7776,
+          "p75": 0.8812,
+          "p95": 0.9484,
+          "max": 0.9995
+        },
+        "frac_nodes_alpha_lt_2": {
+          "min": 0.7443,
+          "p5": 0.8087,
+          "p25": 0.8987,
+          "median": 0.9344,
+          "p75": 0.9603,
+          "p95": 0.9977,
+          "max": 1.0
+        },
+        "mu_minus_truth_med_m": {
+          "min": -0.1329,
+          "p5": -0.0979,
+          "p25": -0.0211,
+          "median": 0.0062,
+          "p75": 0.0312,
+          "p95": 0.1536,
+          "max": 0.7132
+        },
+        "retained": {
+          "min": 0.8974,
+          "p5": 1.0,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "qc_observed_frac": {
+          "min": 0.9977,
+          "p5": 1.0,
+          "p25": 1.0,
+          "median": 1.0,
+          "p75": 1.0,
+          "p95": 1.0,
+          "max": 1.0
+        },
+        "qc_sigma_med_m": {
+          "min": 0.0121,
+          "p5": 0.0128,
+          "p25": 0.0148,
+          "median": 0.0178,
+          "p75": 0.0211,
+          "p95": 0.0379,
+          "max": 0.0621
+        }
+      },
+      "belief_referee": {
+        "n_windows": 46,
+        "n_draws_per_window": 20000,
+        "mc_seed": 20260828,
+        "subsample_seed": 20260828,
+        "referee": "belief MC, raw Var, no truth, no recalibration",
+        "arms": {
+          "clark": {
+            "median_rel_err_E": 3.4202703277773933e-07,
+            "median_rel_err_sd": 0.051318496779003575,
+            "p95_rel_err_E": 1.3982399755108484e-06,
+            "p95_rel_err_sd": 0.17071088500837237,
+            "max_rel_err_E": 2.009794337718069e-06,
+            "max_rel_err_sd": 0.21358190364598253,
+            "sd_ratio_to_mc": {
+              "median": 0.9486815032209963,
+              "mean": 0.9319261074440155,
+              "p5": 0.8292891149916276,
+              "p95": 0.9863112274227676
+            }
+          },
+          "clark-diag": {
+            "median_rel_err_E": 1.2842880968649474e-06,
+            "median_rel_err_sd": 0.19256197274501152,
+            "p95_rel_err_E": 6.0288593983088785e-06,
+            "p95_rel_err_sd": 0.4542171193279325,
+            "max_rel_err_E": 8.19948011631154e-06,
+            "max_rel_err_sd": 0.5741698033739173,
+            "sd_ratio_to_mc": {
+              "median": 0.8074380272549885,
+              "mean": 0.7829395756730667,
+              "p5": 0.5457828806720675,
+              "p95": 0.9386804936354
+            }
+          },
+          "fosm": {
+            "median_rel_err_E": 1.9791408780567915e-05,
+            "median_rel_err_sd": 0.020285776154312547,
+            "p95_rel_err_E": 5.751931999801438e-05,
+            "p95_rel_err_sd": 0.09082571531184902,
+            "max_rel_err_E": 0.00010555129713459246,
+            "max_rel_err_sd": 0.13710385230461203,
+            "sd_ratio_to_mc": {
+              "median": 1.0172208886934222,
+              "mean": 1.0241634537831492,
+              "p5": 0.9769040264490876,
+              "p95": 1.090825715311849
+            }
+          },
+          "step-form": {
+            "median_rel_err_E": 1.9791408780567915e-05,
+            "median_rel_err_sd": 5.296776108424056,
+            "p95_rel_err_E": 5.751931999801438e-05,
+            "p95_rel_err_sd": 8.425741703774545,
+            "max_rel_err_E": 0.00010555129713459246,
+            "max_rel_err_sd": 10.381851471451645,
+            "sd_ratio_to_mc": {
+              "median": 6.296776108424056,
+              "mean": 6.535741405362283,
+              "p5": 4.50262955354342,
+              "p95": 9.425741703774545
+            }
+          },
+          "mc-2": {
+            "median_rel_err_E": 8.075512712508574e-06,
+            "median_rel_err_sd": 0.5127911443778205,
+            "p95_rel_err_E": 3.7178106894678305e-05,
+            "p95_rel_err_sd": 1.0393725880448894,
+            "max_rel_err_E": 7.771612947397447e-05,
+            "max_rel_err_sd": 1.3345064098218233,
+            "sd_ratio_to_mc": {
+              "median": 0.6775805741646566,
+              "mean": 0.828398627510651,
+              "p5": 0.08785498753195933,
+              "p95": 1.9938026780082327
+            }
+          },
+          "mc-32": {
+            "median_rel_err_E": 4.25560658147504e-06,
+            "median_rel_err_sd": 0.10423948705793645,
+            "p95_rel_err_E": 1.6580108857590518e-05,
+            "p95_rel_err_sd": 0.24958126681995718,
+            "max_rel_err_E": 2.4423046095027995e-05,
+            "max_rel_err_sd": 0.341746884819422,
+            "sd_ratio_to_mc": {
+              "median": 0.9797630888847638,
+              "mean": 0.9975630659913644,
+              "p5": 0.7857777986038745,
+              "p95": 1.2336708015528899
+            }
+          },
+          "mean-map": {
+            "median_rel_err_E": 1.9791408780567915e-05,
+            "median_rel_err_sd": null,
+            "note": "no predicted sd"
+          }
+        },
+        "clark_vs_fosm": {
+          "n": 46,
+          "n_clark_better_E": 46,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 10,
+          "sign_test_p_sd": 0.00016,
+          "n_clark_better_BOTH_moments": 10,
+          "sign_test_p_both": 0.00016
+        },
+        "clark_vs_clark-diag": {
+          "n": 46,
+          "n_clark_better_E": 41,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 42,
+          "sign_test_p_sd": 0.0,
+          "n_clark_better_BOTH_moments": 40,
+          "sign_test_p_both": 0.0
+        },
+        "clark_vs_step-form": {
+          "n": 46,
+          "n_clark_better_E": 46,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 46,
+          "sign_test_p_sd": 0.0,
+          "n_clark_better_BOTH_moments": 46,
+          "sign_test_p_both": 0.0
+        },
+        "clark_vs_mc-2": {
+          "n": 46,
+          "n_clark_better_E": 42,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 45,
+          "sign_test_p_sd": 0.0,
+          "n_clark_better_BOTH_moments": 41,
+          "sign_test_p_both": 0.0
+        },
+        "clark_vs_mc-32": {
+          "n": 46,
+          "n_clark_better_E": 44,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 33,
+          "sign_test_p_sd": 0.00453,
+          "n_clark_better_BOTH_moments": 32,
+          "sign_test_p_both": 0.01135
+        },
+        "sd_deficit_vs_alpha": {
+          "note": "REPORTED CHARACTERIZATION, no criterion. clark's belief-referee sd-ratio (sd_clark / sd_MC) binned by the window's cost-weighted median alpha. The historical record is 0.90-0.94; the derived worst case is ~0.89 at alpha ~ 0.",
+          "bin_edges": [
+            0.0,
+            0.2,
+            0.4,
+            0.6,
+            0.8,
+            1.0,
+            1.5,
+            Infinity
+          ],
+          "bins": [
+            {
+              "alpha_lo": 0.0,
+              "alpha_hi": 0.2,
+              "n": 0
+            },
+            {
+              "alpha_lo": 0.2,
+              "alpha_hi": 0.4,
+              "n": 12,
+              "alpha_median": 0.318,
+              "clark_sd_ratio_median": 0.9119,
+              "clark_sd_ratio_p5": 0.8034,
+              "clark_sd_ratio_p95": 0.9492
+            },
+            {
+              "alpha_lo": 0.4,
+              "alpha_hi": 0.6,
+              "n": 18,
+              "alpha_median": 0.517,
+              "clark_sd_ratio_median": 0.9531,
+              "clark_sd_ratio_p5": 0.8602,
+              "clark_sd_ratio_p95": 0.9855
+            },
+            {
+              "alpha_lo": 0.6,
+              "alpha_hi": 0.8,
+              "n": 13,
+              "alpha_median": 0.6839,
+              "clark_sd_ratio_median": 0.9658,
+              "clark_sd_ratio_p5": 0.8845,
+              "clark_sd_ratio_p95": 0.9921
+            },
+            {
+              "alpha_lo": 0.8,
+              "alpha_hi": 1.0,
+              "n": 2,
+              "alpha_median": 0.8438,
+              "clark_sd_ratio_median": 0.9661,
+              "clark_sd_ratio_p5": 0.9559,
+              "clark_sd_ratio_p95": 0.9763
+            },
+            {
+              "alpha_lo": 1.0,
+              "alpha_hi": 1.5,
+              "n": 1,
+              "alpha_median": 1.1459,
+              "clark_sd_ratio_median": 0.9672,
+              "clark_sd_ratio_p5": 0.9672,
+              "clark_sd_ratio_p95": 0.9672
+            },
+            {
+              "alpha_lo": 1.5,
+              "alpha_hi": Infinity,
+              "n": 0
+            }
+          ],
+          "corr_alpha_vs_sd_ratio": 0.4549
+        },
+        "cvar_error": {
+          "note": "REPORTED CHARACTERIZATION, no criterion. |CVaR_q(arm) - CVaR_q(MC)| per window under the belief referee -- the single number a planner consumes, fusing both moments through the decision rule's own tail weight. The arm CVaR is the Gaussian form E + phi(z_q)/(1-q) * sd; the MC CVaR is the mean of the empirical upper tail. mean-map has no sd, so its CVaR is its point prediction -- the floor a risk-blind planner sits at.",
+          "q": 0.9,
+          "gaussian_factor": 1.7549833193248683,
+          "arms": {
+            "clark": {
+              "median": 0.03521802539307828,
+              "p95": 0.12413072802928582,
+              "max": 0.24460113689565333,
+              "mean": 0.04783194796199614
+            },
+            "clark-diag": {
+              "median": 0.13332022052327375,
+              "p95": 0.47048224082800516,
+              "max": 0.6935274472289166,
+              "mean": 0.1728856087743027
+            },
+            "fosm": {
+              "median": 0.30190254325225396,
+              "p95": 0.8649749960795816,
+              "max": 1.662525318806729,
+              "mean": 0.38323588669608516
+            },
+            "step-form": {
+              "median": 3.3102511030856476,
+              "p95": 9.047146680338301,
+              "max": 10.58831316789474,
+              "mean": 3.9248117116722705
+            },
+            "mc-2": {
+              "median": 0.32403947142756806,
+              "p95": 1.1855095239129696,
+              "max": 2.1234094281189755,
+              "mean": 0.46404631091785553
+            },
+            "mc-32": {
+              "median": 0.08197044471580739,
+              "p95": 0.3669106934476076,
+              "max": 0.6072491457307478,
+              "mean": 0.12190906035618315
+            },
+            "mean-map": {
+              "median": 1.0323008612376725,
+              "p95": 2.5931504615941776,
+              "max": 3.956268551866742,
+              "mean": 1.2649821402767925
+            }
+          },
+          "lowest_median_abs_cvar_error": "clark"
+        }
+      },
+      "belief_referee_all_retained": {
+        "n_windows": 46,
+        "n_draws_per_window": 20000,
+        "mc_seed": 20260828,
+        "subsample_seed": 20260828,
+        "referee": "belief MC, raw Var, no truth, no recalibration",
+        "arms": {
+          "clark": {
+            "median_rel_err_E": 3.4202703277773933e-07,
+            "median_rel_err_sd": 0.051318496779003575,
+            "p95_rel_err_E": 1.3982399755108484e-06,
+            "p95_rel_err_sd": 0.17071088500837237,
+            "max_rel_err_E": 2.009794337718069e-06,
+            "max_rel_err_sd": 0.21358190364598253,
+            "sd_ratio_to_mc": {
+              "median": 0.9486815032209963,
+              "mean": 0.9319261074440155,
+              "p5": 0.8292891149916276,
+              "p95": 0.9863112274227676
+            }
+          },
+          "clark-diag": {
+            "median_rel_err_E": 1.2842880968649474e-06,
+            "median_rel_err_sd": 0.19256197274501152,
+            "p95_rel_err_E": 6.0288593983088785e-06,
+            "p95_rel_err_sd": 0.4542171193279325,
+            "max_rel_err_E": 8.19948011631154e-06,
+            "max_rel_err_sd": 0.5741698033739173,
+            "sd_ratio_to_mc": {
+              "median": 0.8074380272549885,
+              "mean": 0.7829395756730667,
+              "p5": 0.5457828806720675,
+              "p95": 0.9386804936354
+            }
+          },
+          "fosm": {
+            "median_rel_err_E": 1.9791408780567915e-05,
+            "median_rel_err_sd": 0.020285776154312547,
+            "p95_rel_err_E": 5.751931999801438e-05,
+            "p95_rel_err_sd": 0.09082571531184902,
+            "max_rel_err_E": 0.00010555129713459246,
+            "max_rel_err_sd": 0.13710385230461203,
+            "sd_ratio_to_mc": {
+              "median": 1.0172208886934222,
+              "mean": 1.0241634537831492,
+              "p5": 0.9769040264490876,
+              "p95": 1.090825715311849
+            }
+          },
+          "step-form": {
+            "median_rel_err_E": 1.9791408780567915e-05,
+            "median_rel_err_sd": 5.296776108424056,
+            "p95_rel_err_E": 5.751931999801438e-05,
+            "p95_rel_err_sd": 8.425741703774545,
+            "max_rel_err_E": 0.00010555129713459246,
+            "max_rel_err_sd": 10.381851471451645,
+            "sd_ratio_to_mc": {
+              "median": 6.296776108424056,
+              "mean": 6.535741405362283,
+              "p5": 4.50262955354342,
+              "p95": 9.425741703774545
+            }
+          },
+          "mc-2": {
+            "median_rel_err_E": 8.075512712508574e-06,
+            "median_rel_err_sd": 0.5127911443778205,
+            "p95_rel_err_E": 3.7178106894678305e-05,
+            "p95_rel_err_sd": 1.0393725880448894,
+            "max_rel_err_E": 7.771612947397447e-05,
+            "max_rel_err_sd": 1.3345064098218233,
+            "sd_ratio_to_mc": {
+              "median": 0.6775805741646566,
+              "mean": 0.828398627510651,
+              "p5": 0.08785498753195933,
+              "p95": 1.9938026780082327
+            }
+          },
+          "mc-32": {
+            "median_rel_err_E": 4.25560658147504e-06,
+            "median_rel_err_sd": 0.10423948705793645,
+            "p95_rel_err_E": 1.6580108857590518e-05,
+            "p95_rel_err_sd": 0.24958126681995718,
+            "max_rel_err_E": 2.4423046095027995e-05,
+            "max_rel_err_sd": 0.341746884819422,
+            "sd_ratio_to_mc": {
+              "median": 0.9797630888847638,
+              "mean": 0.9975630659913644,
+              "p5": 0.7857777986038745,
+              "p95": 1.2336708015528899
+            }
+          },
+          "mean-map": {
+            "median_rel_err_E": 1.9791408780567915e-05,
+            "median_rel_err_sd": null,
+            "note": "no predicted sd"
+          }
+        },
+        "clark_vs_fosm": {
+          "n": 46,
+          "n_clark_better_E": 46,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 10,
+          "sign_test_p_sd": 0.00016,
+          "n_clark_better_BOTH_moments": 10,
+          "sign_test_p_both": 0.00016
+        },
+        "clark_vs_clark-diag": {
+          "n": 46,
+          "n_clark_better_E": 41,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 42,
+          "sign_test_p_sd": 0.0,
+          "n_clark_better_BOTH_moments": 40,
+          "sign_test_p_both": 0.0
+        },
+        "clark_vs_step-form": {
+          "n": 46,
+          "n_clark_better_E": 46,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 46,
+          "sign_test_p_sd": 0.0,
+          "n_clark_better_BOTH_moments": 46,
+          "sign_test_p_both": 0.0
+        },
+        "clark_vs_mc-2": {
+          "n": 46,
+          "n_clark_better_E": 42,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 45,
+          "sign_test_p_sd": 0.0,
+          "n_clark_better_BOTH_moments": 41,
+          "sign_test_p_both": 0.0
+        },
+        "clark_vs_mc-32": {
+          "n": 46,
+          "n_clark_better_E": 44,
+          "sign_test_p_E": 0.0,
+          "n_clark_better_sd": 33,
+          "sign_test_p_sd": 0.00453,
+          "n_clark_better_BOTH_moments": 32,
+          "sign_test_p_both": 0.01135
+        },
+        "sd_deficit_vs_alpha": {
+          "note": "REPORTED CHARACTERIZATION, no criterion. clark's belief-referee sd-ratio (sd_clark / sd_MC) binned by the window's cost-weighted median alpha. The historical record is 0.90-0.94; the derived worst case is ~0.89 at alpha ~ 0.",
+          "bin_edges": [
+            0.0,
+            0.2,
+            0.4,
+            0.6,
+            0.8,
+            1.0,
+            1.5,
+            Infinity
+          ],
+          "bins": [
+            {
+              "alpha_lo": 0.0,
+              "alpha_hi": 0.2,
+              "n": 0
+            },
+            {
+              "alpha_lo": 0.2,
+              "alpha_hi": 0.4,
+              "n": 12,
+              "alpha_median": 0.318,
+              "clark_sd_ratio_median": 0.9119,
+              "clark_sd_ratio_p5": 0.8034,
+              "clark_sd_ratio_p95": 0.9492
+            },
+            {
+              "alpha_lo": 0.4,
+              "alpha_hi": 0.6,
+              "n": 18,
+              "alpha_median": 0.517,
+              "clark_sd_ratio_median": 0.9531,
+              "clark_sd_ratio_p5": 0.8602,
+              "clark_sd_ratio_p95": 0.9855
+            },
+            {
+              "alpha_lo": 0.6,
+              "alpha_hi": 0.8,
+              "n": 13,
+              "alpha_median": 0.6839,
+              "clark_sd_ratio_median": 0.9658,
+              "clark_sd_ratio_p5": 0.8845,
+              "clark_sd_ratio_p95": 0.9921
+            },
+            {
+              "alpha_lo": 0.8,
+              "alpha_hi": 1.0,
+              "n": 2,
+              "alpha_median": 0.8438,
+              "clark_sd_ratio_median": 0.9661,
+              "clark_sd_ratio_p5": 0.9559,
+              "clark_sd_ratio_p95": 0.9763
+            },
+            {
+              "alpha_lo": 1.0,
+              "alpha_hi": 1.5,
+              "n": 1,
+              "alpha_median": 1.1459,
+              "clark_sd_ratio_median": 0.9672,
+              "clark_sd_ratio_p5": 0.9672,
+              "clark_sd_ratio_p95": 0.9672
+            },
+            {
+              "alpha_lo": 1.5,
+              "alpha_hi": Infinity,
+              "n": 0
+            }
+          ],
+          "corr_alpha_vs_sd_ratio": 0.4549
+        },
+        "cvar_error": {
+          "note": "REPORTED CHARACTERIZATION, no criterion. |CVaR_q(arm) - CVaR_q(MC)| per window under the belief referee -- the single number a planner consumes, fusing both moments through the decision rule's own tail weight. The arm CVaR is the Gaussian form E + phi(z_q)/(1-q) * sd; the MC CVaR is the mean of the empirical upper tail. mean-map has no sd, so its CVaR is its point prediction -- the floor a risk-blind planner sits at.",
+          "q": 0.9,
+          "gaussian_factor": 1.7549833193248683,
+          "arms": {
+            "clark": {
+              "median": 0.03521802539307828,
+              "p95": 0.12413072802928582,
+              "max": 0.24460113689565333,
+              "mean": 0.04783194796199614
+            },
+            "clark-diag": {
+              "median": 0.13332022052327375,
+              "p95": 0.47048224082800516,
+              "max": 0.6935274472289166,
+              "mean": 0.1728856087743027
+            },
+            "fosm": {
+              "median": 0.30190254325225396,
+              "p95": 0.8649749960795816,
+              "max": 1.662525318806729,
+              "mean": 0.38323588669608516
+            },
+            "step-form": {
+              "median": 3.3102511030856476,
+              "p95": 9.047146680338301,
+              "max": 10.58831316789474,
+              "mean": 3.9248117116722705
+            },
+            "mc-2": {
+              "median": 0.32403947142756806,
+              "p95": 1.1855095239129696,
+              "max": 2.1234094281189755,
+              "mean": 0.46404631091785553
+            },
+            "mc-32": {
+              "median": 0.08197044471580739,
+              "p95": 0.3669106934476076,
+              "max": 0.6072491457307478,
+              "mean": 0.12190906035618315
+            },
+            "mean-map": {
+              "median": 1.0323008612376725,
+              "p95": 2.5931504615941776,
+              "max": 3.956268551866742,
+              "mean": 1.2649821402767925
+            }
+          },
+          "lowest_median_abs_cvar_error": "clark"
+        }
+      }
+    }
+  }
+}

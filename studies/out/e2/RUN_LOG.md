@@ -1,0 +1,191 @@
+# E2 RUN_LOG
+
+Detached runner for PREREG_baseprod.md, `studies/baseprod/runner.py`. Append-only, one line per stage event.
+
+- `2026-08-28 19:41:39 +0200` **0-init** — runner start (pid 2077169, host dasenka, BASEPROD_ROOT=/local/kuceral4/baseprod, argv=[], design_only=False). Chained authorization: if C1-C4 all pass, FREEZE.json is written and the 22-traverse held-out run starts immediately, unattended. Any gate failure stops before unlock.
+- `2026-08-28 19:41:39 +0200` **0-init** — configuration: windows 4 m (legacy parity build 10 m), look-back 7 m, cell 0.1 m, arms ['clark', 'clark-diag', 'fosm', 'step-form', 'mc-2', 'mc-32'] + mean-map, 20000 MC draws/window (seed 20260828, subsample seed 20260828), QC thresholds retained>=0.5, obs_frac>=0.7, sigma<=0.1 m, voidfill<=0.05
+- `2026-08-28 19:41:39 +0200` **0-init** — pins: fx=fy=422.28125, cx=425.4715881347656, cy=236.69622802734375, mount pitch offset -1.4092 deg (total 18.5908 deg), sigma_z(r) = 0.05185 + 0.00343 r^2, r_wheel 0.075 m
+- `2026-08-28 19:41:39 +0200` **0-init** — step-form formula: E = cost(mean map); sd = sum over contact nodes n of |c_eff[n]| * sqrt(C[u(n), u(n)]), u(n) = u_idx[n, argmax_j means[n, j]] the mean-map winner cell of node n; no max, no covariance (per-step Gaussian-CVaR proxy)
+- `2026-08-28 19:41:39 +0200` **1-commit** — pipeline commit a02dfd9bd5d63f64c8b0d6abf3f486695f0cc3e4 (deployed record)
+- `2026-08-28 19:41:39 +0200` **2-design** — registering design traverses ['2023-07-23_13-05-11', '2023-07-22_14-18-23']
+- `2026-08-28 19:41:48 +0200` **2-design** —   t1: model=plane resid_sd=0.0449 m blockCV=0.0601 m voidfill=0.00078
+- `2026-08-28 19:41:48 +0200` **2-design** —   t2: model=quadratic resid_sd=0.0322 m blockCV=0.0654 m voidfill=0.00339
+- `2026-08-28 19:41:48 +0200` **2-design** — re-checking the two pinned calibration constants (record only, never used in the build)
+- `2026-08-28 19:42:15 +0200` **2-design** —   pitch: pinned -1.4092 deg, refit -1.4092 deg, |diff| 1e-05 deg
+- `2026-08-28 19:42:17 +0200` **2-design** —   sigma: pinned a=0.05185 b=0.00343, refit a=0.05185 b=0.00343
+- `2026-08-28 19:42:17 +0200` **2-design** — C1(a) code parity: rebuilding the 10 m hindsight windows
+- `2026-08-28 19:43:46 +0200` **2-design** —   parity: 19 retained, 19 unflagged, k=405.0668708279696
+- `2026-08-28 19:43:46 +0200` **2-design** — building the hindsight belief at 4 m on both design traverses
+- `2026-08-28 19:46:02 +0200` **2-design** —   hindsight: t1=13 windows, t2=35 windows
+- `2026-08-28 19:46:02 +0200` **2-design** — scoring the hindsight condition, seven arms, 20000 MC draws per window
+- `2026-08-28 19:46:25 +0200` **2-design** —   hindsight: 46 retained, 46 unflagged, k=275.0293778920172 tau=0.0
+- `2026-08-28 19:46:25 +0200` **2-design** — building the foresight belief at 4 m on both design traverses
+- `2026-08-28 19:47:53 +0200` **2-design** —   foresight: t1=12 windows, t2=34 windows
+- `2026-08-28 19:47:53 +0200` **2-design** — scoring the foresight condition, seven arms, 20000 MC draws per window
+- `2026-08-28 19:48:16 +0200` **2-design** —   foresight: 46 retained, 46 unflagged, k=282.99667205586184 tau=0.0
+- `2026-08-28 19:48:17 +0200` **3-freeze-eval** — C1: PASS — (a) the 10 m hindsight scoring path still reproduces rehearsal v3 within 1e-06 relative -- code parity preserved on the old configuration -- AND (b) the 4 m pipeline runs both conditions end to end with finite outputs
+- `2026-08-28 19:48:17 +0200` **3-freeze-eval** — C2: PASS — at least 60% of the 48 design windows (4 m) unflagged under foresight
+- `2026-08-28 19:48:17 +0200` **3-freeze-eval** — C3: PASS — all fits finite, the QC/registration machinery ran on both conditions without error, and NO NaN or degenerate value appears anywhere in the design tables (arm moments, pooled arm table, belief-referee table, regime statistics)
+- `2026-08-28 19:48:17 +0200` **3-freeze-eval** — C4: PASS — no held-out path accessed before the freeze record is written
+- `2026-08-28 19:48:17 +0200` **4-freeze** — FREEZE.json written — pipeline a02dfd9bd5d63f64c8b0d6abf3f486695f0cc3e4, k(hindsight)=275.0293778920172, k(foresight)=282.99667205586184
+- `2026-08-28 19:48:17 +0200` **4-freeze** — DESIGN_PHASE_DONE.md written
+- `2026-08-28 19:48:17 +0200` **5-heldout** — C1-C4 all hold and FREEZE.json is written. Proceeding DIRECTLY into the held-out run under the author's restored chained authorization (PREREG_baseprod.md, 2026-08-28 evening; clark_paper 0506da2). 22 traverses, 223.4 GiB to stream, one archive resident at a time, disk cap 100 GB.
+- `2026-08-28 19:48:17 +0200` **5-heldout** — streaming loop: 22 of 22 traverses still to do (223.4 GiB), 146.3 GB free on /local
+- `2026-08-28 19:48:17 +0200` **5-heldout** — [1/22] 2023-07-20_18-12-05: downloading 9.6 GiB from roboshare token 9UZz7Nw4wBZeC0L; 146.3 GB free
+- `2026-08-28 19:54:42 +0200` **5-heldout** — extracting 2023-07-20_18-12-05
+- `2026-08-28 19:55:56 +0200` **5-heldout** — archive deleted; 145.8 GB free
+- `2026-08-28 19:56:00 +0200` **5-heldout** —   registered 2023-07-20_18-12-05: plane, resid sd 0.3354 m
+- `2026-08-28 19:56:58 +0200` **5-heldout** —   2023-07-20_18-12-05 hindsight: 27 windows built from 2014 depth frames over 111.58 m of track
+- `2026-08-28 19:57:36 +0200` **5-heldout** —   2023-07-20_18-12-05 foresight: 26 windows built from 2014 depth frames over 111.58 m of track
+- `2026-08-28 19:57:36 +0200` **5-heldout** — 2023-07-20_18-12-05 done; extracted data deleted; 146.3 GB free
+- `2026-08-28 19:57:36 +0200` **5-heldout** — [2/22] 2023-07-20_19-12-27: downloading 5.5 GiB from roboshare token 6RUf5R1Fs8DuMg7; 146.3 GB free
+- `2026-08-28 20:00:29 +0200` **5-heldout** — extracting 2023-07-20_19-12-27
+- `2026-08-28 20:03:36 +0200` **5-heldout** — archive deleted; 146.0 GB free
+- `2026-08-28 20:03:38 +0200` **5-heldout** —   registered 2023-07-20_19-12-27: plane, resid sd 2.0785 m
+- `2026-08-28 20:04:15 +0200` **5-heldout** —   2023-07-20_19-12-27 hindsight: 13 windows built from 1169 depth frames over 55.27 m of track
+- `2026-08-28 20:04:39 +0200` **5-heldout** —   2023-07-20_19-12-27 foresight: 12 windows built from 1169 depth frames over 55.27 m of track
+- `2026-08-28 20:04:39 +0200` **5-heldout** — 2023-07-20_19-12-27 done; extracted data deleted; 146.3 GB free
+- `2026-08-28 20:04:39 +0200` **5-heldout** — [3/22] 2023-07-20_20-01-38: downloading 0.069 GiB from roboshare token mzUOLbZI83jrZNO; 146.3 GB free
+- `2026-08-28 20:04:42 +0200` **5-heldout** — extracting 2023-07-20_20-01-38
+- `2026-08-28 20:04:49 +0200` **5-heldout** — archive deleted; 146.1 GB free
+- `2026-08-28 20:04:53 +0200` **5-heldout** —   registered 2023-07-20_20-01-38: quadratic, resid sd 0.023 m
+- `2026-08-28 20:04:53 +0200` **5-heldout** —   2023-07-20_20-01-38 hindsight: 0 windows built from None depth frames over 89.44 m of track
+- `2026-08-28 20:04:53 +0200` **5-heldout** —   2023-07-20_20-01-38 foresight: 0 windows built from None depth frames over 89.44 m of track
+- `2026-08-28 20:04:53 +0200` **5-heldout** — 2023-07-20_20-01-38 done; extracted data deleted; 146.3 GB free
+- `2026-08-28 20:04:53 +0200` **5-heldout** — [4/22] 2023-07-21_12-38-15: downloading 9.4 GiB from roboshare token QRMKKY9AH9IFC95; 146.3 GB free
+- `2026-08-28 20:11:08 +0200` **5-heldout** — extracting 2023-07-21_12-38-15
+- `2026-08-28 20:12:05 +0200` **5-heldout** — archive deleted; 145.9 GB free
+- `2026-08-28 20:12:07 +0200` **5-heldout** —   registered 2023-07-21_12-38-15: plane, resid sd 0.0302 m
+- `2026-08-28 20:12:46 +0200` **5-heldout** —   2023-07-21_12-38-15 hindsight: 14 windows built from 1257 depth frames over 56.05 m of track
+- `2026-08-28 20:13:10 +0200` **5-heldout** —   2023-07-21_12-38-15 foresight: 13 windows built from 1257 depth frames over 56.05 m of track
+- `2026-08-28 20:13:10 +0200` **5-heldout** — 2023-07-21_12-38-15 done; extracted data deleted; 146.2 GB free
+- `2026-08-28 20:13:10 +0200` **5-heldout** — [5/22] 2023-07-21_12-58-11: downloading 29.0 GiB from roboshare token a2gqXQtqS1sftAd; 146.2 GB free
+- `2026-08-28 20:30:42 +0200` **5-heldout** — extracting 2023-07-21_12-58-11
+- `2026-08-28 20:32:59 +0200` **5-heldout** — archive deleted; 145.3 GB free
+- `2026-08-28 20:33:03 +0200` **5-heldout** —   registered 2023-07-21_12-58-11: plane, resid sd 0.0505 m
+- `2026-08-28 20:34:57 +0200` **5-heldout** —   2023-07-21_12-58-11 hindsight: 39 windows built from 3939 depth frames over 159.66 m of track
+- `2026-08-28 20:36:10 +0200` **5-heldout** —   2023-07-21_12-58-11 foresight: 38 windows built from 3939 depth frames over 159.66 m of track
+- `2026-08-28 20:36:10 +0200` **5-heldout** — 2023-07-21_12-58-11 done; extracted data deleted; 146.2 GB free
+- `2026-08-28 20:36:10 +0200` **5-heldout** — [6/22] 2023-07-21_13-43-00: downloading 8.0 GiB from roboshare token 1xcNMOSz5EGpNrk; 146.2 GB free
+- `2026-08-28 20:40:07 +0200` **5-heldout** — extracting 2023-07-21_13-43-00
+- `2026-08-28 20:43:25 +0200` **5-heldout** — archive deleted; 146.0 GB free
+- `2026-08-28 20:43:26 +0200` **5-heldout** —   registered 2023-07-21_13-43-00: plane, resid sd 0.2923 m
+- `2026-08-28 20:43:56 +0200` **5-heldout** —   2023-07-21_13-43-00 hindsight: 10 windows built from 1057 depth frames over 41.97 m of track
+- `2026-08-28 20:44:14 +0200` **5-heldout** —   2023-07-21_13-43-00 foresight: 9 windows built from 1057 depth frames over 41.97 m of track
+- `2026-08-28 20:44:14 +0200` **5-heldout** — 2023-07-21_13-43-00 done; extracted data deleted; 146.2 GB free
+- `2026-08-28 20:44:14 +0200` **5-heldout** — [7/22] 2023-07-21_13-59-14: downloading 5.2 GiB from roboshare token ona9r882aAGjAv5; 146.2 GB free
+- `2026-08-28 20:46:59 +0200` **5-heldout** — extracting 2023-07-21_13-59-14
+- `2026-08-28 20:49:12 +0200` **5-heldout** — archive deleted; 146.0 GB free
+- `2026-08-28 20:49:13 +0200` **5-heldout** —   registered 2023-07-21_13-59-14: plane, resid sd 0.2051 m
+- `2026-08-28 20:49:29 +0200` **5-heldout** —   2023-07-21_13-59-14 hindsight: 6 windows built from 666 depth frames over 26.59 m of track
+- `2026-08-28 20:49:39 +0200` **5-heldout** —   2023-07-21_13-59-14 foresight: 5 windows built from 666 depth frames over 26.59 m of track
+- `2026-08-28 20:49:39 +0200` **5-heldout** — 2023-07-21_13-59-14 done; extracted data deleted; 146.2 GB free
+- `2026-08-28 20:49:39 +0200` **5-heldout** — [8/22] 2023-07-21_14-08-29: downloading 21.0 GiB from roboshare token 2ew83qj2B3JdSqr; 146.2 GB free
+- `2026-08-28 21:00:04 +0200` **5-heldout** — extracting 2023-07-21_14-08-29
+- `2026-08-28 21:01:45 +0200` **5-heldout** — archive deleted; 145.5 GB free
+- `2026-08-28 21:01:49 +0200` **5-heldout** —   registered 2023-07-21_14-08-29: plane, resid sd 0.0461 m
+- `2026-08-28 21:03:14 +0200` **5-heldout** —   2023-07-21_14-08-29 hindsight: 29 windows built from 2881 depth frames over 118.44 m of track
+- `2026-08-28 21:04:08 +0200` **5-heldout** —   2023-07-21_14-08-29 foresight: 28 windows built from 2881 depth frames over 118.44 m of track
+- `2026-08-28 21:04:09 +0200` **5-heldout** — 2023-07-21_14-08-29 done; extracted data deleted; 146.2 GB free
+- `2026-08-28 21:04:09 +0200` **5-heldout** — [9/22] 2023-07-21_14-44-56: downloading 2.2 GiB from roboshare token zFgzSOHvJxDg3cx; 146.2 GB free
+- `2026-08-28 21:05:19 +0200` **5-heldout** — extracting 2023-07-21_14-44-56
+- `2026-08-28 21:06:13 +0200` **5-heldout** — archive deleted; 146.1 GB free
+- `2026-08-28 21:06:14 +0200` **5-heldout** —   registered 2023-07-21_14-44-56: plane, resid sd 0.0219 m
+- `2026-08-28 21:06:21 +0200` **5-heldout** —   2023-07-21_14-44-56 hindsight: 4 windows built from 310 depth frames over 19.09 m of track
+- `2026-08-28 21:06:24 +0200` **5-heldout** —   2023-07-21_14-44-56 foresight: 3 windows built from 310 depth frames over 19.09 m of track
+- `2026-08-28 21:06:24 +0200` **5-heldout** — 2023-07-21_14-44-56 done; extracted data deleted; 146.2 GB free
+- `2026-08-28 21:06:24 +0200` **5-heldout** — [10/22] 2023-07-21_14-51-07: downloading 6.0 GiB from roboshare token 7mQJTqW6XBAxh6i; 146.2 GB free
+- `2026-08-28 21:09:42 +0200` **5-heldout** — extracting 2023-07-21_14-51-07
+- `2026-08-28 21:09:50 +0200` **5-heldout** — archive deleted; 146.1 GB free
+- `2026-08-28 21:09:51 +0200` **5-heldout** —   registered 2023-07-21_14-51-07: plane, resid sd 0.026 m
+- `2026-08-28 21:09:51 +0200` **5-heldout** —   2023-07-21_14-51-07 hindsight: 0 windows built from None depth frames over 45.44 m of track
+- `2026-08-28 21:09:51 +0200` **5-heldout** —   2023-07-21_14-51-07 foresight: 0 windows built from None depth frames over 45.44 m of track
+- `2026-08-28 21:09:51 +0200` **5-heldout** — 2023-07-21_14-51-07 done; extracted data deleted; 146.2 GB free
+- `2026-08-28 21:09:51 +0200` **5-heldout** — [11/22] 2023-07-21_17-07-00: downloading 15.0 GiB from roboshare token CZlOIsOLDXCXd0Z; 146.2 GB free
+- `2026-08-28 21:16:22 +0200` **5-heldout** — extracting 2023-07-21_17-07-00
+- `2026-08-28 21:17:39 +0200` **5-heldout** — archive deleted; 145.8 GB free
+- `2026-08-28 21:17:43 +0200` **5-heldout** —   registered 2023-07-21_17-07-00: quadratic, resid sd 0.0186 m
+- `2026-08-28 21:18:39 +0200` **5-heldout** —   2023-07-21_17-07-00 hindsight: 25 windows built from 1907 depth frames over 100.93 m of track
+- `2026-08-28 21:19:17 +0200` **5-heldout** —   2023-07-21_17-07-00 foresight: 24 windows built from 1907 depth frames over 100.93 m of track
+- `2026-08-28 21:19:17 +0200` **5-heldout** — 2023-07-21_17-07-00 done; extracted data deleted; 146.2 GB free
+- `2026-08-28 21:19:17 +0200` **5-heldout** — [12/22] 2023-07-21_17-34-18: downloading 5.0 GiB from roboshare token IFkskV2rTHlX3XO; 146.2 GB free
+- `2026-08-28 21:22:08 +0200` **5-heldout** — extracting 2023-07-21_17-34-18
+- `2026-08-28 21:24:10 +0200` **5-heldout** — archive deleted; 146.0 GB free
+- `2026-08-28 21:24:11 +0200` **5-heldout** —   registered 2023-07-21_17-34-18: plane, resid sd 0.0135 m
+- `2026-08-28 21:24:29 +0200` **5-heldout** —   2023-07-21_17-34-18 hindsight: 9 windows built from 700 depth frames over 39.59 m of track
+- `2026-08-28 21:24:40 +0200` **5-heldout** —   2023-07-21_17-34-18 foresight: 8 windows built from 700 depth frames over 39.59 m of track
+- `2026-08-28 21:24:40 +0200` **5-heldout** — 2023-07-21_17-34-18 done; extracted data deleted; 146.2 GB free
+- `2026-08-28 21:24:40 +0200` **5-heldout** — [13/22] 2023-07-21_17-45-42: downloading 15.0 GiB from roboshare token 3yoCCri5of3zijU; 146.2 GB free
+- `2026-08-28 21:32:24 +0200` **5-heldout** — extracting 2023-07-21_17-45-42
+- `2026-08-28 21:33:29 +0200` **5-heldout** — archive deleted; 145.7 GB free
+- `2026-08-28 21:33:32 +0200` **5-heldout** —   registered 2023-07-21_17-45-42: plane, resid sd 0.0235 m
+- `2026-08-28 21:34:34 +0200` **5-heldout** —   2023-07-21_17-45-42 hindsight: 26 windows built from 2082 depth frames over 106.71 m of track
+- `2026-08-28 21:35:14 +0200` **5-heldout** —   2023-07-21_17-45-42 foresight: 25 windows built from 2082 depth frames over 106.71 m of track
+- `2026-08-28 21:35:14 +0200` **5-heldout** — 2023-07-21_17-45-42 done; extracted data deleted; 146.2 GB free
+- `2026-08-28 21:35:14 +0200` **5-heldout** — [14/22] 2023-07-22_13-00-57: downloading 5.8 GiB from roboshare token puWG3HNGRoMI14v; 146.2 GB free
+- `2026-08-28 21:37:30 +0200` **5-heldout** — extracting 2023-07-22_13-00-57
+- `2026-08-28 21:39:36 +0200` **5-heldout** — archive deleted; 146.0 GB free
+- `2026-08-28 21:39:37 +0200` **5-heldout** —   registered 2023-07-22_13-00-57: plane, resid sd 0.0472 m
+- `2026-08-28 21:39:56 +0200` **5-heldout** —   2023-07-22_13-00-57 hindsight: 8 windows built from 834 depth frames over 35.5 m of track
+- `2026-08-28 21:40:07 +0200` **5-heldout** —   2023-07-22_13-00-57 foresight: 7 windows built from 834 depth frames over 35.5 m of track
+- `2026-08-28 21:40:07 +0200` **5-heldout** — 2023-07-22_13-00-57 done; extracted data deleted; 146.2 GB free
+- `2026-08-28 21:40:07 +0200` **5-heldout** — [15/22] 2023-07-22_13-28-55: downloading 4.7 GiB from roboshare token YzpKwdN7zrEAAW1; 146.2 GB free
+- `2026-08-28 21:43:42 +0200` **5-heldout** — extracting 2023-07-22_13-28-55
+- `2026-08-28 21:44:58 +0200` **5-heldout** — archive deleted; 145.7 GB free
+- `2026-08-28 21:45:01 +0200` **5-heldout** —   registered 2023-07-22_13-28-55: quadratic, resid sd 0.0212 m
+- `2026-08-28 21:46:02 +0200` **5-heldout** —   2023-07-22_13-28-55 hindsight: 23 windows built from 2088 depth frames over 94.08 m of track
+- `2026-08-28 21:46:41 +0200` **5-heldout** —   2023-07-22_13-28-55 foresight: 22 windows built from 2088 depth frames over 94.08 m of track
+- `2026-08-28 21:46:41 +0200` **5-heldout** — 2023-07-22_13-28-55 done; extracted data deleted; 146.1 GB free
+- `2026-08-28 21:46:41 +0200` **5-heldout** — [16/22] 2023-07-22_16-24-27: downloading 33.0 GiB from roboshare token NcKry8Agfo1lVDW; 146.1 GB free
+- `2026-08-28 22:17:35 +0200` **5-heldout** — extracting 2023-07-22_16-24-27
+- `2026-08-28 22:19:55 +0200` **5-heldout** — archive deleted; 145.1 GB free
+- `2026-08-28 22:20:01 +0200` **5-heldout** —   registered 2023-07-22_16-24-27: plane, resid sd 0.0537 m
+- `2026-08-28 22:22:15 +0200` **5-heldout** —   2023-07-22_16-24-27 hindsight: 52 windows built from 4446 depth frames over 210.99 m of track
+- `2026-08-28 22:23:42 +0200` **5-heldout** —   2023-07-22_16-24-27 foresight: 51 windows built from 4446 depth frames over 210.99 m of track
+- `2026-08-28 22:23:42 +0200` **5-heldout** — 2023-07-22_16-24-27 done; extracted data deleted; 146.1 GB free
+- `2026-08-28 22:23:42 +0200` **5-heldout** — [17/22] 2023-07-22_17-18-36: downloading 1.1 GiB from roboshare token SbL41h9MHxLbcQK; 146.1 GB free
+- `2026-08-28 22:24:41 +0200` **5-heldout** — extracting 2023-07-22_17-18-36
+- `2026-08-28 22:25:06 +0200` **5-heldout** — archive deleted; 146.1 GB free
+- `2026-08-28 22:25:07 +0200` **5-heldout** —   registered 2023-07-22_17-18-36: quadratic, resid sd 0.0237 m
+- `2026-08-28 22:25:08 +0200` **5-heldout** —   2023-07-22_17-18-36 hindsight: 1 windows built from 147 depth frames over 6.1 m of track
+- `2026-08-28 22:25:09 +0200` **5-heldout** —   2023-07-22_17-18-36 foresight: 0 windows built from 147 depth frames over 6.1 m of track
+- `2026-08-28 22:25:09 +0200` **5-heldout** — 2023-07-22_17-18-36 done; extracted data deleted; 146.1 GB free
+- `2026-08-28 22:25:09 +0200` **5-heldout** — [18/22] 2023-07-22_17-31-58: downloading 1.9 GiB from roboshare token KlShSUXBUMd40Po; 146.1 GB free
+- `2026-08-28 22:27:45 +0200` **5-heldout** — extracting 2023-07-22_17-31-58
+- `2026-08-28 22:28:34 +0200` **5-heldout** — archive deleted; 146.1 GB free
+- `2026-08-28 22:28:35 +0200` **5-heldout** —   registered 2023-07-22_17-31-58: plane, resid sd 0.0239 m
+- `2026-08-28 22:28:38 +0200` **5-heldout** —   2023-07-22_17-31-58 hindsight: 2 windows built from 264 depth frames over 11.31 m of track
+- `2026-08-28 22:28:40 +0200` **5-heldout** —   2023-07-22_17-31-58 foresight: 1 windows built from 264 depth frames over 11.31 m of track
+- `2026-08-28 22:28:40 +0200` **5-heldout** — 2023-07-22_17-31-58 done; extracted data deleted; 146.1 GB free
+- `2026-08-28 22:28:40 +0200` **5-heldout** — [19/22] 2023-07-22_17-38-50: downloading 11.0 GiB from roboshare token ExtvLg6aaTSM6Xy; 146.1 GB free
+- `2026-08-28 22:36:48 +0200` **5-heldout** — extracting 2023-07-22_17-38-50
+- `2026-08-28 22:37:49 +0200` **5-heldout** — archive deleted; 145.8 GB free
+- `2026-08-28 22:37:52 +0200` **5-heldout** —   registered 2023-07-22_17-38-50: plane, resid sd 0.0443 m
+- `2026-08-28 22:38:32 +0200` **5-heldout** —   2023-07-22_17-38-50 hindsight: 15 windows built from 1435 depth frames over 63.49 m of track
+- `2026-08-28 22:38:58 +0200` **5-heldout** —   2023-07-22_17-38-50 foresight: 14 windows built from 1435 depth frames over 63.49 m of track
+- `2026-08-28 22:38:58 +0200` **5-heldout** — 2023-07-22_17-38-50 done; extracted data deleted; 146.1 GB free
+- `2026-08-28 22:38:58 +0200` **5-heldout** — [20/22] 2023-07-23_11-23-18: downloading 14.0 GiB from roboshare token 04iqcKdNMS873zC; 146.1 GB free
+- `2026-08-28 22:46:02 +0200` **5-heldout** — extracting 2023-07-23_11-23-18
+- `2026-08-28 22:47:18 +0200` **5-heldout** — archive deleted; 145.6 GB free
+- `2026-08-28 22:47:21 +0200` **5-heldout** —   registered 2023-07-23_11-23-18: quadratic, resid sd 0.0257 m
+- `2026-08-28 22:48:22 +0200` **5-heldout** —   2023-07-23_11-23-18 hindsight: 22 windows built from 2015 depth frames over 89.62 m of track
+- `2026-08-28 22:49:01 +0200` **5-heldout** —   2023-07-23_11-23-18 foresight: 21 windows built from 2015 depth frames over 89.62 m of track
+- `2026-08-28 22:49:01 +0200` **5-heldout** — 2023-07-23_11-23-18 done; extracted data deleted; 146.1 GB free
+- `2026-08-28 22:49:01 +0200` **5-heldout** — [21/22] 2023-07-23_11-52-09: downloading 15.0 GiB from roboshare token JGtBaMHWjShVdfF; 146.1 GB free
+- `2026-08-28 22:56:31 +0200` **5-heldout** — extracting 2023-07-23_11-52-09
+- `2026-08-28 22:57:43 +0200` **5-heldout** — archive deleted; 145.6 GB free
+- `2026-08-28 22:57:47 +0200` **5-heldout** —   registered 2023-07-23_11-52-09: plane, resid sd 0.0443 m
+- `2026-08-28 22:58:49 +0200` **5-heldout** —   2023-07-23_11-52-09 hindsight: 22 windows built from 2091 depth frames over 90.87 m of track
+- `2026-08-28 22:59:29 +0200` **5-heldout** —   2023-07-23_11-52-09 foresight: 21 windows built from 2091 depth frames over 90.87 m of track
+- `2026-08-28 22:59:29 +0200` **5-heldout** — 2023-07-23_11-52-09 done; extracted data deleted; 146.1 GB free
+- `2026-08-28 22:59:29 +0200` **5-heldout** — [22/22] 2023-07-23_12-52-39: downloading 5.9 GiB from roboshare token 8duCZbWOGHnd8LC; 146.1 GB free
+- `2026-08-28 23:01:47 +0200` **5-heldout** — extracting 2023-07-23_12-52-39
+- `2026-08-28 23:04:10 +0200` **5-heldout** — archive deleted; 145.9 GB free
+- `2026-08-28 23:04:12 +0200` **5-heldout** —   registered 2023-07-23_12-52-39: plane, resid sd 0.0428 m
+- `2026-08-28 23:04:36 +0200` **5-heldout** —   2023-07-23_12-52-39 hindsight: 10 windows built from 794 depth frames over 40.36 m of track
+- `2026-08-28 23:04:51 +0200` **5-heldout** —   2023-07-23_12-52-39 foresight: 9 windows built from 794 depth frames over 40.36 m of track
+- `2026-08-28 23:04:51 +0200` **5-heldout** — 2023-07-23_12-52-39 done; extracted data deleted; 146.1 GB free
+- `2026-08-28 23:04:51 +0200` **6-score** — scoring held-out under hindsight at the FROZEN (k=275.0293778920172, tau=0.0)
+- `2026-08-28 23:07:21 +0200` **6-score** — scoring held-out under foresight at the FROZEN (k=282.99667205586184, tau=0.0)
+- `2026-08-28 23:09:47 +0200` **7-report** — FINAL_REPORT.md written (484 lines, design-phase appendix included)
+- `2026-08-28 23:09:47 +0200` **7-report** — ALL STAGES COMPLETE — FINAL_REPORT.md written

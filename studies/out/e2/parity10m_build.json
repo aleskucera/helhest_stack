@@ -1,0 +1,307 @@
+{
+  "t1": {
+    "traverse": "2023-07-23_13-05-11",
+    "key": "t1",
+    "condition": "hindsight",
+    "tag": "parity10m",
+    "win_len_m": 10.0,
+    "path_length_m": 52.84,
+    "n_depth_frames": 1229,
+    "cutoff_rule": "frames with a - LOOKBACK_M <= s <= b (full trajectory)",
+    "lookback_m": 7.0,
+    "cell": 0.1,
+    "alpha": 0.0,
+    "max_variance": 1000000000.0,
+    "intrinsics": {
+      "fx": 422.28125,
+      "fy": 422.28125,
+      "cx": 425.4715881347656,
+      "cy": 236.69622802734375
+    },
+    "mount_pitch_offset_deg": -1.4092,
+    "sigma_model": {
+      "a": 0.05185,
+      "b": 0.00343
+    },
+    "n_windows": 5,
+    "windows": [
+      {
+        "w": 0,
+        "s0": 0.0,
+        "s1": 10.0,
+        "grid": [
+          189,
+          125
+        ],
+        "n_frames": 216,
+        "n_points": 2605428,
+        "map_observed_frac": 0.6523,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 1,
+        "s0": 10.0,
+        "s1": 20.0,
+        "grid": [
+          190,
+          172
+        ],
+        "n_frames": 382,
+        "n_points": 4014898,
+        "map_observed_frac": 0.4774,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 2,
+        "s0": 20.0,
+        "s1": 30.0,
+        "grid": [
+          165,
+          206
+        ],
+        "n_frames": 374,
+        "n_points": 5114537,
+        "map_observed_frac": 0.5149,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 3,
+        "s0": 30.0,
+        "s1": 40.0,
+        "grid": [
+          224,
+          180
+        ],
+        "n_frames": 360,
+        "n_points": 5418493,
+        "map_observed_frac": 0.4274,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 4,
+        "s0": 40.0,
+        "s1": 50.0,
+        "grid": [
+          215,
+          176
+        ],
+        "n_frames": 390,
+        "n_points": 5679291,
+        "map_observed_frac": 0.4757,
+        "truth_valid_frac": 1.0
+      }
+    ],
+    "skipped": []
+  },
+  "t2": {
+    "traverse": "2023-07-22_14-18-23",
+    "key": "t2",
+    "condition": "hindsight",
+    "tag": "parity10m",
+    "win_len_m": 10.0,
+    "path_length_m": 142.45,
+    "n_depth_frames": 3300,
+    "cutoff_rule": "frames with a - LOOKBACK_M <= s <= b (full trajectory)",
+    "lookback_m": 7.0,
+    "cell": 0.1,
+    "alpha": 0.0,
+    "max_variance": 1000000000.0,
+    "intrinsics": {
+      "fx": 422.28125,
+      "fy": 422.28125,
+      "cx": 425.4715881347656,
+      "cy": 236.69622802734375
+    },
+    "mount_pitch_offset_deg": -1.4092,
+    "sigma_model": {
+      "a": 0.05185,
+      "b": 0.00343
+    },
+    "n_windows": 14,
+    "windows": [
+      {
+        "w": 0,
+        "s0": 0.0,
+        "s1": 10.0,
+        "grid": [
+          132,
+          152
+        ],
+        "n_frames": 240,
+        "n_points": 3755832,
+        "map_observed_frac": 0.7808,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 1,
+        "s0": 10.0,
+        "s1": 20.0,
+        "grid": [
+          195,
+          152
+        ],
+        "n_frames": 385,
+        "n_points": 6418832,
+        "map_observed_frac": 0.6823,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 2,
+        "s0": 20.0,
+        "s1": 30.0,
+        "grid": [
+          228,
+          193
+        ],
+        "n_frames": 390,
+        "n_points": 6854511,
+        "map_observed_frac": 0.3373,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 3,
+        "s0": 30.0,
+        "s1": 40.0,
+        "grid": [
+          213,
+          147
+        ],
+        "n_frames": 413,
+        "n_points": 6818393,
+        "map_observed_frac": 0.5048,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 4,
+        "s0": 40.0,
+        "s1": 50.0,
+        "grid": [
+          170,
+          175
+        ],
+        "n_frames": 419,
+        "n_points": 6653868,
+        "map_observed_frac": 0.5779,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 5,
+        "s0": 50.0,
+        "s1": 60.0,
+        "grid": [
+          191,
+          159
+        ],
+        "n_frames": 428,
+        "n_points": 7350066,
+        "map_observed_frac": 0.6937,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 6,
+        "s0": 60.0,
+        "s1": 70.0,
+        "grid": [
+          200,
+          190
+        ],
+        "n_frames": 399,
+        "n_points": 6729572,
+        "map_observed_frac": 0.5203,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 7,
+        "s0": 70.0,
+        "s1": 80.0,
+        "grid": [
+          189,
+          165
+        ],
+        "n_frames": 395,
+        "n_points": 6686097,
+        "map_observed_frac": 0.5207,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 8,
+        "s0": 80.0,
+        "s1": 90.0,
+        "grid": [
+          233,
+          136
+        ],
+        "n_frames": 372,
+        "n_points": 5934121,
+        "map_observed_frac": 0.5982,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 9,
+        "s0": 90.0,
+        "s1": 100.0,
+        "grid": [
+          216,
+          207
+        ],
+        "n_frames": 365,
+        "n_points": 5669700,
+        "map_observed_frac": 0.372,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 10,
+        "s0": 100.0,
+        "s1": 110.0,
+        "grid": [
+          228,
+          201
+        ],
+        "n_frames": 361,
+        "n_points": 5901809,
+        "map_observed_frac": 0.348,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 11,
+        "s0": 110.0,
+        "s1": 120.0,
+        "grid": [
+          242,
+          175
+        ],
+        "n_frames": 379,
+        "n_points": 6332016,
+        "map_observed_frac": 0.3967,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 12,
+        "s0": 120.0,
+        "s1": 130.0,
+        "grid": [
+          217,
+          195
+        ],
+        "n_frames": 397,
+        "n_points": 6074260,
+        "map_observed_frac": 0.3845,
+        "truth_valid_frac": 1.0
+      },
+      {
+        "w": 13,
+        "s0": 130.0,
+        "s1": 140.0,
+        "grid": [
+          229,
+          188
+        ],
+        "n_frames": 386,
+        "n_points": 5913151,
+        "map_observed_frac": 0.3604,
+        "truth_valid_frac": 1.0
+      }
+    ],
+    "skipped": []
+  }
+}

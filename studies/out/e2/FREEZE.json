@@ -1,0 +1,541 @@
+{
+  "record": "F1 \u2014 the freeze record PREREG_baseprod.md's amendment F1 transcribes",
+  "written_at": "2026-08-28 19:48:17 +0200",
+  "authorization": "Authorized autonomous execution (2026-08-28), narrowed the same day: the runner freezes and STOPS. The held-out run requires an explicit manual start.",
+  "pipeline_commit": "a02dfd9bd5d63f64c8b0d6abf3f486695f0cc3e4",
+  "host": "dasenka",
+  "intrinsics": {
+    "fx": 422.28125,
+    "fy": 422.28125,
+    "cx": 425.4715881347656,
+    "cy": 236.69622802734375,
+    "width": 848,
+    "height": 480,
+    "distortion": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "source": "depth CameraInfo, theory/BASEPROD_BLOCKER.md"
+  },
+  "mount_pitch": {
+    "nominal_deg": 20.0,
+    "offset_deg": -1.4092,
+    "total_deg": 18.5908,
+    "status": "calibration, common to both design traverses, mechanism not nuisance; applied inside belief construction",
+    "refit_check": {
+      "estimator": "delta at which the median residual against registered truth is flat in range, pooled over both design traverses by point count; fx pinned at CameraInfo; mount quaternion rebuilt as R_y(20 + delta)",
+      "refit_MOUNT_PITCH_OFFSET_DEG": -1.4092,
+      "pinned_MOUNT_PITCH_OFFSET_DEG": -1.4092,
+      "abs_diff_deg": 1e-05,
+      "per_traverse_at_refit": {
+        "2023-07-23_13-05-11": {
+          "bias_slope_m_per_m": -0.00289,
+          "bias_at_0m_m": -0.0779,
+          "median_resid_m": -0.0828,
+          "robust_sd_m": 0.0742,
+          "n_points": 918845
+        },
+        "2023-07-22_14-18-23": {
+          "bias_slope_m_per_m": 0.00242,
+          "bias_at_0m_m": -0.0026,
+          "median_resid_m": 0.0002,
+          "robust_sd_m": 0.0543,
+          "n_points": 1094471
+        }
+      },
+      "scan": [
+        {
+          "dpitch_deg": -4.0,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0836,
+              "bias_slope_m_per_m": 0.0429,
+              "median_resid_m": -0.0084,
+              "n": 918849
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": -0.0087,
+              "bias_slope_m_per_m": 0.0479,
+              "median_resid_m": 0.064,
+              "n": 1094468
+            }
+          },
+          "pooled_slope_m_per_m": 0.04563
+        },
+        {
+          "dpitch_deg": -3.0,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0816,
+              "bias_slope_m_per_m": 0.0252,
+              "median_resid_m": -0.0366,
+              "n": 918848
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": -0.0064,
+              "bias_slope_m_per_m": 0.0303,
+              "median_resid_m": 0.0403,
+              "n": 1094473
+            }
+          },
+          "pooled_slope_m_per_m": 0.02801
+        },
+        {
+          "dpitch_deg": -2.0,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0794,
+              "bias_slope_m_per_m": 0.0075,
+              "median_resid_m": -0.0658,
+              "n": 918846
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": -0.0041,
+              "bias_slope_m_per_m": 0.0128,
+              "median_resid_m": 0.0152,
+              "n": 1094468
+            }
+          },
+          "pooled_slope_m_per_m": 0.01042
+        },
+        {
+          "dpitch_deg": -1.5,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0781,
+              "bias_slope_m_per_m": -0.0013,
+              "median_resid_m": -0.0802,
+              "n": 918843
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": -0.0028,
+              "bias_slope_m_per_m": 0.004,
+              "median_resid_m": 0.0025,
+              "n": 1094471
+            }
+          },
+          "pooled_slope_m_per_m": 0.0016
+        },
+        {
+          "dpitch_deg": -1.0,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0769,
+              "bias_slope_m_per_m": -0.0101,
+              "median_resid_m": -0.0946,
+              "n": 918847
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": -0.0015,
+              "bias_slope_m_per_m": -0.0048,
+              "median_resid_m": -0.0105,
+              "n": 1094467
+            }
+          },
+          "pooled_slope_m_per_m": -0.00721
+        },
+        {
+          "dpitch_deg": -0.5,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0756,
+              "bias_slope_m_per_m": -0.0189,
+              "median_resid_m": -0.1092,
+              "n": 918841
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": -0.0001,
+              "bias_slope_m_per_m": -0.0136,
+              "median_resid_m": -0.0236,
+              "n": 1094469
+            }
+          },
+          "pooled_slope_m_per_m": -0.01601
+        },
+        {
+          "dpitch_deg": 0.0,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0742,
+              "bias_slope_m_per_m": -0.0277,
+              "median_resid_m": -0.1237,
+              "n": 918844
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": 0.0014,
+              "bias_slope_m_per_m": -0.0224,
+              "median_resid_m": -0.0363,
+              "n": 1094471
+            }
+          },
+          "pooled_slope_m_per_m": -0.02486
+        },
+        {
+          "dpitch_deg": 1.0,
+          "per_traverse": {
+            "2023-07-23_13-05-11": {
+              "bias_at_0m_m": -0.0712,
+              "bias_slope_m_per_m": -0.0455,
+              "median_resid_m": -0.151,
+              "n": 918848
+            },
+            "2023-07-22_14-18-23": {
+              "bias_at_0m_m": 0.0044,
+              "bias_slope_m_per_m": -0.0401,
+              "median_resid_m": -0.0604,
+              "n": 1094470
+            }
+          },
+          "pooled_slope_m_per_m": -0.04254
+        }
+      ]
+    }
+  },
+  "sigma_model": {
+    "form": "sigma_z(r) = a + b r^2 [m]",
+    "a": 0.05185,
+    "b": 0.00343,
+    "refit_check": {
+      "refit_pooled": {
+        "a": 0.05185,
+        "b": 0.00343
+      },
+      "pinned": {
+        "a": 0.05185,
+        "b": 0.00343
+      },
+      "abs_diff": {
+        "a": 0.0,
+        "b": 0.0
+      },
+      "per_traverse": {
+        "2023-07-23_13-05-11": {
+          "a": 0.06313,
+          "b": 0.00265,
+          "profile": [
+            {
+              "r": 0.55,
+              "n": 12329,
+              "median_m": -0.0671,
+              "robust_sd_m": 0.069
+            },
+            {
+              "r": 0.875,
+              "n": 176219,
+              "median_m": -0.079,
+              "robust_sd_m": 0.0656
+            },
+            {
+              "r": 1.125,
+              "n": 144915,
+              "median_m": -0.0849,
+              "robust_sd_m": 0.0651
+            },
+            {
+              "r": 1.375,
+              "n": 106315,
+              "median_m": -0.0866,
+              "robust_sd_m": 0.0659
+            },
+            {
+              "r": 1.75,
+              "n": 143224,
+              "median_m": -0.0831,
+              "robust_sd_m": 0.0666
+            },
+            {
+              "r": 2.25,
+              "n": 91041,
+              "median_m": -0.0835,
+              "robust_sd_m": 0.0781
+            },
+            {
+              "r": 2.75,
+              "n": 65956,
+              "median_m": -0.0841,
+              "robust_sd_m": 0.0849
+            },
+            {
+              "r": 3.5,
+              "n": 84267,
+              "median_m": -0.0857,
+              "robust_sd_m": 0.0958
+            },
+            {
+              "r": 4.5,
+              "n": 55499,
+              "median_m": -0.0802,
+              "robust_sd_m": 0.1148
+            },
+            {
+              "r": 5.5,
+              "n": 39080,
+              "median_m": -0.0841,
+              "robust_sd_m": 0.1443
+            }
+          ]
+        },
+        "2023-07-22_14-18-23": {
+          "a": 0.04058,
+          "b": 0.00422,
+          "profile": [
+            {
+              "r": 0.55,
+              "n": 16709,
+              "median_m": 0.0119,
+              "robust_sd_m": 0.0394
+            },
+            {
+              "r": 0.875,
+              "n": 218354,
+              "median_m": -0.0019,
+              "robust_sd_m": 0.0394
+            },
+            {
+              "r": 1.125,
+              "n": 177450,
+              "median_m": -0.0015,
+              "robust_sd_m": 0.0427
+            },
+            {
+              "r": 1.375,
+              "n": 133621,
+              "median_m": 0.0016,
+              "robust_sd_m": 0.0462
+            },
+            {
+              "r": 1.75,
+              "n": 172459,
+              "median_m": 0.0029,
+              "robust_sd_m": 0.0525
+            },
+            {
+              "r": 2.25,
+              "n": 99704,
+              "median_m": 0.0051,
+              "robust_sd_m": 0.0629
+            },
+            {
+              "r": 2.75,
+              "n": 71073,
+              "median_m": 0.0013,
+              "robust_sd_m": 0.0759
+            },
+            {
+              "r": 3.5,
+              "n": 98566,
+              "median_m": -0.0005,
+              "robust_sd_m": 0.1058
+            },
+            {
+              "r": 4.5,
+              "n": 63156,
+              "median_m": -0.0045,
+              "robust_sd_m": 0.1304
+            },
+            {
+              "r": 5.5,
+              "n": 43379,
+              "median_m": -0.0159,
+              "robust_sd_m": 0.1592
+            }
+          ]
+        }
+      },
+      "sigma_at": {
+        "0.8": 0.0538,
+        "1.0": 0.0553,
+        "1.5": 0.0596,
+        "2.0": 0.0656,
+        "3.0": 0.0827,
+        "4.0": 0.1068
+      }
+    }
+  },
+  "cutoff_rule": {
+    "foresight": "frames with a - LOOKBACK_M <= s(frame) < a, i.e. RTK along-track arc length strictly before the window start",
+    "hindsight": "frames with a - LOOKBACK_M <= s(frame) <= b (full trajectory)",
+    "lookback_m": 7.0,
+    "win_len_m": 4.0,
+    "note": "the look-back is a shared pipeline element, so foresight is the hindsight frame set intersected with the cutoff -- a strict subset"
+  },
+  "belief": {
+    "cell_m": 0.1,
+    "alpha": 0.0,
+    "max_variance": 1000000000.0,
+    "r_min_m": 0.35,
+    "r_max_m": 4.0,
+    "pixel_stride": 4,
+    "track_smooth_fixes": 9
+  },
+  "geometry": {
+    "r_wheel_m": 0.075,
+    "wheel_patch_r_m": 0.05
+  },
+  "registration": {
+    "selection_rule": "Fit each candidate in {plane, quadratic} by least squares on the six-wheel footprint statistic D(x, y); score each by leave-one-contiguous-block-out cross-validation with N_BLOCKS = 5 contiguous along-track blocks of equal fix count, taken in RTK time order with no shuffling; select the candidate with the minimum CV RMSE. 'constant' is fitted and reported as a reference row but is not a candidate.",
+    "outputs": {
+      "t1": {
+        "chosen_model": "plane",
+        "blockcv_rmse_m": 0.0601,
+        "residual_sd_m": 0.0449,
+        "tilt_mm_per_m": [
+          38.18,
+          2.24
+        ],
+        "const_term_m": -0.6295,
+        "voidfill_frac_corridor": 0.00078
+      },
+      "t2": {
+        "chosen_model": "quadratic",
+        "blockcv_rmse_m": 0.0654,
+        "residual_sd_m": 0.0322,
+        "tilt_mm_per_m": [
+          30.0,
+          5.02
+        ],
+        "const_term_m": 0.202,
+        "voidfill_frac_corridor": 0.00339
+      }
+    }
+  },
+  "qc_thresholds": {
+    "min_retained": 0.5,
+    "flag_min_observed_frac": 0.7,
+    "flag_max_median_sigma_m": 0.1,
+    "flag_max_voidfill_frac": 0.05
+  },
+  "recalibration_per_condition": {
+    "hindsight": {
+      "form": "Var' = k Var + (tau n_steps)^2",
+      "k": 275.0293778920172,
+      "tau_m": 0.0,
+      "sd_multiplier": 16.584009704893965,
+      "fitted_on": "UNFLAGGED design windows, arm clark, ML",
+      "n_windows_fitted": 46,
+      "pinned_tau_alternative": {
+        "k": 1.0,
+        "tau_m": 0.34684467696608323,
+        "mean_NLL_at_fit": 4.009170942762865,
+        "nll_penalty_vs_ML": 0.6008
+      }
+    },
+    "foresight": {
+      "form": "Var' = k Var + (tau n_steps)^2",
+      "k": 282.99667205586184,
+      "tau_m": 0.0,
+      "sd_multiplier": 16.822504928097416,
+      "fitted_on": "UNFLAGGED design windows, arm clark, ML",
+      "n_windows_fitted": 46,
+      "pinned_tau_alternative": {
+        "k": 1.0,
+        "tau_m": 0.34267602534331587,
+        "mean_NLL_at_fit": 3.9932561045305373,
+        "nll_penalty_vs_ML": 0.7078
+      }
+    }
+  },
+  "windowing": {
+    "win_len_m": 4.0,
+    "lookback_m": 7.0,
+    "legacy_win_len_m": 10.0,
+    "rationale": "4 m is the depth camera's range cap and the horizon a planner predicts over"
+  },
+  "arms": {
+    "variance_arms": [
+      "clark",
+      "clark-diag",
+      "fosm",
+      "step-form",
+      "mc-2",
+      "mc-32"
+    ],
+    "point_arm": "mean-map",
+    "fit_arm": "clark",
+    "step_form_formula": "E = cost(mean map); sd = sum over contact nodes n of |c_eff[n]| * sqrt(C[u(n), u(n)]), u(n) = u_idx[n, argmax_j means[n, j]] the mean-map winner cell of node n; no max, no covariance (per-step Gaussian-CVaR proxy)",
+    "mc_n_arms": [
+      2,
+      32
+    ],
+    "mc_subsample": "N draws taken without replacement from the reference draws with seed 20260828",
+    "fosm_label": "the canonical first-order route, constructed as the strongest derivative baseline; no published system runs it"
+  },
+  "criteria": {
+    "E2-i_cov1_band": [
+      0.55,
+      0.85
+    ],
+    "E2-ii_sd_ratio_band": [
+      0.7,
+      1.4
+    ],
+    "E2-iii_a_max_median_rel_err_E": 0.05,
+    "E2-iii_b_sd_ratio_band": [
+      0.85,
+      1.05
+    ],
+    "E2-iii_b_pooling": "median",
+    "E2-iii_sign_test_alpha": 0.05,
+    "E2-v": "clark below mc-32 on BOTH belief-referee moments, majority, exact sign test p < 0.05",
+    "mc_draws_per_window": 20000,
+    "mc_seed": 20260828
+  },
+  "reported_characterizations": {
+    "sd_deficit_vs_alpha_bins": [
+      0.0,
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      1.0,
+      1.5,
+      Infinity
+    ],
+    "cvar_q": 0.9,
+    "cvar_gaussian_factor": 1.7549833193248683
+  },
+  "banned_corrections": [
+    "per-window truth-fitted mean correction",
+    "per-traverse truth-fitted mean correction",
+    "per-traverse range-flat vertical constant (sized at ~0.08 m on t1 / ~0.00 m on t2; would cut residual rms to ~0.17 m and k to ~165 -- BANNED, it is a truth-fitted mean)",
+    "any refit of (k, tau) on held-out data",
+    "any per-traverse camera pitch fitted against truth"
+  ],
+  "freeze_conditions": {
+    "C1": true,
+    "C2": true,
+    "C3": true,
+    "C4": true
+  },
+  "held_out_traverses": [
+    "2023-07-20_18-12-05",
+    "2023-07-20_19-12-27",
+    "2023-07-20_20-01-38",
+    "2023-07-21_12-38-15",
+    "2023-07-21_12-58-11",
+    "2023-07-21_13-43-00",
+    "2023-07-21_13-59-14",
+    "2023-07-21_14-08-29",
+    "2023-07-21_14-44-56",
+    "2023-07-21_14-51-07",
+    "2023-07-21_17-07-00",
+    "2023-07-21_17-34-18",
+    "2023-07-21_17-45-42",
+    "2023-07-22_13-00-57",
+    "2023-07-22_13-28-55",
+    "2023-07-22_16-24-27",
+    "2023-07-22_17-18-36",
+    "2023-07-22_17-31-58",
+    "2023-07-22_17-38-50",
+    "2023-07-23_11-23-18",
+    "2023-07-23_11-52-09",
+    "2023-07-23_12-52-39"
+  ],
+  "design_traverses": [
+    "2023-07-23_13-05-11",
+    "2023-07-22_14-18-23"
+  ]
+}

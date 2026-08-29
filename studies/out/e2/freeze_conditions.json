@@ -1,0 +1,549 @@
+{
+  "evaluated_at": "2026-08-28 19:48:17 +0200",
+  "C1": {
+    "statement": "(a) the 10 m hindsight scoring path still reproduces rehearsal v3 within 1e-06 relative -- code parity preserved on the old configuration -- AND (b) the 4 m pipeline runs both conditions end to end with finite outputs",
+    "pass": true,
+    "a_pass": true,
+    "b_pass": true,
+    "checks": [
+      {
+        "part": "a",
+        "quantity": "fit.k",
+        "got": 405.0668708279696,
+        "v3": 405.06688140217034,
+        "rel_diff": 2.610482674137729e-08,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "fit.tau_m",
+        "got": 0.0,
+        "v3": 0.0,
+        "abs_diff": 0.0,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "fit.mean_NLL_at_fit",
+        "got": 4.339594567403208,
+        "v3": 4.339594567403188,
+        "rel_diff": 4.502707552492729e-15,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "qc.n_retained",
+        "got": 19,
+        "v3": 19,
+        "abs_diff": null,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "qc.n_unflagged",
+        "got": 19,
+        "v3": 19,
+        "abs_diff": null,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "pooled.clark.raw.mean_NLL",
+        "got": 203.371,
+        "v3": 203.371,
+        "abs_diff": 0.0,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "pooled.clark.recal.mean_NLL",
+        "got": 4.3396,
+        "v3": 4.3396,
+        "abs_diff": 0.0,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "pooled.clark-diag.raw.mean_NLL",
+        "got": 451.4037,
+        "v3": 451.4037,
+        "abs_diff": 0.0,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "pooled.clark-diag.recal.mean_NLL",
+        "got": 4.6347,
+        "v3": 4.6347,
+        "abs_diff": 0.0,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "pooled.fosm.raw.mean_NLL",
+        "got": 169.4144,
+        "v3": 169.4144,
+        "abs_diff": 0.0,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "pooled.fosm.recal.mean_NLL",
+        "got": 4.3199,
+        "v3": 4.3199,
+        "abs_diff": 0.0,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "nll_clark_minus_fosm.raw.n_windows_clark_better",
+        "got": 3,
+        "v3": 3,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "nll_clark_minus_fosm.recal.n_windows_clark_better",
+        "got": 11,
+        "v3": 11,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "nll_clark_minus_clark-diag.raw.n_windows_clark_better",
+        "got": 18,
+        "v3": 18,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "nll_clark_minus_clark-diag.recal.n_windows_clark_better",
+        "got": 9,
+        "v3": 9,
+        "pass": true
+      },
+      {
+        "part": "a",
+        "quantity": "per-window max relative difference",
+        "got": {
+          "j_truth": 1.8691926307994484e-15,
+          "arm_E": 1.4699558300263196e-15,
+          "arm_sd": 8.2729587753743185e-16,
+          "n_missing": 0
+        },
+        "v3": "rehearsal_v3 windows",
+        "pass": true
+      },
+      {
+        "part": "b",
+        "quantity": "hindsight: products/retained > 0",
+        "pass": true,
+        "n_window_products": 48,
+        "n_retained": 46
+      },
+      {
+        "part": "b",
+        "quantity": "hindsight: (k, tau, NLL) finite",
+        "pass": true,
+        "values": [
+          275.0293778920172,
+          0.0,
+          3.4083805194530123
+        ]
+      },
+      {
+        "part": "b",
+        "quantity": "hindsight: all seven arms finite on every scoreable window",
+        "pass": true
+      },
+      {
+        "part": "b",
+        "quantity": "hindsight: belief referee drawn",
+        "pass": true,
+        "n_windows": 46
+      },
+      {
+        "part": "b",
+        "quantity": "foresight: products/retained > 0",
+        "pass": true,
+        "n_window_products": 46,
+        "n_retained": 46
+      },
+      {
+        "part": "b",
+        "quantity": "foresight: (k, tau, NLL) finite",
+        "pass": true,
+        "values": [
+          282.99667205586184,
+          0.0,
+          3.2854412083375673
+        ]
+      },
+      {
+        "part": "b",
+        "quantity": "foresight: all seven arms finite on every scoreable window",
+        "pass": true
+      },
+      {
+        "part": "b",
+        "quantity": "foresight: belief referee drawn",
+        "pass": true,
+        "n_windows": 46
+      }
+    ]
+  },
+  "C2": {
+    "statement": "at least 60% of the 48 design windows (4 m) unflagged under foresight",
+    "n_unflagged_foresight": 46,
+    "n_design_windows": 48,
+    "fraction": 0.9583,
+    "n_window_products_foresight": 46,
+    "n_retained_foresight": 46,
+    "n_excluded_foresight": 0,
+    "flagged_foresight": {},
+    "pass": true,
+    "diagnostic": {
+      "note": "diagnostic, not a criterion; recorded so the binding QC rule is legible",
+      "win_len_m": 4.0,
+      "n_scoreable": 46,
+      "n_excluded_by_retention": 0,
+      "n_unflagged_ignoring_retention": 46,
+      "per_window": [
+        {
+          "name": "t1/window_001",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01507,
+          "qc_flags": []
+        },
+        {
+          "name": "t1/window_002",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01314,
+          "qc_flags": []
+        },
+        {
+          "name": "t1/window_003",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01465,
+          "qc_flags": []
+        },
+        {
+          "name": "t1/window_004",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01499,
+          "qc_flags": []
+        },
+        {
+          "name": "t1/window_005",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01849,
+          "qc_flags": []
+        },
+        {
+          "name": "t1/window_006",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.0218,
+          "qc_flags": []
+        },
+        {
+          "name": "t1/window_007",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01735,
+          "qc_flags": []
+        },
+        {
+          "name": "t1/window_008",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01486,
+          "qc_flags": []
+        },
+        {
+          "name": "t1/window_009",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01404,
+          "qc_flags": []
+        },
+        {
+          "name": "t1/window_010",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01842,
+          "qc_flags": []
+        },
+        {
+          "name": "t1/window_011",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.02032,
+          "qc_flags": []
+        },
+        {
+          "name": "t1/window_012",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01269,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_001",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.02955,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_002",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01456,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_003",
+          "retained": 0.8974,
+          "qc_observed_frac": 0.9977,
+          "qc_sigma_med_m": 0.02209,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_004",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01473,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_005",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01863,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_006",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01977,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_007",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.0621,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_008",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.02509,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_009",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.02071,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_010",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01208,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_011",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01419,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_012",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01725,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_013",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01771,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_014",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.02067,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_015",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.03493,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_016",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01544,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_017",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01257,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_018",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.02124,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_019",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.014,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_020",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.05417,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_021",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01334,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_022",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01724,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_023",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01972,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_024",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.02037,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_025",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.03886,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_026",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01769,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_027",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01798,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_028",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.02888,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_029",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01729,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_030",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.02028,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_031",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.02356,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_032",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01455,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_033",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.02471,
+          "qc_flags": []
+        },
+        {
+          "name": "t2/window_034",
+          "retained": 1.0,
+          "qc_observed_frac": 1.0,
+          "qc_sigma_med_m": 0.01563,
+          "qc_flags": []
+        }
+      ]
+    }
+  },
+  "C3": {
+    "statement": "all fits finite, the QC/registration machinery ran on both conditions without error, and NO NaN or degenerate value appears anywhere in the design tables (arm moments, pooled arm table, belief-referee table, regime statistics)",
+    "pass": true,
+    "notes": [],
+    "n_degenerate_findings": 0
+  },
+  "C4": {
+    "statement": "no held-out path accessed before the freeze record is written",
+    "pass": true,
+    "evidence_of_access": []
+  },
+  "ALL_PASS": true
+}

@@ -1,0 +1,1423 @@
+{
+  "condition": "parity10m",
+  "label": "C1(a) code parity, hindsight at 10 m",
+  "step_form_formula": "E = cost(mean map); sd = sum over contact nodes n of |c_eff[n]| * sqrt(C[u(n), u(n)]), u(n) = u_idx[n, argmax_j means[n, j]] the mean-map winner cell of node n; no max, no covariance (per-step Gaussian-CVaR proxy)",
+  "qc": {
+    "rule": "PREREG_baseprod.md QC flags",
+    "n_window_products": 19,
+    "n_retained": 19,
+    "n_unflagged": 19,
+    "n_excluded": 0,
+    "excluded": [],
+    "flagged": {}
+  },
+  "fit": {
+    "arm": "clark",
+    "k": 405.0668708279696,
+    "tau_m": 0.0,
+    "sd_multiplier_sqrt_k": 20.126273148001584,
+    "mean_NLL_at_fit": 4.339594567403208,
+    "n_windows_fitted": 19
+  },
+  "fit_pinned_tau_alternative": {
+    "k": 1.0,
+    "tau_m": 0.27343821782366456,
+    "mean_NLL_at_fit": 4.665060180223072,
+    "nll_penalty_vs_ML": 0.3255
+  },
+  "pooled": {
+    "label": "parity10m: pooled, UNFLAGGED windows",
+    "n_windows": 19,
+    "k_used": 405.0668708279696,
+    "tau_used_m": 0.0,
+    "arms_scored": [
+      "clark",
+      "clark-diag",
+      "fosm"
+    ],
+    "windows": [
+      "t1/window_000",
+      "t1/window_001",
+      "t1/window_002",
+      "t1/window_003",
+      "t1/window_004",
+      "t2/window_000",
+      "t2/window_001",
+      "t2/window_002",
+      "t2/window_003",
+      "t2/window_004",
+      "t2/window_005",
+      "t2/window_006",
+      "t2/window_007",
+      "t2/window_008",
+      "t2/window_009",
+      "t2/window_010",
+      "t2/window_011",
+      "t2/window_012",
+      "t2/window_013"
+    ],
+    "clark": {
+      "raw": {
+        "mean_NLL": 203.371,
+        "cov1": 0.0,
+        "cov2": 0.0526,
+        "sd_ratio": 17.9276,
+        "mean_z": -10.0292,
+        "median_z": -9.35,
+        "median_sd": 0.9936,
+        "mean_NLL_full": 203.37101174150754
+      },
+      "recal": {
+        "mean_NLL": 4.3396,
+        "cov1": 0.6316,
+        "cov2": 0.9474,
+        "sd_ratio": 0.8908,
+        "mean_z": -0.4983,
+        "median_z": -0.4646,
+        "median_sd": 19.9974,
+        "mean_NLL_full": 4.339594567403209
+      }
+    },
+    "clark-diag": {
+      "raw": {
+        "mean_NLL": 451.4037,
+        "cov1": 0.0,
+        "cov2": 0.0526,
+        "sd_ratio": 25.456,
+        "mean_z": -16.9666,
+        "median_z": -16.5852,
+        "median_sd": 0.807,
+        "mean_NLL_full": 451.4036883898982
+      },
+      "recal": {
+        "mean_NLL": 4.6347,
+        "cov1": 0.5263,
+        "cov2": 0.7368,
+        "sd_ratio": 1.2648,
+        "mean_z": -0.843,
+        "median_z": -0.8241,
+        "median_sd": 16.2425,
+        "mean_NLL_full": 4.634718993344747
+      }
+    },
+    "fosm": {
+      "raw": {
+        "mean_NLL": 169.4144,
+        "cov1": 0.0526,
+        "cov2": 0.0526,
+        "sd_ratio": 16.6379,
+        "mean_z": -8.6472,
+        "median_z": -8.3798,
+        "median_sd": 1.1367,
+        "mean_NLL_full": 169.4143686246972
+      },
+      "recal": {
+        "mean_NLL": 4.3199,
+        "cov1": 0.6316,
+        "cov2": 1.0,
+        "sd_ratio": 0.8267,
+        "mean_z": -0.4296,
+        "median_z": -0.4164,
+        "median_sd": 22.8774,
+        "mean_NLL_full": 4.319908934160691
+      }
+    },
+    "nll_clark_minus_fosm": {
+      "raw": {
+        "mean": 33.9566,
+        "median": 18.288,
+        "n_windows_clark_better": 3,
+        "n": 19,
+        "sign_test_p_two_sided": 0.0044
+      },
+      "recal": {
+        "mean": 0.0197,
+        "median": -0.0092,
+        "n_windows_clark_better": 11,
+        "n": 19,
+        "sign_test_p_two_sided": 0.6476
+      }
+    },
+    "nll_clark_minus_clark-diag": {
+      "raw": {
+        "mean": -248.0327,
+        "median": -42.0692,
+        "n_windows_clark_better": 18,
+        "n": 19,
+        "sign_test_p_two_sided": 0.0001
+      },
+      "recal": {
+        "mean": -0.2951,
+        "median": 0.0392,
+        "n_windows_clark_better": 9,
+        "n": 19,
+        "sign_test_p_two_sided": 1.0
+      }
+    },
+    "arm_NLL_spread": {
+      "raw_nats": 281.9893,
+      "recal_nats": 0.3148,
+      "compression_factor": 895.8,
+      "note": "max-min mean NLL across the variance arms, before and after the recalibration; the factor is how much of the scale a ranking is read on the k-rescale destroys"
+    },
+    "mean-map": {
+      "note": "point prediction, no predicted variance: mean_NLL / cov1 / cov2 / sd_ratio / mean_z do not exist for this arm and are null by construction, not omitted",
+      "mean_NLL": null,
+      "cov1": null,
+      "cov2": null,
+      "sd_ratio": null,
+      "mean_z": null,
+      "mean_err": -14.7431,
+      "median_abs_err": 10.9871,
+      "median_abs_err_per_step_m": 0.11098
+    },
+    "sigma_med_m": {
+      "min": 0.0111,
+      "p5": 0.0118,
+      "p25": 0.0138,
+      "median": 0.0155,
+      "p75": 0.0162,
+      "p95": 0.0212,
+      "max": 0.0466
+    },
+    "relief_p95_p5_m": {
+      "min": 0.1421,
+      "p5": 0.1441,
+      "p25": 0.1741,
+      "median": 0.277,
+      "p75": 0.4178,
+      "p95": 0.6836,
+      "max": 1.0282
+    },
+    "sigma_over_relief": {
+      "min": 0.0152,
+      "p5": 0.0202,
+      "p25": 0.0341,
+      "median": 0.0562,
+      "p75": 0.0894,
+      "p95": 0.1191,
+      "max": 0.1997
+    },
+    "truth_cell_sd_m": {
+      "min": 0.0422,
+      "p5": 0.0443,
+      "p25": 0.0555,
+      "median": 0.0902,
+      "p75": 0.1366,
+      "p95": 0.2338,
+      "max": 0.3671
+    },
+    "alpha_weighted_median": {
+      "min": 0.336,
+      "p5": 0.4121,
+      "p25": 0.5409,
+      "median": 0.5948,
+      "p75": 0.6893,
+      "p95": 0.8788,
+      "max": 0.9787
+    },
+    "frac_nodes_alpha_lt_1": {
+      "min": 0.5157,
+      "p5": 0.5416,
+      "p25": 0.6265,
+      "median": 0.7029,
+      "p75": 0.7408,
+      "p95": 0.8148,
+      "max": 0.9231
+    },
+    "frac_nodes_alpha_lt_2": {
+      "min": 0.7899,
+      "p5": 0.8049,
+      "p25": 0.8408,
+      "median": 0.8614,
+      "p75": 0.9044,
+      "p95": 0.9483,
+      "max": 0.9625
+    },
+    "mu_minus_truth_med_m": {
+      "min": -0.0847,
+      "p5": -0.0826,
+      "p25": -0.0215,
+      "median": 0.015,
+      "p75": 0.0342,
+      "p95": 0.0783,
+      "max": 0.1935
+    },
+    "retained": {
+      "min": 0.6848,
+      "p5": 0.7435,
+      "p25": 1.0,
+      "median": 1.0,
+      "p75": 1.0,
+      "p95": 1.0,
+      "max": 1.0
+    },
+    "qc_observed_frac": {
+      "min": 0.8662,
+      "p5": 0.9425,
+      "p25": 1.0,
+      "median": 1.0,
+      "p75": 1.0,
+      "p95": 1.0,
+      "max": 1.0
+    },
+    "qc_sigma_med_m": {
+      "min": 0.0115,
+      "p5": 0.0119,
+      "p25": 0.0141,
+      "median": 0.0155,
+      "p75": 0.0162,
+      "p95": 0.0212,
+      "max": 0.0466
+    }
+  },
+  "pooled_all_retained": {
+    "label": "parity10m: pooled, all retained windows",
+    "n_windows": 19,
+    "k_used": 405.0668708279696,
+    "tau_used_m": 0.0,
+    "arms_scored": [
+      "clark",
+      "clark-diag",
+      "fosm"
+    ],
+    "windows": [
+      "t1/window_000",
+      "t1/window_001",
+      "t1/window_002",
+      "t1/window_003",
+      "t1/window_004",
+      "t2/window_000",
+      "t2/window_001",
+      "t2/window_002",
+      "t2/window_003",
+      "t2/window_004",
+      "t2/window_005",
+      "t2/window_006",
+      "t2/window_007",
+      "t2/window_008",
+      "t2/window_009",
+      "t2/window_010",
+      "t2/window_011",
+      "t2/window_012",
+      "t2/window_013"
+    ],
+    "clark": {
+      "raw": {
+        "mean_NLL": 203.371,
+        "cov1": 0.0,
+        "cov2": 0.0526,
+        "sd_ratio": 17.9276,
+        "mean_z": -10.0292,
+        "median_z": -9.35,
+        "median_sd": 0.9936,
+        "mean_NLL_full": 203.37101174150754
+      },
+      "recal": {
+        "mean_NLL": 4.3396,
+        "cov1": 0.6316,
+        "cov2": 0.9474,
+        "sd_ratio": 0.8908,
+        "mean_z": -0.4983,
+        "median_z": -0.4646,
+        "median_sd": 19.9974,
+        "mean_NLL_full": 4.339594567403209
+      }
+    },
+    "clark-diag": {
+      "raw": {
+        "mean_NLL": 451.4037,
+        "cov1": 0.0,
+        "cov2": 0.0526,
+        "sd_ratio": 25.456,
+        "mean_z": -16.9666,
+        "median_z": -16.5852,
+        "median_sd": 0.807,
+        "mean_NLL_full": 451.4036883898982
+      },
+      "recal": {
+        "mean_NLL": 4.6347,
+        "cov1": 0.5263,
+        "cov2": 0.7368,
+        "sd_ratio": 1.2648,
+        "mean_z": -0.843,
+        "median_z": -0.8241,
+        "median_sd": 16.2425,
+        "mean_NLL_full": 4.634718993344747
+      }
+    },
+    "fosm": {
+      "raw": {
+        "mean_NLL": 169.4144,
+        "cov1": 0.0526,
+        "cov2": 0.0526,
+        "sd_ratio": 16.6379,
+        "mean_z": -8.6472,
+        "median_z": -8.3798,
+        "median_sd": 1.1367,
+        "mean_NLL_full": 169.4143686246972
+      },
+      "recal": {
+        "mean_NLL": 4.3199,
+        "cov1": 0.6316,
+        "cov2": 1.0,
+        "sd_ratio": 0.8267,
+        "mean_z": -0.4296,
+        "median_z": -0.4164,
+        "median_sd": 22.8774,
+        "mean_NLL_full": 4.319908934160691
+      }
+    },
+    "nll_clark_minus_fosm": {
+      "raw": {
+        "mean": 33.9566,
+        "median": 18.288,
+        "n_windows_clark_better": 3,
+        "n": 19,
+        "sign_test_p_two_sided": 0.0044
+      },
+      "recal": {
+        "mean": 0.0197,
+        "median": -0.0092,
+        "n_windows_clark_better": 11,
+        "n": 19,
+        "sign_test_p_two_sided": 0.6476
+      }
+    },
+    "nll_clark_minus_clark-diag": {
+      "raw": {
+        "mean": -248.0327,
+        "median": -42.0692,
+        "n_windows_clark_better": 18,
+        "n": 19,
+        "sign_test_p_two_sided": 0.0001
+      },
+      "recal": {
+        "mean": -0.2951,
+        "median": 0.0392,
+        "n_windows_clark_better": 9,
+        "n": 19,
+        "sign_test_p_two_sided": 1.0
+      }
+    },
+    "arm_NLL_spread": {
+      "raw_nats": 281.9893,
+      "recal_nats": 0.3148,
+      "compression_factor": 895.8,
+      "note": "max-min mean NLL across the variance arms, before and after the recalibration; the factor is how much of the scale a ranking is read on the k-rescale destroys"
+    },
+    "mean-map": {
+      "note": "point prediction, no predicted variance: mean_NLL / cov1 / cov2 / sd_ratio / mean_z do not exist for this arm and are null by construction, not omitted",
+      "mean_NLL": null,
+      "cov1": null,
+      "cov2": null,
+      "sd_ratio": null,
+      "mean_z": null,
+      "mean_err": -14.7431,
+      "median_abs_err": 10.9871,
+      "median_abs_err_per_step_m": 0.11098
+    },
+    "sigma_med_m": {
+      "min": 0.0111,
+      "p5": 0.0118,
+      "p25": 0.0138,
+      "median": 0.0155,
+      "p75": 0.0162,
+      "p95": 0.0212,
+      "max": 0.0466
+    },
+    "relief_p95_p5_m": {
+      "min": 0.1421,
+      "p5": 0.1441,
+      "p25": 0.1741,
+      "median": 0.277,
+      "p75": 0.4178,
+      "p95": 0.6836,
+      "max": 1.0282
+    },
+    "sigma_over_relief": {
+      "min": 0.0152,
+      "p5": 0.0202,
+      "p25": 0.0341,
+      "median": 0.0562,
+      "p75": 0.0894,
+      "p95": 0.1191,
+      "max": 0.1997
+    },
+    "truth_cell_sd_m": {
+      "min": 0.0422,
+      "p5": 0.0443,
+      "p25": 0.0555,
+      "median": 0.0902,
+      "p75": 0.1366,
+      "p95": 0.2338,
+      "max": 0.3671
+    },
+    "alpha_weighted_median": {
+      "min": 0.336,
+      "p5": 0.4121,
+      "p25": 0.5409,
+      "median": 0.5948,
+      "p75": 0.6893,
+      "p95": 0.8788,
+      "max": 0.9787
+    },
+    "frac_nodes_alpha_lt_1": {
+      "min": 0.5157,
+      "p5": 0.5416,
+      "p25": 0.6265,
+      "median": 0.7029,
+      "p75": 0.7408,
+      "p95": 0.8148,
+      "max": 0.9231
+    },
+    "frac_nodes_alpha_lt_2": {
+      "min": 0.7899,
+      "p5": 0.8049,
+      "p25": 0.8408,
+      "median": 0.8614,
+      "p75": 0.9044,
+      "p95": 0.9483,
+      "max": 0.9625
+    },
+    "mu_minus_truth_med_m": {
+      "min": -0.0847,
+      "p5": -0.0826,
+      "p25": -0.0215,
+      "median": 0.015,
+      "p75": 0.0342,
+      "p95": 0.0783,
+      "max": 0.1935
+    },
+    "retained": {
+      "min": 0.6848,
+      "p5": 0.7435,
+      "p25": 1.0,
+      "median": 1.0,
+      "p75": 1.0,
+      "p95": 1.0,
+      "max": 1.0
+    },
+    "qc_observed_frac": {
+      "min": 0.8662,
+      "p5": 0.9425,
+      "p25": 1.0,
+      "median": 1.0,
+      "p75": 1.0,
+      "p95": 1.0,
+      "max": 1.0
+    },
+    "qc_sigma_med_m": {
+      "min": 0.0115,
+      "p5": 0.0119,
+      "p25": 0.0141,
+      "median": 0.0155,
+      "p75": 0.0162,
+      "p95": 0.0212,
+      "max": 0.0466
+    }
+  },
+  "belief_referee": {
+    "n_windows": 0,
+    "note": "no MC drawn"
+  },
+  "belief_referee_all_retained": {
+    "n_windows": 0,
+    "note": "no MC drawn"
+  },
+  "windows": [
+    {
+      "name": "t1/window_000",
+      "traverse": "t1",
+      "n_steps": 72,
+      "n_steps_total": 96,
+      "retained": 0.75,
+      "qc_elem_cells": 957,
+      "qc_observed_frac": 0.8662,
+      "qc_sigma_med_m": 0.01148,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 735,
+      "n_nodes": 864,
+      "j_truth": 28354.277693662578,
+      "sigma_med_m": 0.0110506322234869,
+      "relief_p95_p5_m": 0.38641357421875,
+      "sigma_over_relief": 0.028597940033108414,
+      "truth_cell_sd_m": 0.12503056472372304,
+      "alpha_weighted_median": 0.4205894945133763,
+      "frac_nodes_alpha_lt_1": 0.9230583283877946,
+      "frac_nodes_alpha_lt_2": 0.9625334243940267,
+      "mu_minus_truth_med_m": -0.068359375,
+      "arms": {
+        "clark": [
+          28346.864555301352,
+          0.37708871520097176
+        ],
+        "clark-diag": [
+          28346.861665826887,
+          0.3822309650612062
+        ],
+        "fosm": [
+          28346.643544389783,
+          0.4303240129354522
+        ],
+        "mean-map": [
+          28346.643544389783,
+          null
+        ],
+        "step-form": [
+          28346.643544389783,
+          3.2477086044871544
+        ]
+      }
+    },
+    {
+      "name": "t1/window_001",
+      "traverse": "t1",
+      "n_steps": 99,
+      "n_steps_total": 99,
+      "retained": 1.0,
+      "qc_elem_cells": 1015,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01297,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 1015,
+      "n_nodes": 1188,
+      "j_truth": 38963.206464462855,
+      "sigma_med_m": 0.012965348549187183,
+      "relief_p95_p5_m": 0.3883514404296875,
+      "sigma_over_relief": 0.033385606951378384,
+      "truth_cell_sd_m": 0.1283531368026847,
+      "alpha_weighted_median": 0.719030426190808,
+      "frac_nodes_alpha_lt_1": 0.6036853515497048,
+      "frac_nodes_alpha_lt_2": 0.8613877532007137,
+      "mu_minus_truth_med_m": -0.084686279296875,
+      "arms": {
+        "clark": [
+          38952.621502125374,
+          0.48823505788255045
+        ],
+        "clark-diag": [
+          38952.62901342761,
+          0.47733719345828873
+        ],
+        "fosm": [
+          38952.21936620972,
+          0.5059955125989164
+        ],
+        "mean-map": [
+          38952.21936620972,
+          null
+        ],
+        "step-form": [
+          38952.21936620972,
+          4.971741126609381
+        ]
+      }
+    },
+    {
+      "name": "t1/window_002",
+      "traverse": "t1",
+      "n_steps": 99,
+      "n_steps_total": 99,
+      "retained": 1.0,
+      "qc_elem_cells": 1028,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01477,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 1028,
+      "n_nodes": 1188,
+      "j_truth": 38987.45607695279,
+      "sigma_med_m": 0.014774093870073557,
+      "relief_p95_p5_m": 0.44722137451168464,
+      "sigma_over_relief": 0.033035303570195414,
+      "truth_cell_sd_m": 0.14930796543081495,
+      "alpha_weighted_median": 0.588158438324916,
+      "frac_nodes_alpha_lt_1": 0.688882277747955,
+      "frac_nodes_alpha_lt_2": 0.843315091808795,
+      "mu_minus_truth_med_m": -0.06103515625,
+      "arms": {
+        "clark": [
+          38990.94038833087,
+          0.939393194549609
+        ],
+        "clark-diag": [
+          38990.9775061918,
+          0.6794984266421205
+        ],
+        "fosm": [
+          38990.23158248558,
+          0.9658137022107576
+        ],
+        "mean-map": [
+          38990.23158248558,
+          null
+        ],
+        "step-form": [
+          38990.23158248558,
+          6.2703179349910325
+        ]
+      }
+    },
+    {
+      "name": "t1/window_003",
+      "traverse": "t1",
+      "n_steps": 99,
+      "n_steps_total": 99,
+      "retained": 1.0,
+      "qc_elem_cells": 964,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.0134,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 964,
+      "n_nodes": 1188,
+      "j_truth": 38925.67033645715,
+      "sigma_med_m": 0.013401975389569998,
+      "relief_p95_p5_m": 0.645263671875,
+      "sigma_over_relief": 0.020769765870480027,
+      "truth_cell_sd_m": 0.21898386189934296,
+      "alpha_weighted_median": 0.5101338215580087,
+      "frac_nodes_alpha_lt_1": 0.7540548587210838,
+      "frac_nodes_alpha_lt_2": 0.9466659312512291,
+      "mu_minus_truth_med_m": -0.038665771484375,
+      "arms": {
+        "clark": [
+          38922.16340963335,
+          0.7420938360586823
+        ],
+        "clark-diag": [
+          38922.21884829133,
+          0.47590424238052187
+        ],
+        "fosm": [
+          38921.30434793249,
+          0.7769231467760425
+        ],
+        "mean-map": [
+          38921.30434793249,
+          null
+        ],
+        "step-form": [
+          38921.30434793249,
+          4.992284772151596
+        ]
+      }
+    },
+    {
+      "name": "t1/window_004",
+      "traverse": "t1",
+      "n_steps": 96,
+      "n_steps_total": 96,
+      "retained": 1.0,
+      "qc_elem_cells": 1036,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01564,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 1036,
+      "n_nodes": 1152,
+      "j_truth": 37673.956110823645,
+      "sigma_med_m": 0.01563788577914238,
+      "relief_p95_p5_m": 1.0281829833984375,
+      "sigma_over_relief": 0.015209243910509698,
+      "truth_cell_sd_m": 0.3670625394479663,
+      "alpha_weighted_median": 0.5947541041141435,
+      "frac_nodes_alpha_lt_1": 0.7055272050812585,
+      "frac_nodes_alpha_lt_2": 0.8769429343169539,
+      "mu_minus_truth_med_m": -0.0823211669921875,
+      "arms": {
+        "clark": [
+          37659.38522864789,
+          0.9931520497001461
+        ],
+        "clark-diag": [
+          37659.40556308493,
+          0.9058946216004952
+        ],
+        "fosm": [
+          37659.31973528758,
+          1.1133261324764672
+        ],
+        "mean-map": [
+          37659.31973528758,
+          null
+        ],
+        "step-form": [
+          37659.31973528758,
+          9.87253571305099
+        ]
+      }
+    },
+    {
+      "name": "t2/window_000",
+      "traverse": "t2",
+      "n_steps": 63,
+      "n_steps_total": 92,
+      "retained": 0.6847826086956522,
+      "qc_elem_cells": 919,
+      "qc_observed_frac": 0.951,
+      "qc_sigma_med_m": 0.01525,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 723,
+      "n_nodes": 756,
+      "j_truth": 25509.929883531695,
+      "sigma_med_m": 0.01383103895932436,
+      "relief_p95_p5_m": 0.14205322265627274,
+      "sigma_over_relief": 0.09736518961482085,
+      "truth_cell_sd_m": 0.04609971417797211,
+      "alpha_weighted_median": 0.6596102974736203,
+      "frac_nodes_alpha_lt_1": 0.7092062383943176,
+      "frac_nodes_alpha_lt_2": 0.9077585470307367,
+      "mu_minus_truth_med_m": 0.010101318359375,
+      "arms": {
+        "clark": [
+          25510.257197314837,
+          0.29461226552345343
+        ],
+        "clark-diag": [
+          25510.266782115836,
+          0.26759588405473356
+        ],
+        "fosm": [
+          25509.607930253118,
+          0.33018303188831855
+        ],
+        "mean-map": [
+          25509.607930253118,
+          null
+        ],
+        "step-form": [
+          25509.607930253118,
+          3.195650446880991
+        ]
+      }
+    },
+    {
+      "name": "t2/window_001",
+      "traverse": "t2",
+      "n_steps": 99,
+      "n_steps_total": 99,
+      "retained": 1.0,
+      "qc_elem_cells": 1017,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01192,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 1017,
+      "n_nodes": 1188,
+      "j_truth": 40086.25260389895,
+      "sigma_med_m": 0.011919657699763775,
+      "relief_p95_p5_m": 0.154937744140625,
+      "sigma_over_relief": 0.07693191717665145,
+      "truth_cell_sd_m": 0.05424053759618387,
+      "alpha_weighted_median": 0.9787054430096602,
+      "frac_nodes_alpha_lt_1": 0.5156966823554082,
+      "frac_nodes_alpha_lt_2": 0.8352822992079953,
+      "mu_minus_truth_med_m": -0.0042724609375,
+      "arms": {
+        "clark": [
+          40083.42157429872,
+          0.7078930095557073
+        ],
+        "clark-diag": [
+          40083.460006160014,
+          0.5690433336377887
+        ],
+        "fosm": [
+          40082.87928943859,
+          0.7667055364875279
+        ],
+        "mean-map": [
+          40082.87928943859,
+          null
+        ],
+        "step-form": [
+          40082.87928943859,
+          5.32998424470324
+        ]
+      }
+    },
+    {
+      "name": "t2/window_002",
+      "traverse": "t2",
+      "n_steps": 99,
+      "n_steps_total": 99,
+      "retained": 1.0,
+      "qc_elem_cells": 1002,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01625,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 1002,
+      "n_nodes": 1188,
+      "j_truth": 40112.03174967053,
+      "sigma_med_m": 0.016250806860625744,
+      "relief_p95_p5_m": 0.4669357299804915,
+      "sigma_over_relief": 0.034803091340439296,
+      "truth_cell_sd_m": 0.1378757504895874,
+      "alpha_weighted_median": 0.5631275979053854,
+      "frac_nodes_alpha_lt_1": 0.7282342263112078,
+      "frac_nodes_alpha_lt_2": 0.9010507294895784,
+      "mu_minus_truth_med_m": 0.0260162353515625,
+      "arms": {
+        "clark": [
+          40170.25972822037,
+          1.4131721517700455
+        ],
+        "clark-diag": [
+          40170.361317944866,
+          0.9058583778825078
+        ],
+        "fosm": [
+          40168.94677008065,
+          1.4844739970552603
+        ],
+        "mean-map": [
+          40168.94677008065,
+          null
+        ],
+        "step-form": [
+          40168.94677008065,
+          8.705346527499437
+        ]
+      }
+    },
+    {
+      "name": "t2/window_003",
+      "traverse": "t2",
+      "n_steps": 99,
+      "n_steps_total": 99,
+      "retained": 1.0,
+      "qc_elem_cells": 972,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01839,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 972,
+      "n_nodes": 1188,
+      "j_truth": 40087.75169882243,
+      "sigma_med_m": 0.018387291580438614,
+      "relief_p95_p5_m": 0.5275009155273551,
+      "sigma_over_relief": 0.03485736429870724,
+      "truth_cell_sd_m": 0.16217881328108386,
+      "alpha_weighted_median": 0.5807725162791525,
+      "frac_nodes_alpha_lt_1": 0.7028536767958379,
+      "frac_nodes_alpha_lt_2": 0.8437248806444124,
+      "mu_minus_truth_med_m": 0.06549072265625,
+      "arms": {
+        "clark": [
+          40118.46389702301,
+          1.3972873471204292
+        ],
+        "clark-diag": [
+          40118.61684317431,
+          0.7176196074841287
+        ],
+        "fosm": [
+          40117.016800253,
+          1.4338247834308713
+        ],
+        "mean-map": [
+          40117.016800253,
+          null
+        ],
+        "step-form": [
+          40117.016800253,
+          8.029163758172766
+        ]
+      }
+    },
+    {
+      "name": "t2/window_004",
+      "traverse": "t2",
+      "n_steps": 89,
+      "n_steps_total": 89,
+      "retained": 1.0,
+      "qc_elem_cells": 752,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01781,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 752,
+      "n_nodes": 1068,
+      "j_truth": 36003.51301868825,
+      "sigma_med_m": 0.01780612487345934,
+      "relief_p95_p5_m": 0.161711120605446,
+      "sigma_over_relief": 0.11011070114901965,
+      "truth_cell_sd_m": 0.05007131599032392,
+      "alpha_weighted_median": 0.5160784683709434,
+      "frac_nodes_alpha_lt_1": 0.7907276992547811,
+      "frac_nodes_alpha_lt_2": 0.9272168249917736,
+      "mu_minus_truth_med_m": 0.04730224609375,
+      "arms": {
+        "clark": [
+          36010.53264235505,
+          0.5084943728959551
+        ],
+        "clark-diag": [
+          36010.560240065155,
+          0.4249110342472464
+        ],
+        "fosm": [
+          36009.748973772126,
+          0.536047152957251
+        ],
+        "mean-map": [
+          36009.748973772126,
+          null
+        ],
+        "step-form": [
+          36009.748973772126,
+          4.877556674018249
+        ]
+      }
+    },
+    {
+      "name": "t2/window_005",
+      "traverse": "t2",
+      "n_steps": 96,
+      "n_steps_total": 96,
+      "retained": 1.0,
+      "qc_elem_cells": 978,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.0155,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 978,
+      "n_nodes": 1152,
+      "j_truth": 38822.96880044361,
+      "sigma_med_m": 0.015501174610108137,
+      "relief_p95_p5_m": 0.233735656738304,
+      "sigma_over_relief": 0.06631925494989248,
+      "truth_cell_sd_m": 0.07546452832632326,
+      "alpha_weighted_median": 0.547309355192909,
+      "frac_nodes_alpha_lt_1": 0.7533100677952621,
+      "frac_nodes_alpha_lt_2": 0.9163428243086963,
+      "mu_minus_truth_med_m": 0.035736083984375,
+      "arms": {
+        "clark": [
+          38829.72001846806,
+          1.1049487250487366
+        ],
+        "clark-diag": [
+          38829.8607071857,
+          0.8464903889981626
+        ],
+        "fosm": [
+          38828.67847153214,
+          1.2301291463865334
+        ],
+        "mean-map": [
+          38828.67847153214,
+          null
+        ],
+        "step-form": [
+          38828.67847153214,
+          8.962219532521443
+        ]
+      }
+    },
+    {
+      "name": "t2/window_006",
+      "traverse": "t2",
+      "n_steps": 99,
+      "n_steps_total": 99,
+      "retained": 1.0,
+      "qc_elem_cells": 1066,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01558,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 1066,
+      "n_nodes": 1188,
+      "j_truth": 40012.62446745723,
+      "sigma_med_m": 0.01558044133707881,
+      "relief_p95_p5_m": 0.277008056640625,
+      "sigma_over_relief": 0.056245444721097104,
+      "truth_cell_sd_m": 0.0901832063131608,
+      "alpha_weighted_median": 0.5343918069773053,
+      "frac_nodes_alpha_lt_1": 0.7172421589205398,
+      "frac_nodes_alpha_lt_2": 0.8579542075328219,
+      "mu_minus_truth_med_m": 0.01495361328125,
+      "arms": {
+        "clark": [
+          40022.61328945525,
+          1.0683250223947194
+        ],
+        "clark-diag": [
+          40022.66818475723,
+          0.8742747876583064
+        ],
+        "fosm": [
+          40021.69285481254,
+          1.1846555788037825
+        ],
+        "mean-map": [
+          40021.69285481254,
+          null
+        ],
+        "step-form": [
+          40021.69285481254,
+          9.758368836404577
+        ]
+      }
+    },
+    {
+      "name": "t2/window_007",
+      "traverse": "t2",
+      "n_steps": 93,
+      "n_steps_total": 93,
+      "retained": 1.0,
+      "qc_elem_cells": 945,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.04656,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 945,
+      "n_nodes": 1116,
+      "j_truth": 37581.015701259246,
+      "sigma_med_m": 0.046555664390325546,
+      "relief_p95_p5_m": 0.23310546875001137,
+      "sigma_over_relief": 0.19971931435144966,
+      "truth_cell_sd_m": 0.07000702823443684,
+      "alpha_weighted_median": 0.3360399498542005,
+      "frac_nodes_alpha_lt_1": 0.8027284126703559,
+      "frac_nodes_alpha_lt_2": 0.8771623067404286,
+      "mu_minus_truth_med_m": 0.19354248046875,
+      "arms": {
+        "clark": [
+          37613.39448217359,
+          0.9935964047935096
+        ],
+        "clark-diag": [
+          37613.42775326258,
+          0.9516063395854685
+        ],
+        "fosm": [
+          37610.53523979295,
+          1.1544313785340206
+        ],
+        "mean-map": [
+          37610.53523979295,
+          null
+        ],
+        "step-form": [
+          37610.53523979295,
+          14.081819853641393
+        ]
+      }
+    },
+    {
+      "name": "t2/window_008",
+      "traverse": "t2",
+      "n_steps": 99,
+      "n_steps_total": 99,
+      "retained": 1.0,
+      "qc_elem_cells": 1004,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01618,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 1004,
+      "n_nodes": 1188,
+      "j_truth": 39990.44066020486,
+      "sigma_med_m": 0.016180165112018585,
+      "relief_p95_p5_m": 0.36183776855466476,
+      "sigma_over_relief": 0.04471662860582273,
+      "truth_cell_sd_m": 0.11626847843644737,
+      "alpha_weighted_median": 0.6039501754359621,
+      "frac_nodes_alpha_lt_1": 0.6949811329075195,
+      "frac_nodes_alpha_lt_2": 0.8065705425679344,
+      "mu_minus_truth_med_m": 0.0312652587890625,
+      "arms": {
+        "clark": [
+          40046.32465655111,
+          1.8205981629946981
+        ],
+        "clark-diag": [
+          40046.472361741966,
+          1.0746167730366236
+        ],
+        "fosm": [
+          40044.34380463055,
+          1.89394311160248
+        ],
+        "mean-map": [
+          40044.34380463055,
+          null
+        ],
+        "step-form": [
+          40044.34380463055,
+          12.170240599122055
+        ]
+      }
+    },
+    {
+      "name": "t2/window_009",
+      "traverse": "t2",
+      "n_steps": 99,
+      "n_steps_total": 99,
+      "retained": 1.0,
+      "qc_elem_cells": 1053,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01435,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 1053,
+      "n_nodes": 1188,
+      "j_truth": 39974.95902551413,
+      "sigma_med_m": 0.014347384683787823,
+      "relief_p95_p5_m": 0.1442932128906591,
+      "sigma_over_relief": 0.0994321520490352,
+      "truth_cell_sd_m": 0.04222186943927831,
+      "alpha_weighted_median": 0.8676790697959982,
+      "frac_nodes_alpha_lt_1": 0.5444296203781621,
+      "frac_nodes_alpha_lt_2": 0.7899317136659613,
+      "mu_minus_truth_med_m": 0.011077880859375,
+      "arms": {
+        "clark": [
+          39996.9078396672,
+          1.124380330000861
+        ],
+        "clark-diag": [
+          39996.967224852866,
+          0.811565818655387
+        ],
+        "fosm": [
+          39996.055801769646,
+          1.1366951448404874
+        ],
+        "mean-map": [
+          39996.055801769646,
+          null
+        ],
+        "step-form": [
+          39996.055801769646,
+          7.133751212585678
+        ]
+      }
+    },
+    {
+      "name": "t2/window_010",
+      "traverse": "t2",
+      "n_steps": 98,
+      "n_steps_total": 98,
+      "retained": 1.0,
+      "qc_elem_cells": 1038,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01627,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 1038,
+      "n_nodes": 1176,
+      "j_truth": 39550.61763916165,
+      "sigma_med_m": 0.016265503130853176,
+      "relief_p95_p5_m": 0.3813934326171875,
+      "sigma_over_relief": 0.04264757004135202,
+      "truth_cell_sd_m": 0.13539107143176288,
+      "alpha_weighted_median": 0.7915611646536292,
+      "frac_nodes_alpha_lt_1": 0.5642189784693432,
+      "frac_nodes_alpha_lt_2": 0.8104444676010973,
+      "mu_minus_truth_med_m": 0.0367279052734375,
+      "arms": {
+        "clark": [
+          39599.77033378527,
+          1.8329900525093548
+        ],
+        "clark-diag": [
+          39599.86618554923,
+          1.0752473206083744
+        ],
+        "fosm": [
+          39598.23807251765,
+          1.865237875041842
+        ],
+        "mean-map": [
+          39598.23807251765,
+          null
+        ],
+        "step-form": [
+          39598.23807251765,
+          10.589921844545305
+        ]
+      }
+    },
+    {
+      "name": "t2/window_011",
+      "traverse": "t2",
+      "n_steps": 99,
+      "n_steps_total": 99,
+      "retained": 1.0,
+      "qc_elem_cells": 1039,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01591,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 1039,
+      "n_nodes": 1188,
+      "j_truth": 39923.32577735928,
+      "sigma_med_m": 0.01590919867157936,
+      "relief_p95_p5_m": 0.146942138671875,
+      "sigma_over_relief": 0.10826845733547508,
+      "truth_cell_sd_m": 0.04457193208952761,
+      "alpha_weighted_median": 0.6593339878913028,
+      "frac_nodes_alpha_lt_1": 0.6769352721352966,
+      "frac_nodes_alpha_lt_2": 0.8390634740540527,
+      "mu_minus_truth_med_m": 0.01971435546875,
+      "arms": {
+        "clark": [
+          39940.975383948164,
+          1.459759503555961
+        ],
+        "clark-diag": [
+          39941.12139816951,
+          0.8070276925291882
+        ],
+        "fosm": [
+          39939.50938058615,
+          1.5396243989335048
+        ],
+        "mean-map": [
+          39939.50938058615,
+          null
+        ],
+        "step-form": [
+          39939.50938058615,
+          9.124109732000631
+        ]
+      }
+    },
+    {
+      "name": "t2/window_012",
+      "traverse": "t2",
+      "n_steps": 98,
+      "n_steps_total": 98,
+      "retained": 1.0,
+      "qc_elem_cells": 1027,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01381,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 1027,
+      "n_nodes": 1176,
+      "j_truth": 39512.86776219588,
+      "sigma_med_m": 0.013809443451464176,
+      "relief_p95_p5_m": 0.21341857910158524,
+      "sigma_over_relief": 0.06470591037386211,
+      "truth_cell_sd_m": 0.06741388811859383,
+      "alpha_weighted_median": 0.7965930645391236,
+      "frac_nodes_alpha_lt_1": 0.5729320433174763,
+      "frac_nodes_alpha_lt_2": 0.8425540187177589,
+      "mu_minus_truth_med_m": 0.03271484375,
+      "arms": {
+        "clark": [
+          39521.344485472786,
+          0.9350647818368654
+        ],
+        "clark-diag": [
+          39521.46723746189,
+          0.5156014564169867
+        ],
+        "fosm": [
+          39520.85448480364,
+          0.9530960353473724
+        ],
+        "mean-map": [
+          39520.85448480364,
+          null
+        ],
+        "step-form": [
+          39520.85448480364,
+          5.319714705601982
+        ]
+      }
+    },
+    {
+      "name": "t2/window_013",
+      "traverse": "t2",
+      "n_steps": 98,
+      "n_steps_total": 98,
+      "retained": 1.0,
+      "qc_elem_cells": 1042,
+      "qc_observed_frac": 1.0,
+      "qc_sigma_med_m": 0.01517,
+      "qc_truth_invalid_frac": 0.0,
+      "qc_flags": [],
+      "flagged": false,
+      "scoreable": true,
+      "n_cells": 1042,
+      "n_nodes": 1176,
+      "j_truth": 39518.101929713266,
+      "sigma_med_m": 0.015173073392361403,
+      "relief_p95_p5_m": 0.18640441894530113,
+      "sigma_over_relief": 0.0813986786268936,
+      "truth_cell_sd_m": 0.056710624868915996,
+      "alpha_weighted_median": 0.6454078271154204,
+      "frac_nodes_alpha_lt_1": 0.6493793767498827,
+      "frac_nodes_alpha_lt_2": 0.8725624128731293,
+      "mu_minus_truth_med_m": 0.001373291015625,
+      "arms": {
+        "clark": [
+          39554.312062129975,
+          1.3289886466832943
+        ],
+        "clark-diag": [
+          39554.3805509831,
+          0.8200621239100858
+        ],
+        "fosm": [
+          39553.26060211598,
+          1.3882556795463925
+        ],
+        "mean-map": [
+          39553.26060211598,
+          null
+        ],
+        "step-form": [
+          39553.26060211598,
+          8.946038966295008
+        ]
+      }
+    }
+  ]
+}
