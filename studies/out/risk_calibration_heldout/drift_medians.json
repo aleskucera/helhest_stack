@@ -1,0 +1,52 @@
+{
+ "data_root": "/home/kuceral4/data/oxford_spires/out",
+ "definition": "per window: XY distance between the final our_poses and gt_poses entries (drift accumulated from the first-GT-pose anchor); per sequence: median over its windows",
+ "sequences": {
+  "keble-college-02-default": {
+   "held_out": false,
+   "n_windows": 15,
+   "median_end_window_drift_m": 0.1058,
+   "p90_end_window_drift_m": 0.4314
+  },
+  "keble-college-02-unclamped": {
+   "held_out": false,
+   "n_windows": 15,
+   "median_end_window_drift_m": 0.1058,
+   "p90_end_window_drift_m": 0.4314
+  },
+  "keble-college-03-default": {
+   "held_out": false,
+   "n_windows": 14,
+   "median_end_window_drift_m": 0.1869,
+   "p90_end_window_drift_m": 0.7803
+  },
+  "virgin-2024-03-14-blenheim-palace-01": {
+   "held_out": true,
+   "n_windows": 20,
+   "median_end_window_drift_m": 0.9162,
+   "p90_end_window_drift_m": 2.7902
+  },
+  "virgin-2024-03-14-blenheim-palace-02": {
+   "held_out": true,
+   "n_windows": 18,
+   "median_end_window_drift_m": 0.4394,
+   "p90_end_window_drift_m": 1.2455
+  },
+  "virgin-2024-03-18-christ-church-02": {
+   "held_out": true,
+   "n_windows": 28,
+   "median_end_window_drift_m": 0.326,
+   "p90_end_window_drift_m": 1.6681
+  },
+  "virgin-2024-03-18-christ-church-03": {
+   "held_out": true,
+   "n_windows": 16,
+   "median_end_window_drift_m": 0.9805,
+   "p90_end_window_drift_m": 1.4499
+  }
+ },
+ "held_out_median_range_m": [
+  0.326,
+  0.9805
+ ]
+}
