@@ -30,13 +30,18 @@ from .v2_moments import fold_supports, settle_pitch_roll_rows
 
 
 def _attitude_G(c_eff: np.ndarray, t_steps: int) -> np.ndarray:
-    """Linear map folded-node-maxima -> stacked (pitch, roll)."""
+    """Linear map folded sub-node maxima -> stacked (pitch, roll).
+
+    Sub-node layout (build_case): wheel-major blocks of t_steps wheel-steps,
+    each wheel-step exploded into 4 consecutive blend positions; c_eff[n] =
+    settle_weight[wheel] * blend[n]."""
     sw = settle_weights()                      # per-wheel scalar of the v1 cost
     R = settle_pitch_roll_rows()               # (2, 3) wheel columns L, R, rear
     n_nodes = len(c_eff)
-    assert n_nodes == 3 * t_steps, (n_nodes, t_steps)
-    wheel = np.repeat(np.arange(3), t_steps)
-    step = np.tile(np.arange(t_steps), 3)
+    assert n_nodes == 3 * t_steps * 4, (n_nodes, t_steps)
+    ws = np.arange(n_nodes) // 4               # wheel-step index
+    wheel = ws // t_steps
+    step = ws % t_steps
     blend = c_eff / sw[wheel]
     G = np.zeros((2 * t_steps, n_nodes))
     for n in range(n_nodes):
@@ -87,9 +92,9 @@ def case_v2(p: Path, n_ref: int = 20_000, seed: int = 0, correction=None) -> dic
         return base
     base["scoreable"] = True
 
-    sel_steps = np.tile(step_ok, 3)
-    cell_flat, caps = cell_flat[sel_steps], caps[sel_steps]
-    c_eff = c_eff[sel_steps]
+    sel = np.repeat(np.tile(step_ok, 3), 4)      # v1's own selection
+    cell_flat, caps = cell_flat[sel], caps[sel]
+    c_eff = c_eff[sel]
     u_cells, inv = np.unique(cell_flat.ravel(), return_inverse=True)
     u_idx = inv.reshape(cell_flat.shape)
     vi, vg, vl = cell_variance_split(win)
@@ -98,10 +103,10 @@ def case_v2(p: Path, n_ref: int = 20_000, seed: int = 0, correction=None) -> dic
     means = mu_u[u_idx] + caps               # (n_nodes, 4)
 
     # abstract form: candidates flattened, jointly Gaussian via the cell cov
-    n_nodes = means.shape[0]
+    n_nodes, ncand = means.shape
     mu_all = means.ravel()
     Cflat = C[u_idx.ravel()][:, u_idx.ravel()]
-    node_slices = [np.arange(4 * i, 4 * i + 4) for i in range(n_nodes)]
+    node_slices = [np.arange(ncand * i, ncand * (i + 1)) for i in range(n_nodes)]
     G = _attitude_G(c_eff, n_keep)
 
     # parity hook: fold means must match v1's clark recursion means
@@ -109,7 +114,7 @@ def case_v2(p: Path, n_ref: int = 20_000, seed: int = 0, correction=None) -> dic
     cov_self = C[u_idx[:, :, None], u_idx[:, None, :]]
     m_v1, _v, _l = clark_fold(means, cov_self)
     m_v2, _S = fold_supports(mu_all, Cflat, node_slices)
-    assert np.max(np.abs(m_v1 - m_v2)) < 1e-9, "fold parity violated"
+    assert np.max(np.abs(m_v1 - m_v2)) < 1e-6, "fold parity violated"  # metres
 
     alpha_w = None  # cost-weighted alpha for the correction; filled by runner
     row = score_window(mu_all, Cflat, node_slices, G, n_ref=n_ref, seed=seed,

@@ -63,20 +63,21 @@ def fold_supports(mu_all, C_all, node_slices):
     M[:N, :N] = C_all
     mu_aug = np.concatenate([mu_all, np.zeros(n)])
     for i, idx in enumerate(node_slices):
-        order = idx[np.argsort(mu_all[idx])[::-1]]
+        order = idx[np.argsort(-mu_all[idx])]      # stable on ties, like v1
         j0 = order[0]
-        m_run, v_run = mu_aug[j0], M[j0, j0]
-        c_run = M[j0, :N + i].copy()          # Cov(run, universe-so-far)
-        for j in order[1:]:
+        shift = mu_aug[j0]                         # v1's per-node shift: the fold
+        m_run, v_run = 0.0, M[j0, j0]              # is shift-equivariant, and the
+        c_run = M[j0, :N + i].copy()               # shift avoids 400 m elevations
+        for j in order[1:]:                        # cancelling against cm spreads
             m_run, v_run, c_run = _clark_pair(
-                m_run, v_run, mu_aug[j], M[j, j],
-                c_run[j] if j < N + i else 0.0,  # j always < N here
+                m_run, v_run, mu_aug[j] - shift, M[j, j],
+                c_run[j] if j < N + i else 0.0,
                 c_run, M[j, :N + i])
         k = N + i
         M[k, :N + i] = c_run
         M[:N + i, k] = c_run
         M[k, k] = v_run
-        mu_aug[k] = m_run
+        mu_aug[k] = m_run + shift
     m = mu_aug[N:]
     S = M[N:, N:]
     return m, S
