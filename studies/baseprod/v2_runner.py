@@ -89,11 +89,8 @@ def _patched_build(traverse, condition, out_dir):
     """Rebuild one traverse under the v2 constants. Constants are patched
     on the module (verified in dcheck via C2: a build drift changes the
     refit law and stops the run)."""
-    from . import constants as K
-    K.R_MAX = R_MAX_V2
-    K.ALPHA = ALPHA_V2
-    from . import build
-    build.build_traverse(RAW / traverse, condition, out_dir)  # noqa: dasenka path
+    from .v2_build import build_v2
+    build_v2([traverse], conditions=(condition,))
 
 
 def stage_dcheck(f1):
