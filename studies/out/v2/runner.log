@@ -1,0 +1,1494 @@
+[2026-08-31 15:49:05][dbuild] design windows present
+== (a) quadratic-form exactness on its own Gaussian ==
+   E  formula 5.396854e-02  MC 5.396136e-02  rel 1.33e-04
+   sd formula 2.658210e-02  MC 2.650878e-02  rel 2.77e-03
+== (b) full chain vs true-max MC (deficit preview, synthetic) ==
+   [0] clark relE 8.550e-03  sd-ratio 0.9755   | fosm relE 2.587e-01  sd-ratio 1.2763
+   [1] clark relE 8.285e-03  sd-ratio 0.9803   | fosm relE 1.464e-01  sd-ratio 1.1502
+   [2] clark relE 1.098e-02  sd-ratio 0.9857   | fosm relE 2.070e-01  sd-ratio 1.2982
+[2026-08-31 15:49:17][score] t1/window_001 relE 4.4e-03
+[2026-08-31 15:49:25][score] t1/window_002 relE 3.5e-03
+[2026-08-31 15:49:34][score] t1/window_003 relE 2.2e-03
+[2026-08-31 15:49:43][score] t1/window_004 relE 3.2e-03
+[2026-08-31 15:49:55][score] t1/window_005 relE 1.2e-03
+[2026-08-31 15:50:08][score] t1/window_006 relE 3.2e-03
+[2026-08-31 15:50:16][score] t1/window_007 relE 1.9e-04
+[2026-08-31 15:50:25][score] t1/window_008 relE 3.1e-03
+[2026-08-31 15:50:37][score] t1/window_009 relE 4.0e-03
+[2026-08-31 15:50:47][score] t1/window_010 relE 1.0e-05
+[2026-08-31 15:50:56][score] t1/window_011 relE 1.6e-04
+[2026-08-31 15:51:05][score] t1/window_012 relE 1.1e-03
+[2026-08-31 15:51:18][score] t2/window_001 relE 4.8e-03
+[2026-08-31 15:51:27][score] t2/window_002 relE 4.4e-03
+[2026-08-31 15:51:38][score] t2/window_003 relE 6.9e-03
+[2026-08-31 15:51:47][score] t2/window_004 relE 3.1e-03
+[2026-08-31 15:51:56][score] t2/window_005 relE 7.2e-04
+[2026-08-31 15:52:07][score] t2/window_006 relE 3.9e-04
+[2026-08-31 15:52:15][score] t2/window_007 relE 2.0e-04
+[2026-08-31 15:52:28][score] t2/window_008 relE 5.2e-04
+[2026-08-31 15:52:36][score] t2/window_009 relE 7.0e-03
+[2026-08-31 15:52:47][score] t2/window_010 relE 4.1e-03
+[2026-08-31 15:52:57][score] t2/window_011 relE 5.4e-04
+[2026-08-31 15:53:09][score] t2/window_012 relE 7.8e-04
+[2026-08-31 15:53:21][score] t2/window_013 relE 3.2e-03
+[2026-08-31 15:53:30][score] t2/window_014 relE 3.5e-03
+[2026-08-31 15:53:39][score] t2/window_015 relE 4.9e-04
+[2026-08-31 15:53:48][score] t2/window_016 relE 8.1e-03
+[2026-08-31 15:53:59][score] t2/window_017 relE 5.7e-03
+[2026-08-31 15:54:08][score] t2/window_018 relE 4.9e-03
+[2026-08-31 15:54:20][score] t2/window_019 relE 1.9e-03
+[2026-08-31 15:54:29][score] t2/window_020 relE 7.2e-04
+[2026-08-31 15:54:38][score] t2/window_021 relE 1.3e-02
+[2026-08-31 15:54:46][score] t2/window_022 relE 2.1e-03
+[2026-08-31 15:54:56][score] t2/window_023 relE 1.9e-03
+[2026-08-31 15:55:05][score] t2/window_024 relE 1.1e-03
+[2026-08-31 15:55:14][score] t2/window_025 relE 4.0e-04
+[2026-08-31 15:55:22][score] t2/window_026 relE 3.7e-04
+[2026-08-31 15:55:31][score] t2/window_027 relE 5.7e-03
+[2026-08-31 15:55:41][score] t2/window_028 relE 8.6e-05
+[2026-08-31 15:55:53][score] t2/window_029 relE 1.6e-02
+[2026-08-31 15:56:05][score] t2/window_030 relE 4.9e-03
+[2026-08-31 15:56:14][score] t2/window_031 relE 7.6e-04
+[2026-08-31 15:56:23][score] t2/window_032 relE 1.1e-03
+[2026-08-31 15:56:32][score] t2/window_033 relE 3.4e-04
+[2026-08-31 15:56:43][score] t2/window_034 relE 9.9e-04
+[2026-08-31 15:56:45][score] t1/window_000 flagged
+[2026-08-31 15:56:58][score] t1/window_001 relE 1.6e-03
+[2026-08-31 15:57:10][score] t1/window_002 relE 8.1e-04
+[2026-08-31 15:57:23][score] t1/window_003 relE 2.1e-03
+[2026-08-31 15:57:35][score] t1/window_004 relE 8.3e-04
+[2026-08-31 15:57:48][score] t1/window_005 relE 9.6e-05
+[2026-08-31 15:58:00][score] t1/window_006 relE 1.0e-03
+[2026-08-31 15:58:13][score] t1/window_007 relE 9.8e-04
+[2026-08-31 15:58:26][score] t1/window_008 relE 6.3e-04
+[2026-08-31 15:58:38][score] t1/window_009 relE 1.5e-04
+[2026-08-31 15:58:51][score] t1/window_010 relE 7.2e-04
+[2026-08-31 15:59:04][score] t1/window_011 relE 6.0e-04
+[2026-08-31 15:59:12][score] t1/window_012 relE 7.9e-04
+[2026-08-31 15:59:13][score] t2/window_000 relE 4.9e-02
+[2026-08-31 15:59:26][score] t2/window_001 relE 2.4e-03
+[2026-08-31 15:59:38][score] t2/window_002 relE 2.1e-04
+[2026-08-31 15:59:51][score] t2/window_003 relE 6.0e-04
+[2026-08-31 16:00:04][score] t2/window_004 relE 3.0e-04
+[2026-08-31 16:00:16][score] t2/window_005 relE 1.1e-04
+[2026-08-31 16:00:29][score] t2/window_006 relE 2.9e-04
+[2026-08-31 16:00:41][score] t2/window_007 relE 2.6e-05
+[2026-08-31 16:00:54][score] t2/window_008 relE 8.7e-04
+[2026-08-31 16:01:07][score] t2/window_009 relE 9.4e-04
+[2026-08-31 16:01:18][score] t2/window_010 relE 5.6e-04
+[2026-08-31 16:01:28][score] t2/window_011 relE 1.6e-04
+[2026-08-31 16:01:40][score] t2/window_012 relE 2.5e-04
+[2026-08-31 16:01:52][score] t2/window_013 relE 8.2e-04
+[2026-08-31 16:02:05][score] t2/window_014 relE 2.3e-03
+[2026-08-31 16:02:17][score] t2/window_015 relE 4.4e-04
+[2026-08-31 16:02:30][score] t2/window_016 relE 6.3e-04
+[2026-08-31 16:02:41][score] t2/window_017 relE 3.3e-03
+[2026-08-31 16:02:53][score] t2/window_018 relE 8.2e-03
+[2026-08-31 16:03:05][score] t2/window_019 relE 7.5e-04
+[2026-08-31 16:03:18][score] t2/window_020 relE 1.4e-03
+[2026-08-31 16:03:30][score] t2/window_021 relE 4.8e-03
+[2026-08-31 16:03:43][score] t2/window_022 relE 9.4e-04
+[2026-08-31 16:03:55][score] t2/window_023 relE 4.9e-04
+[2026-08-31 16:04:08][score] t2/window_024 relE 8.5e-04
+[2026-08-31 16:04:20][score] t2/window_025 relE 2.9e-05
+[2026-08-31 16:04:33][score] t2/window_026 relE 3.7e-04
+[2026-08-31 16:04:45][score] t2/window_027 relE 1.9e-03
+[2026-08-31 16:04:58][score] t2/window_028 relE 3.9e-04
+[2026-08-31 16:05:11][score] t2/window_029 relE 4.6e-03
+[2026-08-31 16:05:23][score] t2/window_030 relE 9.6e-06
+[2026-08-31 16:05:36][score] t2/window_031 relE 6.6e-04
+[2026-08-31 16:05:47][score] t2/window_032 relE 4.7e-04
+[2026-08-31 16:06:00][score] t2/window_033 relE 9.3e-05
+[2026-08-31 16:06:12][score] t2/window_034 relE 1.1e-03
+[2026-08-31 16:06:13][dcheck] C1-C3 ok; refit a=0.1050 b=0.9711 (n=93)
+[2026-08-31 16:06:13][f1] F1 record in place
+[2026-08-31 16:06:13][gate] kept 21, excluded ['2023-07-20_19-12-27']
+  [foresight_v2] 2023-07-20_18-12-05 w01 grid=118x109 frames=41 pts=599816 obs=0.483
+  [foresight_v2] 2023-07-20_18-12-05 w02 grid=148x118 frames=115 pts=1689387 obs=0.478
+  [foresight_v2] 2023-07-20_18-12-05 w03 grid=153x107 frames=119 pts=1749995 obs=0.425
+  [foresight_v2] 2023-07-20_18-12-05 w04 grid=167x107 frames=56 pts=819068 obs=0.268
+  [foresight_v2] 2023-07-20_18-12-05 w05 grid=164x124 frames=87 pts=1251343 obs=0.258
+  [foresight_v2] 2023-07-20_18-12-05 w06 grid=158x135 frames=123 pts=1653579 obs=0.263
+  [foresight_v2] 2023-07-20_18-12-05 w07 grid=152x141 frames=117 pts=1608417 obs=0.271
+  [foresight_v2] 2023-07-20_18-12-05 w08 grid=138x156 frames=114 pts=1615090 obs=0.264
+  [foresight_v2] 2023-07-20_18-12-05 w09 grid=146x137 frames=120 pts=1666936 obs=0.280
+  [foresight_v2] 2023-07-20_18-12-05 w10 grid=166x111 frames=131 pts=1897287 obs=0.337
+  [foresight_v2] 2023-07-20_18-12-05 w11 grid=166x116 frames=119 pts=1738244 obs=0.300
+  [foresight_v2] 2023-07-20_18-12-05 w12 grid=168x111 frames=111 pts=1631697 obs=0.292
+  [foresight_v2] 2023-07-20_18-12-05 w13 grid=167x107 frames=130 pts=1924819 obs=0.304
+  [foresight_v2] 2023-07-20_18-12-05 w14 grid=163x126 frames=132 pts=1954166 obs=0.256
+  [foresight_v2] 2023-07-20_18-12-05 w15 grid=160x136 frames=130 pts=1904825 obs=0.245
+  [foresight_v2] 2023-07-20_18-12-05 w16 grid=154x141 frames=137 pts=1979123 obs=0.247
+  [foresight_v2] 2023-07-20_18-12-05 w17 grid=145x146 frames=150 pts=2138393 obs=0.279
+  [foresight_v2] 2023-07-20_18-12-05 w18 grid=159x123 frames=157 pts=2285997 obs=0.360
+  [foresight_v2] 2023-07-20_18-12-05 w19 grid=168x107 frames=141 pts=2088022 obs=0.295
+  [foresight_v2] 2023-07-20_18-12-05 w20 grid=169x102 frames=135 pts=2021662 obs=0.306
+  [foresight_v2] 2023-07-20_18-12-05 w21 grid=164x107 frames=136 pts=2022941 obs=0.326
+  [foresight_v2] 2023-07-20_18-12-05 w22 grid=160x119 frames=142 pts=2054947 obs=0.365
+  [foresight_v2] 2023-07-20_18-12-05 w23 grid=160x123 frames=125 pts=1866855 obs=0.327
+  [foresight_v2] 2023-07-20_18-12-05 w24 grid=159x116 frames=129 pts=2044376 obs=0.375
+  [foresight_v2] 2023-07-20_18-12-05 w25 grid=156x129 frames=142 pts=2163011 obs=0.315
+  [foresight_v2] 2023-07-20_18-12-05 w26 grid=123x112 frames=165 pts=2461626 obs=0.475
+[2026-08-31 16:06:53] built 2023-07-20_18-12-05 foresight: 26 windows in 40s
+  [hindsight_v2] 2023-07-20_18-12-05 w00 grid=118x109 frames=41 pts=599816 obs=0.483
+  [hindsight_v2] 2023-07-20_18-12-05 w01 grid=148x118 frames=123 pts=1805335 obs=0.496
+  [hindsight_v2] 2023-07-20_18-12-05 w02 grid=178x118 frames=168 pts=2475722 obs=0.486
+  [hindsight_v2] 2023-07-20_18-12-05 w03 grid=200x114 frames=142 pts=2084369 obs=0.419
+  [hindsight_v2] 2023-07-20_18-12-05 w04 grid=204x125 frames=120 pts=1736037 obs=0.288
+  [hindsight_v2] 2023-07-20_18-12-05 w05 grid=197x144 frames=158 pts=2166555 obs=0.279
+  [hindsight_v2] 2023-07-20_18-12-05 w06 grid=186x163 frames=188 pts=2585276 obs=0.272
+  [hindsight_v2] 2023-07-20_18-12-05 w07 grid=171x175 frames=182 pts=2516849 obs=0.277
+  [hindsight_v2] 2023-07-20_18-12-05 w08 grid=171x168 frames=186 pts=2646079 obs=0.295
+  [hindsight_v2] 2023-07-20_18-12-05 w09 grid=185x137 frames=198 pts=2804898 obs=0.326
+  [hindsight_v2] 2023-07-20_18-12-05 w10 grid=204x119 frames=189 pts=2748033 obs=0.362
+  [hindsight_v2] 2023-07-20_18-12-05 w11 grid=205x122 frames=190 pts=2783520 obs=0.334
+  [hindsight_v2] 2023-07-20_18-12-05 w12 grid=207x111 frames=188 pts=2772274 obs=0.345
+  [hindsight_v2] 2023-07-20_18-12-05 w13 grid=201x126 frames=204 pts=3018570 obs=0.310
+  [hindsight_v2] 2023-07-20_18-12-05 w14 grid=197x147 frames=208 pts=3059471 obs=0.269
+  [hindsight_v2] 2023-07-20_18-12-05 w15 grid=188x162 frames=209 pts=3045403 obs=0.258
+  [hindsight_v2] 2023-07-20_18-12-05 w16 grid=178x166 frames=227 pts=3249809 obs=0.282
+  [hindsight_v2] 2023-07-20_18-12-05 w17 grid=182x153 frames=236 pts=3411043 obs=0.301
+  [hindsight_v2] 2023-07-20_18-12-05 w18 grid=198x124 frames=235 pts=3437173 obs=0.385
+  [hindsight_v2] 2023-07-20_18-12-05 w19 grid=208x108 frames=219 pts=3263110 obs=0.347
+  [hindsight_v2] 2023-07-20_18-12-05 w20 grid=204x107 frames=212 pts=3153829 obs=0.373
+  [hindsight_v2] 2023-07-20_18-12-05 w21 grid=200x119 frames=221 pts=3246034 obs=0.351
+  [hindsight_v2] 2023-07-20_18-12-05 w22 grid=193x135 frames=204 pts=3010916 obs=0.367
+  [hindsight_v2] 2023-07-20_18-12-05 w23 grid=196x123 frames=202 pts=3098529 obs=0.392
+  [hindsight_v2] 2023-07-20_18-12-05 w24 grid=190x130 frames=217 pts=3348328 obs=0.412
+  [hindsight_v2] 2023-07-20_18-12-05 w25 grid=158x129 frames=235 pts=3571042 obs=0.338
+  [hindsight_v2] 2023-07-20_18-12-05 w26 grid=131x119 frames=227 pts=3400244 obs=0.551
+[2026-08-31 16:07:51] built 2023-07-20_18-12-05 hindsight: 27 windows in 57s
+[2026-08-31 16:07:51] built 2023-07-20_20-01-38 foresight: 0 windows in 1s
+[2026-08-31 16:07:51] built 2023-07-20_20-01-38 hindsight: 0 windows in 0s
+  [foresight_v2] 2023-07-21_12-38-15 w01 grid=136x102 frames=79 pts=1093721 obs=0.390
+  [foresight_v2] 2023-07-21_12-38-15 w02 grid=169x107 frames=119 pts=1764833 obs=0.297
+  [foresight_v2] 2023-07-21_12-38-15 w03 grid=166x115 frames=146 pts=2265345 obs=0.296
+  [foresight_v2] 2023-07-21_12-38-15 w04 grid=168x107 frames=153 pts=2333709 obs=0.322
+  [foresight_v2] 2023-07-21_12-38-15 w05 grid=154x133 frames=165 pts=2434423 obs=0.296
+  [foresight_v2] 2023-07-21_12-38-15 w06 grid=154x121 frames=153 pts=2160925 obs=0.325
+  [foresight_v2] 2023-07-21_12-38-15 w07 grid=163x116 frames=160 pts=2065061 obs=0.319
+  [foresight_v2] 2023-07-21_12-38-15 w08 grid=144x134 frames=180 pts=2519128 obs=0.320
+  [foresight_v2] 2023-07-21_12-38-15 w09 grid=145x132 frames=171 pts=2780566 obs=0.294
+  [foresight_v2] 2023-07-21_12-38-15 w10 grid=167x111 frames=160 pts=2602317 obs=0.295
+  [foresight_v2] 2023-07-21_12-38-15 w11 grid=164x124 frames=160 pts=2654252 obs=0.267
+  [foresight_v2] 2023-07-21_12-38-15 w12 grid=166x110 frames=168 pts=2622116 obs=0.311
+  [foresight_v2] 2023-07-21_12-38-15 w13 grid=163x110 frames=169 pts=2302397 obs=0.320
+[2026-08-31 16:08:16] built 2023-07-21_12-38-15 foresight: 13 windows in 25s
+  [hindsight_v2] 2023-07-21_12-38-15 w00 grid=136x102 frames=79 pts=1093721 obs=0.390
+  [hindsight_v2] 2023-07-21_12-38-15 w01 grid=178x107 frames=146 pts=2128473 obs=0.425
+  [hindsight_v2] 2023-07-21_12-38-15 w02 grid=206x116 frames=204 pts=3082596 obs=0.335
+  [hindsight_v2] 2023-07-21_12-38-15 w03 grid=205x117 frames=234 pts=3584363 obs=0.350
+  [hindsight_v2] 2023-07-21_12-38-15 w04 grid=193x136 frames=250 pts=3758189 obs=0.328
+  [hindsight_v2] 2023-07-21_12-38-15 w05 grid=190x133 frames=248 pts=3567273 obs=0.353
+  [hindsight_v2] 2023-07-21_12-38-15 w06 grid=192x121 frames=256 pts=3435808 obs=0.395
+  [hindsight_v2] 2023-07-21_12-38-15 w07 grid=179x142 frames=261 pts=3614193 obs=0.341
+  [hindsight_v2] 2023-07-21_12-38-15 w08 grid=181x139 frames=276 pts=4072185 obs=0.342
+  [hindsight_v2] 2023-07-21_12-38-15 w09 grid=183x136 frames=262 pts=4297773 obs=0.323
+  [hindsight_v2] 2023-07-21_12-38-15 w10 grid=202x125 frames=250 pts=4081235 obs=0.321
+  [hindsight_v2] 2023-07-21_12-38-15 w11 grid=203x125 frames=258 pts=4104620 obs=0.315
+  [hindsight_v2] 2023-07-21_12-38-15 w12 grid=201x115 frames=264 pts=3905315 obs=0.360
+  [hindsight_v2] 2023-07-21_12-38-15 w13 grid=183x111 frames=251 pts=3406473 obs=0.393
+[2026-08-31 16:08:53] built 2023-07-21_12-38-15 hindsight: 14 windows in 37s
+  [foresight_v2] 2023-07-21_12-58-11 w01 grid=135x113 frames=108 pts=1227205 obs=0.270
+  [foresight_v2] 2023-07-21_12-58-11 w02 grid=162x116 frames=171 pts=1684955 obs=0.316
+  [foresight_v2] 2023-07-21_12-58-11 w03 grid=169x102 frames=144 pts=1592301 obs=0.289
+  [foresight_v2] 2023-07-21_12-58-11 w04 grid=147x129 frames=150 pts=1616801 obs=0.287
+  [foresight_v2] 2023-07-21_12-58-11 w05 grid=133x152 frames=153 pts=1189162 obs=0.286
+  [foresight_v2] 2023-07-21_12-58-11 w06 grid=161x118 frames=153 pts=1208606 obs=0.280
+  [foresight_v2] 2023-07-21_12-58-11 w07 grid=168x112 frames=148 pts=1397225 obs=0.288
+  [foresight_v2] 2023-07-21_12-58-11 w08 grid=166x111 frames=155 pts=1740251 obs=0.302
+  [foresight_v2] 2023-07-21_12-58-11 w09 grid=146x139 frames=168 pts=2301988 obs=0.300
+  [foresight_v2] 2023-07-21_12-58-11 w10 grid=131x145 frames=161 pts=2309199 obs=0.319
+  [foresight_v2] 2023-07-21_12-58-11 w11 grid=167x110 frames=147 pts=2141819 obs=0.309
+  [foresight_v2] 2023-07-21_12-58-11 w12 grid=157x111 frames=162 pts=2398219 obs=0.383
+  [foresight_v2] 2023-07-21_12-58-11 w13 grid=153x131 frames=158 pts=2340741 obs=0.435
+  [foresight_v2] 2023-07-21_12-58-11 w14 grid=163x125 frames=145 pts=2117460 obs=0.265
+  [foresight_v2] 2023-07-21_12-58-11 w15 grid=161x118 frames=164 pts=1992199 obs=0.322
+  [foresight_v2] 2023-07-21_12-58-11 w16 grid=132x124 frames=188 pts=2066645 obs=0.415
+  [foresight_v2] 2023-07-21_12-58-11 w17 grid=108x157 frames=184 pts=2163246 obs=0.510
+  [foresight_v2] 2023-07-21_12-58-11 w18 grid=122x126 frames=172 pts=2027461 obs=0.441
+  [foresight_v2] 2023-07-21_12-58-11 w19 grid=143x125 frames=163 pts=1983098 obs=0.510
+  [foresight_v2] 2023-07-21_12-58-11 w20 grid=136x146 frames=153 pts=2169670 obs=0.338
+  [foresight_v2] 2023-07-21_12-58-11 w21 grid=155x129 frames=155 pts=2273930 obs=0.322
+  [foresight_v2] 2023-07-21_12-58-11 w22 grid=159x126 frames=177 pts=2536120 obs=0.301
+  [foresight_v2] 2023-07-21_12-58-11 w23 grid=158x114 frames=206 pts=2976919 obs=0.361
+  [foresight_v2] 2023-07-21_12-58-11 w24 grid=134x117 frames=187 pts=2667513 obs=0.457
+  [foresight_v2] 2023-07-21_12-58-11 w25 grid=120x116 frames=182 pts=2633525 obs=0.469
+  [foresight_v2] 2023-07-21_12-58-11 w26 grid=146x127 frames=179 pts=2567357 obs=0.469
+  [foresight_v2] 2023-07-21_12-58-11 w27 grid=162x116 frames=166 pts=2319157 obs=0.379
+  [foresight_v2] 2023-07-21_12-58-11 w28 grid=166x109 frames=157 pts=2284189 obs=0.322
+  [foresight_v2] 2023-07-21_12-58-11 w29 grid=129x107 frames=206 pts=3093000 obs=0.455
+  [foresight_v2] 2023-07-21_12-58-11 w30 grid=132x108 frames=203 pts=2848647 obs=0.531
+  [foresight_v2] 2023-07-21_12-58-11 w31 grid=157x133 frames=142 pts=1777386 obs=0.251
+  [foresight_v2] 2023-07-21_12-58-11 w32 grid=150x147 frames=150 pts=1829020 obs=0.251
+  [foresight_v2] 2023-07-21_12-58-11 w33 grid=123x133 frames=171 pts=2614258 obs=0.357
+  [foresight_v2] 2023-07-21_12-58-11 w34 grid=143x107 frames=173 pts=2452338 obs=0.507
+  [foresight_v2] 2023-07-21_12-58-11 w35 grid=167x106 frames=175 pts=2181248 obs=0.322
+  [foresight_v2] 2023-07-21_12-58-11 w36 grid=165x117 frames=192 pts=2174235 obs=0.302
+  [foresight_v2] 2023-07-21_12-58-11 w37 grid=158x127 frames=221 pts=1518181 obs=0.292
+  [foresight_v2] 2023-07-21_12-58-11 w38 grid=141x126 frames=196 pts=1185078 obs=0.366
+[2026-08-31 16:10:07] built 2023-07-21_12-58-11 foresight: 38 windows in 74s
+  [hindsight_v2] 2023-07-21_12-58-11 w00 grid=135x113 frames=108 pts=1227205 obs=0.270
+  [hindsight_v2] 2023-07-21_12-58-11 w01 grid=172x119 frames=203 pts=2079579 obs=0.326
+  [hindsight_v2] 2023-07-21_12-58-11 w02 grid=202x116 frames=250 pts=2691252 obs=0.346
+  [hindsight_v2] 2023-07-21_12-58-11 w03 grid=187x130 frames=233 pts=2435702 obs=0.321
+  [hindsight_v2] 2023-07-21_12-58-11 w04 grid=147x155 frames=235 pts=2207046 obs=0.344
+  [hindsight_v2] 2023-07-21_12-58-11 w05 grid=172x152 frames=242 pts=1967930 obs=0.320
+  [hindsight_v2] 2023-07-21_12-58-11 w06 grid=200x118 frames=235 pts=2010775 obs=0.333
+  [hindsight_v2] 2023-07-21_12-58-11 w07 grid=205x116 frames=241 pts=2526300 obs=0.341
+  [hindsight_v2] 2023-07-21_12-58-11 w08 grid=185x139 frames=252 pts=3123882 obs=0.327
+  [hindsight_v2] 2023-07-21_12-58-11 w09 grid=146x158 frames=256 pts=3572217 obs=0.386
+  [hindsight_v2] 2023-07-21_12-58-11 w10 grid=171x146 frames=243 pts=3514708 obs=0.345
+  [hindsight_v2] 2023-07-21_12-58-11 w11 grid=195x117 frames=247 pts=3621079 obs=0.373
+  [hindsight_v2] 2023-07-21_12-58-11 w12 grid=190x133 frames=243 pts=3594362 obs=0.356
+  [hindsight_v2] 2023-07-21_12-58-11 w13 grid=191x140 frames=244 pts=3584536 obs=0.425
+  [hindsight_v2] 2023-07-21_12-58-11 w14 grid=196x126 frames=245 pts=3166675 obs=0.340
+  [hindsight_v2] 2023-07-21_12-58-11 w15 grid=170x124 frames=274 pts=3282766 obs=0.378
+  [hindsight_v2] 2023-07-21_12-58-11 w16 grid=132x157 frames=288 pts=3237832 obs=0.455
+  [hindsight_v2] 2023-07-21_12-58-11 w17 grid=122x157 frames=280 pts=3311145 obs=0.550
+  [hindsight_v2] 2023-07-21_12-58-11 w18 grid=143x148 frames=259 pts=3099436 obs=0.456
+  [hindsight_v2] 2023-07-21_12-58-11 w19 grid=169x146 frames=248 pts=3339752 obs=0.486
+  [hindsight_v2] 2023-07-21_12-58-11 w20 grid=169x146 frames=240 pts=3336758 obs=0.376
+  [hindsight_v2] 2023-07-21_12-58-11 w21 grid=190x137 frames=266 pts=3944246 obs=0.366
+  [hindsight_v2] 2023-07-21_12-58-11 w22 grid=190x126 frames=296 pts=4274590 obs=0.353
+  [hindsight_v2] 2023-07-21_12-58-11 w23 grid=170x127 frames=306 pts=4388879 obs=0.390
+  [hindsight_v2] 2023-07-21_12-58-11 w24 grid=145x123 frames=290 pts=4180629 obs=0.439
+  [hindsight_v2] 2023-07-21_12-58-11 w25 grid=152x135 frames=285 pts=4072774 obs=0.438
+  [hindsight_v2] 2023-07-21_12-58-11 w26 grid=185x128 frames=267 pts=3811488 obs=0.484
+  [hindsight_v2] 2023-07-21_12-58-11 w27 grid=200x118 frames=256 pts=3646927 obs=0.416
+  [hindsight_v2] 2023-07-21_12-58-11 w28 grid=167x110 frames=295 pts=4394384 obs=0.387
+  [hindsight_v2] 2023-07-21_12-58-11 w29 grid=132x108 frames=297 pts=4209559 obs=0.549
+  [hindsight_v2] 2023-07-21_12-58-11 w30 grid=160x135 frames=281 pts=3848023 obs=0.459
+  [hindsight_v2] 2023-07-21_12-58-11 w31 grid=187x159 frames=234 pts=2846838 obs=0.271
+  [hindsight_v2] 2023-07-21_12-58-11 w32 grid=151x162 frames=250 pts=3596080 obs=0.291
+  [hindsight_v2] 2023-07-21_12-58-11 w33 grid=163x135 frames=272 pts=3830079 obs=0.370
+  [hindsight_v2] 2023-07-21_12-58-11 w34 grid=182x108 frames=273 pts=3740408 obs=0.539
+  [hindsight_v2] 2023-07-21_12-58-11 w35 grid=205x117 frames=291 pts=3398650 obs=0.351
+  [hindsight_v2] 2023-07-21_12-58-11 w36 grid=195x127 frames=322 pts=2820287 obs=0.344
+  [hindsight_v2] 2023-07-21_12-58-11 w37 grid=177x134 frames=325 pts=2263138 obs=0.346
+  [hindsight_v2] 2023-07-21_12-58-11 w38 grid=172x145 frames=334 pts=2728341 obs=0.374
+[2026-08-31 16:11:56] built 2023-07-21_12-58-11 hindsight: 39 windows in 110s
+  [foresight_v2] 2023-07-21_13-43-00 w01 grid=119x112 frames=132 pts=1595826 obs=0.518
+  [foresight_v2] 2023-07-21_13-43-00 w02 grid=146x119 frames=213 pts=2229396 obs=0.512
+  [foresight_v2] 2023-07-21_13-43-00 w03 grid=156x128 frames=189 pts=1465006 obs=0.339
+  [foresight_v2] 2023-07-21_13-43-00 w04 grid=151x120 frames=150 pts=1676460 obs=0.328
+  [foresight_v2] 2023-07-21_13-43-00 w05 grid=121x144 frames=149 pts=2166514 obs=0.446
+  [foresight_v2] 2023-07-21_13-43-00 w06 grid=119x156 frames=163 pts=2386348 obs=0.452
+  [foresight_v2] 2023-07-21_13-43-00 w07 grid=110x165 frames=165 pts=2540845 obs=0.320
+  [foresight_v2] 2023-07-21_13-43-00 w08 grid=119x149 frames=172 pts=2936803 obs=0.324
+  [foresight_v2] 2023-07-21_13-43-00 w09 grid=154x116 frames=172 pts=2625163 obs=0.445
+[2026-08-31 16:12:15] built 2023-07-21_13-43-00 foresight: 9 windows in 19s
+  [hindsight_v2] 2023-07-21_13-43-00 w00 grid=119x112 frames=132 pts=1595826 obs=0.518
+  [hindsight_v2] 2023-07-21_13-43-00 w01 grid=147x119 frames=248 pts=2648699 obs=0.536
+  [hindsight_v2] 2023-07-21_13-43-00 w02 grid=180x131 frames=325 pts=3088507 obs=0.505
+  [hindsight_v2] 2023-07-21_13-43-00 w03 grid=181x140 frames=265 pts=2527873 obs=0.364
+  [hindsight_v2] 2023-07-21_13-43-00 w04 grid=156x151 frames=238 pts=2961626 obs=0.357
+  [hindsight_v2] 2023-07-21_13-43-00 w05 grid=137x180 frames=246 pts=3535461 obs=0.424
+  [hindsight_v2] 2023-07-21_13-43-00 w06 grid=119x194 frames=255 pts=3893921 obs=0.475
+  [hindsight_v2] 2023-07-21_13-43-00 w07 grid=119x185 frames=269 pts=4309530 obs=0.378
+  [hindsight_v2] 2023-07-21_13-43-00 w08 grid=157x154 frames=265 pts=4261861 obs=0.351
+  [hindsight_v2] 2023-07-21_13-43-00 w09 grid=193x119 frames=263 pts=4031048 obs=0.460
+[2026-08-31 16:12:44] built 2023-07-21_13-43-00 hindsight: 10 windows in 29s
+  [foresight_v2] 2023-07-21_13-59-14 w01 grid=133x108 frames=104 pts=1392261 obs=0.480
+  [foresight_v2] 2023-07-21_13-59-14 w02 grid=156x134 frames=167 pts=2248370 obs=0.268
+  [foresight_v2] 2023-07-21_13-59-14 w03 grid=158x129 frames=159 pts=2243443 obs=0.271
+  [foresight_v2] 2023-07-21_13-59-14 w04 grid=169x105 frames=145 pts=1992099 obs=0.305
+  [foresight_v2] 2023-07-21_13-59-14 w05 grid=166x107 frames=152 pts=2152115 obs=0.319
+[2026-08-31 16:12:53] built 2023-07-21_13-59-14 foresight: 5 windows in 10s
+  [hindsight_v2] 2023-07-21_13-59-14 w00 grid=133x108 frames=104 pts=1392261 obs=0.480
+  [hindsight_v2] 2023-07-21_13-59-14 w01 grid=162x134 frames=196 pts=2697145 obs=0.431
+  [hindsight_v2] 2023-07-21_13-59-14 w02 grid=192x144 frames=255 pts=3456369 obs=0.298
+  [hindsight_v2] 2023-07-21_13-59-14 w03 grid=198x131 frames=240 pts=3366028 obs=0.305
+  [hindsight_v2] 2023-07-21_13-59-14 w04 grid=205x107 frames=234 pts=3262601 obs=0.379
+  [hindsight_v2] 2023-07-21_13-59-14 w05 grid=168x114 frames=277 pts=3945244 obs=0.386
+[2026-08-31 16:13:09] built 2023-07-21_13-59-14 hindsight: 6 windows in 16s
+  [foresight_v2] 2023-07-21_14-08-29 w01 grid=107x137 frames=93 pts=1520493 obs=0.449
+  [foresight_v2] 2023-07-21_14-08-29 w02 grid=131x153 frames=171 pts=2844632 obs=0.298
+  [foresight_v2] 2023-07-21_14-08-29 w03 grid=149x132 frames=184 pts=2842506 obs=0.378
+  [foresight_v2] 2023-07-21_14-08-29 w04 grid=152x113 frames=182 pts=2510203 obs=0.377
+  [foresight_v2] 2023-07-21_14-08-29 w05 grid=138x112 frames=186 pts=2701576 obs=0.492
+  [foresight_v2] 2023-07-21_14-08-29 w06 grid=157x121 frames=178 pts=2498022 obs=0.479
+  [foresight_v2] 2023-07-21_14-08-29 w07 grid=163x112 frames=163 pts=2019078 obs=0.340
+  [foresight_v2] 2023-07-21_14-08-29 w08 grid=157x113 frames=180 pts=2161749 obs=0.412
+  [foresight_v2] 2023-07-21_14-08-29 w09 grid=162x128 frames=161 pts=1864522 obs=0.282
+  [foresight_v2] 2023-07-21_14-08-29 w10 grid=160x132 frames=154 pts=1712344 obs=0.253
+  [foresight_v2] 2023-07-21_14-08-29 w11 grid=160x126 frames=162 pts=1948845 obs=0.286
+  [foresight_v2] 2023-07-21_14-08-29 w12 grid=166x109 frames=171 pts=2086904 obs=0.341
+  [foresight_v2] 2023-07-21_14-08-29 w13 grid=160x129 frames=161 pts=2009797 obs=0.278
+  [foresight_v2] 2023-07-21_14-08-29 w14 grid=156x120 frames=166 pts=2113065 obs=0.305
+  [foresight_v2] 2023-07-21_14-08-29 w15 grid=144x150 frames=173 pts=1802871 obs=0.266
+  [foresight_v2] 2023-07-21_14-08-29 w16 grid=116x162 frames=197 pts=2103374 obs=0.310
+  [foresight_v2] 2023-07-21_14-08-29 w17 grid=138x133 frames=179 pts=1871086 obs=0.355
+  [foresight_v2] 2023-07-21_14-08-29 w18 grid=164x116 frames=160 pts=2065420 obs=0.332
+  [foresight_v2] 2023-07-21_14-08-29 w19 grid=165x122 frames=157 pts=2120165 obs=0.269
+  [foresight_v2] 2023-07-21_14-08-29 w20 grid=157x138 frames=158 pts=2187221 obs=0.253
+  [foresight_v2] 2023-07-21_14-08-29 w21 grid=158x130 frames=166 pts=2289806 obs=0.283
+  [foresight_v2] 2023-07-21_14-08-29 w22 grid=127x149 frames=183 pts=2279035 obs=0.340
+  [foresight_v2] 2023-07-21_14-08-29 w23 grid=137x132 frames=188 pts=2124470 obs=0.384
+  [foresight_v2] 2023-07-21_14-08-29 w24 grid=146x131 frames=176 pts=2031560 obs=0.391
+  [foresight_v2] 2023-07-21_14-08-29 w25 grid=162x116 frames=165 pts=1500202 obs=0.313
+  [foresight_v2] 2023-07-21_14-08-29 w26 grid=152x138 frames=159 pts=1103424 obs=0.283
+  [foresight_v2] 2023-07-21_14-08-29 w27 grid=122x144 frames=179 pts=1806861 obs=0.433
+  [foresight_v2] 2023-07-21_14-08-29 w28 grid=160x124 frames=172 pts=1603861 obs=0.296
+[2026-08-31 16:14:05] built 2023-07-21_14-08-29 foresight: 28 windows in 55s
+  [hindsight_v2] 2023-07-21_14-08-29 w00 grid=107x137 frames=93 pts=1520493 obs=0.449
+  [hindsight_v2] 2023-07-21_14-08-29 w01 grid=131x162 frames=193 pts=3172917 obs=0.450
+  [hindsight_v2] 2023-07-21_14-08-29 w02 grid=162x168 frames=278 pts=4403825 obs=0.308
+  [hindsight_v2] 2023-07-21_14-08-29 w03 grid=172x132 frames=290 pts=4386975 obs=0.447
+  [hindsight_v2] 2023-07-21_14-08-29 w04 grid=175x113 frames=288 pts=4007715 obs=0.416
+  [hindsight_v2] 2023-07-21_14-08-29 w05 grid=171x131 frames=282 pts=4046230 obs=0.462
+  [hindsight_v2] 2023-07-21_14-08-29 w06 grid=194x121 frames=269 pts=3573012 obs=0.525
+  [hindsight_v2] 2023-07-21_14-08-29 w07 grid=193x113 frames=272 pts=3332077 obs=0.407
+  [hindsight_v2] 2023-07-21_14-08-29 w08 grid=192x128 frames=264 pts=3120581 obs=0.392
+  [hindsight_v2] 2023-07-21_14-08-29 w09 grid=194x150 frames=250 pts=2832807 obs=0.286
+  [hindsight_v2] 2023-07-21_14-08-29 w10 grid=197x141 frames=249 pts=2953988 obs=0.295
+  [hindsight_v2] 2023-07-21_14-08-29 w11 grid=197x133 frames=260 pts=3074966 obs=0.326
+  [hindsight_v2] 2023-07-21_14-08-29 w12 grid=199x129 frames=256 pts=3275265 obs=0.341
+  [hindsight_v2] 2023-07-21_14-08-29 w13 grid=192x131 frames=264 pts=3220296 obs=0.340
+  [hindsight_v2] 2023-07-21_14-08-29 w14 grid=178x151 frames=266 pts=3105361 obs=0.311
+  [hindsight_v2] 2023-07-21_14-08-29 w15 grid=146x187 frames=291 pts=3145989 obs=0.312
+  [hindsight_v2] 2023-07-21_14-08-29 w16 grid=150x168 frames=294 pts=3115010 obs=0.340
+  [hindsight_v2] 2023-07-21_14-08-29 w17 grid=176x133 frames=274 pts=3154235 obs=0.385
+  [hindsight_v2] 2023-07-21_14-08-29 w18 grid=201x122 frames=247 pts=3263893 obs=0.361
+  [hindsight_v2] 2023-07-21_14-08-29 w19 grid=195x147 frames=251 pts=3434889 obs=0.279
+  [hindsight_v2] 2023-07-21_14-08-29 w20 grid=192x150 frames=253 pts=3495048 obs=0.288
+  [hindsight_v2] 2023-07-21_14-08-29 w21 grid=160x168 frames=275 pts=3555904 obs=0.316
+  [hindsight_v2] 2023-07-21_14-08-29 w22 grid=137x155 frames=288 pts=3497535 obs=0.461
+  [hindsight_v2] 2023-07-21_14-08-29 w23 grid=163x132 frames=286 pts=3244984 obs=0.435
+  [hindsight_v2] 2023-07-21_14-08-29 w24 grid=183x136 frames=270 pts=2687989 obs=0.408
+  [hindsight_v2] 2023-07-21_14-08-29 w25 grid=188x138 frames=252 pts=2169050 obs=0.332
+  [hindsight_v2] 2023-07-21_14-08-29 w26 grid=154x159 frames=273 pts=2401256 obs=0.378
+  [hindsight_v2] 2023-07-21_14-08-29 w27 grid=161x152 frames=265 pts=2508362 obs=0.412
+  [hindsight_v2] 2023-07-21_14-08-29 w28 grid=199x133 frames=260 pts=2344274 obs=0.313
+[2026-08-31 16:15:27] built 2023-07-21_14-08-29 hindsight: 29 windows in 83s
+  [foresight_v2] 2023-07-21_14-44-56 w01 grid=104x103 frames=79 pts=1049799 obs=0.541
+  [foresight_v2] 2023-07-21_14-44-56 w02 grid=127x104 frames=121 pts=1682777 obs=0.550
+  [foresight_v2] 2023-07-21_14-44-56 w03 grid=156x117 frames=61 pts=817004 obs=0.343
+[2026-08-31 16:15:31] built 2023-07-21_14-44-56 foresight: 3 windows in 4s
+  [hindsight_v2] 2023-07-21_14-44-56 w00 grid=104x103 frames=79 pts=1049799 obs=0.541
+  [hindsight_v2] 2023-07-21_14-44-56 w01 grid=127x104 frames=145 pts=1999108 obs=0.560
+  [hindsight_v2] 2023-07-21_14-44-56 w02 grid=166x119 frames=135 pts=1826191 obs=0.478
+  [hindsight_v2] 2023-07-21_14-44-56 w03 grid=195x130 frames=146 pts=1609934 obs=0.353
+[2026-08-31 16:15:38] built 2023-07-21_14-44-56 hindsight: 4 windows in 6s
+[2026-08-31 16:15:38] built 2023-07-21_14-51-07 foresight: 0 windows in 0s
+[2026-08-31 16:15:38] built 2023-07-21_14-51-07 hindsight: 0 windows in 0s
+  [foresight_v2] 2023-07-21_17-07-00 w01 grid=133x122 frames=81 pts=530334 obs=0.217
+  [foresight_v2] 2023-07-21_17-07-00 w02 grid=149x127 frames=161 pts=1321006 obs=0.332
+  [foresight_v2] 2023-07-21_17-07-00 w03 grid=156x108 frames=166 pts=1630777 obs=0.483
+  [foresight_v2] 2023-07-21_17-07-00 w04 grid=166x116 frames=159 pts=1699244 obs=0.285
+  [foresight_v2] 2023-07-21_17-07-00 w05 grid=164x114 frames=162 pts=1793786 obs=0.302
+  [foresight_v2] 2023-07-21_17-07-00 w06 grid=164x113 frames=151 pts=1525504 obs=0.290
+  [foresight_v2] 2023-07-21_17-07-00 w07 grid=155x128 frames=147 pts=1268489 obs=0.296
+  [foresight_v2] 2023-07-21_17-07-00 w08 grid=147x139 frames=155 pts=1331616 obs=0.393
+  [foresight_v2] 2023-07-21_17-07-00 w09 grid=162x117 frames=161 pts=1714105 obs=0.297
+  [foresight_v2] 2023-07-21_17-07-00 w10 grid=162x120 frames=160 pts=2114084 obs=0.290
+  [foresight_v2] 2023-07-21_17-07-00 w11 grid=162x113 frames=157 pts=2256628 obs=0.322
+  [foresight_v2] 2023-07-21_17-07-00 w12 grid=163x114 frames=144 pts=2129543 obs=0.321
+  [foresight_v2] 2023-07-21_17-07-00 w13 grid=144x121 frames=130 pts=1874691 obs=0.351
+  [foresight_v2] 2023-07-21_17-07-00 w14 grid=134x130 frames=135 pts=1936207 obs=0.496
+  [foresight_v2] 2023-07-21_17-07-00 w15 grid=130x132 frames=141 pts=1921326 obs=0.413
+  [foresight_v2] 2023-07-21_17-07-00 w16 grid=142x128 frames=143 pts=1544686 obs=0.465
+  [foresight_v2] 2023-07-21_17-07-00 w17 grid=162x114 frames=131 pts=1603389 obs=0.321
+  [foresight_v2] 2023-07-21_17-07-00 w18 grid=159x127 frames=134 pts=1728633 obs=0.291
+  [foresight_v2] 2023-07-21_17-07-00 w19 grid=162x127 frames=136 pts=1693539 obs=0.265
+  [foresight_v2] 2023-07-21_17-07-00 w20 grid=160x129 frames=142 pts=1587260 obs=0.275
+  [foresight_v2] 2023-07-21_17-07-00 w21 grid=160x128 frames=142 pts=1599682 obs=0.278
+  [foresight_v2] 2023-07-21_17-07-00 w22 grid=164x115 frames=150 pts=2217523 obs=0.293
+  [foresight_v2] 2023-07-21_17-07-00 w23 grid=146x120 frames=117 pts=1774706 obs=0.281
+  [foresight_v2] 2023-07-21_17-07-00 w24 grid=111x102 frames=28 pts=429172 obs=0.198
+[2026-08-31 16:16:16] built 2023-07-21_17-07-00 foresight: 24 windows in 38s
+  [hindsight_v2] 2023-07-21_17-07-00 w00 grid=133x122 frames=81 pts=530334 obs=0.217
+  [hindsight_v2] 2023-07-21_17-07-00 w01 grid=158x133 frames=183 pts=1446724 obs=0.301
+  [hindsight_v2] 2023-07-21_17-07-00 w02 grid=188x127 frames=249 pts=2245420 obs=0.362
+  [hindsight_v2] 2023-07-21_17-07-00 w03 grid=194x120 frames=259 pts=2649200 obs=0.460
+  [hindsight_v2] 2023-07-21_17-07-00 w04 grid=203x116 frames=251 pts=2736735 obs=0.351
+  [hindsight_v2] 2023-07-21_17-07-00 w05 grid=202x114 frames=245 pts=2581693 obs=0.354
+  [hindsight_v2] 2023-07-21_17-07-00 w06 grid=192x131 frames=237 pts=2270294 obs=0.324
+  [hindsight_v2] 2023-07-21_17-07-00 w07 grid=183x154 frames=239 pts=2051602 obs=0.305
+  [hindsight_v2] 2023-07-21_17-07-00 w08 grid=186x139 frames=245 pts=2435983 obs=0.410
+  [hindsight_v2] 2023-07-21_17-07-00 w09 grid=195x132 frames=253 pts=2973158 obs=0.326
+  [hindsight_v2] 2023-07-21_17-07-00 w10 grid=199x120 frames=247 pts=3393644 obs=0.351
+  [hindsight_v2] 2023-07-21_17-07-00 w11 grid=198x114 frames=235 pts=3418605 obs=0.379
+  [hindsight_v2] 2023-07-21_17-07-00 w12 grid=181x123 frames=218 pts=3185467 obs=0.361
+  [hindsight_v2] 2023-07-21_17-07-00 w13 grid=166x145 frames=208 pts=2998698 obs=0.371
+  [hindsight_v2] 2023-07-21_17-07-00 w14 grid=149x146 frames=219 pts=3037880 obs=0.484
+  [hindsight_v2] 2023-07-21_17-07-00 w15 grid=162x147 frames=222 pts=2647464 obs=0.402
+  [hindsight_v2] 2023-07-21_17-07-00 w16 grid=178x128 frames=215 pts=2579947 obs=0.495
+  [hindsight_v2] 2023-07-21_17-07-00 w17 grid=195x127 frames=207 pts=2479853 obs=0.344
+  [hindsight_v2] 2023-07-21_17-07-00 w18 grid=198x137 frames=212 pts=2761867 obs=0.307
+  [hindsight_v2] 2023-07-21_17-07-00 w19 grid=193x149 frames=220 pts=2497851 obs=0.287
+  [hindsight_v2] 2023-07-21_17-07-00 w20 grid=199x138 frames=222 pts=2712276 obs=0.296
+  [hindsight_v2] 2023-07-21_17-07-00 w21 grid=195x128 frames=229 pts=2908099 obs=0.335
+  [hindsight_v2] 2023-07-21_17-07-00 w22 grid=185x120 frames=199 pts=2958480 obs=0.327
+  [hindsight_v2] 2023-07-21_17-07-00 w23 grid=146x120 frames=117 pts=1774706 obs=0.281
+  [hindsight_v2] 2023-07-21_17-07-00 w24 grid=111x102 frames=28 pts=429172 obs=0.198
+[2026-08-31 16:17:12] built 2023-07-21_17-07-00 hindsight: 25 windows in 56s
+  [foresight_v2] 2023-07-21_17-34-18 w01 grid=133x112 frames=84 pts=1309215 obs=0.448
+  [foresight_v2] 2023-07-21_17-34-18 w02 grid=147x130 frames=122 pts=1840223 obs=0.239
+  [foresight_v2] 2023-07-21_17-34-18 w03 grid=144x143 frames=49 pts=728452 obs=0.204
+  [foresight_v2] 2023-07-21_17-34-18 w04 grid=139x148 frames=53 pts=771828 obs=0.217
+  [foresight_v2] 2023-07-21_17-34-18 w05 grid=132x152 frames=91 pts=1281925 obs=0.306
+  [foresight_v2] 2023-07-21_17-34-18 w06 grid=121x132 frames=153 pts=2203711 obs=0.447
+  [foresight_v2] 2023-07-21_17-34-18 w07 grid=146x139 frames=163 pts=2400156 obs=0.435
+  [foresight_v2] 2023-07-21_17-34-18 w08 grid=162x130 frames=151 pts=2311951 obs=0.250
+[2026-08-31 16:17:23] built 2023-07-21_17-34-18 foresight: 8 windows in 11s
+  [hindsight_v2] 2023-07-21_17-34-18 w00 grid=133x112 frames=84 pts=1309215 obs=0.448
+  [hindsight_v2] 2023-07-21_17-34-18 w01 grid=152x132 frames=141 pts=2140871 obs=0.415
+  [hindsight_v2] 2023-07-21_17-34-18 w02 grid=179x160 frames=136 pts=2047287 obs=0.238
+  [hindsight_v2] 2023-07-21_17-34-18 w03 grid=167x177 frames=93 pts=1366591 obs=0.223
+  [hindsight_v2] 2023-07-21_17-34-18 w04 grid=159x180 frames=106 pts=1504530 obs=0.282
+  [hindsight_v2] 2023-07-21_17-34-18 w05 grid=142x167 frames=192 pts=2766983 obs=0.312
+  [hindsight_v2] 2023-07-21_17-34-18 w06 grid=154x153 frames=239 pts=3455496 obs=0.406
+  [hindsight_v2] 2023-07-21_17-34-18 w07 grid=182x154 frames=249 pts=3771317 obs=0.402
+  [hindsight_v2] 2023-07-21_17-34-18 w08 grid=200x140 frames=237 pts=3662604 obs=0.266
+[2026-08-31 16:17:40] built 2023-07-21_17-34-18 hindsight: 9 windows in 17s
+  [foresight_v2] 2023-07-21_17-45-42 w01 grid=132x102 frames=89 pts=1362978 obs=0.490
+  [foresight_v2] 2023-07-21_17-45-42 w02 grid=151x108 frames=153 pts=2505550 obs=0.337
+  [foresight_v2] 2023-07-21_17-45-42 w03 grid=126x109 frames=165 pts=2861056 obs=0.489
+  [foresight_v2] 2023-07-21_17-45-42 w04 grid=145x112 frames=164 pts=2727019 obs=0.490
+  [foresight_v2] 2023-07-21_17-45-42 w05 grid=165x119 frames=153 pts=2374897 obs=0.299
+  [foresight_v2] 2023-07-21_17-45-42 w06 grid=161x127 frames=156 pts=2424084 obs=0.264
+  [foresight_v2] 2023-07-21_17-45-42 w07 grid=159x136 frames=151 pts=2320259 obs=0.240
+  [foresight_v2] 2023-07-21_17-45-42 w08 grid=164x121 frames=158 pts=2309025 obs=0.273
+  [foresight_v2] 2023-07-21_17-45-42 w09 grid=163x104 frames=170 pts=2555093 obs=0.398
+  [foresight_v2] 2023-07-21_17-45-42 w10 grid=126x138 frames=166 pts=2623435 obs=0.445
+  [foresight_v2] 2023-07-21_17-45-42 w11 grid=146x142 frames=94 pts=1456217 obs=0.242
+  [foresight_v2] 2023-07-21_17-45-42 w12 grid=166x113 frames=67 pts=1008693 obs=0.270
+  [foresight_v2] 2023-07-21_17-45-42 w13 grid=144x114 frames=137 pts=2029278 obs=0.407
+  [foresight_v2] 2023-07-21_17-45-42 w14 grid=156x109 frames=160 pts=2464155 obs=0.510
+  [foresight_v2] 2023-07-21_17-45-42 w15 grid=166x120 frames=143 pts=2190554 obs=0.262
+  [foresight_v2] 2023-07-21_17-45-42 w16 grid=156x125 frames=142 pts=2080472 obs=0.302
+  [foresight_v2] 2023-07-21_17-45-42 w17 grid=157x116 frames=155 pts=2233728 obs=0.456
+  [foresight_v2] 2023-07-21_17-45-42 w18 grid=155x114 frames=157 pts=2352842 obs=0.346
+  [foresight_v2] 2023-07-21_17-45-42 w19 grid=152x108 frames=141 pts=2089355 obs=0.519
+  [foresight_v2] 2023-07-21_17-45-42 w20 grid=164x114 frames=124 pts=1839275 obs=0.306
+  [foresight_v2] 2023-07-21_17-45-42 w21 grid=156x105 frames=76 pts=1120007 obs=0.278
+  [foresight_v2] 2023-07-21_17-45-42 w22 grid=146x117 frames=20 pts=288039 obs=0.215
+  [foresight_v2] 2023-07-21_17-45-42 w23 grid=131x143 frames=81 pts=1210900 obs=0.228
+  [foresight_v2] 2023-07-21_17-45-42 w24 grid=146x152 frames=152 pts=2278546 obs=0.239
+  [foresight_v2] 2023-07-21_17-45-42 w25 grid=149x149 frames=149 pts=2259758 obs=0.241
+[2026-08-31 16:18:21] built 2023-07-21_17-45-42 foresight: 25 windows in 40s
+  [hindsight_v2] 2023-07-21_17-45-42 w00 grid=132x102 frames=89 pts=1362978 obs=0.490
+  [hindsight_v2] 2023-07-21_17-45-42 w01 grid=153x108 frames=180 pts=2913753 obs=0.541
+  [hindsight_v2] 2023-07-21_17-45-42 w02 grid=166x113 frames=247 pts=4134564 obs=0.360
+  [hindsight_v2] 2023-07-21_17-45-42 w03 grid=155x112 frames=255 pts=4314060 obs=0.498
+  [hindsight_v2] 2023-07-21_17-45-42 w04 grid=183x119 frames=253 pts=4089321 obs=0.481
+  [hindsight_v2] 2023-07-21_17-45-42 w05 grid=198x127 frames=242 pts=3775622 obs=0.334
+  [hindsight_v2] 2023-07-21_17-45-42 w06 grid=196x145 frames=244 pts=3751631 obs=0.276
+  [hindsight_v2] 2023-07-21_17-45-42 w07 grid=197x145 frames=239 pts=3579788 obs=0.269
+  [hindsight_v2] 2023-07-21_17-45-42 w08 grid=198x122 frames=262 pts=3924106 obs=0.362
+  [hindsight_v2] 2023-07-21_17-45-42 w09 grid=164x139 frames=258 pts=3980573 obs=0.403
+  [hindsight_v2] 2023-07-21_17-45-42 w10 grid=149x153 frames=198 pts=3111941 obs=0.434
+  [hindsight_v2] 2023-07-21_17-45-42 w11 grid=184x146 frames=137 pts=2097232 obs=0.284
+  [hindsight_v2] 2023-07-21_17-45-42 w12 grid=186x114 frames=164 pts=2443138 obs=0.364
+  [hindsight_v2] 2023-07-21_17-45-42 w13 grid=183x116 frames=226 pts=3424681 obs=0.430
+  [hindsight_v2] 2023-07-21_17-45-42 w14 grid=194x120 frames=237 pts=3640321 obs=0.473
+  [hindsight_v2] 2023-07-21_17-45-42 w15 grid=194x134 frames=228 pts=3399597 obs=0.308
+  [hindsight_v2] 2023-07-21_17-45-42 w16 grid=195x130 frames=232 pts=3406002 obs=0.334
+  [hindsight_v2] 2023-07-21_17-45-42 w17 grid=184x126 frames=249 pts=3645013 obs=0.476
+  [hindsight_v2] 2023-07-21_17-45-42 w18 grid=192x115 frames=222 pts=3303364 obs=0.396
+  [hindsight_v2] 2023-07-21_17-45-42 w19 grid=189x115 frames=228 pts=3388978 obs=0.513
+  [hindsight_v2] 2023-07-21_17-45-42 w20 grid=192x114 frames=135 pts=1995803 obs=0.329
+  [hindsight_v2] 2023-07-21_17-45-42 w21 grid=195x119 frames=93 pts=1364546 obs=0.292
+  [hindsight_v2] 2023-07-21_17-45-42 w22 grid=174x156 frames=90 pts=1342027 obs=0.239
+  [hindsight_v2] 2023-07-21_17-45-42 w23 grid=158x172 frames=166 pts=2482282 obs=0.249
+  [hindsight_v2] 2023-07-21_17-45-42 w24 grid=174x179 frames=237 pts=3582379 obs=0.251
+  [hindsight_v2] 2023-07-21_17-45-42 w25 grid=168x180 frames=237 pts=3648801 obs=0.278
+[2026-08-31 16:19:20] built 2023-07-21_17-45-42 hindsight: 26 windows in 60s
+  [foresight_v2] 2023-07-22_13-00-57 w01 grid=114x107 frames=102 pts=1587245 obs=0.518
+  [foresight_v2] 2023-07-22_13-00-57 w02 grid=148x114 frames=155 pts=2232755 obs=0.502
+  [foresight_v2] 2023-07-22_13-00-57 w03 grid=157x119 frames=162 pts=2219086 obs=0.375
+  [foresight_v2] 2023-07-22_13-00-57 w04 grid=150x139 frames=144 pts=1596874 obs=0.308
+  [foresight_v2] 2023-07-22_13-00-57 w05 grid=126x120 frames=140 pts=1299245 obs=0.431
+  [foresight_v2] 2023-07-22_13-00-57 w06 grid=107x107 frames=165 pts=1471235 obs=0.556
+  [foresight_v2] 2023-07-22_13-00-57 w07 grid=103x108 frames=181 pts=1635296 obs=0.551
+[2026-08-31 16:19:32] built 2023-07-22_13-00-57 foresight: 7 windows in 12s
+  [hindsight_v2] 2023-07-22_13-00-57 w00 grid=114x107 frames=102 pts=1587245 obs=0.518
+  [hindsight_v2] 2023-07-22_13-00-57 w01 grid=148x114 frames=192 pts=2847298 obs=0.513
+  [hindsight_v2] 2023-07-22_13-00-57 w02 grid=180x119 frames=248 pts=3438245 obs=0.516
+  [hindsight_v2] 2023-07-22_13-00-57 w03 grid=185x140 frames=236 pts=2979574 obs=0.387
+  [hindsight_v2] 2023-07-22_13-00-57 w04 grid=155x143 frames=233 pts=2399389 obs=0.344
+  [hindsight_v2] 2023-07-22_13-00-57 w05 grid=126x120 frames=241 pts=2197747 obs=0.447
+  [hindsight_v2] 2023-07-22_13-00-57 w06 grid=108x113 frames=270 pts=2430757 obs=0.545
+  [hindsight_v2] 2023-07-22_13-00-57 w07 grid=113x146 frames=267 pts=2704365 obs=0.520
+[2026-08-31 16:19:50] built 2023-07-22_13-00-57 hindsight: 8 windows in 18s
+  [foresight_v2] 2023-07-22_13-28-55 w01 grid=127x115 frames=93 pts=1099561 obs=0.487
+  [foresight_v2] 2023-07-22_13-28-55 w02 grid=156x140 frames=145 pts=1625745 obs=0.299
+  [foresight_v2] 2023-07-22_13-28-55 w03 grid=152x139 frames=140 pts=1489492 obs=0.243
+  [foresight_v2] 2023-07-22_13-28-55 w04 grid=160x134 frames=130 pts=1418035 obs=0.256
+  [foresight_v2] 2023-07-22_13-28-55 w05 grid=159x136 frames=150 pts=1915163 obs=0.242
+  [foresight_v2] 2023-07-22_13-28-55 w06 grid=163x123 frames=140 pts=1841981 obs=0.276
+  [foresight_v2] 2023-07-22_13-28-55 w07 grid=163x124 frames=133 pts=1563892 obs=0.298
+  [foresight_v2] 2023-07-22_13-28-55 w08 grid=158x137 frames=162 pts=1838378 obs=0.255
+  [foresight_v2] 2023-07-22_13-28-55 w09 grid=161x133 frames=161 pts=1911967 obs=0.253
+  [foresight_v2] 2023-07-22_13-28-55 w10 grid=149x139 frames=162 pts=1886239 obs=0.280
+  [foresight_v2] 2023-07-22_13-28-55 w11 grid=142x138 frames=179 pts=2356123 obs=0.322
+  [foresight_v2] 2023-07-22_13-28-55 w12 grid=168x107 frames=158 pts=1902324 obs=0.329
+  [foresight_v2] 2023-07-22_13-28-55 w13 grid=167x111 frames=153 pts=1913062 obs=0.287
+  [foresight_v2] 2023-07-22_13-28-55 w14 grid=159x134 frames=156 pts=1966182 obs=0.256
+  [foresight_v2] 2023-07-22_13-28-55 w15 grid=156x140 frames=161 pts=2142654 obs=0.254
+  [foresight_v2] 2023-07-22_13-28-55 w16 grid=151x145 frames=158 pts=2001230 obs=0.260
+  [foresight_v2] 2023-07-22_13-28-55 w17 grid=154x138 frames=155 pts=1920804 obs=0.270
+  [foresight_v2] 2023-07-22_13-28-55 w18 grid=163x115 frames=157 pts=1944198 obs=0.313
+  [foresight_v2] 2023-07-22_13-28-55 w19 grid=149x139 frames=169 pts=2725495 obs=0.262
+  [foresight_v2] 2023-07-22_13-28-55 w20 grid=138x123 frames=170 pts=3011784 obs=0.358
+  [foresight_v2] 2023-07-22_13-28-55 w21 grid=156x108 frames=162 pts=2545122 obs=0.481
+  [foresight_v2] 2023-07-22_13-28-55 w22 grid=139x108 frames=151 pts=2196359 obs=0.449
+[2026-08-31 16:20:30] built 2023-07-22_13-28-55 foresight: 22 windows in 40s
+  [hindsight_v2] 2023-07-22_13-28-55 w00 grid=127x115 frames=93 pts=1099561 obs=0.487
+  [hindsight_v2] 2023-07-22_13-28-55 w01 grid=156x141 frames=177 pts=2039651 obs=0.433
+  [hindsight_v2] 2023-07-22_13-28-55 w02 grid=187x159 frames=221 pts=2403236 obs=0.299
+  [hindsight_v2] 2023-07-22_13-28-55 w03 grid=189x162 frames=215 pts=2350088 obs=0.257
+  [hindsight_v2] 2023-07-22_13-28-55 w04 grid=195x154 frames=217 pts=2607279 obs=0.264
+  [hindsight_v2] 2023-07-22_13-28-55 w05 grid=196x145 frames=224 pts=2895126 obs=0.276
+  [hindsight_v2] 2023-07-22_13-28-55 w06 grid=198x142 frames=220 pts=2676798 obs=0.290
+  [hindsight_v2] 2023-07-22_13-28-55 w07 grid=196x146 frames=229 pts=2711839 obs=0.301
+  [hindsight_v2] 2023-07-22_13-28-55 w08 grid=194x155 frames=249 pts=2885690 obs=0.264
+  [hindsight_v2] 2023-07-22_13-28-55 w09 grid=183x160 frames=257 pts=3022480 obs=0.288
+  [hindsight_v2] 2023-07-22_13-28-55 w10 grid=179x154 frames=265 pts=3352798 obs=0.309
+  [hindsight_v2] 2023-07-22_13-28-55 w11 grid=182x140 frames=264 pts=3306963 obs=0.346
+  [hindsight_v2] 2023-07-22_13-28-55 w12 grid=206x116 frames=247 pts=3077281 obs=0.354
+  [hindsight_v2] 2023-07-22_13-28-55 w13 grid=199x135 frames=241 pts=2973404 obs=0.293
+  [hindsight_v2] 2023-07-22_13-28-55 w14 grid=192x156 frames=251 pts=3287511 obs=0.268
+  [hindsight_v2] 2023-07-22_13-28-55 w15 grid=183x169 frames=248 pts=3176661 obs=0.265
+  [hindsight_v2] 2023-07-22_13-28-55 w16 grid=185x162 frames=248 pts=3127958 obs=0.282
+  [hindsight_v2] 2023-07-22_13-28-55 w17 grid=191x138 frames=243 pts=2948497 obs=0.317
+  [hindsight_v2] 2023-07-22_13-28-55 w18 grid=185x143 frames=259 pts=3878683 obs=0.312
+  [hindsight_v2] 2023-07-22_13-28-55 w19 grid=172x141 frames=261 pts=4204428 obs=0.296
+  [hindsight_v2] 2023-07-22_13-28-55 w20 grid=169x123 frames=256 pts=4364582 obs=0.439
+  [hindsight_v2] 2023-07-22_13-28-55 w21 grid=174x111 frames=246 pts=3708607 obs=0.483
+  [hindsight_v2] 2023-07-22_13-28-55 w22 grid=176x121 frames=242 pts=3274094 obs=0.434
+[2026-08-31 16:21:30] built 2023-07-22_13-28-55 hindsight: 23 windows in 60s
+  [foresight_v2] 2023-07-22_16-24-27 w01 grid=112x130 frames=87 pts=1247244 obs=0.460
+  [foresight_v2] 2023-07-22_16-24-27 w02 grid=123x160 frames=143 pts=2021132 obs=0.288
+  [foresight_v2] 2023-07-22_16-24-27 w03 grid=142x147 frames=145 pts=2066843 obs=0.288
+  [foresight_v2] 2023-07-22_16-24-27 w04 grid=152x143 frames=131 pts=1954937 obs=0.248
+  [foresight_v2] 2023-07-22_16-24-27 w05 grid=141x152 frames=145 pts=2121703 obs=0.268
+  [foresight_v2] 2023-07-22_16-24-27 w06 grid=113x161 frames=142 pts=2075456 obs=0.329
+  [foresight_v2] 2023-07-22_16-24-27 w07 grid=127x148 frames=144 pts=2160119 obs=0.396
+  [foresight_v2] 2023-07-22_16-24-27 w08 grid=164x111 frames=145 pts=2168896 obs=0.347
+  [foresight_v2] 2023-07-22_16-24-27 w09 grid=153x131 frames=132 pts=1984805 obs=0.292
+  [foresight_v2] 2023-07-22_16-24-27 w10 grid=120x163 frames=106 pts=1543956 obs=0.274
+  [foresight_v2] 2023-07-22_16-24-27 w11 grid=122x165 frames=120 pts=1647205 obs=0.263
+  [foresight_v2] 2023-07-22_16-24-27 w12 grid=147x145 frames=144 pts=2026440 obs=0.258
+  [foresight_v2] 2023-07-22_16-24-27 w13 grid=145x147 frames=142 pts=1954050 obs=0.254
+  [foresight_v2] 2023-07-22_16-24-27 w14 grid=130x161 frames=142 pts=1868957 obs=0.268
+  [foresight_v2] 2023-07-22_16-24-27 w15 grid=137x158 frames=144 pts=2011300 obs=0.253
+  [foresight_v2] 2023-07-22_16-24-27 w16 grid=139x153 frames=142 pts=2037275 obs=0.263
+  [foresight_v2] 2023-07-22_16-24-27 w17 grid=151x122 frames=144 pts=1890671 obs=0.324
+  [foresight_v2] 2023-07-22_16-24-27 w18 grid=120x156 frames=148 pts=2092348 obs=0.344
+  [foresight_v2] 2023-07-22_16-24-27 w19 grid=107x168 frames=104 pts=1509322 obs=0.307
+  [foresight_v2] 2023-07-22_16-24-27 w20 grid=126x158 frames=109 pts=1818968 obs=0.263
+  [foresight_v2] 2023-07-22_16-24-27 w21 grid=156x135 frames=142 pts=2276602 obs=0.271
+  [foresight_v2] 2023-07-22_16-24-27 w22 grid=166x119 frames=137 pts=2107106 obs=0.281
+  [foresight_v2] 2023-07-22_16-24-27 w23 grid=169x106 frames=140 pts=2008796 obs=0.304
+  [foresight_v2] 2023-07-22_16-24-27 w24 grid=168x112 frames=138 pts=1743775 obs=0.275
+  [foresight_v2] 2023-07-22_16-24-27 w25 grid=167x110 frames=150 pts=2101276 obs=0.295
+  [foresight_v2] 2023-07-22_16-24-27 w26 grid=149x130 frames=155 pts=2373320 obs=0.317
+  [foresight_v2] 2023-07-22_16-24-27 w27 grid=131x145 frames=158 pts=2361844 obs=0.404
+  [foresight_v2] 2023-07-22_16-24-27 w28 grid=143x127 frames=165 pts=2521378 obs=0.333
+  [foresight_v2] 2023-07-22_16-24-27 w29 grid=146x115 frames=167 pts=2485284 obs=0.509
+  [foresight_v2] 2023-07-22_16-24-27 w30 grid=146x144 frames=147 pts=2101136 obs=0.279
+/local/kuceral4/baseprod/studies_v2/baseprod/build.py:149: RuntimeWarning: All-NaN slice encountered
+  tmax, tmean = np.nanmax(vals, axis=1), np.nanmean(vals, axis=1)
+/local/kuceral4/baseprod/studies_v2/baseprod/build.py:149: RuntimeWarning: Mean of empty slice
+  tmax, tmean = np.nanmax(vals, axis=1), np.nanmean(vals, axis=1)
+  [foresight_v2] 2023-07-22_16-24-27 w31 grid=142x140 frames=150 pts=2285805 obs=0.306
+  [foresight_v2] 2023-07-22_16-24-27 w32 grid=153x136 frames=167 pts=2652781 obs=0.352
+  [foresight_v2] 2023-07-22_16-24-27 w33 grid=160x128 frames=159 pts=2325803 obs=0.292
+  [foresight_v2] 2023-07-22_16-24-27 w34 grid=160x126 frames=156 pts=2116402 obs=0.309
+  [foresight_v2] 2023-07-22_16-24-27 w35 grid=134x132 frames=152 pts=1643282 obs=0.328
+  [foresight_v2] 2023-07-22_16-24-27 w36 grid=129x127 frames=142 pts=1471689 obs=0.457
+  [foresight_v2] 2023-07-22_16-24-27 w37 grid=159x136 frames=141 pts=1933260 obs=0.253
+  [foresight_v2] 2023-07-22_16-24-27 w38 grid=164x115 frames=141 pts=2102603 obs=0.296
+  [foresight_v2] 2023-07-22_16-24-27 w39 grid=156x115 frames=149 pts=2324680 obs=0.344
+  [foresight_v2] 2023-07-22_16-24-27 w40 grid=145x108 frames=181 pts=2912471 obs=0.492
+  [foresight_v2] 2023-07-22_16-24-27 w41 grid=161x106 frames=224 pts=3411371 obs=0.322
+  [foresight_v2] 2023-07-22_16-24-27 w42 grid=160x107 frames=196 pts=2724877 obs=0.380
+  [foresight_v2] 2023-07-22_16-24-27 w43 grid=160x120 frames=153 pts=2044305 obs=0.324
+  [foresight_v2] 2023-07-22_16-24-27 w44 grid=155x121 frames=153 pts=2213775 obs=0.348
+  [foresight_v2] 2023-07-22_16-24-27 w45 grid=129x158 frames=157 pts=2203640 obs=0.349
+  [foresight_v2] 2023-07-22_16-24-27 w46 grid=119x158 frames=158 pts=2109225 obs=0.327
+  [foresight_v2] 2023-07-22_16-24-27 w47 grid=127x135 frames=160 pts=2271568 obs=0.440
+  [foresight_v2] 2023-07-22_16-24-27 w48 grid=120x163 frames=143 pts=2141141 obs=0.322
+  [foresight_v2] 2023-07-22_16-24-27 w49 grid=145x144 frames=145 pts=2171351 obs=0.304
+  [foresight_v2] 2023-07-22_16-24-27 w50 grid=138x115 frames=139 pts=2100931 obs=0.426
+  [foresight_v2] 2023-07-22_16-24-27 w51 grid=126x124 frames=147 pts=2210751 obs=0.515
+[2026-08-31 16:22:59] built 2023-07-22_16-24-27 foresight: 51 windows in 89s
+  [hindsight_v2] 2023-07-22_16-24-27 w00 grid=112x130 frames=87 pts=1247244 obs=0.460
+  [hindsight_v2] 2023-07-22_16-24-27 w01 grid=124x163 frames=175 pts=2485818 obs=0.471
+  [hindsight_v2] 2023-07-22_16-24-27 w02 grid=142x183 frames=219 pts=3123773 obs=0.318
+  [hindsight_v2] 2023-07-22_16-24-27 w03 grid=170x174 frames=220 pts=3199246 obs=0.289
+  [hindsight_v2] 2023-07-22_16-24-27 w04 grid=173x175 frames=217 pts=3196803 obs=0.269
+  [hindsight_v2] 2023-07-22_16-24-27 w05 grid=141x190 frames=221 pts=3250173 obs=0.310
+  [hindsight_v2] 2023-07-22_16-24-27 w06 grid=130x183 frames=229 pts=3388485 obs=0.382
+  [hindsight_v2] 2023-07-22_16-24-27 w07 grid=164x148 frames=223 pts=3344939 obs=0.412
+  [hindsight_v2] 2023-07-22_16-24-27 w08 grid=189x131 frames=217 pts=3250377 obs=0.366
+  [hindsight_v2] 2023-07-22_16-24-27 w09 grid=157x169 frames=183 pts=2703148 obs=0.305
+  [hindsight_v2] 2023-07-22_16-24-27 w10 grid=122x199 frames=188 pts=2673429 obs=0.326
+  [hindsight_v2] 2023-07-22_16-24-27 w11 grid=157x183 frames=204 pts=2841397 obs=0.276
+  [hindsight_v2] 2023-07-22_16-24-27 w12 grid=166x178 frames=226 pts=3132650 obs=0.276
+  [hindsight_v2] 2023-07-22_16-24-27 w13 grid=164x180 frames=222 pts=3002854 obs=0.265
+  [hindsight_v2] 2023-07-22_16-24-27 w14 grid=151x195 frames=224 pts=3077511 obs=0.283
+  [hindsight_v2] 2023-07-22_16-24-27 w15 grid=162x185 frames=226 pts=3141556 obs=0.265
+  [hindsight_v2] 2023-07-22_16-24-27 w16 grid=168x158 frames=225 pts=3112852 obs=0.325
+  [hindsight_v2] 2023-07-22_16-24-27 w17 grid=151x156 frames=227 pts=3156608 obs=0.373
+  [hindsight_v2] 2023-07-22_16-24-27 w18 grid=123x195 frames=191 pts=2653291 obs=0.372
+  [hindsight_v2] 2023-07-22_16-24-27 w19 grid=128x197 frames=187 pts=2975964 obs=0.313
+  [hindsight_v2] 2023-07-22_16-24-27 w20 grid=161x175 frames=186 pts=3006484 obs=0.282
+  [hindsight_v2] 2023-07-22_16-24-27 w21 grid=195x141 frames=222 pts=3478848 obs=0.299
+  [hindsight_v2] 2023-07-22_16-24-27 w22 grid=205x119 frames=217 pts=3218167 obs=0.328
+  [hindsight_v2] 2023-07-22_16-24-27 w23 grid=208x112 frames=219 pts=2954185 obs=0.336
+  [hindsight_v2] 2023-07-22_16-24-27 w24 grid=207x112 frames=226 pts=3099041 obs=0.341
+  [hindsight_v2] 2023-07-22_16-24-27 w25 grid=188x132 frames=239 pts=3421588 obs=0.343
+  [hindsight_v2] 2023-07-22_16-24-27 w26 grid=149x155 frames=241 pts=3662452 obs=0.385
+  [hindsight_v2] 2023-07-22_16-24-27 w27 grid=150x157 frames=258 pts=3887677 obs=0.433
+  [hindsight_v2] 2023-07-22_16-24-27 w28 grid=146x134 frames=253 pts=3833631 obs=0.443
+  [hindsight_v2] 2023-07-22_16-24-27 w29 grid=166x144 frames=245 pts=3554517 obs=0.463
+  [hindsight_v2] 2023-07-22_16-24-27 w30 grid=175x158 frames=240 pts=3598472 obs=0.326
+  [hindsight_v2] 2023-07-22_16-24-27 w31 grid=172x140 frames=242 pts=3706419 obs=0.368
+  [hindsight_v2] 2023-07-22_16-24-27 w32 grid=189x147 frames=258 pts=3927228 obs=0.368
+  [hindsight_v2] 2023-07-22_16-24-27 w33 grid=193x128 frames=246 pts=3494473 obs=0.349
+  [hindsight_v2] 2023-07-22_16-24-27 w34 grid=171x140 frames=242 pts=2873716 obs=0.354
+  [hindsight_v2] 2023-07-22_16-24-27 w35 grid=160x153 frames=232 pts=2604483 obs=0.316
+  [hindsight_v2] 2023-07-22_16-24-27 w36 grid=164x146 frames=224 pts=2632310 obs=0.418
+  [hindsight_v2] 2023-07-22_16-24-27 w37 grid=198x137 frames=220 pts=3146853 obs=0.301
+  [hindsight_v2] 2023-07-22_16-24-27 w38 grid=191x115 frames=233 pts=3536526 obs=0.398
+  [hindsight_v2] 2023-07-22_16-24-27 w39 grid=184x120 frames=262 pts=4133478 obs=0.366
+  [hindsight_v2] 2023-07-22_16-24-27 w40 grid=180x108 frames=317 pts=4922450 obs=0.512
+  [hindsight_v2] 2023-07-22_16-24-27 w41 grid=197x109 frames=324 pts=4731428 obs=0.371
+  [hindsight_v2] 2023-07-22_16-24-27 w42 grid=195x120 frames=276 pts=3819586 obs=0.395
+  [hindsight_v2] 2023-07-22_16-24-27 w43 grid=188x122 frames=247 pts=3430127 obs=0.406
+  [hindsight_v2] 2023-07-22_16-24-27 w44 grid=166x158 frames=241 pts=3411078 obs=0.350
+  [hindsight_v2] 2023-07-22_16-24-27 w45 grid=142x187 frames=249 pts=3454828 obs=0.382
+  [hindsight_v2] 2023-07-22_16-24-27 w46 grid=132x158 frames=246 pts=3404056 obs=0.410
+  [hindsight_v2] 2023-07-22_16-24-27 w47 grid=141x170 frames=242 pts=3521633 obs=0.429
+  [hindsight_v2] 2023-07-22_16-24-27 w48 grid=153x183 frames=225 pts=3356063 obs=0.328
+  [hindsight_v2] 2023-07-22_16-24-27 w49 grid=160x145 frames=224 pts=3367898 obs=0.350
+  [hindsight_v2] 2023-07-22_16-24-27 w50 grid=148x124 frames=226 pts=3415093 obs=0.462
+  [hindsight_v2] 2023-07-22_16-24-27 w51 grid=130x156 frames=226 pts=3357630 obs=0.528
+[2026-08-31 16:25:10] built 2023-07-22_16-24-27 hindsight: 52 windows in 131s
+[2026-08-31 16:25:10] built 2023-07-22_17-18-36 foresight: 0 windows in 0s
+  [hindsight_v2] 2023-07-22_17-18-36 w00 grid=120x124 frames=96 pts=1328579 obs=0.446
+[2026-08-31 16:25:12] built 2023-07-22_17-18-36 hindsight: 1 windows in 1s
+  [foresight_v2] 2023-07-22_17-31-58 w01 grid=118x107 frames=97 pts=1422008 obs=0.517
+[2026-08-31 16:25:14] built 2023-07-22_17-31-58 foresight: 1 windows in 2s
+  [hindsight_v2] 2023-07-22_17-31-58 w00 grid=118x107 frames=97 pts=1422008 obs=0.517
+  [hindsight_v2] 2023-07-22_17-31-58 w01 grid=153x125 frames=178 pts=2670463 obs=0.480
+[2026-08-31 16:25:17] built 2023-07-22_17-31-58 hindsight: 2 windows in 4s
+  [foresight_v2] 2023-07-22_17-38-50 w01 grid=114x130 frames=87 pts=1265665 obs=0.464
+  [foresight_v2] 2023-07-22_17-38-50 w02 grid=133x160 frames=143 pts=2020978 obs=0.252
+  [foresight_v2] 2023-07-22_17-38-50 w03 grid=154x137 frames=146 pts=2054082 obs=0.256
+  [foresight_v2] 2023-07-22_17-38-50 w04 grid=168x108 frames=152 pts=2282188 obs=0.297
+  [foresight_v2] 2023-07-22_17-38-50 w05 grid=168x107 frames=150 pts=2165641 obs=0.297
+  [foresight_v2] 2023-07-22_17-38-50 w06 grid=165x114 frames=165 pts=2235708 obs=0.312
+  [foresight_v2] 2023-07-22_17-38-50 w07 grid=162x130 frames=163 pts=2270418 obs=0.270
+  [foresight_v2] 2023-07-22_17-38-50 w08 grid=163x114 frames=156 pts=2254956 obs=0.315
+  [foresight_v2] 2023-07-22_17-38-50 w09 grid=140x114 frames=158 pts=2176191 obs=0.378
+  [foresight_v2] 2023-07-22_17-38-50 w10 grid=134x117 frames=169 pts=2500165 obs=0.510
+  [foresight_v2] 2023-07-22_17-38-50 w11 grid=164x123 frames=158 pts=2459745 obs=0.349
+  [foresight_v2] 2023-07-22_17-38-50 w12 grid=168x113 frames=167 pts=2238718 obs=0.284
+  [foresight_v2] 2023-07-22_17-38-50 w13 grid=167x111 frames=166 pts=2222647 obs=0.294
+  [foresight_v2] 2023-07-22_17-38-50 w14 grid=168x105 frames=173 pts=2550902 obs=0.324
+[2026-08-31 16:25:43] built 2023-07-22_17-38-50 foresight: 14 windows in 26s
+  [hindsight_v2] 2023-07-22_17-38-50 w00 grid=114x130 frames=87 pts=1265665 obs=0.464
+  [hindsight_v2] 2023-07-22_17-38-50 w01 grid=135x164 frames=170 pts=2467681 obs=0.422
+  [hindsight_v2] 2023-07-22_17-38-50 w02 grid=170x173 frames=226 pts=3160574 obs=0.271
+  [hindsight_v2] 2023-07-22_17-38-50 w03 grid=194x137 frames=235 pts=3462578 obs=0.297
+  [hindsight_v2] 2023-07-22_17-38-50 w04 grid=208x108 frames=235 pts=3379294 obs=0.350
+  [hindsight_v2] 2023-07-22_17-38-50 w05 grid=205x114 frames=252 pts=3533177 obs=0.354
+  [hindsight_v2] 2023-07-22_17-38-50 w06 grid=201x132 frames=250 pts=3463340 obs=0.312
+  [hindsight_v2] 2023-07-22_17-38-50 w07 grid=199x131 frames=255 pts=3568870 obs=0.329
+  [hindsight_v2] 2023-07-22_17-38-50 w08 grid=175x114 frames=246 pts=3483015 obs=0.397
+  [hindsight_v2] 2023-07-22_17-38-50 w09 grid=170x129 frames=255 pts=3701065 obs=0.374
+  [hindsight_v2] 2023-07-22_17-38-50 w10 grid=173x127 frames=259 pts=3833702 obs=0.475
+  [hindsight_v2] 2023-07-22_17-38-50 w11 grid=202x130 frames=255 pts=3653093 obs=0.365
+  [hindsight_v2] 2023-07-22_17-38-50 w12 grid=207x119 frames=256 pts=3537512 obs=0.324
+  [hindsight_v2] 2023-07-22_17-38-50 w13 grid=206x111 frames=271 pts=3754809 obs=0.355
+  [hindsight_v2] 2023-07-22_17-38-50 w14 grid=207x110 frames=264 pts=3966657 obs=0.369
+[2026-08-31 16:26:22] built 2023-07-22_17-38-50 hindsight: 15 windows in 39s
+  [foresight_v2] 2023-07-23_11-23-18 w01 grid=132x115 frames=100 pts=1561528 obs=0.470
+  [foresight_v2] 2023-07-23_11-23-18 w02 grid=158x137 frames=144 pts=2192594 obs=0.244
+  [foresight_v2] 2023-07-23_11-23-18 w03 grid=153x143 frames=143 pts=2065482 obs=0.246
+  [foresight_v2] 2023-07-23_11-23-18 w04 grid=144x150 frames=150 pts=2236564 obs=0.259
+  [foresight_v2] 2023-07-23_11-23-18 w05 grid=156x131 frames=152 pts=2196022 obs=0.276
+  [foresight_v2] 2023-07-23_11-23-18 w06 grid=169x108 frames=145 pts=2156743 obs=0.286
+  [foresight_v2] 2023-07-23_11-23-18 w07 grid=169x108 frames=147 pts=2210508 obs=0.292
+  [foresight_v2] 2023-07-23_11-23-18 w08 grid=169x110 frames=151 pts=2274145 obs=0.291
+  [foresight_v2] 2023-07-23_11-23-18 w09 grid=167x118 frames=150 pts=2226374 obs=0.280
+  [foresight_v2] 2023-07-23_11-23-18 w10 grid=162x128 frames=148 pts=2311606 obs=0.262
+  [foresight_v2] 2023-07-23_11-23-18 w11 grid=151x146 frames=156 pts=2406680 obs=0.233
+  [foresight_v2] 2023-07-23_11-23-18 w12 grid=154x142 frames=162 pts=2522300 obs=0.241
+  [foresight_v2] 2023-07-23_11-23-18 w13 grid=152x143 frames=189 pts=2778184 obs=0.246
+  [foresight_v2] 2023-07-23_11-23-18 w14 grid=154x143 frames=169 pts=2472074 obs=0.228
+  [foresight_v2] 2023-07-23_11-23-18 w15 grid=155x142 frames=145 pts=2096774 obs=0.213
+  [foresight_v2] 2023-07-23_11-23-18 w16 grid=146x151 frames=146 pts=2081228 obs=0.232
+  [foresight_v2] 2023-07-23_11-23-18 w17 grid=152x142 frames=157 pts=2322036 obs=0.257
+  [foresight_v2] 2023-07-23_11-23-18 w18 grid=163x115 frames=170 pts=2687699 obs=0.335
+  [foresight_v2] 2023-07-23_11-23-18 w19 grid=164x117 frames=164 pts=2687649 obs=0.334
+  [foresight_v2] 2023-07-23_11-23-18 w20 grid=163x128 frames=153 pts=2333519 obs=0.264
+  [foresight_v2] 2023-07-23_11-23-18 w21 grid=161x132 frames=152 pts=2289414 obs=0.263
+[2026-08-31 16:27:01] built 2023-07-23_11-23-18 foresight: 21 windows in 39s
+  [hindsight_v2] 2023-07-23_11-23-18 w00 grid=132x115 frames=100 pts=1561528 obs=0.470
+  [hindsight_v2] 2023-07-23_11-23-18 w01 grid=163x140 frames=180 pts=2786742 obs=0.422
+  [hindsight_v2] 2023-07-23_11-23-18 w02 grid=189x162 frames=228 pts=3365255 obs=0.255
+  [hindsight_v2] 2023-07-23_11-23-18 w03 grid=175x175 frames=231 pts=3424588 obs=0.260
+  [hindsight_v2] 2023-07-23_11-23-18 w04 grid=183x159 frames=237 pts=3436152 obs=0.282
+  [hindsight_v2] 2023-07-23_11-23-18 w05 grid=195x135 frames=234 pts=3486004 obs=0.305
+  [hindsight_v2] 2023-07-23_11-23-18 w06 grid=208x113 frames=230 pts=3429542 obs=0.328
+  [hindsight_v2] 2023-07-23_11-23-18 w07 grid=208x115 frames=235 pts=3553901 obs=0.331
+  [hindsight_v2] 2023-07-23_11-23-18 w08 grid=207x122 frames=234 pts=3496587 obs=0.312
+  [hindsight_v2] 2023-07-23_11-23-18 w09 grid=201x137 frames=237 pts=3640559 obs=0.291
+  [hindsight_v2] 2023-07-23_11-23-18 w10 grid=189x158 frames=238 pts=3624294 obs=0.257
+  [hindsight_v2] 2023-07-23_11-23-18 w11 grid=184x166 frames=251 pts=3980043 obs=0.254
+  [hindsight_v2] 2023-07-23_11-23-18 w12 grid=181x170 frames=279 pts=4131439 obs=0.250
+  [hindsight_v2] 2023-07-23_11-23-18 w13 grid=185x166 frames=273 pts=4020253 obs=0.243
+  [hindsight_v2] 2023-07-23_11-23-18 w14 grid=185x168 frames=253 pts=3666421 obs=0.233
+  [hindsight_v2] 2023-07-23_11-23-18 w15 grid=178x174 frames=228 pts=3295048 obs=0.233
+  [hindsight_v2] 2023-07-23_11-23-18 w16 grid=180x169 frames=241 pts=3506399 obs=0.256
+  [hindsight_v2] 2023-07-23_11-23-18 w17 grid=189x142 frames=253 pts=3911980 obs=0.325
+  [hindsight_v2] 2023-07-23_11-23-18 w18 grid=201x119 frames=263 pts=4161020 obs=0.372
+  [hindsight_v2] 2023-07-23_11-23-18 w19 grid=199x128 frames=251 pts=3994146 obs=0.350
+  [hindsight_v2] 2023-07-23_11-23-18 w20 grid=197x147 frames=242 pts=3668049 obs=0.283
+  [hindsight_v2] 2023-07-23_11-23-18 w21 grid=165x156 frames=262 pts=4285685 obs=0.307
+[2026-08-31 16:28:00] built 2023-07-23_11-23-18 hindsight: 22 windows in 60s
+  [foresight_v2] 2023-07-23_11-52-09 w01 grid=122x109 frames=73 pts=1082766 obs=0.456
+  [foresight_v2] 2023-07-23_11-52-09 w02 grid=154x112 frames=133 pts=2027916 obs=0.454
+  [foresight_v2] 2023-07-23_11-52-09 w03 grid=161x127 frames=132 pts=1993511 obs=0.343
+  [foresight_v2] 2023-07-23_11-52-09 w04 grid=162x122 frames=144 pts=1925240 obs=0.295
+  [foresight_v2] 2023-07-23_11-52-09 w05 grid=137x151 frames=156 pts=2017042 obs=0.281
+  [foresight_v2] 2023-07-23_11-52-09 w06 grid=122x164 frames=164 pts=2212234 obs=0.294
+  [foresight_v2] 2023-07-23_11-52-09 w07 grid=147x137 frames=167 pts=2604535 obs=0.296
+  [foresight_v2] 2023-07-23_11-52-09 w08 grid=166x109 frames=168 pts=2507314 obs=0.310
+  [foresight_v2] 2023-07-23_11-52-09 w09 grid=165x122 frames=161 pts=2227463 obs=0.277
+  [foresight_v2] 2023-07-23_11-52-09 w10 grid=165x124 frames=166 pts=2346214 obs=0.267
+  [foresight_v2] 2023-07-23_11-52-09 w11 grid=127x111 frames=160 pts=2224959 obs=0.419
+  [foresight_v2] 2023-07-23_11-52-09 w12 grid=121x111 frames=156 pts=2179562 obs=0.494
+  [foresight_v2] 2023-07-23_11-52-09 w13 grid=159x121 frames=157 pts=2241280 obs=0.441
+  [foresight_v2] 2023-07-23_11-52-09 w14 grid=168x111 frames=153 pts=2288082 obs=0.282
+  [foresight_v2] 2023-07-23_11-52-09 w15 grid=168x104 frames=150 pts=2467346 obs=0.288
+  [foresight_v2] 2023-07-23_11-52-09 w16 grid=169x105 frames=162 pts=2616590 obs=0.282
+  [foresight_v2] 2023-07-23_11-52-09 w17 grid=169x106 frames=182 pts=2686055 obs=0.292
+  [foresight_v2] 2023-07-23_11-52-09 w18 grid=168x108 frames=187 pts=2693736 obs=0.318
+  [foresight_v2] 2023-07-23_11-52-09 w19 grid=162x125 frames=186 pts=2486888 obs=0.284
+  [foresight_v2] 2023-07-23_11-52-09 w20 grid=164x114 frames=178 pts=2479295 obs=0.301
+  [foresight_v2] 2023-07-23_11-52-09 w21 grid=168x108 frames=179 pts=2572780 obs=0.302
+[2026-08-31 16:28:40] built 2023-07-23_11-52-09 foresight: 21 windows in 40s
+  [hindsight_v2] 2023-07-23_11-52-09 w00 grid=122x109 frames=73 pts=1082766 obs=0.456
+  [hindsight_v2] 2023-07-23_11-52-09 w01 grid=157x112 frames=150 pts=2308307 obs=0.497
+  [hindsight_v2] 2023-07-23_11-52-09 w02 grid=190x127 frames=210 pts=3121441 obs=0.427
+  [hindsight_v2] 2023-07-23_11-52-09 w03 grid=196x139 frames=215 pts=3117077 obs=0.362
+  [hindsight_v2] 2023-07-23_11-52-09 w04 grid=174x159 frames=236 pts=3088060 obs=0.305
+  [hindsight_v2] 2023-07-23_11-52-09 w05 grid=151x187 frames=251 pts=3396350 obs=0.305
+  [hindsight_v2] 2023-07-23_11-52-09 w06 grid=158x174 frames=260 pts=3758858 obs=0.312
+  [hindsight_v2] 2023-07-23_11-52-09 w07 grid=184x142 frames=262 pts=3900463 obs=0.326
+  [hindsight_v2] 2023-07-23_11-52-09 w08 grid=203x122 frames=260 pts=3809031 obs=0.327
+  [hindsight_v2] 2023-07-23_11-52-09 w09 grid=202x136 frames=257 pts=3583015 obs=0.296
+  [hindsight_v2] 2023-07-23_11-52-09 w10 grid=165x125 frames=254 pts=3562241 obs=0.325
+  [hindsight_v2] 2023-07-23_11-52-09 w11 grid=145x120 frames=248 pts=3464687 obs=0.398
+  [hindsight_v2] 2023-07-23_11-52-09 w12 grid=159x121 frames=245 pts=3458287 obs=0.479
+  [hindsight_v2] 2023-07-23_11-52-09 w13 grid=198x126 frames=246 pts=3602716 obs=0.438
+  [hindsight_v2] 2023-07-23_11-52-09 w14 grid=207x112 frames=238 pts=3751201 obs=0.322
+  [hindsight_v2] 2023-07-23_11-52-09 w15 grid=208x107 frames=247 pts=3925383 obs=0.331
+  [hindsight_v2] 2023-07-23_11-52-09 w16 grid=208x108 frames=271 pts=4212536 obs=0.334
+  [hindsight_v2] 2023-07-23_11-52-09 w17 grid=208x112 frames=290 pts=4222527 obs=0.335
+  [hindsight_v2] 2023-07-23_11-52-09 w18 grid=201x128 frames=287 pts=3976089 obs=0.332
+  [hindsight_v2] 2023-07-23_11-52-09 w19 grid=201x125 frames=285 pts=3914095 obs=0.328
+  [hindsight_v2] 2023-07-23_11-52-09 w20 grid=203x118 frames=283 pts=3970691 obs=0.343
+  [hindsight_v2] 2023-07-23_11-52-09 w21 grid=207x111 frames=264 pts=3894928 obs=0.340
+[2026-08-31 16:29:41] built 2023-07-23_11-52-09 hindsight: 22 windows in 61s
+  [foresight_v2] 2023-07-23_12-52-39 w01 grid=128x109 frames=90 pts=1324728 obs=0.486
+  [foresight_v2] 2023-07-23_12-52-39 w02 grid=167x111 frames=121 pts=1594532 obs=0.378
+  [foresight_v2] 2023-07-23_12-52-39 w03 grid=147x122 frames=108 pts=1438260 obs=0.392
+  [foresight_v2] 2023-07-23_12-52-39 w04 grid=134x137 frames=130 pts=2103617 obs=0.395
+  [foresight_v2] 2023-07-23_12-52-39 w05 grid=168x106 frames=122 pts=1986235 obs=0.309
+  [foresight_v2] 2023-07-23_12-52-39 w06 grid=166x115 frames=131 pts=2148596 obs=0.275
+  [foresight_v2] 2023-07-23_12-52-39 w07 grid=164x119 frames=142 pts=2358184 obs=0.288
+  [foresight_v2] 2023-07-23_12-52-39 w08 grid=167x108 frames=142 pts=2180720 obs=0.304
+  [foresight_v2] 2023-07-23_12-52-39 w09 grid=165x113 frames=143 pts=1980613 obs=0.322
+[2026-08-31 16:29:56] built 2023-07-23_12-52-39 foresight: 9 windows in 15s
+  [hindsight_v2] 2023-07-23_12-52-39 w00 grid=128x109 frames=90 pts=1324728 obs=0.486
+  [hindsight_v2] 2023-07-23_12-52-39 w01 grid=167x111 frames=148 pts=2010671 obs=0.507
+  [hindsight_v2] 2023-07-23_12-52-39 w02 grid=186x125 frames=187 pts=2557743 obs=0.427
+  [hindsight_v2] 2023-07-23_12-52-39 w03 grid=172x138 frames=188 pts=2828114 obs=0.390
+  [hindsight_v2] 2023-07-23_12-52-39 w04 grid=174x139 frames=195 pts=3173958 obs=0.396
+  [hindsight_v2] 2023-07-23_12-52-39 w05 grid=204x120 frames=203 pts=3301254 obs=0.331
+  [hindsight_v2] 2023-07-23_12-52-39 w06 grid=204x121 frames=214 pts=3538918 obs=0.319
+  [hindsight_v2] 2023-07-23_12-52-39 w07 grid=202x123 frames=223 pts=3511970 obs=0.330
+  [hindsight_v2] 2023-07-23_12-52-39 w08 grid=204x119 frames=225 pts=3330546 obs=0.335
+  [hindsight_v2] 2023-07-23_12-52-39 w09 grid=187x123 frames=242 pts=3225644 obs=0.379
+[2026-08-31 16:30:19] built 2023-07-23_12-52-39 hindsight: 10 windows in 23s
+[2026-08-31 16:30:19][ebuild] eval builds complete
+[2026-08-31 16:30:43][score] 2023-07-20_18-12-05/window_001 relE 5.6e-02
+[2026-08-31 16:31:06][score] 2023-07-20_18-12-05/window_002 relE 8.8e-03
+[2026-08-31 16:31:08][score] 2023-07-20_18-12-05/window_003 flagged
+[2026-08-31 16:31:30][score] 2023-07-20_18-12-05/window_004 relE 1.9e-02
+[2026-08-31 16:31:52][score] 2023-07-20_18-12-05/window_005 relE 7.1e-03
+[2026-08-31 16:32:15][score] 2023-07-20_18-12-05/window_006 relE 3.5e-03
+[2026-08-31 16:32:37][score] 2023-07-20_18-12-05/window_007 relE 5.1e-03
+[2026-08-31 16:33:02][score] 2023-07-20_18-12-05/window_008 relE 6.6e-03
+[2026-08-31 16:33:22][score] 2023-07-20_18-12-05/window_009 relE 4.1e-04
+[2026-08-31 16:33:44][score] 2023-07-20_18-12-05/window_010 relE 9.3e-03
+[2026-08-31 16:34:06][score] 2023-07-20_18-12-05/window_011 relE 2.2e-02
+[2026-08-31 16:34:29][score] 2023-07-20_18-12-05/window_012 relE 1.5e-02
+[2026-08-31 16:34:49][score] 2023-07-20_18-12-05/window_013 relE 1.6e-03
+[2026-08-31 16:35:11][score] 2023-07-20_18-12-05/window_014 relE 1.4e-02
+[2026-08-31 16:35:16][score] 2023-07-20_18-12-05/window_015 relE 4.2e-04
+[2026-08-31 16:35:38][score] 2023-07-20_18-12-05/window_016 relE 1.4e-02
+[2026-08-31 16:36:00][score] 2023-07-20_18-12-05/window_017 relE 6.3e-04
+[2026-08-31 16:36:19][score] 2023-07-20_18-12-05/window_018 relE 6.2e-03
+[2026-08-31 16:36:42][score] 2023-07-20_18-12-05/window_019 relE 2.8e-03
+[2026-08-31 16:37:04][score] 2023-07-20_18-12-05/window_020 relE 2.8e-02
+[2026-08-31 16:37:25][score] 2023-07-20_18-12-05/window_021 relE 1.9e-04
+[2026-08-31 16:37:39][score] 2023-07-20_18-12-05/window_022 relE 6.2e-03
+[2026-08-31 16:37:57][score] 2023-07-20_18-12-05/window_023 relE 1.2e-03
+[2026-08-31 16:38:02][score] 2023-07-20_18-12-05/window_024 relE 5.3e-04
+[2026-08-31 16:38:15][score] 2023-07-20_18-12-05/window_025 relE 1.2e-03
+[2026-08-31 16:38:23][score] 2023-07-20_18-12-05/window_026 relE 3.0e-04
+[2026-08-31 16:38:44][score] 2023-07-21_12-38-15/window_001 relE 8.8e-04
+[2026-08-31 16:39:06][score] 2023-07-21_12-38-15/window_002 relE 8.6e-04
+[2026-08-31 16:39:28][score] 2023-07-21_12-38-15/window_003 relE 1.6e-03
+[2026-08-31 16:39:49][score] 2023-07-21_12-38-15/window_004 relE 2.8e-03
+[2026-08-31 16:40:13][score] 2023-07-21_12-38-15/window_005 relE 1.3e-02
+[2026-08-31 16:40:37][score] 2023-07-21_12-38-15/window_006 relE 4.6e-03
+[2026-08-31 16:41:00][score] 2023-07-21_12-38-15/window_007 relE 2.6e-03
+[2026-08-31 16:41:08][score] 2023-07-21_12-38-15/window_008 relE 9.7e-03
+[2026-08-31 16:41:28][score] 2023-07-21_12-38-15/window_009 relE 2.9e-04
+[2026-08-31 16:41:32][score] 2023-07-21_12-38-15/window_010 relE 1.5e-03
+[2026-08-31 16:41:55][score] 2023-07-21_12-38-15/window_011 relE 2.0e-03
+[2026-08-31 16:42:18][score] 2023-07-21_12-38-15/window_012 relE 2.7e-03
+[2026-08-31 16:42:41][score] 2023-07-21_12-38-15/window_013 relE 1.6e-03
+[2026-08-31 16:43:04][score] 2023-07-21_12-58-11/window_001 relE 1.9e-04
+[2026-08-31 16:43:08][score] 2023-07-21_12-58-11/window_002 relE 5.6e-04
+[2026-08-31 16:43:25][score] 2023-07-21_12-58-11/window_003 relE 6.1e-03
+[2026-08-31 16:43:46][score] 2023-07-21_12-58-11/window_004 relE 2.6e-03
+[2026-08-31 16:44:07][score] 2023-07-21_12-58-11/window_005 relE 2.0e-03
+[2026-08-31 16:44:29][score] 2023-07-21_12-58-11/window_006 relE 1.8e-03
+[2026-08-31 16:44:52][score] 2023-07-21_12-58-11/window_007 relE 5.1e-03
+[2026-08-31 16:45:12][score] 2023-07-21_12-58-11/window_008 relE 1.7e-03
+[2026-08-31 16:45:17][score] 2023-07-21_12-58-11/window_009 relE 8.5e-04
+[2026-08-31 16:45:39][score] 2023-07-21_12-58-11/window_010 relE 1.7e-03
+[2026-08-31 16:46:02][score] 2023-07-21_12-58-11/window_011 relE 1.6e-03
+[2026-08-31 16:46:25][score] 2023-07-21_12-58-11/window_012 relE 1.2e-03
+[2026-08-31 16:46:29][score] 2023-07-21_12-58-11/window_013 relE 1.2e-03
+[2026-08-31 16:46:53][score] 2023-07-21_12-58-11/window_014 relE 8.6e-04
+[2026-08-31 16:47:16][score] 2023-07-21_12-58-11/window_015 relE 4.9e-03
+[2026-08-31 16:47:38][score] 2023-07-21_12-58-11/window_016 relE 3.0e-03
+[2026-08-31 16:47:57][score] 2023-07-21_12-58-11/window_017 relE 1.0e-04
+[2026-08-31 16:48:07][score] 2023-07-21_12-58-11/window_018 relE 1.9e-05
+[2026-08-31 16:48:32][score] 2023-07-21_12-58-11/window_019 relE 1.8e-03
+[2026-08-31 16:48:55][score] 2023-07-21_12-58-11/window_020 relE 1.7e-03
+[2026-08-31 16:49:19][score] 2023-07-21_12-58-11/window_021 relE 2.1e-03
+[2026-08-31 16:49:42][score] 2023-07-21_12-58-11/window_022 relE 6.9e-03
+[2026-08-31 16:50:04][score] 2023-07-21_12-58-11/window_023 relE 1.0e-05
+[2026-08-31 16:50:26][score] 2023-07-21_12-58-11/window_024 relE 1.3e-03
+[2026-08-31 16:50:42][score] 2023-07-21_12-58-11/window_025 relE 6.0e-04
+[2026-08-31 16:50:47][score] 2023-07-21_12-58-11/window_026 relE 7.3e-04
+[2026-08-31 16:51:01][score] 2023-07-21_12-58-11/window_027 relE 6.6e-03
+[2026-08-31 16:51:16][score] 2023-07-21_12-58-11/window_028 relE 8.7e-04
+[2026-08-31 16:51:40][score] 2023-07-21_12-58-11/window_029 relE 2.7e-04
+[2026-08-31 16:51:45][score] 2023-07-21_12-58-11/window_030 relE 3.9e-05
+[2026-08-31 16:52:07][score] 2023-07-21_12-58-11/window_031 relE 1.3e-03
+[2026-08-31 16:52:24][score] 2023-07-21_12-58-11/window_032 relE 4.2e-04
+[2026-08-31 16:52:41][score] 2023-07-21_12-58-11/window_033 relE 5.4e-04
+[2026-08-31 16:52:44][score] 2023-07-21_12-58-11/window_034 relE 7.8e-04
+[2026-08-31 16:53:07][score] 2023-07-21_12-58-11/window_035 relE 2.9e-03
+[2026-08-31 16:53:30][score] 2023-07-21_12-58-11/window_036 relE 6.0e-04
+[2026-08-31 16:53:53][score] 2023-07-21_12-58-11/window_037 relE 1.0e-04
+[2026-08-31 16:54:15][score] 2023-07-21_12-58-11/window_038 relE 1.3e-03
+[2026-08-31 16:54:40][score] 2023-07-21_13-43-00/window_001 relE 7.8e-03
+[2026-08-31 16:55:02][score] 2023-07-21_13-43-00/window_002 relE 8.4e-04
+[2026-08-31 16:55:27][score] 2023-07-21_13-43-00/window_003 relE 1.2e-03
+[2026-08-31 16:55:33][score] 2023-07-21_13-43-00/window_004 relE 6.3e-04
+[2026-08-31 16:55:38][score] 2023-07-21_13-43-00/window_005 relE 2.1e-05
+[2026-08-31 16:56:00][score] 2023-07-21_13-43-00/window_006 relE 4.0e-04
+[2026-08-31 16:56:18][score] 2023-07-21_13-43-00/window_007 relE 1.2e-03
+[2026-08-31 16:56:22][score] 2023-07-21_13-43-00/window_008 relE 8.0e-04
+[2026-08-31 16:56:42][score] 2023-07-21_13-43-00/window_009 relE 2.9e-03
+[2026-08-31 16:57:05][score] 2023-07-21_13-59-14/window_001 relE 7.4e-04
+[2026-08-31 16:57:29][score] 2023-07-21_13-59-14/window_002 relE 4.1e-03
+[2026-08-31 16:57:49][score] 2023-07-21_13-59-14/window_003 relE 1.8e-03
+[2026-08-31 16:58:10][score] 2023-07-21_13-59-14/window_004 relE 9.6e-03
+[2026-08-31 16:58:33][score] 2023-07-21_13-59-14/window_005 relE 3.9e-03
+[2026-08-31 16:58:48][score] 2023-07-21_14-08-29/window_001 relE 1.4e-03
+[2026-08-31 16:59:08][score] 2023-07-21_14-08-29/window_002 relE 1.9e-03
+[2026-08-31 16:59:30][score] 2023-07-21_14-08-29/window_003 relE 1.8e-04
+[2026-08-31 16:59:42][score] 2023-07-21_14-08-29/window_004 relE 2.0e-03
+[2026-08-31 16:59:55][score] 2023-07-21_14-08-29/window_005 relE 2.5e-03
+[2026-08-31 17:00:18][score] 2023-07-21_14-08-29/window_006 relE 3.3e-03
+[2026-08-31 17:00:34][score] 2023-07-21_14-08-29/window_007 relE 1.6e-03
+[2026-08-31 17:00:52][score] 2023-07-21_14-08-29/window_008 relE 1.2e-04
+[2026-08-31 17:01:12][score] 2023-07-21_14-08-29/window_009 relE 3.1e-03
+[2026-08-31 17:01:35][score] 2023-07-21_14-08-29/window_010 relE 1.0e-02
+[2026-08-31 17:01:57][score] 2023-07-21_14-08-29/window_011 relE 1.0e-03
+[2026-08-31 17:02:20][score] 2023-07-21_14-08-29/window_012 relE 5.9e-04
+[2026-08-31 17:02:39][score] 2023-07-21_14-08-29/window_013 relE 2.6e-04
+[2026-08-31 17:03:01][score] 2023-07-21_14-08-29/window_014 relE 9.6e-05
+[2026-08-31 17:03:23][score] 2023-07-21_14-08-29/window_015 relE 4.4e-03
+[2026-08-31 17:03:45][score] 2023-07-21_14-08-29/window_016 relE 5.2e-03
+[2026-08-31 17:04:07][score] 2023-07-21_14-08-29/window_017 relE 2.0e-03
+[2026-08-31 17:04:28][score] 2023-07-21_14-08-29/window_018 relE 2.2e-04
+[2026-08-31 17:04:50][score] 2023-07-21_14-08-29/window_019 relE 1.4e-03
+[2026-08-31 17:05:01][score] 2023-07-21_14-08-29/window_020 relE 9.9e-04
+[2026-08-31 17:05:08][score] 2023-07-21_14-08-29/window_021 relE 1.7e-03
+[2026-08-31 17:05:30][score] 2023-07-21_14-08-29/window_022 relE 6.0e-03
+[2026-08-31 17:05:52][score] 2023-07-21_14-08-29/window_023 relE 5.2e-03
+[2026-08-31 17:06:04][score] 2023-07-21_14-08-29/window_024 relE 2.0e-05
+[2026-08-31 17:06:27][score] 2023-07-21_14-08-29/window_025 relE 5.7e-03
+[2026-08-31 17:06:50][score] 2023-07-21_14-08-29/window_026 relE 2.2e-02
+[2026-08-31 17:06:58][score] 2023-07-21_14-08-29/window_027 relE 3.0e-04
+[2026-08-31 17:07:18][score] 2023-07-21_14-08-29/window_028 relE 1.1e-03
+[2026-08-31 17:07:20][score] 2023-07-21_14-44-56/window_001 flagged
+[2026-08-31 17:07:22][score] 2023-07-21_14-44-56/window_002 relE 3.3e-05
+[2026-08-31 17:07:43][score] 2023-07-21_14-44-56/window_003 relE 3.3e-03
+[2026-08-31 17:08:06][score] 2023-07-21_17-07-00/window_001 relE 1.2e-02
+[2026-08-31 17:08:29][score] 2023-07-21_17-07-00/window_002 relE 8.9e-04
+[2026-08-31 17:08:34][score] 2023-07-21_17-07-00/window_003 relE 4.1e-03
+[2026-08-31 17:08:57][score] 2023-07-21_17-07-00/window_004 relE 4.4e-03
+[2026-08-31 17:09:19][score] 2023-07-21_17-07-00/window_005 relE 1.0e-02
+[2026-08-31 17:09:43][score] 2023-07-21_17-07-00/window_006 relE 1.7e-02
+[2026-08-31 17:10:05][score] 2023-07-21_17-07-00/window_007 relE 4.7e-03
+[2026-08-31 17:10:27][score] 2023-07-21_17-07-00/window_008 relE 1.1e-02
+[2026-08-31 17:10:49][score] 2023-07-21_17-07-00/window_009 relE 5.0e-03
+[2026-08-31 17:11:11][score] 2023-07-21_17-07-00/window_010 relE 8.6e-03
+[2026-08-31 17:11:33][score] 2023-07-21_17-07-00/window_011 relE 3.2e-02
+[2026-08-31 17:11:56][score] 2023-07-21_17-07-00/window_012 relE 6.1e-03
+[2026-08-31 17:12:20][score] 2023-07-21_17-07-00/window_013 relE 7.9e-03
+[2026-08-31 17:12:33][score] 2023-07-21_17-07-00/window_014 relE 3.8e-03
+[2026-08-31 17:12:57][score] 2023-07-21_17-07-00/window_015 relE 1.8e-02
+[2026-08-31 17:13:20][score] 2023-07-21_17-07-00/window_016 relE 2.0e-02
+[2026-08-31 17:13:42][score] 2023-07-21_17-07-00/window_017 relE 1.9e-02
+[2026-08-31 17:14:04][score] 2023-07-21_17-07-00/window_018 relE 5.7e-03
+[2026-08-31 17:14:28][score] 2023-07-21_17-07-00/window_019 relE 3.5e-03
+[2026-08-31 17:14:50][score] 2023-07-21_17-07-00/window_020 relE 3.2e-03
+[2026-08-31 17:15:13][score] 2023-07-21_17-07-00/window_021 relE 6.0e-03
+[2026-08-31 17:15:36][score] 2023-07-21_17-07-00/window_022 relE 2.0e-02
+[2026-08-31 17:15:38][score] 2023-07-21_17-07-00/window_023 flagged
+[2026-08-31 17:15:38][score] 2023-07-21_17-07-00/window_024 flagged
+[2026-08-31 17:16:00][score] 2023-07-21_17-34-18/window_001 relE 3.4e-04
+[2026-08-31 17:16:01][score] 2023-07-21_17-34-18/window_002 flagged
+[2026-08-31 17:16:21][score] 2023-07-21_17-34-18/window_003 relE 2.0e-02
+[2026-08-31 17:16:42][score] 2023-07-21_17-34-18/window_004 relE 2.3e-02
+[2026-08-31 17:17:04][score] 2023-07-21_17-34-18/window_005 relE 1.3e-02
+[2026-08-31 17:17:26][score] 2023-07-21_17-34-18/window_006 relE 2.8e-03
+[2026-08-31 17:17:48][score] 2023-07-21_17-34-18/window_007 relE 6.6e-03
+[2026-08-31 17:18:02][score] 2023-07-21_17-34-18/window_008 relE 4.2e-03
+[2026-08-31 17:18:08][score] 2023-07-21_17-45-42/window_001 relE 2.5e-03
+[2026-08-31 17:18:24][score] 2023-07-21_17-45-42/window_002 relE 7.1e-04
+[2026-08-31 17:18:35][score] 2023-07-21_17-45-42/window_003 relE 2.5e-03
+[2026-08-31 17:18:49][score] 2023-07-21_17-45-42/window_004 relE 5.6e-03
+[2026-08-31 17:19:11][score] 2023-07-21_17-45-42/window_005 relE 1.6e-03
+[2026-08-31 17:19:33][score] 2023-07-21_17-45-42/window_006 relE 4.4e-04
+[2026-08-31 17:19:55][score] 2023-07-21_17-45-42/window_007 relE 4.2e-04
+[2026-08-31 17:20:17][score] 2023-07-21_17-45-42/window_008 relE 5.4e-04
+[2026-08-31 17:20:22][score] 2023-07-21_17-45-42/window_009 relE 4.6e-03
+[2026-08-31 17:20:43][score] 2023-07-21_17-45-42/window_010 relE 1.3e-02
+[2026-08-31 17:20:48][score] 2023-07-21_17-45-42/window_011 relE 2.6e-03
+[2026-08-31 17:21:10][score] 2023-07-21_17-45-42/window_012 relE 2.1e-03
+[2026-08-31 17:21:32][score] 2023-07-21_17-45-42/window_013 relE 1.7e-03
+[2026-08-31 17:21:54][score] 2023-07-21_17-45-42/window_014 relE 4.5e-03
+[2026-08-31 17:22:18][score] 2023-07-21_17-45-42/window_015 relE 2.4e-03
+[2026-08-31 17:22:40][score] 2023-07-21_17-45-42/window_016 relE 3.0e-03
+[2026-08-31 17:23:03][score] 2023-07-21_17-45-42/window_017 relE 5.9e-03
+[2026-08-31 17:23:28][score] 2023-07-21_17-45-42/window_018 relE 1.6e-02
+[2026-08-31 17:23:50][score] 2023-07-21_17-45-42/window_019 relE 3.3e-02
+[2026-08-31 17:24:13][score] 2023-07-21_17-45-42/window_020 relE 2.1e-02
+[2026-08-31 17:24:14][score] 2023-07-21_17-45-42/window_021 flagged
+[2026-08-31 17:24:16][score] 2023-07-21_17-45-42/window_022 flagged
+[2026-08-31 17:24:39][score] 2023-07-21_17-45-42/window_023 relE 1.5e-03
+[2026-08-31 17:25:01][score] 2023-07-21_17-45-42/window_024 relE 4.9e-05
+[2026-08-31 17:25:23][score] 2023-07-21_17-45-42/window_025 relE 4.5e-04
+[2026-08-31 17:25:26][score] 2023-07-22_13-00-57/window_001 relE 9.8e-04
+[2026-08-31 17:25:47][score] 2023-07-22_13-00-57/window_002 relE 1.8e-03
+[2026-08-31 17:26:07][score] 2023-07-22_13-00-57/window_003 relE 1.1e-04
+[2026-08-31 17:26:12][score] 2023-07-22_13-00-57/window_004 relE 3.9e-03
+[2026-08-31 17:26:23][score] 2023-07-22_13-00-57/window_005 relE 2.5e-03
+[2026-08-31 17:26:23][score] 2023-07-22_13-00-57/window_006 flagged
+[2026-08-31 17:26:25][score] 2023-07-22_13-00-57/window_007 relE 5.8e-03
+[2026-08-31 17:26:33][score] 2023-07-22_13-28-55/window_001 relE 4.8e-04
+[2026-08-31 17:26:52][score] 2023-07-22_13-28-55/window_002 relE 5.6e-03
+[2026-08-31 17:27:13][score] 2023-07-22_13-28-55/window_003 relE 6.1e-03
+[2026-08-31 17:27:25][score] 2023-07-22_13-28-55/window_004 relE 3.2e-03
+[2026-08-31 17:27:47][score] 2023-07-22_13-28-55/window_005 relE 4.1e-03
+[2026-08-31 17:27:55][score] 2023-07-22_13-28-55/window_006 relE 4.3e-03
+[2026-08-31 17:28:17][score] 2023-07-22_13-28-55/window_007 relE 1.9e-03
+[2026-08-31 17:28:40][score] 2023-07-22_13-28-55/window_008 relE 2.5e-03
+[2026-08-31 17:29:03][score] 2023-07-22_13-28-55/window_009 relE 7.5e-03
+[2026-08-31 17:29:28][score] 2023-07-22_13-28-55/window_010 relE 4.2e-03
+[2026-08-31 17:29:42][score] 2023-07-22_13-28-55/window_011 relE 4.5e-04
+[2026-08-31 17:30:04][score] 2023-07-22_13-28-55/window_012 relE 6.1e-03
+[2026-08-31 17:30:26][score] 2023-07-22_13-28-55/window_013 relE 1.5e-03
+[2026-08-31 17:30:49][score] 2023-07-22_13-28-55/window_014 relE 1.8e-03
+[2026-08-31 17:31:10][score] 2023-07-22_13-28-55/window_015 relE 7.8e-04
+[2026-08-31 17:31:32][score] 2023-07-22_13-28-55/window_016 relE 8.8e-04
+[2026-08-31 17:31:55][score] 2023-07-22_13-28-55/window_017 relE 4.1e-03
+[2026-08-31 17:32:18][score] 2023-07-22_13-28-55/window_018 relE 1.6e-03
+[2026-08-31 17:32:31][score] 2023-07-22_13-28-55/window_019 relE 1.8e-04
+[2026-08-31 17:32:44][score] 2023-07-22_13-28-55/window_020 relE 5.2e-04
+[2026-08-31 17:32:52][score] 2023-07-22_13-28-55/window_021 relE 1.1e-04
+[2026-08-31 17:32:57][score] 2023-07-22_13-28-55/window_022 relE 3.1e-04
+[2026-08-31 17:33:21][score] 2023-07-22_16-24-27/window_001 relE 2.5e-03
+[2026-08-31 17:33:43][score] 2023-07-22_16-24-27/window_002 relE 5.5e-05
+[2026-08-31 17:34:05][score] 2023-07-22_16-24-27/window_003 relE 5.7e-04
+[2026-08-31 17:34:27][score] 2023-07-22_16-24-27/window_004 relE 5.1e-04
+[2026-08-31 17:34:49][score] 2023-07-22_16-24-27/window_005 relE 9.3e-04
+[2026-08-31 17:35:14][score] 2023-07-22_16-24-27/window_006 relE 4.9e-03
+[2026-08-31 17:35:37][score] 2023-07-22_16-24-27/window_007 relE 2.9e-03
+[2026-08-31 17:36:01][score] 2023-07-22_16-24-27/window_008 relE 3.0e-03
+[2026-08-31 17:36:24][score] 2023-07-22_16-24-27/window_009 relE 2.3e-03
+[2026-08-31 17:36:46][score] 2023-07-22_16-24-27/window_010 relE 3.0e-03
+[2026-08-31 17:37:10][score] 2023-07-22_16-24-27/window_011 relE 6.1e-03
+[2026-08-31 17:37:30][score] 2023-07-22_16-24-27/window_012 relE 1.2e-03
+[2026-08-31 17:37:53][score] 2023-07-22_16-24-27/window_013 relE 1.4e-03
+[2026-08-31 17:38:14][score] 2023-07-22_16-24-27/window_014 relE 7.1e-04
+[2026-08-31 17:38:36][score] 2023-07-22_16-24-27/window_015 relE 1.0e-03
+[2026-08-31 17:39:01][score] 2023-07-22_16-24-27/window_016 relE 5.5e-05
+[2026-08-31 17:39:18][score] 2023-07-22_16-24-27/window_017 relE 3.5e-03
+[2026-08-31 17:39:40][score] 2023-07-22_16-24-27/window_018 relE 4.1e-05
+[2026-08-31 17:39:56][score] 2023-07-22_16-24-27/window_019 relE 7.3e-04
+[2026-08-31 17:40:14][score] 2023-07-22_16-24-27/window_020 relE 1.6e-03
+[2026-08-31 17:40:36][score] 2023-07-22_16-24-27/window_021 relE 1.8e-03
+[2026-08-31 17:40:58][score] 2023-07-22_16-24-27/window_022 relE 6.0e-03
+[2026-08-31 17:41:03][score] 2023-07-22_16-24-27/window_023 relE 1.3e-03
+[2026-08-31 17:41:19][score] 2023-07-22_16-24-27/window_024 relE 9.9e-04
+[2026-08-31 17:41:44][score] 2023-07-22_16-24-27/window_025 relE 2.0e-03
+[2026-08-31 17:42:06][score] 2023-07-22_16-24-27/window_026 relE 5.0e-03
+[2026-08-31 17:42:30][score] 2023-07-22_16-24-27/window_027 relE 2.0e-03
+[2026-08-31 17:42:54][score] 2023-07-22_16-24-27/window_028 relE 6.2e-03
+[2026-08-31 17:43:03][score] 2023-07-22_16-24-27/window_029 relE 7.0e-04
+[2026-08-31 17:43:28][score] 2023-07-22_16-24-27/window_030 relE 2.1e-03
+[2026-08-31 17:43:49][score] 2023-07-22_16-24-27/window_031 relE 4.3e-04
+[2026-08-31 17:44:12][score] 2023-07-22_16-24-27/window_032 relE 2.1e-03
+[2026-08-31 17:44:19][score] 2023-07-22_16-24-27/window_033 relE 7.2e-04
+[2026-08-31 17:44:41][score] 2023-07-22_16-24-27/window_034 relE 1.3e-04
+[2026-08-31 17:45:03][score] 2023-07-22_16-24-27/window_035 relE 2.7e-03
+[2026-08-31 17:45:25][score] 2023-07-22_16-24-27/window_036 relE 2.0e-03
+[2026-08-31 17:45:47][score] 2023-07-22_16-24-27/window_037 relE 1.4e-03
+[2026-08-31 17:46:09][score] 2023-07-22_16-24-27/window_038 relE 1.5e-02
+[2026-08-31 17:46:24][score] 2023-07-22_16-24-27/window_039 relE 5.8e-04
+[2026-08-31 17:46:28][score] 2023-07-22_16-24-27/window_040 relE 2.6e-03
+[2026-08-31 17:46:33][score] 2023-07-22_16-24-27/window_041 relE 1.0e-03
+[2026-08-31 17:46:53][score] 2023-07-22_16-24-27/window_042 relE 2.3e-03
+[2026-08-31 17:47:18][score] 2023-07-22_16-24-27/window_043 relE 2.4e-03
+[2026-08-31 17:47:40][score] 2023-07-22_16-24-27/window_044 relE 1.3e-03
+[2026-08-31 17:47:58][score] 2023-07-22_16-24-27/window_045 relE 2.9e-03
+[2026-08-31 17:48:23][score] 2023-07-22_16-24-27/window_046 relE 3.8e-03
+[2026-08-31 17:48:45][score] 2023-07-22_16-24-27/window_047 relE 1.2e-03
+[2026-08-31 17:49:07][score] 2023-07-22_16-24-27/window_048 relE 3.0e-03
+[2026-08-31 17:49:30][score] 2023-07-22_16-24-27/window_049 relE 4.0e-04
+[2026-08-31 17:49:53][score] 2023-07-22_16-24-27/window_050 relE 4.3e-04
+[2026-08-31 17:50:16][score] 2023-07-22_16-24-27/window_051 relE 7.2e-04
+[2026-08-31 17:50:19][score] 2023-07-22_17-31-58/window_001 relE 1.5e-03
+[2026-08-31 17:50:24][score] 2023-07-22_17-38-50/window_001 relE 2.3e-04
+[2026-08-31 17:50:46][score] 2023-07-22_17-38-50/window_002 relE 1.5e-03
+[2026-08-31 17:51:08][score] 2023-07-22_17-38-50/window_003 relE 5.4e-03
+[2026-08-31 17:51:29][score] 2023-07-22_17-38-50/window_004 relE 1.2e-04
+[2026-08-31 17:51:51][score] 2023-07-22_17-38-50/window_005 relE 8.0e-03
+[2026-08-31 17:52:03][score] 2023-07-22_17-38-50/window_006 relE 1.7e-03
+[2026-08-31 17:52:25][score] 2023-07-22_17-38-50/window_007 relE 3.4e-03
+[2026-08-31 17:52:47][score] 2023-07-22_17-38-50/window_008 relE 6.3e-03
+[2026-08-31 17:53:12][score] 2023-07-22_17-38-50/window_009 relE 8.6e-03
+[2026-08-31 17:53:33][score] 2023-07-22_17-38-50/window_010 relE 1.9e-03
+[2026-08-31 17:53:50][score] 2023-07-22_17-38-50/window_011 relE 5.6e-05
+[2026-08-31 17:54:07][score] 2023-07-22_17-38-50/window_012 relE 3.2e-04
+[2026-08-31 17:54:16][score] 2023-07-22_17-38-50/window_013 relE 2.6e-04
+[2026-08-31 17:54:38][score] 2023-07-22_17-38-50/window_014 relE 3.0e-03
+[2026-08-31 17:55:00][score] 2023-07-23_11-23-18/window_001 relE 2.9e-03
+[2026-08-31 17:55:22][score] 2023-07-23_11-23-18/window_002 relE 1.2e-03
+[2026-08-31 17:55:44][score] 2023-07-23_11-23-18/window_003 relE 2.7e-03
+[2026-08-31 17:56:06][score] 2023-07-23_11-23-18/window_004 relE 1.5e-03
+[2026-08-31 17:56:29][score] 2023-07-23_11-23-18/window_005 relE 8.8e-04
+[2026-08-31 17:56:51][score] 2023-07-23_11-23-18/window_006 relE 5.8e-03
+[2026-08-31 17:57:13][score] 2023-07-23_11-23-18/window_007 relE 2.7e-03
+[2026-08-31 17:57:35][score] 2023-07-23_11-23-18/window_008 relE 5.8e-03
+[2026-08-31 17:57:56][score] 2023-07-23_11-23-18/window_009 relE 3.4e-03
+[2026-08-31 17:58:18][score] 2023-07-23_11-23-18/window_010 relE 1.5e-04
+[2026-08-31 17:58:40][score] 2023-07-23_11-23-18/window_011 relE 7.6e-04
+[2026-08-31 17:58:48][score] 2023-07-23_11-23-18/window_012 relE 9.7e-05
+[2026-08-31 17:58:57][score] 2023-07-23_11-23-18/window_013 relE 3.1e-04
+[2026-08-31 17:59:09][score] 2023-07-23_11-23-18/window_014 relE 9.1e-04
+[2026-08-31 17:59:31][score] 2023-07-23_11-23-18/window_015 relE 1.3e-04
+[2026-08-31 17:59:43][score] 2023-07-23_11-23-18/window_016 relE 1.1e-03
+[2026-08-31 17:59:54][score] 2023-07-23_11-23-18/window_017 relE 6.2e-04
+[2026-08-31 18:00:20][score] 2023-07-23_11-23-18/window_018 relE 5.3e-03
+[2026-08-31 18:00:41][score] 2023-07-23_11-23-18/window_019 relE 3.2e-03
+[2026-08-31 18:00:55][score] 2023-07-23_11-23-18/window_020 relE 1.7e-03
+[2026-08-31 18:01:19][score] 2023-07-23_11-23-18/window_021 relE 9.6e-04
+[2026-08-31 18:01:43][score] 2023-07-23_11-52-09/window_001 relE 1.1e-03
+[2026-08-31 18:02:05][score] 2023-07-23_11-52-09/window_002 relE 8.9e-04
+[2026-08-31 18:02:10][score] 2023-07-23_11-52-09/window_003 relE 3.2e-04
+[2026-08-31 18:02:30][score] 2023-07-23_11-52-09/window_004 relE 8.8e-03
+[2026-08-31 18:02:52][score] 2023-07-23_11-52-09/window_005 relE 2.0e-03
+[2026-08-31 18:03:17][score] 2023-07-23_11-52-09/window_006 relE 3.3e-03
+[2026-08-31 18:03:39][score] 2023-07-23_11-52-09/window_007 relE 1.0e-03
+[2026-08-31 18:04:01][score] 2023-07-23_11-52-09/window_008 relE 1.5e-03
+[2026-08-31 18:04:23][score] 2023-07-23_11-52-09/window_009 relE 1.3e-03
+[2026-08-31 18:04:44][score] 2023-07-23_11-52-09/window_010 relE 9.3e-04
+[2026-08-31 18:05:07][score] 2023-07-23_11-52-09/window_011 relE 1.3e-04
+[2026-08-31 18:05:28][score] 2023-07-23_11-52-09/window_012 relE 7.5e-03
+[2026-08-31 18:05:50][score] 2023-07-23_11-52-09/window_013 relE 1.0e-02
+[2026-08-31 18:05:54][score] 2023-07-23_11-52-09/window_014 relE 7.1e-04
+[2026-08-31 18:06:01][score] 2023-07-23_11-52-09/window_015 relE 6.4e-05
+[2026-08-31 18:06:06][score] 2023-07-23_11-52-09/window_016 relE 1.2e-03
+[2026-08-31 18:06:28][score] 2023-07-23_11-52-09/window_017 relE 9.3e-04
+[2026-08-31 18:06:50][score] 2023-07-23_11-52-09/window_018 relE 4.8e-03
+[2026-08-31 18:07:14][score] 2023-07-23_11-52-09/window_019 relE 1.8e-02
+[2026-08-31 18:07:35][score] 2023-07-23_11-52-09/window_020 relE 2.5e-03
+[2026-08-31 18:07:57][score] 2023-07-23_11-52-09/window_021 relE 6.8e-04
+[2026-08-31 18:08:01][score] 2023-07-23_12-52-39/window_001 relE 1.2e-04
+[2026-08-31 18:08:26][score] 2023-07-23_12-52-39/window_002 relE 5.7e-03
+[2026-08-31 18:08:36][score] 2023-07-23_12-52-39/window_003 relE 3.4e-03
+[2026-08-31 18:08:40][score] 2023-07-23_12-52-39/window_004 relE 2.6e-04
+[2026-08-31 18:08:58][score] 2023-07-23_12-52-39/window_005 relE 1.8e-03
+[2026-08-31 18:09:15][score] 2023-07-23_12-52-39/window_006 relE 5.0e-03
+[2026-08-31 18:09:19][score] 2023-07-23_12-52-39/window_007 relE 6.3e-04
+[2026-08-31 18:09:39][score] 2023-07-23_12-52-39/window_008 relE 1.9e-03
+[2026-08-31 18:10:00][score] 2023-07-23_12-52-39/window_009 relE 2.5e-03
+[2026-08-31 18:10:00][escore] foresight: 325 windows scored
+[2026-08-31 18:10:00][score] 2023-07-20_18-12-05/window_000 flagged
+[2026-08-31 18:10:24][score] 2023-07-20_18-12-05/window_001 relE 1.7e-02
+[2026-08-31 18:10:48][score] 2023-07-20_18-12-05/window_002 relE 4.0e-03
+[2026-08-31 18:11:13][score] 2023-07-20_18-12-05/window_003 relE 2.3e-02
+[2026-08-31 18:11:38][score] 2023-07-20_18-12-05/window_004 relE 7.1e-03
+[2026-08-31 18:12:03][score] 2023-07-20_18-12-05/window_005 relE 1.8e-03
+[2026-08-31 18:12:28][score] 2023-07-20_18-12-05/window_006 relE 1.1e-03
+[2026-08-31 18:12:53][score] 2023-07-20_18-12-05/window_007 relE 2.9e-03
+[2026-08-31 18:13:17][score] 2023-07-20_18-12-05/window_008 relE 2.2e-03
+[2026-08-31 18:13:40][score] 2023-07-20_18-12-05/window_009 relE 2.1e-03
+[2026-08-31 18:14:05][score] 2023-07-20_18-12-05/window_010 relE 1.0e-02
+[2026-08-31 18:14:30][score] 2023-07-20_18-12-05/window_011 relE 6.1e-03
+[2026-08-31 18:14:55][score] 2023-07-20_18-12-05/window_012 relE 1.8e-03
+[2026-08-31 18:15:18][score] 2023-07-20_18-12-05/window_013 relE 4.9e-04
+[2026-08-31 18:15:42][score] 2023-07-20_18-12-05/window_014 relE 2.7e-03
+[2026-08-31 18:15:50][score] 2023-07-20_18-12-05/window_015 relE 4.5e-04
+[2026-08-31 18:16:15][score] 2023-07-20_18-12-05/window_016 relE 4.0e-03
+[2026-08-31 18:16:39][score] 2023-07-20_18-12-05/window_017 relE 1.5e-04
+[2026-08-31 18:17:01][score] 2023-07-20_18-12-05/window_018 relE 1.6e-04
+[2026-08-31 18:17:26][score] 2023-07-20_18-12-05/window_019 relE 1.4e-03
+[2026-08-31 18:17:51][score] 2023-07-20_18-12-05/window_020 relE 7.5e-03
+[2026-08-31 18:18:14][score] 2023-07-20_18-12-05/window_021 relE 7.5e-04
+[2026-08-31 18:18:30][score] 2023-07-20_18-12-05/window_022 relE 2.6e-03
+[2026-08-31 18:18:50][score] 2023-07-20_18-12-05/window_023 relE 2.9e-04
+[2026-08-31 18:18:57][score] 2023-07-20_18-12-05/window_024 relE 5.4e-04
+[2026-08-31 18:19:03][score] 2023-07-20_18-12-05/window_025 relE 1.8e-03
+[2026-08-31 18:19:11][score] 2023-07-20_18-12-05/window_026 relE 7.6e-04
+[2026-08-31 18:19:13][score] 2023-07-21_12-38-15/window_000 flagged
+[2026-08-31 18:19:37][score] 2023-07-21_12-38-15/window_001 relE 5.9e-04
+[2026-08-31 18:20:02][score] 2023-07-21_12-38-15/window_002 relE 2.7e-04
+[2026-08-31 18:20:27][score] 2023-07-21_12-38-15/window_003 relE 3.3e-04
+[2026-08-31 18:20:51][score] 2023-07-21_12-38-15/window_004 relE 6.8e-05
+[2026-08-31 18:21:16][score] 2023-07-21_12-38-15/window_005 relE 9.9e-04
+[2026-08-31 18:21:40][score] 2023-07-21_12-38-15/window_006 relE 7.0e-04
+[2026-08-31 18:22:03][score] 2023-07-21_12-38-15/window_007 relE 1.8e-03
+[2026-08-31 18:22:16][score] 2023-07-21_12-38-15/window_008 relE 8.1e-04
+[2026-08-31 18:22:38][score] 2023-07-21_12-38-15/window_009 relE 4.7e-04
+[2026-08-31 18:22:46][score] 2023-07-21_12-38-15/window_010 relE 1.3e-03
+[2026-08-31 18:23:11][score] 2023-07-21_12-38-15/window_011 relE 2.7e-04
+[2026-08-31 18:23:35][score] 2023-07-21_12-38-15/window_012 relE 1.6e-03
+[2026-08-31 18:23:58][score] 2023-07-21_12-38-15/window_013 relE 9.1e-04
+[2026-08-31 18:24:00][score] 2023-07-21_12-58-11/window_000 flagged
+[2026-08-31 18:24:25][score] 2023-07-21_12-58-11/window_001 relE 9.6e-05
+[2026-08-31 18:24:32][score] 2023-07-21_12-58-11/window_002 relE 7.2e-04
+[2026-08-31 18:24:49][score] 2023-07-21_12-58-11/window_003 relE 6.3e-05
+[2026-08-31 18:25:13][score] 2023-07-21_12-58-11/window_004 relE 6.5e-06
+[2026-08-31 18:25:38][score] 2023-07-21_12-58-11/window_005 relE 1.5e-03
+[2026-08-31 18:26:02][score] 2023-07-21_12-58-11/window_006 relE 2.3e-03
+[2026-08-31 18:26:27][score] 2023-07-21_12-58-11/window_007 relE 1.8e-03
+[2026-08-31 18:26:51][score] 2023-07-21_12-58-11/window_008 relE 6.5e-03
+[2026-08-31 18:26:58][score] 2023-07-21_12-58-11/window_009 relE 4.9e-04
+[2026-08-31 18:27:23][score] 2023-07-21_12-58-11/window_010 relE 3.7e-04
+[2026-08-31 18:27:46][score] 2023-07-21_12-58-11/window_011 relE 1.2e-03
+[2026-08-31 18:28:10][score] 2023-07-21_12-58-11/window_012 relE 2.8e-04
+[2026-08-31 18:28:17][score] 2023-07-21_12-58-11/window_013 relE 2.4e-03
+[2026-08-31 18:28:42][score] 2023-07-21_12-58-11/window_014 relE 1.4e-03
+[2026-08-31 18:29:06][score] 2023-07-21_12-58-11/window_015 relE 3.9e-03
+[2026-08-31 18:29:30][score] 2023-07-21_12-58-11/window_016 relE 9.2e-04
+[2026-08-31 18:29:48][score] 2023-07-21_12-58-11/window_017 relE 2.3e-04
+[2026-08-31 18:29:59][score] 2023-07-21_12-58-11/window_018 relE 2.7e-04
+[2026-08-31 18:30:24][score] 2023-07-21_12-58-11/window_019 relE 4.0e-04
+[2026-08-31 18:30:49][score] 2023-07-21_12-58-11/window_020 relE 1.3e-03
+[2026-08-31 18:31:14][score] 2023-07-21_12-58-11/window_021 relE 8.7e-04
+[2026-08-31 18:31:38][score] 2023-07-21_12-58-11/window_022 relE 6.1e-04
+[2026-08-31 18:32:01][score] 2023-07-21_12-58-11/window_023 relE 7.2e-04
+[2026-08-31 18:32:22][score] 2023-07-21_12-58-11/window_024 relE 1.8e-03
+[2026-08-31 18:32:40][score] 2023-07-21_12-58-11/window_025 relE 4.9e-04
+[2026-08-31 18:32:47][score] 2023-07-21_12-58-11/window_026 relE 1.9e-04
+[2026-08-31 18:33:04][score] 2023-07-21_12-58-11/window_027 relE 1.2e-03
+[2026-08-31 18:33:19][score] 2023-07-21_12-58-11/window_028 relE 9.5e-04
+[2026-08-31 18:33:43][score] 2023-07-21_12-58-11/window_029 relE 9.4e-04
+[2026-08-31 18:33:51][score] 2023-07-21_12-58-11/window_030 relE 2.4e-04
+[2026-08-31 18:34:16][score] 2023-07-21_12-58-11/window_031 relE 5.4e-05
+[2026-08-31 18:34:32][score] 2023-07-21_12-58-11/window_032 relE 2.6e-05
+[2026-08-31 18:34:49][score] 2023-07-21_12-58-11/window_033 relE 1.9e-04
+[2026-08-31 18:34:56][score] 2023-07-21_12-58-11/window_034 relE 4.2e-04
+[2026-08-31 18:35:21][score] 2023-07-21_12-58-11/window_035 relE 6.9e-04
+[2026-08-31 18:35:46][score] 2023-07-21_12-58-11/window_036 relE 2.0e-04
+[2026-08-31 18:36:09][score] 2023-07-21_12-58-11/window_037 relE 3.0e-04
+[2026-08-31 18:36:33][score] 2023-07-21_12-58-11/window_038 relE 3.4e-05
+[2026-08-31 18:36:33][score] 2023-07-21_13-43-00/window_000 flagged
+[2026-08-31 18:36:57][score] 2023-07-21_13-43-00/window_001 relE 4.4e-03
+[2026-08-31 18:37:21][score] 2023-07-21_13-43-00/window_002 relE 2.0e-04
+[2026-08-31 18:37:46][score] 2023-07-21_13-43-00/window_003 relE 1.2e-03
+[2026-08-31 18:37:52][score] 2023-07-21_13-43-00/window_004 relE 5.0e-04
+[2026-08-31 18:38:00][score] 2023-07-21_13-43-00/window_005 relE 2.4e-04
+[2026-08-31 18:38:24][score] 2023-07-21_13-43-00/window_006 relE 1.3e-03
+[2026-08-31 18:38:42][score] 2023-07-21_13-43-00/window_007 relE 1.3e-03
+[2026-08-31 18:38:50][score] 2023-07-21_13-43-00/window_008 relE 6.5e-04
+[2026-08-31 18:39:12][score] 2023-07-21_13-43-00/window_009 relE 3.8e-03
+[2026-08-31 18:39:14][score] 2023-07-21_13-59-14/window_000 flagged
+[2026-08-31 18:39:39][score] 2023-07-21_13-59-14/window_001 relE 5.4e-04
+[2026-08-31 18:40:04][score] 2023-07-21_13-59-14/window_002 relE 1.2e-03
+[2026-08-31 18:40:25][score] 2023-07-21_13-59-14/window_003 relE 9.6e-04
+[2026-08-31 18:40:49][score] 2023-07-21_13-59-14/window_004 relE 2.8e-03
+[2026-08-31 18:41:12][score] 2023-07-21_13-59-14/window_005 relE 4.2e-03
+[2026-08-31 18:41:13][score] 2023-07-21_14-08-29/window_000 flagged
+[2026-08-31 18:41:31][score] 2023-07-21_14-08-29/window_001 relE 3.0e-03
+[2026-08-31 18:41:50][score] 2023-07-21_14-08-29/window_002 relE 2.2e-05
+[2026-08-31 18:42:12][score] 2023-07-21_14-08-29/window_003 relE 1.9e-03
+[2026-08-31 18:42:24][score] 2023-07-21_14-08-29/window_004 relE 2.1e-03
+[2026-08-31 18:42:43][score] 2023-07-21_14-08-29/window_005 relE 4.1e-04
+[2026-08-31 18:43:08][score] 2023-07-21_14-08-29/window_006 relE 1.7e-03
+[2026-08-31 18:43:26][score] 2023-07-21_14-08-29/window_007 relE 1.6e-03
+[2026-08-31 18:43:48][score] 2023-07-21_14-08-29/window_008 relE 9.4e-04
+[2026-08-31 18:44:11][score] 2023-07-21_14-08-29/window_009 relE 2.6e-03
+[2026-08-31 18:44:36][score] 2023-07-21_14-08-29/window_010 relE 1.0e-03
+[2026-08-31 18:45:01][score] 2023-07-21_14-08-29/window_011 relE 8.1e-04
+[2026-08-31 18:45:26][score] 2023-07-21_14-08-29/window_012 relE 5.2e-04
+[2026-08-31 18:45:46][score] 2023-07-21_14-08-29/window_013 relE 8.2e-04
+[2026-08-31 18:46:11][score] 2023-07-21_14-08-29/window_014 relE 1.9e-04
+[2026-08-31 18:46:35][score] 2023-07-21_14-08-29/window_015 relE 1.4e-03
+[2026-08-31 18:46:59][score] 2023-07-21_14-08-29/window_016 relE 1.3e-03
+[2026-08-31 18:47:24][score] 2023-07-21_14-08-29/window_017 relE 5.9e-05
+[2026-08-31 18:47:47][score] 2023-07-21_14-08-29/window_018 relE 7.9e-04
+[2026-08-31 18:48:12][score] 2023-07-21_14-08-29/window_019 relE 4.6e-04
+[2026-08-31 18:48:25][score] 2023-07-21_14-08-29/window_020 relE 8.8e-05
+[2026-08-31 18:48:32][score] 2023-07-21_14-08-29/window_021 relE 8.1e-05
+[2026-08-31 18:48:56][score] 2023-07-21_14-08-29/window_022 relE 3.6e-03
+[2026-08-31 18:49:21][score] 2023-07-21_14-08-29/window_023 relE 2.0e-03
+[2026-08-31 18:49:34][score] 2023-07-21_14-08-29/window_024 relE 1.5e-03
+[2026-08-31 18:49:59][score] 2023-07-21_14-08-29/window_025 relE 2.0e-04
+[2026-08-31 18:50:23][score] 2023-07-21_14-08-29/window_026 relE 3.1e-03
+[2026-08-31 18:50:33][score] 2023-07-21_14-08-29/window_027 relE 4.9e-04
+[2026-08-31 18:50:56][score] 2023-07-21_14-08-29/window_028 relE 1.2e-03
+[2026-08-31 18:50:56][score] 2023-07-21_14-44-56/window_000 flagged
+[2026-08-31 18:51:15][score] 2023-07-21_14-44-56/window_001 relE 1.6e-03
+[2026-08-31 18:51:23][score] 2023-07-21_14-44-56/window_002 relE 6.7e-04
+[2026-08-31 18:51:47][score] 2023-07-21_14-44-56/window_003 relE 2.0e-03
+[2026-08-31 18:51:48][score] 2023-07-21_17-07-00/window_000 flagged
+[2026-08-31 18:52:12][score] 2023-07-21_17-07-00/window_001 relE 4.8e-03
+[2026-08-31 18:52:37][score] 2023-07-21_17-07-00/window_002 relE 1.7e-03
+[2026-08-31 18:52:44][score] 2023-07-21_17-07-00/window_003 relE 1.1e-03
+[2026-08-31 18:53:09][score] 2023-07-21_17-07-00/window_004 relE 2.6e-03
+[2026-08-31 18:53:33][score] 2023-07-21_17-07-00/window_005 relE 3.0e-03
+[2026-08-31 18:53:58][score] 2023-07-21_17-07-00/window_006 relE 9.0e-03
+[2026-08-31 18:54:23][score] 2023-07-21_17-07-00/window_007 relE 2.0e-03
+[2026-08-31 18:54:48][score] 2023-07-21_17-07-00/window_008 relE 8.0e-04
+[2026-08-31 18:55:12][score] 2023-07-21_17-07-00/window_009 relE 2.5e-03
+[2026-08-31 18:55:37][score] 2023-07-21_17-07-00/window_010 relE 3.4e-03
+[2026-08-31 18:56:02][score] 2023-07-21_17-07-00/window_011 relE 1.6e-02
+[2026-08-31 18:56:25][score] 2023-07-21_17-07-00/window_012 relE 5.0e-03
+[2026-08-31 18:56:49][score] 2023-07-21_17-07-00/window_013 relE 2.8e-03
+[2026-08-31 18:57:03][score] 2023-07-21_17-07-00/window_014 relE 5.4e-03
+[2026-08-31 18:57:27][score] 2023-07-21_17-07-00/window_015 relE 7.7e-03
+[2026-08-31 18:57:52][score] 2023-07-21_17-07-00/window_016 relE 1.6e-02
+[2026-08-31 18:58:17][score] 2023-07-21_17-07-00/window_017 relE 7.6e-03
+[2026-08-31 18:58:42][score] 2023-07-21_17-07-00/window_018 relE 1.9e-03
+[2026-08-31 18:59:07][score] 2023-07-21_17-07-00/window_019 relE 2.2e-03
+[2026-08-31 18:59:31][score] 2023-07-21_17-07-00/window_020 relE 2.6e-03
+[2026-08-31 18:59:56][score] 2023-07-21_17-07-00/window_021 relE 2.2e-03
+[2026-08-31 19:00:21][score] 2023-07-21_17-07-00/window_022 relE 6.0e-03
+[2026-08-31 19:00:22][score] 2023-07-21_17-07-00/window_023 flagged
+[2026-08-31 19:00:22][score] 2023-07-21_17-07-00/window_024 flagged
+[2026-08-31 19:00:24][score] 2023-07-21_17-34-18/window_000 flagged
+[2026-08-31 19:00:48][score] 2023-07-21_17-34-18/window_001 relE 6.4e-04
+[2026-08-31 19:01:12][score] 2023-07-21_17-34-18/window_002 relE 4.6e-03
+[2026-08-31 19:01:37][score] 2023-07-21_17-34-18/window_003 relE 1.1e-02
+[2026-08-31 19:02:01][score] 2023-07-21_17-34-18/window_004 relE 1.6e-02
+[2026-08-31 19:02:23][score] 2023-07-21_17-34-18/window_005 relE 1.1e-02
+[2026-08-31 19:02:48][score] 2023-07-21_17-34-18/window_006 relE 7.4e-04
+[2026-08-31 19:03:13][score] 2023-07-21_17-34-18/window_007 relE 2.0e-03
+[2026-08-31 19:03:31][score] 2023-07-21_17-34-18/window_008 relE 1.6e-03
+[2026-08-31 19:03:32][score] 2023-07-21_17-45-42/window_000 flagged
+[2026-08-31 19:03:38][score] 2023-07-21_17-45-42/window_001 relE 6.8e-04
+[2026-08-31 19:03:53][score] 2023-07-21_17-45-42/window_002 relE 1.7e-03
+[2026-08-31 19:04:03][score] 2023-07-21_17-45-42/window_003 relE 1.7e-03
+[2026-08-31 19:04:20][score] 2023-07-21_17-45-42/window_004 relE 1.6e-03
+[2026-08-31 19:04:45][score] 2023-07-21_17-45-42/window_005 relE 4.8e-04
+[2026-08-31 19:05:10][score] 2023-07-21_17-45-42/window_006 relE 3.1e-04
+[2026-08-31 19:05:34][score] 2023-07-21_17-45-42/window_007 relE 3.0e-04
+[2026-08-31 19:05:59][score] 2023-07-21_17-45-42/window_008 relE 1.0e-05
+[2026-08-31 19:06:06][score] 2023-07-21_17-45-42/window_009 relE 7.1e-05
+[2026-08-31 19:06:29][score] 2023-07-21_17-45-42/window_010 relE 9.3e-03
+[2026-08-31 19:06:36][score] 2023-07-21_17-45-42/window_011 relE 5.3e-04
+[2026-08-31 19:06:58][score] 2023-07-21_17-45-42/window_012 relE 2.5e-03
+[2026-08-31 19:07:23][score] 2023-07-21_17-45-42/window_013 relE 2.0e-03
+[2026-08-31 19:07:48][score] 2023-07-21_17-45-42/window_014 relE 1.9e-03
+[2026-08-31 19:08:12][score] 2023-07-21_17-45-42/window_015 relE 5.0e-04
+[2026-08-31 19:08:37][score] 2023-07-21_17-45-42/window_016 relE 2.9e-04
+[2026-08-31 19:09:01][score] 2023-07-21_17-45-42/window_017 relE 3.0e-03
+[2026-08-31 19:09:26][score] 2023-07-21_17-45-42/window_018 relE 2.2e-03
+[2026-08-31 19:09:50][score] 2023-07-21_17-45-42/window_019 relE 4.4e-03
+[2026-08-31 19:10:15][score] 2023-07-21_17-45-42/window_020 relE 3.0e-02
+[2026-08-31 19:10:40][score] 2023-07-21_17-45-42/window_021 relE 4.9e-02
+[2026-08-31 19:11:03][score] 2023-07-21_17-45-42/window_022 relE 9.0e-03
+[2026-08-31 19:11:28][score] 2023-07-21_17-45-42/window_023 relE 2.3e-04
+[2026-08-31 19:11:53][score] 2023-07-21_17-45-42/window_024 relE 3.9e-04
+[2026-08-31 19:12:18][score] 2023-07-21_17-45-42/window_025 relE 4.2e-04
+[2026-08-31 19:12:18][score] 2023-07-22_13-00-57/window_000 flagged
+[2026-08-31 19:12:42][score] 2023-07-22_13-00-57/window_001 relE 4.5e-04
+[2026-08-31 19:13:05][score] 2023-07-22_13-00-57/window_002 relE 7.0e-04
+[2026-08-31 19:13:25][score] 2023-07-22_13-00-57/window_003 relE 4.3e-04
+[2026-08-31 19:13:30][score] 2023-07-22_13-00-57/window_004 relE 2.3e-03
+[2026-08-31 19:13:41][score] 2023-07-22_13-00-57/window_005 relE 2.7e-03
+[2026-08-31 19:13:41][score] 2023-07-22_13-00-57/window_006 flagged
+[2026-08-31 19:13:44][score] 2023-07-22_13-00-57/window_007 relE 2.8e-03
+[2026-08-31 19:13:45][score] 2023-07-22_13-28-55/window_000 flagged
+[2026-08-31 19:13:56][score] 2023-07-22_13-28-55/window_001 relE 6.0e-04
+[2026-08-31 19:14:17][score] 2023-07-22_13-28-55/window_002 relE 1.5e-03
+[2026-08-31 19:14:42][score] 2023-07-22_13-28-55/window_003 relE 1.0e-03
+[2026-08-31 19:14:57][score] 2023-07-22_13-28-55/window_004 relE 1.5e-04
+[2026-08-31 19:15:21][score] 2023-07-22_13-28-55/window_005 relE 1.4e-03
+[2026-08-31 19:15:32][score] 2023-07-22_13-28-55/window_006 relE 4.4e-03
+[2026-08-31 19:15:57][score] 2023-07-22_13-28-55/window_007 relE 3.2e-04
+[2026-08-31 19:16:22][score] 2023-07-22_13-28-55/window_008 relE 4.2e-04
+[2026-08-31 19:16:47][score] 2023-07-22_13-28-55/window_009 relE 1.7e-03
+[2026-08-31 19:17:12][score] 2023-07-22_13-28-55/window_010 relE 6.9e-04
+[2026-08-31 19:17:28][score] 2023-07-22_13-28-55/window_011 relE 4.3e-03
+[2026-08-31 19:17:53][score] 2023-07-22_13-28-55/window_012 relE 2.4e-03
+[2026-08-31 19:18:18][score] 2023-07-22_13-28-55/window_013 relE 9.3e-04
+[2026-08-31 19:18:42][score] 2023-07-22_13-28-55/window_014 relE 4.1e-04
+[2026-08-31 19:19:07][score] 2023-07-22_13-28-55/window_015 relE 1.6e-04
+[2026-08-31 19:19:32][score] 2023-07-22_13-28-55/window_016 relE 1.1e-03
+[2026-08-31 19:19:57][score] 2023-07-22_13-28-55/window_017 relE 1.1e-03
+[2026-08-31 19:20:22][score] 2023-07-22_13-28-55/window_018 relE 4.7e-04
+[2026-08-31 19:20:35][score] 2023-07-22_13-28-55/window_019 relE 1.7e-04
+[2026-08-31 19:20:49][score] 2023-07-22_13-28-55/window_020 relE 3.9e-05
+[2026-08-31 19:20:58][score] 2023-07-22_13-28-55/window_021 relE 4.0e-04
+[2026-08-31 19:21:06][score] 2023-07-22_13-28-55/window_022 relE 2.6e-04
+[2026-08-31 19:21:07][score] 2023-07-22_16-24-27/window_000 flagged
+[2026-08-31 19:21:32][score] 2023-07-22_16-24-27/window_001 relE 1.3e-04
+[2026-08-31 19:21:57][score] 2023-07-22_16-24-27/window_002 relE 1.2e-04
+[2026-08-31 19:22:22][score] 2023-07-22_16-24-27/window_003 relE 1.8e-04
+[2026-08-31 19:22:47][score] 2023-07-22_16-24-27/window_004 relE 6.0e-04
+[2026-08-31 19:23:11][score] 2023-07-22_16-24-27/window_005 relE 1.6e-04
+[2026-08-31 19:23:36][score] 2023-07-22_16-24-27/window_006 relE 5.3e-04
+[2026-08-31 19:24:01][score] 2023-07-22_16-24-27/window_007 relE 2.1e-03
+[2026-08-31 19:24:26][score] 2023-07-22_16-24-27/window_008 relE 6.9e-04
+[2026-08-31 19:24:51][score] 2023-07-22_16-24-27/window_009 relE 8.2e-04
+[2026-08-31 19:25:16][score] 2023-07-22_16-24-27/window_010 relE 2.3e-03
+[2026-08-31 19:25:41][score] 2023-07-22_16-24-27/window_011 relE 2.2e-03
+[2026-08-31 19:26:04][score] 2023-07-22_16-24-27/window_012 relE 4.9e-04
+[2026-08-31 19:26:29][score] 2023-07-22_16-24-27/window_013 relE 5.6e-04
+[2026-08-31 19:26:53][score] 2023-07-22_16-24-27/window_014 relE 4.3e-04
+[2026-08-31 19:27:18][score] 2023-07-22_16-24-27/window_015 relE 5.1e-04
+[2026-08-31 19:27:44][score] 2023-07-22_16-24-27/window_016 relE 2.4e-04
+[2026-08-31 19:28:03][score] 2023-07-22_16-24-27/window_017 relE 1.1e-03
+[2026-08-31 19:28:28][score] 2023-07-22_16-24-27/window_018 relE 1.1e-04
+[2026-08-31 19:28:48][score] 2023-07-22_16-24-27/window_019 relE 1.6e-04
+[2026-08-31 19:29:12][score] 2023-07-22_16-24-27/window_020 relE 5.9e-04
+[2026-08-31 19:29:36][score] 2023-07-22_16-24-27/window_021 relE 1.2e-03
+[2026-08-31 19:30:01][score] 2023-07-22_16-24-27/window_022 relE 2.3e-03
+[2026-08-31 19:30:10][score] 2023-07-22_16-24-27/window_023 relE 7.8e-05
+[2026-08-31 19:30:30][score] 2023-07-22_16-24-27/window_024 relE 3.8e-04
+[2026-08-31 19:30:55][score] 2023-07-22_16-24-27/window_025 relE 5.4e-04
+[2026-08-31 19:31:19][score] 2023-07-22_16-24-27/window_026 relE 3.5e-03
+[2026-08-31 19:31:43][score] 2023-07-22_16-24-27/window_027 relE 2.0e-03
+[2026-08-31 19:32:08][score] 2023-07-22_16-24-27/window_028 relE 1.4e-03
+[2026-08-31 19:32:20][score] 2023-07-22_16-24-27/window_029 relE 7.1e-04
+[2026-08-31 19:32:45][score] 2023-07-22_16-24-27/window_030 relE 5.0e-04
+[2026-08-31 19:33:09][score] 2023-07-22_16-24-27/window_031 relE 1.6e-03
+[2026-08-31 19:33:34][score] 2023-07-22_16-24-27/window_032 relE 5.8e-04
+[2026-08-31 19:33:44][score] 2023-07-22_16-24-27/window_033 relE 5.1e-04
+[2026-08-31 19:34:06][score] 2023-07-22_16-24-27/window_034 relE 4.0e-04
+[2026-08-31 19:34:28][score] 2023-07-22_16-24-27/window_035 relE 8.1e-04
+[2026-08-31 19:34:53][score] 2023-07-22_16-24-27/window_036 relE 1.4e-03
+[2026-08-31 19:35:18][score] 2023-07-22_16-24-27/window_037 relE 8.2e-04
+[2026-08-31 19:35:41][score] 2023-07-22_16-24-27/window_038 relE 2.1e-03
+[2026-08-31 19:35:54][score] 2023-07-22_16-24-27/window_039 relE 5.5e-04
+[2026-08-31 19:36:00][score] 2023-07-22_16-24-27/window_040 relE 3.1e-03
+[2026-08-31 19:36:07][score] 2023-07-22_16-24-27/window_041 relE 2.2e-04
+[2026-08-31 19:36:31][score] 2023-07-22_16-24-27/window_042 relE 1.4e-03
+[2026-08-31 19:36:56][score] 2023-07-22_16-24-27/window_043 relE 2.9e-04
+[2026-08-31 19:37:20][score] 2023-07-22_16-24-27/window_044 relE 1.0e-04
+[2026-08-31 19:37:41][score] 2023-07-22_16-24-27/window_045 relE 4.0e-04
+[2026-08-31 19:38:06][score] 2023-07-22_16-24-27/window_046 relE 7.3e-04
+[2026-08-31 19:38:31][score] 2023-07-22_16-24-27/window_047 relE 1.3e-04
+[2026-08-31 19:38:56][score] 2023-07-22_16-24-27/window_048 relE 1.0e-03
+[2026-08-31 19:39:19][score] 2023-07-22_16-24-27/window_049 relE 5.0e-04
+[2026-08-31 19:39:43][score] 2023-07-22_16-24-27/window_050 relE 4.6e-04
+[2026-08-31 19:40:08][score] 2023-07-22_16-24-27/window_051 relE 5.9e-04
+[2026-08-31 19:40:09][score] 2023-07-22_17-18-36/window_000 flagged
+[2026-08-31 19:40:09][score] 2023-07-22_17-31-58/window_000 flagged
+[2026-08-31 19:40:15][score] 2023-07-22_17-31-58/window_001 relE 6.6e-04
+[2026-08-31 19:40:16][score] 2023-07-22_17-38-50/window_000 flagged
+[2026-08-31 19:40:24][score] 2023-07-22_17-38-50/window_001 relE 9.9e-04
+[2026-08-31 19:40:48][score] 2023-07-22_17-38-50/window_002 relE 1.2e-03
+[2026-08-31 19:41:13][score] 2023-07-22_17-38-50/window_003 relE 1.7e-03
+[2026-08-31 19:41:38][score] 2023-07-22_17-38-50/window_004 relE 5.4e-04
+[2026-08-31 19:42:03][score] 2023-07-22_17-38-50/window_005 relE 1.2e-03
+[2026-08-31 19:42:18][score] 2023-07-22_17-38-50/window_006 relE 7.4e-05
+[2026-08-31 19:42:42][score] 2023-07-22_17-38-50/window_007 relE 4.0e-04
+[2026-08-31 19:43:04][score] 2023-07-22_17-38-50/window_008 relE 4.8e-03
+[2026-08-31 19:43:28][score] 2023-07-22_17-38-50/window_009 relE 2.3e-03
+[2026-08-31 19:43:53][score] 2023-07-22_17-38-50/window_010 relE 1.2e-03
+[2026-08-31 19:44:12][score] 2023-07-22_17-38-50/window_011 relE 1.3e-05
+[2026-08-31 19:44:33][score] 2023-07-22_17-38-50/window_012 relE 1.3e-03
+[2026-08-31 19:44:44][score] 2023-07-22_17-38-50/window_013 relE 4.6e-03
+[2026-08-31 19:45:09][score] 2023-07-22_17-38-50/window_014 relE 1.6e-03
+[2026-08-31 19:45:10][score] 2023-07-23_11-23-18/window_000 flagged
+[2026-08-31 19:45:35][score] 2023-07-23_11-23-18/window_001 relE 6.4e-05
+[2026-08-31 19:45:59][score] 2023-07-23_11-23-18/window_002 relE 1.2e-04
+[2026-08-31 19:46:24][score] 2023-07-23_11-23-18/window_003 relE 8.5e-04
+[2026-08-31 19:46:49][score] 2023-07-23_11-23-18/window_004 relE 1.6e-03
+[2026-08-31 19:47:14][score] 2023-07-23_11-23-18/window_005 relE 1.7e-04
+[2026-08-31 19:47:39][score] 2023-07-23_11-23-18/window_006 relE 3.6e-04
+[2026-08-31 19:48:04][score] 2023-07-23_11-23-18/window_007 relE 5.1e-04
+[2026-08-31 19:48:29][score] 2023-07-23_11-23-18/window_008 relE 2.6e-03
+[2026-08-31 19:48:54][score] 2023-07-23_11-23-18/window_009 relE 1.4e-03
+[2026-08-31 19:49:18][score] 2023-07-23_11-23-18/window_010 relE 6.1e-04
+[2026-08-31 19:49:42][score] 2023-07-23_11-23-18/window_011 relE 8.0e-05
+[2026-08-31 19:49:53][score] 2023-07-23_11-23-18/window_012 relE 2.6e-04
+[2026-08-31 19:50:04][score] 2023-07-23_11-23-18/window_013 relE 6.7e-05
+[2026-08-31 19:50:19][score] 2023-07-23_11-23-18/window_014 relE 1.3e-04
+[2026-08-31 19:50:44][score] 2023-07-23_11-23-18/window_015 relE 3.2e-05
+[2026-08-31 19:50:51][score] 2023-07-23_11-23-18/window_016 relE 4.4e-04
+[2026-08-31 19:51:04][score] 2023-07-23_11-23-18/window_017 relE 1.8e-04
+[2026-08-31 19:51:29][score] 2023-07-23_11-23-18/window_018 relE 1.2e-03
+[2026-08-31 19:51:54][score] 2023-07-23_11-23-18/window_019 relE 5.8e-04
+[2026-08-31 19:52:10][score] 2023-07-23_11-23-18/window_020 relE 4.9e-04
+[2026-08-31 19:52:34][score] 2023-07-23_11-23-18/window_021 relE 6.9e-04
+[2026-08-31 19:52:35][score] 2023-07-23_11-52-09/window_000 relE 5.4e-03
+[2026-08-31 19:52:58][score] 2023-07-23_11-52-09/window_001 relE 9.5e-05
+[2026-08-31 19:53:23][score] 2023-07-23_11-52-09/window_002 relE 6.3e-05
+[2026-08-31 19:53:30][score] 2023-07-23_11-52-09/window_003 relE 8.9e-05
+[2026-08-31 19:53:54][score] 2023-07-23_11-52-09/window_004 relE 6.0e-03
+[2026-08-31 19:54:19][score] 2023-07-23_11-52-09/window_005 relE 3.5e-04
+[2026-08-31 19:54:44][score] 2023-07-23_11-52-09/window_006 relE 5.3e-04
+[2026-08-31 19:55:08][score] 2023-07-23_11-52-09/window_007 relE 2.2e-04
+[2026-08-31 19:55:33][score] 2023-07-23_11-52-09/window_008 relE 3.4e-04
+[2026-08-31 19:55:58][score] 2023-07-23_11-52-09/window_009 relE 2.0e-04
+[2026-08-31 19:56:19][score] 2023-07-23_11-52-09/window_010 relE 9.2e-04
+[2026-08-31 19:56:42][score] 2023-07-23_11-52-09/window_011 relE 1.1e-04
+[2026-08-31 19:57:07][score] 2023-07-23_11-52-09/window_012 relE 3.2e-03
+[2026-08-31 19:57:32][score] 2023-07-23_11-52-09/window_013 relE 7.1e-04
+[2026-08-31 19:57:39][score] 2023-07-23_11-52-09/window_014 relE 1.2e-03
+[2026-08-31 19:57:49][score] 2023-07-23_11-52-09/window_015 relE 4.0e-04
+[2026-08-31 19:57:57][score] 2023-07-23_11-52-09/window_016 relE 1.7e-03
+[2026-08-31 19:58:22][score] 2023-07-23_11-52-09/window_017 relE 2.9e-04
+[2026-08-31 19:58:47][score] 2023-07-23_11-52-09/window_018 relE 9.5e-04
+[2026-08-31 19:59:11][score] 2023-07-23_11-52-09/window_019 relE 5.6e-03
+[2026-08-31 19:59:36][score] 2023-07-23_11-52-09/window_020 relE 8.3e-04
+[2026-08-31 20:00:00][score] 2023-07-23_11-52-09/window_021 relE 8.4e-04
+[2026-08-31 20:00:01][score] 2023-07-23_12-52-39/window_000 flagged
+[2026-08-31 20:00:09][score] 2023-07-23_12-52-39/window_001 relE 7.4e-04
+[2026-08-31 20:00:33][score] 2023-07-23_12-52-39/window_002 relE 1.6e-03
+[2026-08-31 20:00:45][score] 2023-07-23_12-52-39/window_003 relE 1.4e-03
+[2026-08-31 20:00:52][score] 2023-07-23_12-52-39/window_004 relE 1.5e-03
+[2026-08-31 20:01:12][score] 2023-07-23_12-52-39/window_005 relE 1.1e-03
+[2026-08-31 20:01:32][score] 2023-07-23_12-52-39/window_006 relE 4.5e-03
+[2026-08-31 20:01:39][score] 2023-07-23_12-52-39/window_007 relE 1.3e-03
+[2026-08-31 20:02:02][score] 2023-07-23_12-52-39/window_008 relE 8.4e-04
+[2026-08-31 20:02:22][score] 2023-07-23_12-52-39/window_009 relE 2.3e-03
+[2026-08-31 20:02:22][escore] hindsight: 344 windows scored
+[2026-08-31 20:02:23][report] report written
+[2026-08-31 20:02:23][main] runner finished

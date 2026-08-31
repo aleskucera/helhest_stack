@@ -1,0 +1,25 @@
+{
+ "law": {
+  "a": 0.11,
+  "b": 1.0209
+ },
+ "build": {
+  "R_MAX": 3.0,
+  "ALPHA": 1.0
+ },
+ "fan": {
+  "K": 32,
+  "T": 3.0,
+  "v_max": 1.0,
+  "w_max": 1.2,
+  "n_ref": 8000,
+  "att_gate_rad": 0.35
+ },
+ "gate_dzdt_ms": 0.3,
+ "n_ref": 20000,
+ "pipeline": {
+  "commit": "",
+  "deployed_from": "/local/kuceral4/baseprod/studies_v2/baseprod/v2_runner.py"
+ },
+ "written": "2026-08-31 16:06:13"
+}
