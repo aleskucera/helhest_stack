@@ -1,0 +1,15 @@
+{
+  "script": "studies/bench/v2_att_wall.py + v2_att_forward_bench.py",
+  "code": "attitude.py @d83c441 (optimized), deployed to dasenka bench_v2",
+  "device": "NVIDIA GeForce RTX 3090 (dasenka)",
+  "date": "2026-08-31",
+  "P": 256, "T": 40, "cell_m": 0.10, "corr_len_m": 0.15,
+  "clark_ms_per_call": 1.4, "clark_us_per_plan": 5.5,
+  "sampler_D32_ms": 3.5, "ratio_clark_over_mc32": 0.40,
+  "estimator_floor": {"rel_E": 1.15e-2, "rel_sd": 1.01e-2},
+  "D_equal_accuracy": 4946,
+  "sampler_Deq_ms": 402.5, "ratio_at_equal_accuracy": 0.0035,
+  "forward_pass_multiplier": 5.8,
+  "mirror_test": "OK on 3090 (E 2.0e-7, Var 3.5e-7)",
+  "note": "sampler at full occupancy, common random numbers, correlated noise generation charged to it; floor/D_eq from the synthetic scene per the v1 wall methodology"
+}
