@@ -165,3 +165,26 @@ def selftest(seed=0, n_mc=400_000):
 
 if __name__ == "__main__":
     selftest()
+
+
+def fold_supports_fast(means, cov_self, C, u_idx, lam_fold=None):
+    """GPU-shaped equivalent of fold_supports for the real-window layout.
+
+    Uses the vectorized v1 recursion (clark_fold) for per-node (m, v, lam),
+    then the SSTA identity: Cov(sup_i, sup_j) = lam_i C lam_j' for i != j,
+    with Clark's exact variance on the diagonal. Returns (m, S). This is
+    the formulation the Warp port implements: never materialize node-space
+    S at O(n^2) when the cost only needs x-space -- callers can contract
+    G S G' as (G Lam) C (G Lam)' + G diag(v - lamClam) G'.
+    """
+    from spires.risk_calibration import clark_fold
+    m, v, lam = clark_fold(means, cov_self)
+    n, k = means.shape
+    # W[i, :] = lam_i gathered to unique-cell space
+    n_u = C.shape[0]
+    W = np.zeros((n, n_u))
+    rows = np.repeat(np.arange(n), k)
+    np.add.at(W, (rows, u_idx.ravel()), lam.ravel())
+    S = W @ C @ W.T
+    np.fill_diagonal(S, v)
+    return m, S

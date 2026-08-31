@@ -21,8 +21,14 @@ def _quad(m, S, G):
     return quadratic_moments(m, S, G.T @ G)
 
 
-def arm_clark(mu_all, C_all, node_slices, G, correction=None, alpha_w=None):
-    m, S = fold_supports(mu_all, C_all, node_slices)
+def arm_clark(mu_all, C_all, node_slices, G, correction=None, alpha_w=None,
+              fast=None):
+    if fast is not None:
+        from .v2_moments import fold_supports_fast
+        means, cov_self, C, u_idx = fast
+        m, S = fold_supports_fast(means, cov_self, C, u_idx)
+    else:
+        m, S = fold_supports(mu_all, C_all, node_slices)
     E, V = _quad(m, S, G)
     sd = np.sqrt(V)
     if correction is not None:
@@ -80,7 +86,7 @@ def sample_costs(mu_all, C_all, node_slices, G, n, seed, chunk=4096):
 
 
 def score_window(mu_all, C_all, node_slices, G, n_ref=20_000, seed=0,
-                 correction=None, alpha_w=None, q=0.9):
+                 correction=None, alpha_w=None, q=0.9, fast=None):
     """All eight arms + the referee for one window. Returns a dict in the
     v1 row idiom: per-arm (E, sd), referee stats, per-arm referee errors."""
     ref = sample_costs(mu_all, C_all, node_slices, G, n_ref, seed)
@@ -89,9 +95,10 @@ def score_window(mu_all, C_all, node_slices, G, n_ref=20_000, seed=0,
     cvar_mc = float(tail.mean())
 
     arms = {}
-    arms["clark"] = arm_clark(mu_all, C_all, node_slices, G)
-    arms["clark-corr"] = arm_clark(mu_all, C_all, node_slices, G,
-                                   correction=correction, alpha_w=alpha_w)
+    arms["clark"] = arm_clark(mu_all, C_all, node_slices, G, fast=fast)
+    E_c, sd_c = arms["clark"]
+    corr = float(correction(alpha_w)) if correction is not None else 1.0
+    arms["clark-corr"] = (E_c, sd_c * corr)
     arms["clark-diag"] = arm_clark_diag(mu_all, C_all, node_slices, G)
     arms["fosm"] = arm_fosm(mu_all, C_all, node_slices, G)
     arms["step-form"] = arm_step_form(mu_all, C_all, node_slices, G)

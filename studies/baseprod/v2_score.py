@@ -116,9 +116,12 @@ def case_v2(p: Path, n_ref: int = 20_000, seed: int = 0, correction=None) -> dic
     m_v2, _S = fold_supports(mu_all, Cflat, node_slices)
     assert np.max(np.abs(m_v1 - m_v2)) < 1e-6, "fold parity violated"  # metres
 
-    alpha_w = None  # cost-weighted alpha for the correction; filled by runner
+    from .v2_correction import window_alpha_from_arrays
+    alpha_w = window_alpha_from_arrays(means, cov_self, caps, c_eff, G)
     row = score_window(mu_all, Cflat, node_slices, G, n_ref=n_ref, seed=seed,
-                       correction=correction, alpha_w=alpha_w)
+                       correction=correction, alpha_w=alpha_w,
+                       fast=(means, cov_self, C, u_idx))
+    row["alpha_weighted_median"] = alpha_w
     base.update(row)
     return base
 
