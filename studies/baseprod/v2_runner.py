@@ -120,7 +120,8 @@ def _score_dir(tagdir: Path, n_ref: int, corr, fan_cfg=None):
     from .v2_score import case_v2
     from .v2_fan import fan as run_fan
     rows = []
-    for wp in sorted(tagdir.glob("*/window_*.npz")):
+    files = sorted(tagdir.glob("window_*.npz")) or sorted(tagdir.glob("*/window_*.npz"))
+    for wp in files:
         r = case_v2(wp, n_ref=n_ref, seed=abs(hash(wp.stem)) % 2 ** 31, correction=corr)
         if r is None:
             continue
@@ -153,7 +154,7 @@ def stage_dcheck():
     alphas, ratios = [], []
     for cond in CONDS:
         for name in DESIGN_TRAVERSES:
-            rows = _score_dir(window_dir(name, f"{cond}_v2").parent / window_dir(name, f"{cond}_v2").name, 50_000, None)
+            rows = _score_dir(window_dir(name, f"{cond}_v2"), 50_000, None)
             for r in rows:
                 if not (r.get("scoreable") and not r["flagged"]):
                     continue
@@ -252,8 +253,7 @@ def stage_escore():
             continue
         rows = []
         for name in kept:
-            rows.extend(_score_dir(window_dir(name, f"{cond}_v2").parent
-                                   / window_dir(name, f"{cond}_v2").name,
+            rows.extend(_score_dir(window_dir(name, f"{cond}_v2"),
                                    N_REF, corr, fan_cfg=FAN))
         outp.write_text(json.dumps(rows, indent=1))
         log(f"{cond}: {len(rows)} windows scored", "escore")
