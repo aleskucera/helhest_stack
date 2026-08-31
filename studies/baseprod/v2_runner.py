@@ -203,6 +203,8 @@ def stage_gate():
             missing.append(name)
             continue
         t, base = z["t"].astype(np.float64), z["base"]
+        if len(t) > 1 and float(np.median(np.diff(t))) > 1.0e3:
+            t = t * 1e-9          # registration stores nanoseconds
         dt = np.diff(t)
         ok = dt > 1e-3
         dzdt = np.abs(np.diff(base[:, 2])[ok] / dt[ok])
