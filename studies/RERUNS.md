@@ -22,3 +22,10 @@
   with alpha in ~0.5-2; below alpha* ~1 partial gating has a worst-window mean error of 15% (H).
 - Not for the paper's held-out claims. If a gated arm is scored on held-out data, alpha* must be
   fixed from this table first and the result labelled post hoc (or a new pre-registration).
+
+## 2026-09-11 post hoc readings of the frozen held-out record (review round; no new scoring)
+- studies/out/v2/posthoc_review.json from studies/baseprod/v2_posthoc_review.py, a function of
+  heldout_score_{foresight,hindsight}.json only: the reference CVaR's definition (empirical tail)
+  and its gap to the Gaussian form on the referee's own moments; the referee's relative standard
+  error (mean, sd); the hybrid arm (fold mean, linearization sd) CVaR error; Table II at two
+  significant figures; exact McNemar on the fans' top-1 hits (clark-corr vs fosm / mc-32 / mean-map).
