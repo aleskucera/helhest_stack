@@ -29,3 +29,17 @@
   and its gap to the Gaussian form on the referee's own moments; the referee's relative standard
   error (mean, sd); the hybrid arm (fold mean, linearization sd) CVaR error; Table II at two
   significant figures; exact McNemar on the fans' top-1 hits (clark-corr vs fosm / mc-32 / mean-map).
+
+## 2026-09-11 maximum-level calibration of the wheel support against the DSM (post hoc)
+- studies/out/v2/max_calibration/: max_calibration_summary.json, max_calibration_windows.json, run.log,
+  from studies/baseprod/v2_max_calibration.py (first run at this commit), on dasenka, all v2 windows
+  (design t1/t2 and held-out, labelled; the held-out truth was consumed by E2 pre-registered, this
+  reading is post hoc). Per node: true support (truth_max + cap, max over the element), the fold's
+  E and sd, the max of means, contest depth alpha. Per-traverse median of (truth - max of means)
+  removed (the registration's constant term carries the wheel radius).
+- Reading: the truth's lift over the max of means is within +-0.5 cm of zero in every alpha bin
+  below 3 on design and held-out, against a predicted Jensen lift of +0.6 to +0.8 cm at alpha < 0.25;
+  the bin means are negative (-1 to -6 cm at low alpha), the same regression-on-the-mean signature
+  as the simulated clearance campaign (clark_paper sim_campaign/rubble/clearance/investigate/).
+  Nodes at alpha > 3 (1-2 %) sit 0.15-0.9 m above the truth: phantom winners. Fold |z| <= 1
+  coverage 0.20-0.26 (the belief's variance, as E2 measured).

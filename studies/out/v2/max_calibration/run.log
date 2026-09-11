@@ -1,0 +1,849 @@
+763 windows, 20 workers
+[20:08:23] foresight 2023-07-21_12-38-15/window_001 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_003 flagged
+[20:08:23] foresight 2023-07-20_18-12-05/window_019 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_017 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_007 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_025 ok
+[20:08:23] foresight 2023-07-21_12-38-15/window_011 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_011 ok
+[20:08:23] foresight 2023-07-21_12-38-15/window_009 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_015 ok
+[20:08:23] foresight 2023-07-21_12-38-15/window_003 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_009 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_021 ok
+[20:08:23] foresight 2023-07-21_12-38-15/window_013 ok
+[20:08:23] foresight 2023-07-21_12-38-15/window_007 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_005 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_013 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_023 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_001 ok
+[20:08:23] foresight 2023-07-21_12-38-15/window_005 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_018 ok
+[20:08:23] foresight 2023-07-21_12-38-15/window_002 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_012 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_010 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_004 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_001 ok
+[20:08:23] foresight 2023-07-21_12-38-15/window_010 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_020 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_022 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_014 ok
+[20:08:23] foresight 2023-07-21_12-38-15/window_008 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_006 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_002 ok
+[20:08:23] foresight 2023-07-21_12-38-15/window_004 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_016 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_024 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_008 ok
+[20:08:23] foresight 2023-07-20_18-12-05/window_026 ok
+[20:08:23] foresight 2023-07-21_12-38-15/window_012 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_002 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_006 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_004 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_012 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_010 ok
+[20:08:23] foresight 2023-07-21_12-38-15/window_006 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_024 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_018 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_008 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_030 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_016 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_028 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_020 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_022 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_026 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_038 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_005 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_034 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_007 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_032 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_013 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_014 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_025 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_036 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_031 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_017 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_003 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_011 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_009 ok
+[20:08:23] foresight 2023-07-21_13-43-00/window_002 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_019 ok
+[20:08:23] foresight 2023-07-21_13-43-00/window_008 ok
+[20:08:23] foresight 2023-07-21_13-43-00/window_001 ok
+[20:08:23] foresight 2023-07-21_13-43-00/window_006 ok
+[20:08:23] foresight 2023-07-21_13-59-14/window_003 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_027 ok
+[20:08:23] foresight 2023-07-21_13-59-14/window_001 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_033 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_035 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_023 ok
+[20:08:23] foresight 2023-07-21_13-43-00/window_004 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_015 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_029 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_021 ok
+[20:08:23] foresight 2023-07-21_13-59-14/window_005 ok
+[20:08:23] foresight 2023-07-21_12-58-11/window_037 ok
+[20:08:23] foresight 2023-07-21_13-43-00/window_009 ok
+[20:08:23] foresight 2023-07-21_13-59-14/window_004 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_008 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_010 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_006 ok
+[20:08:23] foresight 2023-07-21_13-59-14/window_002 ok
+[20:08:23] foresight 2023-07-21_13-43-00/window_007 ok
+[20:08:23] foresight 2023-07-21_13-43-00/window_005 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_002 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_012 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_004 ok
+[20:08:23] foresight 2023-07-21_14-44-56/window_002 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_016 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_014 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_018 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_020 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_028 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_024 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_022 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_001 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_011 ok
+[20:08:23] foresight 2023-07-21_13-43-00/window_003 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_009 ok
+[20:08:23] foresight 2023-07-21_14-44-56/window_001 flagged
+[20:08:23] foresight 2023-07-21_17-07-00/window_003 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_005 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_026 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_001 ok
+[20:08:23] foresight 2023-07-21_14-44-56/window_003 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_015 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_013 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_003 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_017 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_009 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_019 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_023 flagged
+[20:08:23] foresight 2023-07-21_14-08-29/window_007 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_023 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_025 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_027 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_005 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_007 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_011 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_024 flagged
+[20:08:23] foresight 2023-07-21_17-07-00/window_002 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_004 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_017 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_006 ok
+[20:08:23] foresight 2023-07-21_14-08-29/window_021 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_021 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_019 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_013 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_010 ok
+[20:08:23] foresight 2023-07-21_17-34-18/window_003 ok
+[20:08:23] foresight 2023-07-21_17-34-18/window_001 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_015 ok
+[20:08:23] foresight 2023-07-21_17-34-18/window_005 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_007 ok
+[20:08:23] foresight 2023-07-21_17-34-18/window_002 flagged
+[20:08:23] foresight 2023-07-21_17-45-42/window_009 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_005 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_018 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_011 ok
+[20:08:23] foresight 2023-07-21_17-34-18/window_007 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_020 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_008 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_012 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_021 flagged
+[20:08:23] foresight 2023-07-21_17-45-42/window_015 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_013 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_022 ok
+[20:08:23] foresight 2023-07-21_17-34-18/window_004 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_001 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_017 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_008 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_003 ok
+[20:08:23] foresight 2023-07-21_17-34-18/window_006 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_016 ok
+[20:08:23] foresight 2023-07-21_17-07-00/window_014 ok
+[20:08:23] foresight 2023-07-22_13-00-57/window_006 flagged
+[20:08:23] foresight 2023-07-21_17-45-42/window_006 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_019 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_012 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_022 flagged
+[20:08:23] foresight 2023-07-21_17-45-42/window_023 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_010 ok
+[20:08:23] foresight 2023-07-21_17-34-18/window_008 ok
+[20:08:23] foresight 2023-07-22_13-00-57/window_004 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_016 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_014 ok
+[20:08:23] foresight 2023-07-22_13-00-57/window_007 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_003 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_001 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_005 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_002 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_025 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_007 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_011 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_018 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_004 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_020 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_013 ok
+[20:08:23] foresight 2023-07-22_13-00-57/window_002 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_015 ok
+[20:08:23] foresight 2023-07-21_17-45-42/window_024 ok
+[20:08:23] foresight 2023-07-22_13-00-57/window_005 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_009 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_019 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_021 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_017 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_012 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_006 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_004 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_002 ok
+[20:08:23] foresight 2023-07-22_13-00-57/window_001 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_008 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_005 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_003 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_009 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_001 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_016 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_014 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_013 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_007 ok
+[20:08:23] foresight 2023-07-22_13-00-57/window_003 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_011 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_022 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_010 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_015 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_010 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_004 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_014 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_029 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_020 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_027 ok
+[20:08:23] foresight 2023-07-22_13-28-55/window_018 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_017 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_023 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_002 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_006 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_021 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_019 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_012 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_033 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_025 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_031 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_037 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_008 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_035 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_041 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_039 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_016 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_028 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_047 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_018 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_020 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_022 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_024 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_049 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_030 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_051 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_045 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_034 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_038 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_040 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_003 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_036 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_042 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_026 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_032 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_001 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_005 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_043 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_048 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_007 ok
+[20:08:23] foresight 2023-07-22_17-31-58/window_001 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_001 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_011 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_050 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_009 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_005 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_003 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_013 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_004 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_009 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_011 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_007 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_006 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_008 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_019 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_017 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_012 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_002 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_002 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_015 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_013 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_044 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_006 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_010 ok
+[20:08:23] foresight 2023-07-22_16-24-27/window_046 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_021 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_004 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_002 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_008 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_012 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_010 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_004 ok
+[20:08:23] foresight 2023-07-22_17-38-50/window_014 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_020 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_010 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_008 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_016 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_006 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_018 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_012 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_014 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_020 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_014 ok
+[20:08:23] foresight 2023-07-23_11-23-18/window_016 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_018 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_003 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_005 ok
+[20:08:23] foresight 2023-07-23_12-52-39/window_007 ok
+[20:08:23] foresight 2023-07-23_12-52-39/window_005 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_001 ok
+[20:08:23] foresight 2023-07-23_12-52-39/window_003 ok
+[20:08:23] foresight t1/window_002 ok
+[20:08:23] foresight 2023-07-23_12-52-39/window_001 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_009 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_011 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_017 ok
+[20:08:23] foresight t1/window_004 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_007 ok
+[20:08:23] foresight 2023-07-23_12-52-39/window_004 ok
+[20:08:23] foresight t1/window_008 ok
+[20:08:23] foresight t1/window_012 ok
+[20:08:23] foresight 2023-07-23_12-52-39/window_009 ok
+[20:08:23] foresight 2023-07-23_12-52-39/window_008 ok
+[20:08:23] foresight 2023-07-23_12-52-39/window_006 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_013 ok
+[20:08:23] foresight t1/window_003 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_015 ok
+[20:08:23] foresight t2/window_002 ok
+[20:08:23] foresight t1/window_010 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_021 ok
+[20:08:23] foresight t2/window_004 ok
+[20:08:23] foresight 2023-07-23_11-52-09/window_019 ok
+[20:08:23] foresight t2/window_006 ok
+[20:08:23] foresight t1/window_006 ok
+[20:08:23] foresight t2/window_010 ok
+[20:08:23] foresight t2/window_008 ok
+[20:08:23] foresight t1/window_005 ok
+[20:08:23] foresight t1/window_011 ok
+[20:08:23] foresight t1/window_001 ok
+[20:08:23] foresight t2/window_001 ok
+[20:08:23] foresight t2/window_016 ok
+[20:08:23] foresight 2023-07-23_12-52-39/window_002 ok
+[20:08:23] foresight t2/window_005 ok
+[20:08:23] foresight t2/window_003 ok
+[20:08:23] foresight t2/window_007 ok
+[20:08:23] foresight t2/window_012 ok
+[20:08:23] foresight t2/window_014 ok
+[20:08:23] foresight t1/window_009 ok
+[20:08:23] foresight t2/window_018 ok
+[20:08:23] foresight t2/window_020 ok
+[20:08:23] foresight t1/window_007 ok
+[20:08:23] foresight t2/window_009 ok
+[20:08:23] foresight t2/window_011 ok
+[20:08:23] foresight t2/window_022 ok
+[20:08:23] foresight t2/window_024 ok
+[20:08:23] foresight t2/window_026 ok
+[20:08:23] foresight t2/window_028 ok
+[20:08:23] foresight t2/window_032 ok
+[20:08:23] foresight t2/window_030 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_003 ok
+[20:08:23] foresight t2/window_013 ok
+[20:08:23] foresight t2/window_034 ok
+[20:08:23] foresight t2/window_021 ok
+[20:08:23] foresight t2/window_015 ok
+[20:08:23] foresight t2/window_017 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_011 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_005 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_001 ok
+[20:08:23] foresight t2/window_027 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_013 ok
+[20:08:23] foresight t2/window_025 ok
+[20:08:23] foresight t2/window_019 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_015 ok
+[20:08:23] foresight t2/window_023 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_000 flagged
+[20:08:23] foresight t2/window_029 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_007 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_009 ok
+[20:08:23] foresight t2/window_031 ok
+[20:08:23] foresight t2/window_033 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_004 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_000 flagged
+[20:08:23] hindsight 2023-07-20_18-12-05/window_012 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_000 flagged
+[20:08:23] hindsight 2023-07-20_18-12-05/window_017 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_014 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_019 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_002 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_025 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_010 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_016 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_021 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_008 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_006 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_004 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_002 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_001 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_002 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_008 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_012 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_001 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_006 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_004 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_010 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_018 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_023 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_020 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_008 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_010 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_006 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_022 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_009 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_026 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_013 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_005 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_014 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_003 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_005 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_012 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_022 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_024 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_018 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_011 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_003 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_009 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_007 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_028 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_016 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_020 ok
+[20:08:23] hindsight 2023-07-21_12-38-15/window_011 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_015 ok
+[20:08:23] hindsight 2023-07-20_18-12-05/window_024 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_026 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_034 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_032 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_007 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_036 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_023 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_030 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_017 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_025 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_038 ok
+[20:08:23] hindsight 2023-07-21_13-43-00/window_001 ok
+[20:08:23] hindsight 2023-07-21_13-43-00/window_000 flagged
+[20:08:23] hindsight 2023-07-21_12-58-11/window_013 ok
+[20:08:23] hindsight 2023-07-21_13-43-00/window_009 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_029 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_027 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_019 ok
+[20:08:23] hindsight 2023-07-21_13-59-14/window_000 flagged
+[20:08:23] hindsight 2023-07-21_12-58-11/window_037 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_035 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_021 ok
+[20:08:23] hindsight 2023-07-21_13-43-00/window_007 ok
+[20:08:23] hindsight 2023-07-21_13-43-00/window_005 ok
+[20:08:23] hindsight 2023-07-21_13-43-00/window_003 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_033 ok
+[20:08:23] hindsight 2023-07-21_13-59-14/window_005 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_000 flagged
+[20:08:23] hindsight 2023-07-21_13-59-14/window_001 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_003 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_001 ok
+[20:08:23] hindsight 2023-07-21_13-59-14/window_003 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_005 ok
+[20:08:23] hindsight 2023-07-21_12-58-11/window_031 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_015 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_017 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_011 ok
+[20:08:23] hindsight 2023-07-21_13-43-00/window_002 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_009 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_007 ok
+[20:08:23] hindsight 2023-07-21_13-43-00/window_006 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_004 ok
+[20:08:23] hindsight 2023-07-21_13-43-00/window_004 ok
+[20:08:23] hindsight 2023-07-21_13-59-14/window_002 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_013 ok
+[20:08:23] hindsight 2023-07-21_14-44-56/window_000 flagged
+[20:08:23] hindsight 2023-07-21_14-08-29/window_025 ok
+[20:08:23] hindsight 2023-07-21_13-43-00/window_008 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_019 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_021 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_023 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_002 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_000 flagged
+[20:08:23] hindsight 2023-07-21_13-59-14/window_004 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_006 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_018 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_016 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_012 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_027 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_008 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_010 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_002 ok
+[20:08:23] hindsight 2023-07-21_14-44-56/window_002 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_001 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_026 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_012 ok
+[20:08:23] hindsight 2023-07-21_14-44-56/window_001 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_004 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_024 flagged
+[20:08:23] hindsight 2023-07-21_14-08-29/window_022 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_008 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_014 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_020 ok
+[20:08:23] hindsight 2023-07-21_17-34-18/window_000 flagged
+[20:08:23] hindsight 2023-07-21_14-08-29/window_024 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_014 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_010 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_016 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_006 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_000 flagged
+[20:08:23] hindsight 2023-07-21_17-07-00/window_018 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_003 ok
+[20:08:23] hindsight 2023-07-21_14-44-56/window_003 ok
+[20:08:23] hindsight 2023-07-21_14-08-29/window_028 ok
+[20:08:23] hindsight 2023-07-21_17-34-18/window_005 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_020 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_022 ok
+[20:08:23] hindsight 2023-07-21_17-34-18/window_001 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_013 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_005 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_009 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_023 flagged
+[20:08:23] hindsight 2023-07-21_17-07-00/window_015 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_004 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_011 ok
+[20:08:23] hindsight 2023-07-21_17-34-18/window_003 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_001 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_002 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_017 ok
+[20:08:23] hindsight 2023-07-21_17-34-18/window_007 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_008 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_019 ok
+[20:08:23] hindsight 2023-07-22_13-00-57/window_000 flagged
+[20:08:23] hindsight 2023-07-21_17-45-42/window_006 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_012 ok
+[20:08:23] hindsight 2023-07-21_17-07-00/window_021 ok
+[20:08:23] hindsight 2023-07-21_17-34-18/window_006 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_014 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_010 ok
+[20:08:23] hindsight 2023-07-22_13-00-57/window_006 flagged
+[20:08:23] hindsight 2023-07-21_17-07-00/window_007 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_016 ok
+[20:08:23] hindsight 2023-07-21_17-34-18/window_002 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_020 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_018 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_005 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_003 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_022 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_000 flagged
+[20:08:23] hindsight 2023-07-22_13-00-57/window_001 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_024 ok
+[20:08:23] hindsight 2023-07-22_13-00-57/window_004 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_007 ok
+[20:08:23] hindsight 2023-07-21_17-34-18/window_008 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_009 ok
+[20:08:23] hindsight 2023-07-22_13-00-57/window_007 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_013 ok
+[20:08:23] hindsight 2023-07-22_13-00-57/window_002 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_015 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_017 ok
+[20:08:23] hindsight 2023-07-21_17-34-18/window_004 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_021 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_011 ok
+[20:08:23] hindsight 2023-07-22_13-00-57/window_005 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_019 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_002 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_006 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_004 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_025 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_012 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_010 ok
+[20:08:23] hindsight 2023-07-21_17-45-42/window_023 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_008 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_014 ok
+[20:08:23] hindsight 2023-07-22_13-00-57/window_003 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_001 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_016 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_018 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_020 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_022 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_003 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_009 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_000 flagged
+[20:08:23] hindsight 2023-07-22_13-28-55/window_011 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_007 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_005 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_005 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_003 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_013 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_001 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_011 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_007 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_019 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_021 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_013 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_009 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_015 ok
+[20:08:23] hindsight 2023-07-22_13-28-55/window_017 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_015 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_019 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_004 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_017 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_010 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_021 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_008 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_027 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_006 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_023 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_012 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_025 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_031 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_029 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_033 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_014 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_002 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_039 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_037 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_022 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_035 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_041 ok
+[20:08:23] hindsight 2023-07-22_17-31-58/window_000 flagged
+[20:08:23] hindsight 2023-07-22_16-24-27/window_049 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_028 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_020 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_018 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_000 flagged
+[20:08:23] hindsight 2023-07-22_16-24-27/window_045 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_024 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_043 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_016 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_034 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_047 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_032 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_030 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_026 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_040 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_038 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_008 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_050 ok
+[20:08:23] hindsight 2023-07-22_17-31-58/window_001 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_042 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_001 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_051 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_004 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_044 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_002 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_046 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_036 ok
+[20:08:23] hindsight 2023-07-22_17-18-36/window_000 flagged
+[20:08:23] hindsight 2023-07-23_11-23-18/window_001 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_014 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_006 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_003 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_005 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_007 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_000 flagged
+[20:08:23] hindsight 2023-07-22_17-38-50/window_012 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_010 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_009 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_009 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_011 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_013 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_015 ok
+[20:08:23] hindsight 2023-07-22_16-24-27/window_048 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_005 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_003 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_019 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_017 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_021 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_002 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_006 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_001 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_007 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_004 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_008 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_000 unscoreable
+[20:08:23] hindsight 2023-07-23_11-52-09/window_003 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_010 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_011 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_012 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_016 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_014 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_005 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_013 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_009 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_018 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_007 ok
+[20:08:23] hindsight 2023-07-22_17-38-50/window_011 ok
+[20:08:23] hindsight 2023-07-23_11-23-18/window_020 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_015 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_017 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_013 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_019 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_021 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_010 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_012 ok
+[20:08:23] hindsight 2023-07-23_12-52-39/window_003 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_004 ok
+[20:08:23] hindsight 2023-07-23_12-52-39/window_009 ok
+[20:08:23] hindsight 2023-07-23_12-52-39/window_000 flagged
+[20:08:23] hindsight 2023-07-23_12-52-39/window_005 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_002 ok
+[20:08:23] hindsight 2023-07-23_12-52-39/window_001 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_006 ok
+[20:08:23] hindsight 2023-07-23_12-52-39/window_007 ok
+[20:08:23] hindsight t2/window_000 unscoreable
+[20:08:23] hindsight t1/window_000 flagged
+[20:08:23] hindsight t1/window_003 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_008 ok
+[20:08:23] hindsight t1/window_007 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_016 ok
+[20:08:23] hindsight t1/window_001 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_014 ok
+[20:08:23] hindsight 2023-07-23_12-52-39/window_004 ok
+[20:08:23] hindsight t1/window_005 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_020 ok
+[20:08:23] hindsight 2023-07-23_11-52-09/window_018 ok
+[20:08:23] hindsight t1/window_011 ok
+[20:08:23] hindsight t1/window_009 ok
+[20:08:23] hindsight 2023-07-23_12-52-39/window_006 ok
+[20:08:23] hindsight 2023-07-23_12-52-39/window_008 ok
+[20:08:23] hindsight t2/window_006 ok
+[20:08:23] hindsight t2/window_010 ok
+[20:08:23] hindsight t1/window_004 ok
+[20:08:23] hindsight t1/window_008 ok
+[20:08:23] hindsight t2/window_001 ok
+[20:08:23] hindsight t2/window_002 ok
+[20:08:23] hindsight t2/window_008 ok
+[20:08:23] hindsight 2023-07-23_12-52-39/window_002 ok
+[20:08:23] hindsight t2/window_012 ok
+[20:08:23] hindsight t1/window_012 ok
+[20:08:23] hindsight t2/window_004 ok
+[20:08:23] hindsight t1/window_006 ok
+[20:08:23] hindsight t1/window_002 ok
+[20:08:23] hindsight t2/window_011 ok
+[20:08:23] hindsight t1/window_010 ok
+[20:08:23] hindsight t2/window_009 ok
+[20:08:23] hindsight t2/window_007 ok
+[20:08:23] hindsight t2/window_003 ok
+[20:08:23] hindsight t2/window_026 ok
+[20:08:23] hindsight t2/window_028 ok
+[20:08:23] hindsight t2/window_032 ok
+[20:08:23] hindsight t2/window_013 ok
+[20:08:23] hindsight t2/window_018 ok
+[20:08:23] hindsight t2/window_034 ok
+[20:08:23] hindsight t2/window_014 ok
+[20:08:23] hindsight t2/window_016 ok
+[20:08:23] hindsight t2/window_005 ok
+[20:08:23] hindsight t2/window_020 ok
+[20:08:23] hindsight t2/window_022 ok
+[20:08:23] hindsight t2/window_024 ok
+[20:08:23] hindsight t2/window_030 ok
+[20:08:23] hindsight t2/window_033 ok
+[20:08:23] hindsight t2/window_027 ok
+[20:08:23] hindsight t2/window_029 ok
+[20:08:23] hindsight t2/window_023 ok
+[20:08:23] hindsight t2/window_017 ok
+[20:08:23] hindsight t2/window_019 ok
+[20:08:23] hindsight t2/window_015 ok
+[20:08:23] hindsight t2/window_021 ok
+[20:08:23] hindsight t2/window_025 ok
+[20:08:23] hindsight t2/window_031 ok
+
+== design/foresight: 46 windows, 17916 nodes (truth support - forecast)
+  fold E:        mean -0.0266 median -0.0039 sd 0.1301; z -0.51, |z|<=1 0.26, P(truth above) 0.46
+  max of means:  mean -0.0215 median +0.0000 sd 0.1273; z(winner sd) -0.18, P(truth above) 0.50
+  predicted lift median +0.0033; truth lift over max of means median +0.0000
+    alpha [0,0.25) n=  3238: predicted lift +0.0084, truth lift median +0.0039 mean -0.0252; fold err -0.0376 z -0.75 |z|<=1 0.25
+    alpha [0.25,0.5) n=  3610: predicted lift +0.0056, truth lift median +0.0004 mean -0.0125; fold err -0.0199 z -0.47 |z|<=1 0.25
+    alpha [0.5,0.75) n=  3160: predicted lift +0.0035, truth lift median +0.0013 mean -0.0108; fold err -0.0152 z -0.38 |z|<=1 0.27
+    alpha [0.75,1) n=  2319: predicted lift +0.0022, truth lift median -0.0045 mean -0.0184; fold err -0.0213 z -0.67 |z|<=1 0.28
+    alpha [1,1.5) n=  2547: predicted lift +0.0011, truth lift median -0.0012 mean -0.0100; fold err -0.0114 z -0.19 |z|<=1 0.24
+    alpha [1.5,2) n=  1859: predicted lift +0.0003, truth lift median +0.0035 mean -0.0084; fold err -0.0088 z +0.07 |z|<=1 0.25
+    alpha [2,3) n=   967: predicted lift +0.0001, truth lift median -0.0006 mean -0.0275; fold err -0.0276 z -0.51 |z|<=1 0.26
+    alpha [3,5) n=    96: predicted lift +0.0000, truth lift median -0.2159 mean -0.2644; fold err -0.2644 z -4.26 |z|<=1 0.01
+    alpha [5,1e+09) n=   120: predicted lift +0.0000, truth lift median -0.7599 mean -0.7388; fold err -0.7388 z -8.78 |z|<=1 0.01
+
+== design/hindsight: 46 windows, 21192 nodes (truth support - forecast)
+  fold E:        mean -0.0234 median -0.0025 sd 0.1307; z -0.34, |z|<=1 0.23, P(truth above) 0.47
+  max of means:  mean -0.0202 median +0.0000 sd 0.1280; z(winner sd) -0.09, P(truth above) 0.50
+  predicted lift median +0.0022; truth lift over max of means median +0.0000
+    alpha [0,0.25) n=  2995: predicted lift +0.0056, truth lift median +0.0013 mean -0.0308; fold err -0.0404 z -0.54 |z|<=1 0.20
+    alpha [0.25,0.5) n=  3310: predicted lift +0.0039, truth lift median +0.0002 mean -0.0138; fold err -0.0189 z -0.38 |z|<=1 0.23
+    alpha [0.5,0.75) n=  3691: predicted lift +0.0028, truth lift median -0.0022 mean -0.0121; fold err -0.0154 z -0.42 |z|<=1 0.24
+    alpha [0.75,1) n=  3094: predicted lift +0.0019, truth lift median -0.0027 mean -0.0106; fold err -0.0128 z -0.42 |z|<=1 0.25
+    alpha [1,1.5) n=  3136: predicted lift +0.0010, truth lift median -0.0010 mean -0.0095; fold err -0.0106 z -0.10 |z|<=1 0.26
+    alpha [1.5,2) n=  2789: predicted lift +0.0003, truth lift median +0.0071 mean -0.0016; fold err -0.0019 z +0.41 |z|<=1 0.24
+    alpha [2,3) n=  1863: predicted lift +0.0001, truth lift median +0.0041 mean -0.0128; fold err -0.0129 z +0.10 |z|<=1 0.25
+    alpha [3,5) n=   162: predicted lift +0.0000, truth lift median -0.0618 mean -0.1478; fold err -0.1478 z -2.90 |z|<=1 0.07
+    alpha [5,1e+09) n=   152: predicted lift +0.0000, truth lift median -0.8845 mean -0.8539; fold err -0.8539 z -12.72 |z|<=1 0.01
+
+== heldout/foresight: 317 windows, 119520 nodes (truth support - forecast)
+  fold E:        mean -0.0354 median -0.0041 sd 0.1978; z -0.74, |z|<=1 0.21, P(truth above) 0.46
+  max of means:  mean -0.0303 median +0.0000 sd 0.1953; z(winner sd) -0.36, P(truth above) 0.50
+  predicted lift median +0.0033; truth lift over max of means median +0.0000
+    alpha [0,0.25) n= 19646: predicted lift +0.0080, truth lift median -0.0002 mean -0.0550; fold err -0.0675 z -1.88 |z|<=1 0.20
+    alpha [0.25,0.5) n= 24989: predicted lift +0.0057, truth lift median +0.0020 mean -0.0236; fold err -0.0310 z -0.81 |z|<=1 0.22
+    alpha [0.5,0.75) n= 25350: predicted lift +0.0035, truth lift median +0.0031 mean -0.0097; fold err -0.0139 z -0.16 |z|<=1 0.21
+    alpha [0.75,1) n= 18695: predicted lift +0.0022, truth lift median +0.0013 mean -0.0117; fold err -0.0143 z -0.04 |z|<=1 0.22
+    alpha [1,1.5) n= 15769: predicted lift +0.0012, truth lift median +0.0002 mean -0.0151; fold err -0.0165 z -0.14 |z|<=1 0.20
+    alpha [1.5,2) n=  8957: predicted lift +0.0003, truth lift median -0.0047 mean -0.0157; fold err -0.0161 z -0.42 |z|<=1 0.21
+    alpha [2,3) n=  4514: predicted lift +0.0001, truth lift median -0.0136 mean -0.0495; fold err -0.0496 z -1.50 |z|<=1 0.19
+    alpha [3,5) n=   792: predicted lift +0.0000, truth lift median -0.1841 mean -0.2694; fold err -0.2694 z -5.82 |z|<=1 0.06
+    alpha [5,1e+09) n=   808: predicted lift +0.0000, truth lift median -0.9050 mean -0.8252; fold err -0.8252 z -11.61 |z|<=1 0.01
+
+== heldout/hindsight: 322 windows, 147084 nodes (truth support - forecast)
+  fold E:        mean -0.0307 median -0.0026 sd 0.1886; z -0.44, |z|<=1 0.20, P(truth above) 0.47
+  max of means:  mean -0.0272 median +0.0000 sd 0.1862; z(winner sd) -0.18, P(truth above) 0.50
+  predicted lift median +0.0023; truth lift over max of means median +0.0000
+    alpha [0,0.25) n= 18878: predicted lift +0.0056, truth lift median -0.0002 mean -0.0599; fold err -0.0698 z -1.57 |z|<=1 0.17
+    alpha [0.25,0.5) n= 23112: predicted lift +0.0040, truth lift median +0.0017 mean -0.0298; fold err -0.0354 z -0.78 |z|<=1 0.19
+    alpha [0.5,0.75) n= 28596: predicted lift +0.0028, truth lift median +0.0023 mean -0.0117; fold err -0.0151 z -0.10 |z|<=1 0.20
+    alpha [0.75,1) n= 28128: predicted lift +0.0019, truth lift median +0.0028 mean -0.0049; fold err -0.0071 z +0.34 |z|<=1 0.21
+    alpha [1,1.5) n= 23205: predicted lift +0.0011, truth lift median +0.0017 mean -0.0094; fold err -0.0107 z +0.21 |z|<=1 0.20
+    alpha [1.5,2) n= 13625: predicted lift +0.0003, truth lift median -0.0031 mean -0.0116; fold err -0.0119 z -0.18 |z|<=1 0.21
+    alpha [2,3) n=  9416: predicted lift +0.0001, truth lift median -0.0078 mean -0.0252; fold err -0.0253 z -0.88 |z|<=1 0.24
+    alpha [3,5) n=  1100: predicted lift +0.0000, truth lift median -0.1647 mean -0.2477; fold err -0.2477 z -5.60 |z|<=1 0.05
+    alpha [5,1e+09) n=  1024: predicted lift +0.0000, truth lift median -0.8948 mean -0.8039; fold err -0.8039 z -11.63 |z|<=1 0.01
+
+== all/foresight: 363 windows, 137436 nodes (truth support - forecast)
+  fold E:        mean -0.0343 median -0.0041 sd 0.1904; z -0.71, |z|<=1 0.21, P(truth above) 0.46
+  max of means:  mean -0.0291 median +0.0000 sd 0.1879; z(winner sd) -0.34, P(truth above) 0.50
+  predicted lift median +0.0033; truth lift over max of means median +0.0000
+    alpha [0,0.25) n= 22884: predicted lift +0.0081, truth lift median +0.0005 mean -0.0508; fold err -0.0633 z -1.72 |z|<=1 0.21
+    alpha [0.25,0.5) n= 28599: predicted lift +0.0057, truth lift median +0.0017 mean -0.0222; fold err -0.0296 z -0.76 |z|<=1 0.22
+    alpha [0.5,0.75) n= 28510: predicted lift +0.0035, truth lift median +0.0028 mean -0.0098; fold err -0.0141 z -0.18 |z|<=1 0.22
+    alpha [0.75,1) n= 21014: predicted lift +0.0022, truth lift median +0.0006 mean -0.0124; fold err -0.0151 z -0.11 |z|<=1 0.23
+    alpha [1,1.5) n= 18316: predicted lift +0.0012, truth lift median +0.0000 mean -0.0144; fold err -0.0158 z -0.15 |z|<=1 0.21
+    alpha [1.5,2) n= 10816: predicted lift +0.0003, truth lift median -0.0032 mean -0.0144; fold err -0.0148 z -0.34 |z|<=1 0.21
+    alpha [2,3) n=  5481: predicted lift +0.0001, truth lift median -0.0109 mean -0.0456; fold err -0.0458 z -1.33 |z|<=1 0.20
+    alpha [3,5) n=   888: predicted lift +0.0000, truth lift median -0.1845 mean -0.2688; fold err -0.2688 z -5.65 |z|<=1 0.05
+    alpha [5,1e+09) n=   928: predicted lift +0.0000, truth lift median -0.8854 mean -0.8140; fold err -0.8140 z -11.24 |z|<=1 0.01
+
+== all/hindsight: 368 windows, 168276 nodes (truth support - forecast)
+  fold E:        mean -0.0298 median -0.0026 sd 0.1823; z -0.43, |z|<=1 0.20, P(truth above) 0.47
+  max of means:  mean -0.0263 median +0.0000 sd 0.1799; z(winner sd) -0.17, P(truth above) 0.50
+  predicted lift median +0.0023; truth lift over max of means median +0.0000
+    alpha [0,0.25) n= 21873: predicted lift +0.0056, truth lift median +0.0000 mean -0.0559; fold err -0.0658 z -1.43 |z|<=1 0.17
+    alpha [0.25,0.5) n= 26422: predicted lift +0.0040, truth lift median +0.0014 mean -0.0278; fold err -0.0334 z -0.73 |z|<=1 0.19
+    alpha [0.5,0.75) n= 32287: predicted lift +0.0028, truth lift median +0.0017 mean -0.0117; fold err -0.0151 z -0.14 |z|<=1 0.20
+    alpha [0.75,1) n= 31222: predicted lift +0.0019, truth lift median +0.0020 mean -0.0055; fold err -0.0077 z +0.26 |z|<=1 0.21
+    alpha [1,1.5) n= 26341: predicted lift +0.0011, truth lift median +0.0013 mean -0.0094; fold err -0.0107 z +0.18 |z|<=1 0.21
+    alpha [1.5,2) n= 16414: predicted lift +0.0003, truth lift median -0.0013 mean -0.0099; fold err -0.0102 z -0.08 |z|<=1 0.22
+    alpha [2,3) n= 11279: predicted lift +0.0001, truth lift median -0.0058 mean -0.0231; fold err -0.0232 z -0.72 |z|<=1 0.24
+    alpha [3,5) n=  1262: predicted lift +0.0000, truth lift median -0.1519 mean -0.2349; fold err -0.2349 z -5.25 |z|<=1 0.06
+    alpha [5,1e+09) n=  1176: predicted lift +0.0000, truth lift median -0.8935 mean -0.8103; fold err -0.8103 z -11.77 |z|<=1 0.01
+wrote out/v2/max_calibration
