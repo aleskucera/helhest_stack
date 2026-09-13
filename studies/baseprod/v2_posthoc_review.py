@@ -15,6 +15,10 @@ a function of fields the runner already wrote.
   4. Table II with two significant figures on the medians.
   5. paired decision test: exact McNemar (two-sided binomial on the
      discordant fans) of clark-corr's top-1 hit against fosm, mc-32, mean-map.
+  6. threshold verdicts: at thresholds tau set to the reference CVaR's
+     quartiles and 90th percentile, the fraction of segments on which an
+     arm's safe/unsafe verdict (cvar_arm < tau) disagrees with the
+     reference's, split into unsafe-called-safe and safe-called-unsafe.
 
     PYTHONPATH=studies python -m baseprod.v2_posthoc_review [out_dir]
 """
@@ -98,6 +102,15 @@ def main(out_dir: Path):
             mc[f"clark-corr_vs_{other}"] = {"ours_only": n10, "theirs_only": n01,
                                             "mcnemar_exact_p": binom_two_sided(min(n10, n01), n10 + n01)}
         d["decision_paired"] = mc
+        taus = {q: float(np.quantile(cv, q)) for q in (0.25, 0.5, 0.75, 0.9)}
+        tv = {"thresholds": taus, "arms": {}}
+        for a in ARMS:
+            arm = np.array([r["arms"][a]["cvar_arm"] for r in rows])
+            tv["arms"][a] = {str(q): {"disagree": float(np.mean((arm < t) != (cv < t))),
+                                      "unsafe_called_safe": float(np.mean((arm < t) & (cv >= t))),
+                                      "safe_called_unsafe": float(np.mean((arm >= t) & (cv < t)))}
+                             for q, t in taus.items()}
+        d["threshold_verdicts"] = tv
         out[cond] = d
     (out_dir / "posthoc_review.json").write_text(json.dumps(out, indent=1))
     for cond in ("foresight", "hindsight"):
@@ -112,6 +125,9 @@ def main(out_dir: Path):
         print("  table:", {a: (round(v["median"], 4), round(v["p95"], 3)) for a, v in d["table_cvar"].items()})
         print("  ratios:", {k: round(v, 3) for k, v in d["ratios"].items()})
         print("  decisions:", d["decision_paired"])
+        print("  threshold verdict disagreement (q25/q50/q75/q90):",
+              {a: [round(v[str(q)]["disagree"], 3) for q in (0.25, 0.5, 0.75, 0.9)]
+               for a, v in d["threshold_verdicts"]["arms"].items()})
     print("wrote", out_dir / "posthoc_review.json")
 
 
