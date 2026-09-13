@@ -47,7 +47,10 @@ def binom_two_sided(k: int, n: int) -> float:
     if n == 0:
         return 1.0
     pk = [comb(n, i) / 2 ** n for i in range(n + 1)]
-    return min(1.0, sum(p for p in pk if p <= pk[k] + 1e-15))
+    # relative tolerance: an absolute 1e-15 admitted every outcome up to 1e-15
+    # when the observed tail was far below it (methodology review 2026-09-13,
+    # F-11: hindsight hybrid sign test 2.4e-15 reported, 2.3e-18 exact)
+    return min(1.0, sum(p for p in pk if p <= pk[k] * (1.0 + 1e-9)))
 
 
 def p95(x):

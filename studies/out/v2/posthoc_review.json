@@ -1,6 +1,6 @@
 {
  "_meta": {
-  "written": "2026-09-13 15:48:46",
+  "written": "2026-09-13 18:45:26",
   "lambda_q": 1.754983319324869,
   "q": 0.9,
   "source": "heldout_score_{foresight,hindsight}.json (unflagged, scoreable rows)"
@@ -365,7 +365,7 @@
    },
    "clark-corr_lower_in": 239,
    "hybrid_lower_in": 84,
-   "sign_test_p": 2.3990443320086036e-15
+   "sign_test_p": 2.254420106940939e-18
   },
   "table_cvar": {
    "clark-corr": {

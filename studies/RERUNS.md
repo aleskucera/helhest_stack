@@ -91,3 +91,11 @@
   8.5e-4, fosm 2.4e-2 / 1.5e-2), sd/MC 1.42 / 1.26, CVaR abs err median 0.027 / 0.016 (p95 1.22 / 1.03)
   against clark-corr 0.0045 / 0.0019 and fosm 0.013 / 0.0075. clark-corr beats the standard UT in
   362 / 363 and 363 / 368 windows on E and in every window on sd and CVaR.
+
+## 2026-09-13 lineage note: the GPU wall benchmark
+- The 5.5 us/plan, 5.8x, 0.4x, ~5,000-draw and 290x figures of the paper's Section III-I come from
+  helhest_stack-study studies/out/v2_att_wall_3090.json @ db0491f (studies/bench/v2_att_wall.py,
+  RTX 3090, P = 256, T = 40, cell 0.10 m), a third repository; the 290x is the sampler's price at
+  its 4,096-draw cap, and the equal-accuracy count 4,946 is the 1/sqrt(D) extrapolation.
+- 2026-09-13: v2_posthoc_review.py binom_two_sided tolerance made relative (F-11 of the methodology
+  review); the hindsight hybrid sign-test p changes from 2.4e-15 to 2.3e-18; no other number moves.
