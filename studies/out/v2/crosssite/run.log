@@ -1,0 +1,155 @@
+111 windows, 6 workers
+[16:59:13] keble-college-02-default/window_000 flagged sigma
+[17:00:39] keble-college-02-default/window_001 flagged sigma
+[17:00:57] keble-college-02-default/window_004 flagged sigma
+[17:01:02] keble-college-02-default/window_002 flagged sigma
+[17:01:02] keble-college-02-default/window_003 flagged sigma
+[17:01:31] keble-college-02-default/window_005 flagged sigma
+[17:02:11] keble-college-02-default/window_009 flagged sigma
+[17:02:16] keble-college-02-default/window_010 flagged sigma
+[17:02:21] keble-college-02-default/window_008 flagged sigma
+[17:02:34] keble-college-02-default/window_006 flagged sigma
+[17:03:13] keble-college-02-default/window_014 flagged sigma
+[17:03:20] keble-college-02-default/window_011 flagged sigma
+[17:03:45] keble-college-02-default/window_007 flagged sigma
+[17:04:07] keble-college-03-default/window_000 flagged sigma
+[17:04:08] keble-college-02-default/window_013 flagged sigma
+[17:04:44] keble-college-03-default/window_003 flagged sigma
+[17:04:44] keble-college-03-default/window_005 flagged sigma
+[17:04:44] keble-college-03-default/window_002 flagged sigma
+[17:05:07] keble-college-03-default/window_004 flagged sigma
+[17:05:08] keble-college-02-default/window_012 flagged sigma
+[17:05:50] keble-college-03-default/window_006 flagged sigma
+[17:06:40] keble-college-03-default/window_001 flagged sigma
+[17:08:04] keble-college-03-default/window_007 flagged sigma
+[17:08:32] keble-college-03-default/window_008 flagged sigma
+[17:08:39] keble-college-03-default/window_009 flagged sigma
+[17:08:43] keble-college-03-default/window_010 flagged sigma
+[17:09:08] keble-college-03-default/window_011 flagged sigma
+[17:09:40] keble-college-03-default/window_012 flagged sigma
+[17:10:42] virgin-2024-03-14-blenheim-palace-01/window_000 flagged sigma
+[17:10:52] keble-college-03-default/window_013 flagged sigma
+[17:11:43] virgin-2024-03-14-blenheim-palace-01/window_001 flagged sigma
+[17:11:57] virgin-2024-03-14-blenheim-palace-01/window_002 flagged sigma
+[17:12:08] virgin-2024-03-14-blenheim-palace-01/window_003 flagged sigma
+[17:12:45] virgin-2024-03-14-blenheim-palace-01/window_004 flagged sigma
+[17:13:44] virgin-2024-03-14-blenheim-palace-01/window_005 flagged sigma
+[17:14:10] virgin-2024-03-14-blenheim-palace-01/window_008 flagged sigma
+[17:14:20] virgin-2024-03-14-blenheim-palace-01/window_007 flagged sigma
+[17:14:22] virgin-2024-03-14-blenheim-palace-01/window_006 flagged sigma
+[17:14:40] virgin-2024-03-14-blenheim-palace-01/window_009 flagged sigma
+[17:15:00] virgin-2024-03-14-blenheim-palace-01/window_010 flagged sigma
+[17:16:06] virgin-2024-03-14-blenheim-palace-01/window_011 flagged sigma
+[17:17:15] virgin-2024-03-14-blenheim-palace-01/window_012 flagged sigma
+[17:17:23] virgin-2024-03-14-blenheim-palace-01/window_013 flagged sigma
+[17:17:40] virgin-2024-03-14-blenheim-palace-01/window_014 flagged sigma
+[17:18:02] virgin-2024-03-14-blenheim-palace-01/window_015 flagged sigma
+[17:18:09] virgin-2024-03-14-blenheim-palace-01/window_016 flagged sigma
+[17:18:27] virgin-2024-03-14-blenheim-palace-01/window_017 flagged sigma
+[17:18:59] virgin-2024-03-14-blenheim-palace-01/window_019 flagged sigma
+[17:19:17] virgin-2024-03-14-blenheim-palace-02/window_000 flagged sigma
+[17:19:21] virgin-2024-03-14-blenheim-palace-01/window_018 flagged sigma
+[17:20:17] virgin-2024-03-14-blenheim-palace-02/window_002 flagged sigma
+[17:20:21] virgin-2024-03-14-blenheim-palace-02/window_003 flagged sigma
+[17:20:27] virgin-2024-03-14-blenheim-palace-02/window_001 flagged sigma
+[17:21:13] virgin-2024-03-14-blenheim-palace-02/window_004 flagged sigma
+[17:21:17] virgin-2024-03-14-blenheim-palace-02/window_006 flagged sigma
+[17:21:28] virgin-2024-03-14-blenheim-palace-02/window_005 flagged sigma
+[17:21:53] virgin-2024-03-14-blenheim-palace-02/window_008 flagged sigma
+[17:22:07] virgin-2024-03-14-blenheim-palace-02/window_009 flagged sigma
+[17:22:09] virgin-2024-03-14-blenheim-palace-02/window_007 flagged sigma
+[17:22:45] virgin-2024-03-14-blenheim-palace-02/window_010 flagged sigma
+[17:23:37] virgin-2024-03-14-blenheim-palace-02/window_012 flagged sigma
+[17:23:49] virgin-2024-03-14-blenheim-palace-02/window_011 flagged sigma
+[17:24:24] virgin-2024-03-14-blenheim-palace-02/window_013 flagged sigma
+[17:24:33] virgin-2024-03-14-blenheim-palace-02/window_014 flagged sigma
+[17:24:46] virgin-2024-03-14-blenheim-palace-02/window_015 flagged sigma
+[17:24:57] virgin-2024-03-14-blenheim-palace-02/window_016 flagged sigma
+[17:25:22] virgin-2024-03-18-christ-church-02/window_000 flagged sigma
+[17:26:02] virgin-2024-03-14-blenheim-palace-02/window_017 flagged sigma
+[17:27:33] virgin-2024-03-18-christ-church-02/window_001 flagged sigma
+[17:27:35] virgin-2024-03-18-christ-church-02/window_002 flagged sigma
+[17:27:48] virgin-2024-03-18-christ-church-02/window_003 flagged sigma
+[17:28:35] virgin-2024-03-18-christ-church-02/window_005 flagged sigma
+[17:28:44] virgin-2024-03-18-christ-church-02/window_004 flagged sigma
+[17:29:42] virgin-2024-03-18-christ-church-02/window_006 flagged sigma
+[17:31:21] virgin-2024-03-18-christ-church-02/window_011 flagged sigma
+[17:31:33] virgin-2024-03-18-christ-church-02/window_007 flagged sigma
+[17:31:39] virgin-2024-03-18-christ-church-02/window_009 flagged sigma
+[17:31:41] virgin-2024-03-18-christ-church-02/window_008 flagged sigma
+[17:32:15] virgin-2024-03-18-christ-church-02/window_010 flagged sigma
+[17:32:44] virgin-2024-03-18-christ-church-02/window_013 flagged sigma
+[17:32:56] virgin-2024-03-18-christ-church-02/window_014 flagged sigma
+[17:32:59] virgin-2024-03-18-christ-church-02/window_012 flagged sigma
+[17:33:30] virgin-2024-03-18-christ-church-02/window_015 flagged sigma
+[17:33:34] virgin-2024-03-18-christ-church-02/window_016 flagged sigma
+[17:33:49] virgin-2024-03-18-christ-church-02/window_019 flagged sigma
+[17:34:05] virgin-2024-03-18-christ-church-02/window_020 flagged sigma
+[17:34:06] virgin-2024-03-18-christ-church-02/window_018 flagged sigma
+[17:34:17] virgin-2024-03-18-christ-church-02/window_017 flagged sigma
+[17:35:25] virgin-2024-03-18-christ-church-02/window_021 flagged sigma
+[17:36:04] virgin-2024-03-18-christ-church-02/window_022 flagged sigma
+[17:36:13] virgin-2024-03-18-christ-church-02/window_027 flagged sigma
+[17:36:17] virgin-2024-03-18-christ-church-02/window_025 flagged sigma
+[17:36:19] virgin-2024-03-18-christ-church-02/window_023 flagged sigma
+[17:36:31] virgin-2024-03-18-christ-church-02/window_026 flagged sigma
+[17:36:43] virgin-2024-03-18-christ-church-02/window_024 flagged sigma
+[17:37:21] virgin-2024-03-18-christ-church-03/window_004 flagged sigma
+[17:37:44] virgin-2024-03-18-christ-church-03/window_001 flagged sigma
+[17:37:49] virgin-2024-03-18-christ-church-03/window_003 flagged sigma
+[17:37:52] virgin-2024-03-18-christ-church-03/window_000 flagged sigma
+[17:38:18] virgin-2024-03-18-christ-church-03/window_005 flagged sigma
+[17:38:21] virgin-2024-03-18-christ-church-03/window_002 flagged sigma
+[17:38:28] virgin-2024-03-18-christ-church-03/window_011 flagged sigma
+[17:38:28] virgin-2024-03-18-christ-church-03/window_012 flagged coverage,sigma
+[17:38:48] virgin-2024-03-18-christ-church-03/window_010 flagged sigma
+[17:38:54] virgin-2024-03-18-christ-church-03/window_006 flagged sigma
+[17:39:11] virgin-2024-03-18-christ-church-03/window_009 flagged sigma
+[17:39:20] virgin-2024-03-18-christ-church-03/window_008 flagged sigma
+[17:39:34] virgin-2024-03-18-christ-church-03/window_013 flagged sigma
+[17:39:34] virgin-2024-03-18-christ-church-03/window_007 flagged sigma
+[17:39:50] virgin-2024-03-18-christ-church-03/window_015 flagged sigma
+[17:40:59] virgin-2024-03-18-christ-church-03/window_014 flagged sigma
+
+##### UNFLAGGED WINDOWS (BASEPROD QC) #####
+
+rows 111, scored 0, flagged 111 {'coverage': 1, 'sigma': 111}
+BASEPROD law {'a': 0.11, 'b': 1.0209} | keble refit None
+
+##### ALL SCOREABLE WINDOWS (flagged included) #####
+
+rows 111, scored 110, flagged 111 {'coverage': 1, 'sigma': 111}
+BASEPROD law {'a': 0.11, 'b': 1.0209} | keble refit {'a': np.float64(0.115), 'b': np.float64(0.05), 'sse': 0.16069732811714268, 'form': 'd(alpha) = 1 - a*exp(-b*alpha); correction = 1/d'}
+
+== keble: 29 windows, alpha_w median 0.16 (IQR 0.09-0.20), sigma med 0.293 m
+  clark                rel_err_E 0.02742 rel_err_sd 0.0975 sd_ratio_to_mc 0.9025 cvar_abs_err 16.05
+  clark-corr-baseprod  rel_err_E 0.02742 rel_err_sd 0.05377 sd_ratio_to_mc 0.9866 cvar_abs_err 10.47
+  fosm                 rel_err_E 0.08234 rel_err_sd 0.069 sd_ratio_to_mc 0.9675 cvar_abs_err 10.09
+  hybrid               rel_err_E 0.02742 rel_err_sd 0.069 sd_ratio_to_mc 0.9675 cvar_abs_err 12.28
+  clark-corr-keble     sd_ratio_to_mc 1.018 rel_err_sd 0.05717
+  paired: {'corr_bp_sd_err_below_raw': 24, 'corr_bp_sd_err_below_fosm': 15, 'clark_E_err_below_fosm': 28, 'corr_bp_cvar_err_below_fosm': 7}
+
+== blenheim: 38 windows, alpha_w median 0.15 (IQR 0.11-0.21), sigma med 0.351 m
+  clark                rel_err_E 0.01979 rel_err_sd 0.09437 sd_ratio_to_mc 0.9056 cvar_abs_err 20.15
+  clark-corr-baseprod  rel_err_E 0.01979 rel_err_sd 0.03986 sd_ratio_to_mc 0.9928 cvar_abs_err 13.7
+  fosm                 rel_err_E 0.07437 rel_err_sd 0.03479 sd_ratio_to_mc 1.011 cvar_abs_err 14.86
+  hybrid               rel_err_E 0.01979 rel_err_sd 0.03479 sd_ratio_to_mc 1.011 cvar_abs_err 15.87
+  clark-corr-keble     sd_ratio_to_mc 1.022 rel_err_sd 0.04102
+  paired: {'corr_bp_sd_err_below_raw': 31, 'corr_bp_sd_err_below_fosm': 19, 'clark_E_err_below_fosm': 38, 'corr_bp_cvar_err_below_fosm': 10}
+
+== christ-church: 43 windows, alpha_w median 0.15 (IQR 0.10-0.18), sigma med 0.837 m
+  clark                rel_err_E 0.0113 rel_err_sd 0.0374 sd_ratio_to_mc 0.9626 cvar_abs_err 440.4
+  clark-corr-baseprod  rel_err_E 0.0113 rel_err_sd 0.06245 sd_ratio_to_mc 1.062 cvar_abs_err 214.9
+  fosm                 rel_err_E 0.06163 rel_err_sd 0.02614 sd_ratio_to_mc 1.022 cvar_abs_err 139.5
+  hybrid               rel_err_E 0.0113 rel_err_sd 0.02614 sd_ratio_to_mc 1.022 cvar_abs_err 301.4
+  clark-corr-keble     sd_ratio_to_mc 1.086 rel_err_sd 0.08588
+  paired: {'corr_bp_sd_err_below_raw': 14, 'corr_bp_sd_err_below_fosm': 14, 'clark_E_err_below_fosm': 42, 'corr_bp_cvar_err_below_fosm': 15}
+
+== virgin: 81 windows, alpha_w median 0.15 (IQR 0.11-0.19), sigma med 0.585 m
+  clark                rel_err_E 0.01541 rel_err_sd 0.05694 sd_ratio_to_mc 0.9431 cvar_abs_err 215
+  clark-corr-baseprod  rel_err_E 0.01541 rel_err_sd 0.05368 sd_ratio_to_mc 1.039 cvar_abs_err 77.74
+  fosm                 rel_err_E 0.06366 rel_err_sd 0.02928 sd_ratio_to_mc 1.016 cvar_abs_err 62.99
+  hybrid               rel_err_E 0.01541 rel_err_sd 0.02928 sd_ratio_to_mc 1.016 cvar_abs_err 128.9
+  clark-corr-keble     sd_ratio_to_mc 1.065 rel_err_sd 0.06804
+  paired: {'corr_bp_sd_err_below_raw': 45, 'corr_bp_sd_err_below_fosm': 33, 'clark_E_err_below_fosm': 80, 'corr_bp_cvar_err_below_fosm': 25}
+wrote out/v2/crosssite

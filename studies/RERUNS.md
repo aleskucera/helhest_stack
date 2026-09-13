@@ -64,3 +64,18 @@
   fosm 2.7 / 2.9 / 3.5 % and 1.3 / 1.5 / 1.8 %; the Gaussian CVaR on the referee's own moments (the
   floor of any Gaussian-tail estimator) 0.9 / 1.4 / 2.6 % and 0.6 / 0.9 / 1.7 %: at q = 0.99 the
   corrected fold is at the floor.
+
+## 2026-09-13 cross-site check of the sd correction on Oxford Spires (post hoc)
+- studies/out/v2/crosssite/: crosssite_summary_all.json (the reading; every Spires window carries
+  BASEPROD's sigma flag, so crosssite_summary.json, unflagged only, is empty), crosssite_windows.json,
+  run.log, from studies/baseprod/v2_crosssite.py on dasenka (fast-BLAS venv), 20k-draw referee, seed
+  crc32 of the window name. Windows: the E1 campaign's (~/data/oxford_spires/out, copied to
+  dasenka:/local/kuceral4/spires_windows), keble-college-02/03-default (design site) and the four
+  virgin sequences (blenheim-palace-01/02, christ-church-02/03); -02-unclamped skipped.
+- Reading (medians; keble 29, blenheim 38, christ-church 43 windows; alpha_w ~0.15 everywhere; belief
+  sigma 0.29 / 0.35 / 0.84 m): rel err E clark 2.7 / 2.0 / 1.1 % vs fosm 8.2 / 7.4 / 6.2 %, clark below
+  fosm in 28/29, 38/38, 42/43; raw fold sd ratio 0.90 / 0.91 / 0.96, with the FROZEN BASEPROD law
+  (a = 0.110, b = 1.0209) 0.99 / 0.99 / 1.06; fosm sd ratio 0.97 / 1.01 / 1.02; corrected sd error
+  below raw in 24/29, 31/38, 14/43 and below fosm in 15/29, 19/38, 14/43; corrected CVaR error below
+  fosm in 7/29, 10/38, 15/43. Keble refit degenerate (b = 0.05, the grid floor): alpha_w does not
+  vary enough on Spires to identify the law.

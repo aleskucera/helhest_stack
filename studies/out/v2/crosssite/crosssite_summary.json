@@ -1,0 +1,21 @@
+{
+ "n_rows": 111,
+ "n_scored": 0,
+ "n_flagged": 111,
+ "include_flagged": false,
+ "flags": {
+  "coverage": 1,
+  "sigma": 111
+ },
+ "law_baseprod": {
+  "a": 0.11,
+  "b": 1.0209
+ },
+ "law_keble_refit": null,
+ "_meta": {
+  "written": "2026-09-13 17:40:59",
+  "spires_out_root": "/local/kuceral4/spires_windows",
+  "n_ref": 20000,
+  "note": "post hoc; Oxford Spires E1 windows scored with the v2 attitude cost; BASEPROD law frozen (F1.json); QC flags are BASEPROD's (sigma <= 0.10 m, observed fraction >= 0.70)"
+ }
+}
