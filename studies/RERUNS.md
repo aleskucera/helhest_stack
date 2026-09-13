@@ -51,3 +51,16 @@
 - Reading: median |dE/E| between an order and desc 1.3e-4 to 8.4e-4 (max 8.2e-3), median |dsd/sd|
   6.6e-4 to 3.2e-3 (max 2.7e-2); median rel err E against the referee 2.10-2.28e-3 (F) and
   7.5-9.5e-4 (H) for every order, sd/MC 0.946-0.949 / 0.965-0.966; desc is best or tied-best on E.
+
+## 2026-09-13 tail levels and approximation-error decomposition, all v2 windows (post hoc)
+- studies/out/v2/tail_decomp/: tail_decomp_summary.json, tail_decomp_windows.json, run.log, from
+  studies/baseprod/v2_tail_decomp.py on dasenka (fast-BLAS venv /local/kuceral4/venv_fast, numpy 2.2.6);
+  referee re-drawn, 20k draws, seed crc32 of the window name; design and held-out windows both
+  included (363 foresight, 368 hindsight unflagged). Post hoc, not pre-registered.
+- Reading: referee cost skew 0.28 / 0.21, excess kurtosis 0.17 / 0.09 (medians). The fold's sd error
+  against the quadratic form on the referee's OWN support moments is 5.3 % / 3.4 % (the moment-matching
+  deficit); the Gaussian quadratic-form assumption on true moments costs 0.7 % / 0.3 %. CVaR relative
+  error medians at q = 0.90 / 0.95 / 0.99: clark-corr 1.1 / 1.5 / 2.6 % (F), 0.5 / 0.8 / 1.4 % (H);
+  fosm 2.7 / 2.9 / 3.5 % and 1.3 / 1.5 / 1.8 %; the Gaussian CVaR on the referee's own moments (the
+  floor of any Gaussian-tail estimator) 0.9 / 1.4 / 2.6 % and 0.6 / 0.9 / 1.7 %: at q = 0.99 the
+  corrected fold is at the floor.
