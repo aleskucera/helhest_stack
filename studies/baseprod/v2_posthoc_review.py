@@ -15,6 +15,11 @@ a function of fields the runner already wrote.
   4. Table II with two significant figures on the medians.
   5. paired decision test: exact McNemar (two-sided binomial on the
      discordant fans) of clark-corr's top-1 hit against fosm, mc-32, mean-map.
+  7. traverse-level statistics: per-traverse win fractions of clark-corr
+     against fosm (rel_err_E; cvar_abs_err) and against mc-32 (both moments),
+     the number of traverses with a majority, the traverse-level two-sided
+     sign test, and a cluster bootstrap by traverse (2000 resamples, seed 0)
+     of the median errors and of the fosm / clark-corr ratios.
   6. threshold verdicts: at thresholds tau set to the reference CVaR's
      quartiles and 90th percentile, the fraction of segments on which an
      arm's safe/unsafe verdict (cvar_arm < tau) disagrees with the
@@ -111,6 +116,32 @@ def main(out_dir: Path):
                                       "safe_called_unsafe": float(np.mean((arm >= t) & (cv < t)))}
                              for q, t in taus.items()}
         d["threshold_verdicts"] = tv
+        trs = sorted({r["traverse"] for r in rows})
+        by = {t: [r for r in rows if r["traverse"] == t] for t in trs}
+        def frac(fn):
+            return [float(np.mean([fn(r) for r in by[t]])) for t in trs]
+        wins = {"V2-1_E_vs_fosm": frac(lambda r: r["arms"]["clark-corr"]["rel_err_E"] < r["arms"]["fosm"]["rel_err_E"]),
+                "V2-3_both_vs_mc-32": frac(lambda r: r["arms"]["clark-corr"]["rel_err_E"] < r["arms"]["mc-32"]["rel_err_E"]
+                                           and r["arms"]["clark-corr"]["rel_err_sd"] < r["arms"]["mc-32"]["rel_err_sd"]),
+                "cvar_vs_fosm": frac(lambda r: r["arms"]["clark-corr"]["cvar_abs_err"] < r["arms"]["fosm"]["cvar_abs_err"]),
+                "cvar_vs_mc-32": frac(lambda r: r["arms"]["clark-corr"]["cvar_abs_err"] < r["arms"]["mc-32"]["cvar_abs_err"])}
+        tl = {"n_traverses": len(trs), "traverses": trs}
+        for k, v in wins.items():
+            maj = int(sum(x > 0.5 for x in v))
+            tl[k] = {"min": min(v), "median": float(np.median(v)), "majority_in": maj,
+                     "sign_test_p": binom_two_sided(len(trs) - maj, len(trs))}
+        rng = np.random.default_rng(0)
+        boot = []
+        for _ in range(2000):
+            rs = [r for t in rng.choice(trs, len(trs), replace=True) for r in by[t]]
+            c = np.median([r["arms"]["clark-corr"]["rel_err_E"] for r in rs]); f = np.median([r["arms"]["fosm"]["rel_err_E"] for r in rs])
+            cc_ = np.median([r["arms"]["clark-corr"]["cvar_abs_err"] for r in rs]); fc = np.median([r["arms"]["fosm"]["cvar_abs_err"] for r in rs])
+            boot.append((c, f, f / c, fc / cc_))
+        b = np.array(boot)
+        ci = lambda i: [float(np.percentile(b[:, i], 2.5)), float(np.percentile(b[:, i], 97.5))]
+        tl["cluster_bootstrap_95"] = {"resamples": 2000, "seed": 0, "median_relE_clark-corr": ci(0), "median_relE_fosm": ci(1),
+                                      "ratio_relE_fosm_over_clark-corr": ci(2), "ratio_cvar_err_fosm_over_clark-corr": ci(3)}
+        d["traverse_level"] = tl
         out[cond] = d
     (out_dir / "posthoc_review.json").write_text(json.dumps(out, indent=1))
     for cond in ("foresight", "hindsight"):
@@ -125,6 +156,10 @@ def main(out_dir: Path):
         print("  table:", {a: (round(v["median"], 4), round(v["p95"], 3)) for a, v in d["table_cvar"].items()})
         print("  ratios:", {k: round(v, 3) for k, v in d["ratios"].items()})
         print("  decisions:", d["decision_paired"])
+        tl = d["traverse_level"]
+        print("  traverse-level:", {k: (v["min"], v["majority_in"], f"{v['sign_test_p']:.1e}") for k, v in tl.items() if isinstance(v, dict) and "majority_in" in v},
+              "bootstrap ratios E / CVaR:", [round(x, 1) for x in tl["cluster_bootstrap_95"]["ratio_relE_fosm_over_clark-corr"]],
+              [round(x, 1) for x in tl["cluster_bootstrap_95"]["ratio_cvar_err_fosm_over_clark-corr"]])
         print("  threshold verdict disagreement (q25/q50/q75/q90):",
               {a: [round(v[str(q)]["disagree"], 3) for q in (0.25, 0.5, 0.75, 0.9)]
                for a, v in d["threshold_verdicts"]["arms"].items()})
