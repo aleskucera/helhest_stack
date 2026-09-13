@@ -43,3 +43,11 @@
   as the simulated clearance campaign (clark_paper sim_campaign/rubble/clearance/investigate/).
   Nodes at alpha > 3 (1-2 %) sit 0.15-0.9 m above the truth: phantom winners. Fold |z| <= 1
   coverage 0.20-0.26 (the belief's variance, as E2 measured).
+
+## 2026-09-13 fold-order ablation, DESIGN traverses (post hoc)
+- studies/out/v2/fold_order/: fold_order_summary.json, fold_order_windows.json, run.log, from
+  studies/baseprod/v2_fold_order.py on dasenka (46 + 46 unflagged design windows, 20k-draw referee,
+  seed crc32 of the window name). Orders: desc (the paper's), asc, var_desc, var_asc, random.
+- Reading: median |dE/E| between an order and desc 1.3e-4 to 8.4e-4 (max 8.2e-3), median |dsd/sd|
+  6.6e-4 to 3.2e-3 (max 2.7e-2); median rel err E against the referee 2.10-2.28e-3 (F) and
+  7.5-9.5e-4 (H) for every order, sd/MC 0.946-0.949 / 0.965-0.966; desc is best or tied-best on E.

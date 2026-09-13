@@ -1,0 +1,112 @@
+94 design windows, 24 workers
+[15:56:17] foresight t2/window_007 ok
+[15:56:18] foresight t2/window_009 ok
+[15:56:19] foresight t1/window_001 ok
+[15:56:19] foresight t1/window_007 ok
+[15:56:20] foresight t1/window_002 ok
+[15:56:21] foresight t1/window_004 ok
+[15:56:31] foresight t1/window_003 ok
+[15:56:31] foresight t1/window_008 ok
+[15:56:33] foresight t2/window_002 ok
+[15:56:34] foresight t1/window_012 ok
+[15:56:43] foresight t1/window_011 ok
+[15:56:47] foresight t2/window_005 ok
+[15:56:50] foresight t2/window_004 ok
+[15:57:17] foresight t1/window_010 ok
+[15:57:20] foresight t2/window_011 ok
+[15:57:45] foresight t2/window_003 ok
+[15:57:47] foresight t2/window_010 ok
+[15:57:49] foresight t2/window_006 ok
+[15:58:21] foresight t1/window_009 ok
+[15:58:52] foresight t1/window_005 ok
+[15:58:55] foresight t2/window_012 ok
+[15:58:59] foresight t2/window_008 ok
+[15:59:00] foresight t1/window_006 ok
+[15:59:00] hindsight t1/window_000 flagged
+[15:59:01] foresight t2/window_001 ok
+[15:59:43] foresight t2/window_014 ok
+[15:59:44] foresight t2/window_015 ok
+[15:59:45] foresight t2/window_020 ok
+[15:59:46] foresight t2/window_016 ok
+[15:59:47] foresight t2/window_022 ok
+[15:59:59] foresight t2/window_018 ok
+[16:00:02] foresight t2/window_021 ok
+[16:00:04] foresight t2/window_025 ok
+[16:00:15] foresight t2/window_024 ok
+[16:00:31] foresight t2/window_026 ok
+[16:00:56] foresight t2/window_023 ok
+[16:00:56] hindsight t2/window_000 unscoreable
+[16:01:02] foresight t2/window_027 ok
+[16:01:24] foresight t2/window_017 ok
+[16:01:27] foresight t2/window_028 ok
+[16:01:33] foresight t2/window_013 ok
+[16:01:47] foresight t2/window_031 ok
+[16:01:48] foresight t2/window_019 ok
+[16:02:19] foresight t2/window_032 ok
+[16:02:20] foresight t2/window_033 ok
+[16:03:24] foresight t2/window_030 ok
+[16:03:26] foresight t2/window_034 ok
+[16:03:43] foresight t2/window_029 ok
+[16:03:59] hindsight t1/window_012 ok
+[16:04:54] hindsight t1/window_001 ok
+[16:04:56] hindsight t1/window_002 ok
+[16:05:33] hindsight t1/window_003 ok
+[16:05:36] hindsight t1/window_005 ok
+[16:05:38] hindsight t1/window_004 ok
+[16:05:38] hindsight t1/window_006 ok
+[16:05:44] hindsight t1/window_007 ok
+[16:05:54] hindsight t1/window_008 ok
+[16:05:58] hindsight t1/window_009 ok
+[16:06:02] hindsight t1/window_010 ok
+[16:06:10] hindsight t1/window_011 ok
+[16:06:46] hindsight t2/window_001 ok
+[16:06:56] hindsight t2/window_002 ok
+[16:07:19] hindsight t2/window_003 ok
+[16:07:20] hindsight t2/window_004 ok
+[16:07:23] hindsight t2/window_005 ok
+[16:07:39] hindsight t2/window_006 ok
+[16:07:39] hindsight t2/window_011 ok
+[16:07:41] hindsight t2/window_007 ok
+[16:08:13] hindsight t2/window_008 ok
+[16:08:15] hindsight t2/window_009 ok
+[16:08:28] hindsight t2/window_010 ok
+[16:09:14] hindsight t2/window_013 ok
+[16:09:41] hindsight t2/window_012 ok
+[16:11:00] hindsight t2/window_017 ok
+[16:11:10] hindsight t2/window_014 ok
+[16:11:14] hindsight t2/window_015 ok
+[16:11:24] hindsight t2/window_019 ok
+[16:11:57] hindsight t2/window_016 ok
+[16:11:57] hindsight t2/window_018 ok
+[16:12:14] hindsight t2/window_020 ok
+[16:12:16] hindsight t2/window_021 ok
+[16:12:23] hindsight t2/window_024 ok
+[16:12:28] hindsight t2/window_023 ok
+[16:12:39] hindsight t2/window_022 ok
+[16:13:12] hindsight t2/window_025 ok
+[16:13:28] hindsight t2/window_026 ok
+[16:13:32] hindsight t2/window_032 ok
+[16:13:35] hindsight t2/window_027 ok
+[16:13:42] hindsight t2/window_028 ok
+[16:13:44] hindsight t2/window_029 ok
+[16:13:57] hindsight t2/window_030 ok
+[16:14:05] hindsight t2/window_031 ok
+[16:14:25] hindsight t2/window_034 ok
+[16:14:27] hindsight t2/window_033 ok
+
+== foresight: 46 windows (fosm relE 3.14e-02, relSD 0.043)
+  order     relE      relSD   sd/mc   cvarErr  maxrelE | vs desc: dE med / max, dsd med / max, E better
+  desc      2.10e-03 0.052  0.9482  0.0085  0.018 | -
+  asc       2.10e-03 0.054  0.9457  0.0091  0.022 | 8.4e-04 / 8.2e-03, 3.2e-03 / 2.7e-02, 14/46
+  var_desc  2.18e-03 0.053  0.9467  0.0089  0.020 | 4.5e-04 / 2.2e-03, 1.6e-03 / 1.3e-02, 10/46
+  var_asc   2.26e-03 0.051  0.9485  0.0087  0.020 | 3.5e-04 / 1.8e-03, 1.3e-03 / 8.5e-03, 13/46
+  random    2.28e-03 0.053  0.9474  0.0090  0.021 | 4.8e-04 / 2.3e-03, 2.0e-03 / 1.2e-02, 12/46
+
+== hindsight: 46 windows (fosm relE 1.41e-02, relSD 0.028)
+  order     relE      relSD   sd/mc   cvarErr  maxrelE | vs desc: dE med / max, dsd med / max, E better
+  desc      7.53e-04 0.034  0.9662  0.0047  0.010 | -
+  asc       9.43e-04 0.035  0.9647  0.0050  0.007 | 1.9e-04 / 4.2e-03, 1.9e-03 / 1.4e-02, 20/46
+  var_desc  9.48e-04 0.035  0.9653  0.0049  0.007 | 1.3e-04 / 2.8e-03, 8.0e-04 / 1.3e-02, 16/46
+  var_asc   8.29e-04 0.035  0.9655  0.0047  0.009 | 1.3e-04 / 1.1e-03, 6.6e-04 / 5.0e-03, 18/46
+  random    7.97e-04 0.035  0.9650  0.0050  0.008 | 1.3e-04 / 1.7e-03, 9.2e-04 / 6.9e-03, 16/46
+wrote out/v2/fold_order
