@@ -79,3 +79,15 @@
   below raw in 24/29, 31/38, 14/43 and below fosm in 15/29, 19/38, 14/43; corrected CVaR error below
   fosm in 7/29, 10/38, 15/43. Keble refit degenerate (b = 0.05, the grid floor): alpha_w does not
   vary enough on Spires to identify the law.
+
+## 2026-09-13 unscented-transform baseline, all v2 windows (post hoc)
+- studies/out/v2/unscented/ (standard UT, alpha = 1) and studies/out/v2/unscented_scaled/ (scaled UT,
+  alpha in {1, 0.3, 0.1, 0.03, 0.01}, kappa = 0, beta = 2), each with unscented_summary.json,
+  unscented_windows.json, run.log, from studies/baseprod/v2_unscented.py on dasenka (fast-BLAS venv);
+  2N + 1 sigma points per window (median 5,041 foresight / 6,553 hindsight), referee re-drawn (20k,
+  crc32 seeds), design and held-out windows both included (363 / 368 unflagged).
+- Reading (medians): the standard UT is unusable at this dimension (rel err E 0.14 / 0.073, sd 17x /
+  9.5x the referee's); the scaled UT is best at alpha = 0.03: rel err E 9.7e-3 / 4.3e-3 (fold 2.0e-3 /
+  8.5e-4, fosm 2.4e-2 / 1.5e-2), sd/MC 1.42 / 1.26, CVaR abs err median 0.027 / 0.016 (p95 1.22 / 1.03)
+  against clark-corr 0.0045 / 0.0019 and fosm 0.013 / 0.0075. clark-corr beats the standard UT in
+  362 / 363 and 363 / 368 windows on E and in every window on sd and CVaR.
