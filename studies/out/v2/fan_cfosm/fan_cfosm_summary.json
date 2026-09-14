@@ -1,0 +1,133 @@
+{
+ "foresight": {
+  "n_fans": 284,
+  "n_reproduce_frozen": 284,
+  "top1": {
+   "clark-corr": 279,
+   "clark": 279,
+   "clark-diag": 263,
+   "fosm": 272,
+   "step-form": 238,
+   "mean-map": 255,
+   "mc-2": 175,
+   "mc-32": 255,
+   "c-fosm": 278
+  },
+  "regret_median": {
+   "clark-corr": 0.0,
+   "clark": 0.0,
+   "clark-diag": 0.0,
+   "fosm": 0.0,
+   "step-form": 0.0,
+   "mean-map": 0.0,
+   "mc-2": 0.0,
+   "mc-32": 0.0,
+   "c-fosm": 0.0
+  },
+  "regret_p95": {
+   "clark-corr": 0.0,
+   "clark": 0.0,
+   "clark-diag": 0.0002066881435042675,
+   "fosm": 0.0,
+   "step-form": 0.0053245523993133426,
+   "mean-map": 0.0018750169157775425,
+   "mc-2": 0.02422169909570926,
+   "mc-32": 0.002428906995114777,
+   "c-fosm": 0.0
+  },
+  "paired_mcnemar": {
+   "c-fosm_vs_fosm": {
+    "ours_only": 7,
+    "theirs_only": 1,
+    "mcnemar_exact_p": 0.0703125
+   },
+   "c-fosm_vs_mc-32": {
+    "ours_only": 24,
+    "theirs_only": 1,
+    "mcnemar_exact_p": 1.5497207641601562e-06
+   },
+   "c-fosm_vs_mean-map": {
+    "ours_only": 25,
+    "theirs_only": 2,
+    "mcnemar_exact_p": 5.647540092468262e-06
+   },
+   "c-fosm_vs_clark-corr": {
+    "ours_only": 2,
+    "theirs_only": 3,
+    "mcnemar_exact_p": 1.0
+   }
+  }
+ },
+ "hindsight": {
+  "n_fans": 289,
+  "n_reproduce_frozen": 289,
+  "top1": {
+   "clark-corr": 283,
+   "clark": 283,
+   "clark-diag": 267,
+   "fosm": 270,
+   "step-form": 249,
+   "mean-map": 255,
+   "mc-2": 182,
+   "mc-32": 256,
+   "c-fosm": 278
+  },
+  "regret_median": {
+   "clark-corr": 0.0,
+   "clark": 0.0,
+   "clark-diag": 0.0,
+   "fosm": 0.0,
+   "step-form": 0.0,
+   "mean-map": 0.0,
+   "mc-2": 0.0,
+   "mc-32": 0.0,
+   "c-fosm": 0.0
+  },
+  "regret_p95": {
+   "clark-corr": 0.0,
+   "clark": 0.0,
+   "clark-diag": 0.0005817867301243472,
+   "fosm": 0.00027175097084326805,
+   "step-form": 0.004124075514753703,
+   "mean-map": 0.0024024205216571504,
+   "mc-2": 0.02314213281241176,
+   "mc-32": 0.003006473432204615,
+   "c-fosm": 0.0
+  },
+  "paired_mcnemar": {
+   "c-fosm_vs_fosm": {
+    "ours_only": 8,
+    "theirs_only": 0,
+    "mcnemar_exact_p": 0.0078125
+   },
+   "c-fosm_vs_mc-32": {
+    "ours_only": 26,
+    "theirs_only": 4,
+    "mcnemar_exact_p": 5.947612226009369e-05
+   },
+   "c-fosm_vs_mean-map": {
+    "ours_only": 26,
+    "theirs_only": 3,
+    "mcnemar_exact_p": 1.5236437320709229e-05
+   },
+   "c-fosm_vs_clark-corr": {
+    "ours_only": 0,
+    "theirs_only": 5,
+    "mcnemar_exact_p": 0.0625
+   }
+  }
+ },
+ "_meta": {
+  "written": "2026-09-14 18:41:16",
+  "fan": {
+   "K": 32,
+   "T": 3.0,
+   "v_max": 1.0,
+   "w_max": 1.2,
+   "n_ref": 8000
+  },
+  "seed": 17,
+  "windows_root": "out/windows",
+  "note": "post hoc; v2 fans rerun with the C-FOSM arm (fold mean, linearization sd); same seeds as the frozen pass, pre-registered arms asserted to reproduce"
+ }
+}

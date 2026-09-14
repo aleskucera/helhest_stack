@@ -160,3 +160,21 @@ the paper's Limitations paragraph.
   (sd/MC 0.896 / 0.935, worse than the uncorrected fold's 0.940 / 0.964), so its CVaR error
   (0.0148 / 0.0090) is above linearization's (0.0126 / 0.0075); clark-corr below it in 351 / 363 and
   350 / 368 windows, the hybrid in 328 / 363 and 318 / 368.
+
+## 2026-09-14 path-selection fans rerun with the C-FOSM arm; C-FOSM threshold verdicts (post hoc)
+- studies/out/v2/fan_cfosm/: fan_cfosm_summary.json, fan_cfosm_rows.jsonl, run.log, from
+  studies/baseprod/v2_fan_cfosm.py on dasenka (fast-BLAS venv, 24 workers, single-threaded BLAS):
+  the 284 / 289 scoreable fans of the frozen held-out pass, same candidate seed (17) and referee
+  seed (18), 8,000 shared draws, with c-fosm (fold mean, fosm sd) added; every pre-registered
+  arm's regret and top-1 reproduce the frozen artifact in all 573 fans (asserted per fan).
+- Reading: c-fosm top-1 278 / 284 (97.9 %) and 278 / 289 (96.2 %) against clark-corr 279 / 283
+  (98.2 / 97.9 %), fosm 272 / 270 (95.8 / 93.4 %), mc-32 255 / 256, mean map 255 / 255; median
+  regret 0 for every arm. Exact McNemar on discordant hits: c-fosm vs fosm 7-1 (p = 0.070) and
+  8-0 (p = 0.0078); vs clark-corr 2-3 (p = 1.0) and 0-5 (p = 0.0625); vs mc-32 24-1 and 26-4,
+  vs mean map 25-2 and 26-3 (p < 1e-4 each). c-fosm ranks like the fold, is not separated from it,
+  and beats linearization significantly only under hindsight.
+- Threshold verdicts (v2_posthoc_review.py, 'hybrid' arm derived from the frozen clark E and fosm
+  sd, no new draws; out/v2/posthoc_review.json): disagreement with the reference at the reference
+  CVaR's q25/q50/q75/q90 thresholds 1.6 / 0.9 / 0.3 / 0.0 % (foresight) and 0.0 / 0.3 / 0.0 /
+  0.0 % (hindsight), against clark-corr 1.6 / 0.6 / 0.6 / 0.0 and 0 / 0 / 0 / 0, fosm 1.3 / 1.6 /
+  0.3 / 0.3 and 0.0 / 0.6 / 0.3 / 0.3. No separation from linearization on verdicts.
