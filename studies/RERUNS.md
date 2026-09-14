@@ -135,3 +135,12 @@ the paper's Limitations paragraph.
 - Two aborted attempts (run.attempt{1,2}.log): with OMP/OPENBLAS threads = 2 per worker the pool
   deadlocked on the six largest christ-church-02 windows (workers asleep in the BLAS thread after
   fork); threads = 1 finished them. The script now persists rows per window and resumes.
+
+## 2026-09-14 post hoc: single scalar vs the alpha_w law on the held-out record
+- studies/out/v2/posthoc_scalar_law.json from studies/baseprod/v2_posthoc_scalar_law.py, reading
+  the committed heldout_score_{foresight,hindsight}.json (no new draws, law frozen). Across the six
+  alpha_w-quantile bins the raw fold sd ratio rises 0.027 / 0.028 while the law rises 0.043 /
+  0.045; a single scalar (1.065 / 1.037) gives median |sd ratio - 1| 0.0301 / 0.0183 against the
+  law's 0.0280 / 0.0180. Reading (the ICRA-style review's point): the alpha_w dependence of the
+  correction is not established on the held-out record; a scalar does as well. Also records the
+  reference CVaR_0.9 medians 0.500 / 0.630 (cost units) for the Table II caption.
