@@ -90,6 +90,19 @@ def main(out_dir: Path):
             "clark-corr_lower_in": int(np.sum(cc < hyb)), "hybrid_lower_in": int(np.sum(hyb < cc)),
             "sign_test_p": binom_two_sided(min(int(np.sum(cc < hyb)), int(np.sum(hyb < cc))),
                                            int(np.sum(cc != hyb)))}
+        # 2026-09-14: window-level counts for the hybrid against the baselines,
+        # the readings the paper quotes now that the fitted-scale arm is not in it
+        _relE_ck = np.array([r["arms"]["clark"]["rel_err_E"] for r in rows])
+        _relsd_fo = np.array([r["arms"]["fosm"]["rel_err_sd"] for r in rows])
+        _mcE = np.array([r["arms"]["mc-32"]["rel_err_E"] for r in rows])
+        _mcsd = np.array([r["arms"]["mc-32"]["rel_err_sd"] for r in rows])
+        _fo_cv = np.array([r["arms"]["fosm"]["cvar_abs_err"] for r in rows])
+        _mc_cv = np.array([r["arms"]["mc-32"]["cvar_abs_err"] for r in rows])
+        d["hybrid_clarkE_fosmSD"]["windows"] = {
+            "n": len(rows),
+            "both_moments_below_mc-32": int(np.sum((_relE_ck < _mcE) & (_relsd_fo < _mcsd))),
+            "cvar_below_fosm": int(np.sum(hyb < _fo_cv)),
+            "cvar_below_mc-32": int(np.sum(hyb < _mc_cv))}
         d["table_cvar"] = {a: {"median": float(np.median([r["arms"][a]["cvar_abs_err"] for r in rows])),
                                "p95": p95([r["arms"][a]["cvar_abs_err"] for r in rows])} for a in ARMS}
         d["table_cvar"]["hybrid"] = d["hybrid_clarkE_fosmSD"]["cvar_abs_err"]
@@ -124,13 +137,25 @@ def main(out_dir: Path):
         d["threshold_verdicts"] = tv
         trs = sorted({r["traverse"] for r in rows})
         by = {t: [r for r in rows if r["traverse"] == t] for t in trs}
+        # 2026-09-14: the same readings for the C-FOSM (hybrid) arm, derived per
+        # window from the frozen arms (clark's E, fosm's sd, the Gaussian CVaR of
+        # eq. 12), no new draws. Its E is clark's and its sd is fosm's, so
+        # V2-1_E_vs_fosm_hybrid must equal V2-1_E_vs_fosm; the assert below holds
+        # that invariant. Additive: no existing key changes value.
+        hyb_by_id = {id(r): h for r, h in zip(rows, hyb)}
         def frac(fn):
             return [float(np.mean([fn(r) for r in by[t]])) for t in trs]
         wins = {"V2-1_E_vs_fosm": frac(lambda r: r["arms"]["clark-corr"]["rel_err_E"] < r["arms"]["fosm"]["rel_err_E"]),
                 "V2-3_both_vs_mc-32": frac(lambda r: r["arms"]["clark-corr"]["rel_err_E"] < r["arms"]["mc-32"]["rel_err_E"]
                                            and r["arms"]["clark-corr"]["rel_err_sd"] < r["arms"]["mc-32"]["rel_err_sd"]),
                 "cvar_vs_fosm": frac(lambda r: r["arms"]["clark-corr"]["cvar_abs_err"] < r["arms"]["fosm"]["cvar_abs_err"]),
-                "cvar_vs_mc-32": frac(lambda r: r["arms"]["clark-corr"]["cvar_abs_err"] < r["arms"]["mc-32"]["cvar_abs_err"])}
+                "cvar_vs_mc-32": frac(lambda r: r["arms"]["clark-corr"]["cvar_abs_err"] < r["arms"]["mc-32"]["cvar_abs_err"]),
+                "V2-1_E_vs_fosm_hybrid": frac(lambda r: r["arms"]["clark"]["rel_err_E"] < r["arms"]["fosm"]["rel_err_E"]),
+                "V2-3_both_vs_mc-32_hybrid": frac(lambda r: r["arms"]["clark"]["rel_err_E"] < r["arms"]["mc-32"]["rel_err_E"]
+                                                  and r["arms"]["fosm"]["rel_err_sd"] < r["arms"]["mc-32"]["rel_err_sd"]),
+                "cvar_vs_fosm_hybrid": frac(lambda r: hyb_by_id[id(r)] < r["arms"]["fosm"]["cvar_abs_err"]),
+                "cvar_vs_mc-32_hybrid": frac(lambda r: hyb_by_id[id(r)] < r["arms"]["mc-32"]["cvar_abs_err"])}
+        assert wins["V2-1_E_vs_fosm_hybrid"] == wins["V2-1_E_vs_fosm"], "hybrid shares the mean"
         tl = {"n_traverses": len(trs), "traverses": trs}
         for k, v in wins.items():
             maj = int(sum(x > 0.5 for x in v))
@@ -142,11 +167,13 @@ def main(out_dir: Path):
             rs = [r for t in rng.choice(trs, len(trs), replace=True) for r in by[t]]
             c = np.median([r["arms"]["clark-corr"]["rel_err_E"] for r in rs]); f = np.median([r["arms"]["fosm"]["rel_err_E"] for r in rs])
             cc_ = np.median([r["arms"]["clark-corr"]["cvar_abs_err"] for r in rs]); fc = np.median([r["arms"]["fosm"]["cvar_abs_err"] for r in rs])
-            boot.append((c, f, f / c, fc / cc_))
+            hb = np.median([hyb_by_id[id(r)] for r in rs])
+            boot.append((c, f, f / c, fc / cc_, fc / hb))
         b = np.array(boot)
         ci = lambda i: [float(np.percentile(b[:, i], 2.5)), float(np.percentile(b[:, i], 97.5))]
         tl["cluster_bootstrap_95"] = {"resamples": 2000, "seed": 0, "median_relE_clark-corr": ci(0), "median_relE_fosm": ci(1),
-                                      "ratio_relE_fosm_over_clark-corr": ci(2), "ratio_cvar_err_fosm_over_clark-corr": ci(3)}
+                                      "ratio_relE_fosm_over_clark-corr": ci(2), "ratio_cvar_err_fosm_over_clark-corr": ci(3),
+                                      "ratio_cvar_err_fosm_over_hybrid": ci(4)}
         d["traverse_level"] = tl
         out[cond] = d
     (out_dir / "posthoc_review.json").write_text(json.dumps(out, indent=1))

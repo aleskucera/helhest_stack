@@ -178,3 +178,22 @@ the paper's Limitations paragraph.
   CVaR's q25/q50/q75/q90 thresholds 1.6 / 0.9 / 0.3 / 0.0 % (foresight) and 0.0 / 0.3 / 0.0 /
   0.0 % (hindsight), against clark-corr 1.6 / 0.6 / 0.6 / 0.0 and 0 / 0 / 0 / 0, fosm 1.3 / 1.6 /
   0.3 / 0.3 and 0.0 / 0.6 / 0.3 / 0.3. No separation from linearization on verdicts.
+
+## 2026-09-14 C-FOSM traverse-level and window-level readings (post hoc, additive)
+- studies/baseprod/v2_posthoc_review.py extended and rerun (out/v2/posthoc_review.json): the
+  hybrid arm (the fold's E with linearization's sd through the Gaussian CVaR, no new draws) now
+  also carries the per-traverse win fractions, the window counts against the baselines, and a
+  cluster-bootstrap ratio, the readings the paper quotes now that the fitted-scale arm
+  (clark-corr) is no longer reported in it. Purely additive: every pre-existing key in
+  posthoc_review.json reproduces bit-for-bit, verified by a key-wise diff against the previous
+  file. The script asserts V2-1_E_vs_fosm_hybrid == V2-1_E_vs_fosm (the hybrid's mean IS the
+  fold's).
+- Reading (foresight / hindsight): the hybrid's CVaR error is below linearization's in 225 / 317
+  and 226 / 323 windows, a majority in 16 and 17 of the 18 traverses, cluster-bootstrap 95 %
+  ratio of median errors 1.75-3.12 and 1.70-2.83. It beats mc-32 on BOTH moments in 216 / 317 and
+  246 / 323 windows, a majority in 16 and 17 traverses; below mc-32 on CVaR in 194 / 317 and
+  242 / 323. Threshold-verdict disagreement 1.6 / 0.9 / 0.3 / 0.0 % and 0.0 / 0.3 / 0.0 / 0.0 %,
+  the same 0-1.6 % band as clark-corr and fosm.
+- For comparison, the fitted-scale arm's own figures (still in the artifact, no longer in the
+  paper): CVaR below fosm in a majority of 16 and 18 traverses, bootstrap 2.05-3.60 and
+  2.44-4.16, both moments below mc-32 in 231 / 317 and 255 / 323.
