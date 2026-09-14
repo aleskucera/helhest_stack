@@ -197,3 +197,16 @@ the paper's Limitations paragraph.
 - For comparison, the fitted-scale arm's own figures (still in the artifact, no longer in the
   paper): CVaR below fosm in a majority of 16 and 18 traverses, bootstrap 2.05-3.60 and
   2.44-4.16, both moments below mc-32 in 231 / 317 and 255 / 323.
+
+## 2026-09-14 C-FOSM tail readings (post hoc, derived, no new draws)
+- studies/baseprod/v2_tail_decomp_cfosm.py -> out/v2/tail_decomp/tail_decomp_cfosm.json: the
+  C-FOSM arm's CVaR error at q = 0.90 / 0.95 / 0.99 against the re-drawn reference of the
+  tail-decomposition study, derived from the per-window file that study already wrote (the fold's
+  E, linearization's sd, the reference's CVaR per level). No re-scoring and no new draws. The
+  script asserts that clark, clark-corr and fosm reproduce their committed medians from the same
+  rows before reporting the new arm, which validates the window filter and the lambda_q constants.
+- Reading, median relative CVaR error at q90 / q95 / q99 (foresight, then hindsight):
+  c-fosm 1.21 / 1.70 / 2.91 % and 0.76 / 1.06 / 1.85 %; fosm 2.74 / 2.89 / 3.54 % and
+  1.34 / 1.50 / 1.84 %; the Gaussian-tail floor on the referee's own moments 0.92 / 1.39 / 2.55 %
+  and 0.60 / 0.92 / 1.66 %. At q = 0.99 under foresight c-fosm is 1.14x that floor (clark-corr,
+  no longer in the paper, was 1.04x), so the Gaussian tail binds there, not the moments.
