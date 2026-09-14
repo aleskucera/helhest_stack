@@ -111,3 +111,27 @@ the frozen k, as scored (asserted against the pooled tables in
 sd ratio 0.9429 / 1.0736. The existing fields are unchanged (clark 1.0231 / 1.1846,
 coverage 0.7352 / 0.6904). Post hoc; E2-ii's pre-registered verdict stands. Cited by
 the paper's Limitations paragraph.
+
+## 2026-09-14 cross-site check rerun with the E1 overhang flag (post hoc)
+- studies/out/v2/crosssite_overhang/: crosssite_rows.jsonl (per-window rows as they finished),
+  crosssite_windows.json, crosssite_summary{,_all,_clean,_overhang}.json, run.log (+ two aborted
+  attempts' logs), from studies/baseprod/v2_crosssite.py --overhang-json (the three E1 artifacts
+  out/risk_calibration{,_heldout}/e{0,1}_*.json) on dasenka, fast-BLAS venv, 20k-draw referee,
+  same seeds as the 2026-09-13 run: every arm and referee moment reproduces it to 9e-9 relative.
+- The Spires walks pass under arches, cloisters and porches; both the belief and the TLS truth
+  keep the max height per cell, so the roof is aliased onto the ground track (RISK_CAL_DATA_AUDIT
+  R1). The E1 overhang flag (belief-to-ground gap > 1 m along the track, computed in E1 before any
+  cross-site scoring) marks 57 of the 111 windows: keble 12/29, blenheim 10/38, christ-church
+  34/43 (5 clean, 4 without an E1 record); 10 scored windows have no E1 record and are in
+  neither subset.
+- CLEAN windows (44; medians raw fold sd ratio / with the frozen BASEPROD law / fosm): keble 13
+  windows 0.84 / 0.93 / 0.95; blenheim 26 windows 0.89 / 0.98 / 0.99; christ-church 5 windows
+  0.97 / 1.07 / 1.00. OVERHANG windows (56): 0.95-0.96 raw, 1.05-1.06 corrected, 1.03-1.05 fosm
+  on every site. The mean result is unchanged in both subsets (clark below fosm in 44/44 clean,
+  54/56 overhang). Reading: the deficit on clean ground is at or below the law's floor and the
+  correction lands at or under one; under overhangs the deficit is shallow (belief sigma 0.7-1.2 m
+  there) and the law overshoots by 5 % at every site. "Over-corrects the third site" is an
+  overhang effect; christ-church is the site made of overhang windows.
+- Two aborted attempts (run.attempt{1,2}.log): with OMP/OPENBLAS threads = 2 per worker the pool
+  deadlocked on the six largest christ-church-02 windows (workers asleep in the BLAS thread after
+  fork); threads = 1 finished them. The script now persists rows per window and resumes.

@@ -1,0 +1,29 @@
+{
+ "n_rows": 111,
+ "n_scored": 0,
+ "n_flagged": 111,
+ "include_flagged": false,
+ "overhang_subset": null,
+ "n_overhang_flagged": 57,
+ "n_no_e1_record": 10,
+ "flags": {
+  "coverage": 1,
+  "sigma": 111
+ },
+ "law_baseprod": {
+  "a": 0.11,
+  "b": 1.0209
+ },
+ "law_keble_refit": null,
+ "_meta": {
+  "written": "2026-09-14 16:08:24",
+  "spires_out_root": "/local/kuceral4/spires_windows",
+  "n_ref": 20000,
+  "overhang_json": [
+   "e1_flags/e1_heldout.json",
+   "e1_flags/e1_design_dryrun.json",
+   "e1_flags/e0_design.json"
+  ],
+  "note": "post hoc; Oxford Spires E1 windows scored with the v2 attitude cost; BASEPROD law frozen (F1.json); QC flags are BASEPROD's (sigma <= 0.10 m, observed fraction >= 0.70) plus the E1 overhang flag (belief-to-ground gap > 1 m along the track, RISK_CAL_DATA_AUDIT.md R1) when --overhang-json is given"
+ }
+}

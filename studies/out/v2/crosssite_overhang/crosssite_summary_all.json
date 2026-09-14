@@ -1,0 +1,218 @@
+{
+ "n_rows": 111,
+ "n_scored": 110,
+ "n_flagged": 111,
+ "include_flagged": true,
+ "overhang_subset": null,
+ "n_overhang_flagged": 57,
+ "n_no_e1_record": 10,
+ "flags": {
+  "coverage": 1,
+  "sigma": 111
+ },
+ "law_baseprod": {
+  "a": 0.11,
+  "b": 1.0209
+ },
+ "law_keble_refit": {
+  "a": 0.115,
+  "b": 0.05,
+  "sse": 0.16069732765672504,
+  "form": "d(alpha) = 1 - a*exp(-b*alpha); correction = 1/d"
+ },
+ "keble": {
+  "n_windows": 29,
+  "alpha_w_median": 0.15504376362250957,
+  "alpha_w_iqr": [
+   0.09413920318610311,
+   0.1968561429442045
+  ],
+  "sigma_med_m_median": 0.29347,
+  "overhang_gap_m_median": 0.039821624755859375,
+  "arms": {
+   "clark": {
+    "rel_err_E": 0.027420651540092544,
+    "rel_err_sd": 0.09749874012435944,
+    "sd_ratio_to_mc": 0.9025012598756406,
+    "cvar_abs_err": 16.05375936930318
+   },
+   "clark-corr-baseprod": {
+    "rel_err_E": 0.027420651540092544,
+    "rel_err_sd": 0.05376814051748058,
+    "sd_ratio_to_mc": 0.9865744281187013,
+    "cvar_abs_err": 10.466846645727344
+   },
+   "fosm": {
+    "rel_err_E": 0.08233934945593702,
+    "rel_err_sd": 0.06899635248984681,
+    "sd_ratio_to_mc": 0.9674988022740593,
+    "cvar_abs_err": 10.089605139874237
+   },
+   "hybrid": {
+    "rel_err_E": 0.027420651540092544,
+    "rel_err_sd": 0.06899635248984681,
+    "sd_ratio_to_mc": 0.9674988022740593,
+    "cvar_abs_err": 12.28447644083451
+   },
+   "clark-corr-keble": {
+    "sd_ratio_to_mc": 1.0181316541218732,
+    "rel_err_sd": 0.057173502382617425
+   }
+  },
+  "paired": {
+   "corr_bp_sd_err_below_raw": 24,
+   "corr_bp_sd_err_below_fosm": 15,
+   "clark_E_err_below_fosm": 28,
+   "corr_bp_cvar_err_below_fosm": 7
+  }
+ },
+ "blenheim": {
+  "n_windows": 38,
+  "alpha_w_median": 0.15435495972348406,
+  "alpha_w_iqr": [
+   0.11481669395163743,
+   0.20744759203729227
+  ],
+  "sigma_med_m_median": 0.35135,
+  "overhang_gap_m_median": 0.11189025640487671,
+  "arms": {
+   "clark": {
+    "rel_err_E": 0.019793405609026593,
+    "rel_err_sd": 0.09436767917284145,
+    "sd_ratio_to_mc": 0.9056323208271586,
+    "cvar_abs_err": 20.15489464730628
+   },
+   "clark-corr-baseprod": {
+    "rel_err_E": 0.019793405609026593,
+    "rel_err_sd": 0.03986400624997066,
+    "sd_ratio_to_mc": 0.9928281988589727,
+    "cvar_abs_err": 13.695427760098156
+   },
+   "fosm": {
+    "rel_err_E": 0.07436681270632783,
+    "rel_err_sd": 0.034786667071353417,
+    "sd_ratio_to_mc": 1.0109756929446543,
+    "cvar_abs_err": 14.858895408374877
+   },
+   "hybrid": {
+    "rel_err_E": 0.019793405609026593,
+    "rel_err_sd": 0.034786667071353417,
+    "sd_ratio_to_mc": 1.0109756929446543,
+    "cvar_abs_err": 15.869208015668832
+   },
+   "clark-corr-keble": {
+    "sd_ratio_to_mc": 1.022347123310632,
+    "rel_err_sd": 0.04101822737119609
+   }
+  },
+  "paired": {
+   "corr_bp_sd_err_below_raw": 31,
+   "corr_bp_sd_err_below_fosm": 19,
+   "clark_E_err_below_fosm": 38,
+   "corr_bp_cvar_err_below_fosm": 10
+  }
+ },
+ "christ-church": {
+  "n_windows": 43,
+  "alpha_w_median": 0.14617103114643037,
+  "alpha_w_iqr": [
+   0.10345887359637435,
+   0.1752339022785481
+  ],
+  "sigma_med_m_median": 0.83716,
+  "overhang_gap_m_median": 11.493419647216797,
+  "arms": {
+   "clark": {
+    "rel_err_E": 0.011302634968721526,
+    "rel_err_sd": 0.03740454787663561,
+    "sd_ratio_to_mc": 0.9625954521233644,
+    "cvar_abs_err": 440.42789765617863
+   },
+   "clark-corr-baseprod": {
+    "rel_err_E": 0.011302634968721526,
+    "rel_err_sd": 0.062445479172168694,
+    "sd_ratio_to_mc": 1.0624454791721687,
+    "cvar_abs_err": 214.85286418709802
+   },
+   "fosm": {
+    "rel_err_E": 0.06163392969562764,
+    "rel_err_sd": 0.026138065211544825,
+    "sd_ratio_to_mc": 1.0220210365492441,
+    "cvar_abs_err": 139.46567261839436
+   },
+   "hybrid": {
+    "rel_err_E": 0.011302634968721526,
+    "rel_err_sd": 0.026138065211544825,
+    "sd_ratio_to_mc": 1.0220210365492441,
+    "cvar_abs_err": 301.35301218927634
+   },
+   "clark-corr-keble": {
+    "sd_ratio_to_mc": 1.0858770049759061,
+    "rel_err_sd": 0.08587700497590611
+   }
+  },
+  "paired": {
+   "corr_bp_sd_err_below_raw": 14,
+   "corr_bp_sd_err_below_fosm": 14,
+   "clark_E_err_below_fosm": 42,
+   "corr_bp_cvar_err_below_fosm": 15
+  }
+ },
+ "virgin": {
+  "n_windows": 81,
+  "alpha_w_median": 0.14789814180041516,
+  "alpha_w_iqr": [
+   0.10774602672543578,
+   0.18705517736724522
+  ],
+  "sigma_med_m_median": 0.585,
+  "overhang_gap_m_median": 5.844152927398682,
+  "arms": {
+   "clark": {
+    "rel_err_E": 0.015407049686967378,
+    "rel_err_sd": 0.0569376446593266,
+    "sd_ratio_to_mc": 0.9430623553406734,
+    "cvar_abs_err": 215.04306449567093
+   },
+   "clark-corr-baseprod": {
+    "rel_err_E": 0.015407049686967378,
+    "rel_err_sd": 0.053678208102076574,
+    "sd_ratio_to_mc": 1.0391977709396956,
+    "cvar_abs_err": 77.74208931671274
+   },
+   "fosm": {
+    "rel_err_E": 0.06365741091669164,
+    "rel_err_sd": 0.029283864099759693,
+    "sd_ratio_to_mc": 1.0158776596196548,
+    "cvar_abs_err": 62.987393490062004
+   },
+   "hybrid": {
+    "rel_err_E": 0.015407049686967378,
+    "rel_err_sd": 0.029283864099759693,
+    "sd_ratio_to_mc": 1.0158776596196548,
+    "cvar_abs_err": 128.93649873927075
+   },
+   "clark-corr-keble": {
+    "sd_ratio_to_mc": 1.0647357385009886,
+    "rel_err_sd": 0.06803876037498346
+   }
+  },
+  "paired": {
+   "corr_bp_sd_err_below_raw": 45,
+   "corr_bp_sd_err_below_fosm": 33,
+   "clark_E_err_below_fosm": 80,
+   "corr_bp_cvar_err_below_fosm": 25
+  }
+ },
+ "_meta": {
+  "written": "2026-09-14 16:08:24",
+  "spires_out_root": "/local/kuceral4/spires_windows",
+  "n_ref": 20000,
+  "overhang_json": [
+   "e1_flags/e1_heldout.json",
+   "e1_flags/e1_design_dryrun.json",
+   "e1_flags/e0_design.json"
+  ],
+  "note": "post hoc; Oxford Spires E1 windows scored with the v2 attitude cost; BASEPROD law frozen (F1.json); QC flags are BASEPROD's (sigma <= 0.10 m, observed fraction >= 0.70) plus the E1 overhang flag (belief-to-ground gap > 1 m along the track, RISK_CAL_DATA_AUDIT.md R1) when --overhang-json is given"
+ }
+}

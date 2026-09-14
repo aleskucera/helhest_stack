@@ -1,0 +1,124 @@
+6 windows to score (105 already in crosssite_rows.jsonl), 6 workers
+[16:07:28] virgin-2024-03-18-christ-church-02/window_006 flagged sigma
+[16:07:29] virgin-2024-03-18-christ-church-02/window_009 flagged sigma
+[16:07:29] virgin-2024-03-18-christ-church-02/window_010 flagged sigma
+[16:07:47] virgin-2024-03-18-christ-church-02/window_004 flagged sigma
+[16:08:10] virgin-2024-03-18-christ-church-02/window_007 flagged sigma
+[16:08:23] virgin-2024-03-18-christ-church-02/window_008 flagged sigma
+
+##### UNFLAGGED WINDOWS (BASEPROD QC) #####
+
+rows 111, scored 0, flagged 111 {'coverage': 1, 'sigma': 111}, overhang subset None, overhang-flagged 57, no E1 record 10
+BASEPROD law {'a': 0.11, 'b': 1.0209} | keble refit None
+
+##### ALL SCOREABLE WINDOWS (flagged included) #####
+
+rows 111, scored 110, flagged 111 {'coverage': 1, 'sigma': 111}, overhang subset None, overhang-flagged 57, no E1 record 10
+BASEPROD law {'a': 0.11, 'b': 1.0209} | keble refit {'a': np.float64(0.115), 'b': np.float64(0.05), 'sse': 0.16069732765672504, 'form': 'd(alpha) = 1 - a*exp(-b*alpha); correction = 1/d'}
+
+== keble: 29 windows, alpha_w median 0.16 (IQR 0.09-0.20), sigma med 0.293 m
+  clark                rel_err_E 0.02742 rel_err_sd 0.0975 sd_ratio_to_mc 0.9025 cvar_abs_err 16.05
+  clark-corr-baseprod  rel_err_E 0.02742 rel_err_sd 0.05377 sd_ratio_to_mc 0.9866 cvar_abs_err 10.47
+  fosm                 rel_err_E 0.08234 rel_err_sd 0.069 sd_ratio_to_mc 0.9675 cvar_abs_err 10.09
+  hybrid               rel_err_E 0.02742 rel_err_sd 0.069 sd_ratio_to_mc 0.9675 cvar_abs_err 12.28
+  clark-corr-keble     sd_ratio_to_mc 1.018 rel_err_sd 0.05717
+  paired: {'corr_bp_sd_err_below_raw': 24, 'corr_bp_sd_err_below_fosm': 15, 'clark_E_err_below_fosm': 28, 'corr_bp_cvar_err_below_fosm': 7}
+
+== blenheim: 38 windows, alpha_w median 0.15 (IQR 0.11-0.21), sigma med 0.351 m
+  clark                rel_err_E 0.01979 rel_err_sd 0.09437 sd_ratio_to_mc 0.9056 cvar_abs_err 20.15
+  clark-corr-baseprod  rel_err_E 0.01979 rel_err_sd 0.03986 sd_ratio_to_mc 0.9928 cvar_abs_err 13.7
+  fosm                 rel_err_E 0.07437 rel_err_sd 0.03479 sd_ratio_to_mc 1.011 cvar_abs_err 14.86
+  hybrid               rel_err_E 0.01979 rel_err_sd 0.03479 sd_ratio_to_mc 1.011 cvar_abs_err 15.87
+  clark-corr-keble     sd_ratio_to_mc 1.022 rel_err_sd 0.04102
+  paired: {'corr_bp_sd_err_below_raw': 31, 'corr_bp_sd_err_below_fosm': 19, 'clark_E_err_below_fosm': 38, 'corr_bp_cvar_err_below_fosm': 10}
+
+== christ-church: 43 windows, alpha_w median 0.15 (IQR 0.10-0.18), sigma med 0.837 m
+  clark                rel_err_E 0.0113 rel_err_sd 0.0374 sd_ratio_to_mc 0.9626 cvar_abs_err 440.4
+  clark-corr-baseprod  rel_err_E 0.0113 rel_err_sd 0.06245 sd_ratio_to_mc 1.062 cvar_abs_err 214.9
+  fosm                 rel_err_E 0.06163 rel_err_sd 0.02614 sd_ratio_to_mc 1.022 cvar_abs_err 139.5
+  hybrid               rel_err_E 0.0113 rel_err_sd 0.02614 sd_ratio_to_mc 1.022 cvar_abs_err 301.4
+  clark-corr-keble     sd_ratio_to_mc 1.086 rel_err_sd 0.08588
+  paired: {'corr_bp_sd_err_below_raw': 14, 'corr_bp_sd_err_below_fosm': 14, 'clark_E_err_below_fosm': 42, 'corr_bp_cvar_err_below_fosm': 15}
+
+== virgin: 81 windows, alpha_w median 0.15 (IQR 0.11-0.19), sigma med 0.585 m
+  clark                rel_err_E 0.01541 rel_err_sd 0.05694 sd_ratio_to_mc 0.9431 cvar_abs_err 215
+  clark-corr-baseprod  rel_err_E 0.01541 rel_err_sd 0.05368 sd_ratio_to_mc 1.039 cvar_abs_err 77.74
+  fosm                 rel_err_E 0.06366 rel_err_sd 0.02928 sd_ratio_to_mc 1.016 cvar_abs_err 62.99
+  hybrid               rel_err_E 0.01541 rel_err_sd 0.02928 sd_ratio_to_mc 1.016 cvar_abs_err 128.9
+  clark-corr-keble     sd_ratio_to_mc 1.065 rel_err_sd 0.06804
+  paired: {'corr_bp_sd_err_below_raw': 45, 'corr_bp_sd_err_below_fosm': 33, 'clark_E_err_below_fosm': 80, 'corr_bp_cvar_err_below_fosm': 25}
+
+##### CLEAN WINDOWS (E1 record present, not overhang-flagged; BASEPROD sigma flag ignored) #####
+
+rows 111, scored 44, flagged 111 {'coverage': 1, 'sigma': 111}, overhang subset False, overhang-flagged 57, no E1 record 10
+BASEPROD law {'a': 0.11, 'b': 1.0209} | keble refit {'a': np.float64(0.1625), 'b': np.float64(0.05), 'sse': 0.07128168634351544, 'form': 'd(alpha) = 1 - a*exp(-b*alpha); correction = 1/d'}
+
+== keble: 13 windows, alpha_w median 0.17 (IQR 0.13-0.19), sigma med 0.218 m
+  clark                rel_err_E 0.03427 rel_err_sd 0.1593 sd_ratio_to_mc 0.8407 cvar_abs_err 8.02
+  clark-corr-baseprod  rel_err_E 0.03427 rel_err_sd 0.07171 sd_ratio_to_mc 0.9283 cvar_abs_err 6.282
+  fosm                 rel_err_E 0.08234 rel_err_sd 0.05319 sd_ratio_to_mc 0.9479 cvar_abs_err 3.669
+  hybrid               rel_err_E 0.03427 rel_err_sd 0.05319 sd_ratio_to_mc 0.9479 cvar_abs_err 7.308
+  clark-corr-keble     sd_ratio_to_mc 1.002 rel_err_sd 0.05867
+  paired: {'corr_bp_sd_err_below_raw': 13, 'corr_bp_sd_err_below_fosm': 5, 'clark_E_err_below_fosm': 13, 'corr_bp_cvar_err_below_fosm': 1}
+
+== blenheim: 26 windows, alpha_w median 0.17 (IQR 0.13-0.22), sigma med 0.320 m
+  clark                rel_err_E 0.02294 rel_err_sd 0.1102 sd_ratio_to_mc 0.8898 cvar_abs_err 14.49
+  clark-corr-baseprod  rel_err_E 0.02294 rel_err_sd 0.03744 sd_ratio_to_mc 0.9813 cvar_abs_err 9.517
+  fosm                 rel_err_E 0.0786 rel_err_sd 0.03149 sd_ratio_to_mc 0.9873 cvar_abs_err 4.655
+  hybrid               rel_err_E 0.02294 rel_err_sd 0.03149 sd_ratio_to_mc 0.9873 cvar_abs_err 8.798
+  clark-corr-keble     sd_ratio_to_mc 1.061 rel_err_sd 0.06528
+  paired: {'corr_bp_sd_err_below_raw': 25, 'corr_bp_sd_err_below_fosm': 14, 'clark_E_err_below_fosm': 26, 'corr_bp_cvar_err_below_fosm': 6}
+
+== christ-church: 5 windows, alpha_w median 0.11 (IQR 0.11-0.16), sigma med 0.651 m
+  clark                rel_err_E 0.009226 rel_err_sd 0.03091 sd_ratio_to_mc 0.9691 cvar_abs_err 25.57
+  clark-corr-baseprod  rel_err_E 0.009226 rel_err_sd 0.07101 sd_ratio_to_mc 1.071 cvar_abs_err 8.43
+  fosm                 rel_err_E 0.04964 rel_err_sd 0.01027 sd_ratio_to_mc 0.9984 cvar_abs_err 3.042
+  hybrid               rel_err_E 0.009226 rel_err_sd 0.01027 sd_ratio_to_mc 0.9984 cvar_abs_err 22.36
+  clark-corr-keble     sd_ratio_to_mc 1.156 rel_err_sd 0.1563
+  paired: {'corr_bp_sd_err_below_raw': 2, 'corr_bp_sd_err_below_fosm': 0, 'clark_E_err_below_fosm': 5, 'corr_bp_cvar_err_below_fosm': 0}
+
+== virgin: 31 windows, alpha_w median 0.16 (IQR 0.11-0.21), sigma med 0.342 m
+  clark                rel_err_E 0.02072 rel_err_sd 0.1048 sd_ratio_to_mc 0.8952 cvar_abs_err 14.64
+  clark-corr-baseprod  rel_err_E 0.02072 rel_err_sd 0.03903 sd_ratio_to_mc 0.9859 cvar_abs_err 8.992
+  fosm                 rel_err_E 0.07383 rel_err_sd 0.02876 sd_ratio_to_mc 0.9931 cvar_abs_err 3.703
+  hybrid               rel_err_E 0.02072 rel_err_sd 0.02876 sd_ratio_to_mc 0.9931 cvar_abs_err 9.429
+  clark-corr-keble     sd_ratio_to_mc 1.067 rel_err_sd 0.06664
+  paired: {'corr_bp_sd_err_below_raw': 27, 'corr_bp_sd_err_below_fosm': 14, 'clark_E_err_below_fosm': 31, 'corr_bp_cvar_err_below_fosm': 6}
+
+##### OVERHANG-FLAGGED WINDOWS #####
+
+rows 111, scored 56, flagged 111 {'coverage': 1, 'sigma': 111}, overhang subset True, overhang-flagged 57, no E1 record 10
+BASEPROD law {'a': 0.11, 'b': 1.0209} | keble refit {'a': np.float64(0.0525), 'b': np.float64(0.05), 'sse': 0.008262265932749664, 'form': 'd(alpha) = 1 - a*exp(-b*alpha); correction = 1/d'}
+
+== keble: 12 windows, alpha_w median 0.12 (IQR 0.06-0.17), sigma med 0.755 m
+  clark                rel_err_E 0.02322 rel_err_sd 0.0537 sd_ratio_to_mc 0.9463 cvar_abs_err 760.1
+  clark-corr-baseprod  rel_err_E 0.02322 rel_err_sd 0.04556 sd_ratio_to_mc 1.046 cvar_abs_err 364
+  fosm                 rel_err_E 0.08376 rel_err_sd 0.07797 sd_ratio_to_mc 1.049 cvar_abs_err 206.3
+  hybrid               rel_err_E 0.02322 rel_err_sd 0.07797 sd_ratio_to_mc 1.049 cvar_abs_err 383.2
+  clark-corr-keble     sd_ratio_to_mc 0.9983 rel_err_sd 0.01372
+  paired: {'corr_bp_sd_err_below_raw': 7, 'corr_bp_sd_err_below_fosm': 8, 'clark_E_err_below_fosm': 11, 'corr_bp_cvar_err_below_fosm': 5}
+
+== blenheim: 10 windows, alpha_w median 0.13 (IQR 0.09-0.17), sigma med 0.714 m
+  clark                rel_err_E 0.009462 rel_err_sd 0.05043 sd_ratio_to_mc 0.9496 cvar_abs_err 779.3
+  clark-corr-baseprod  rel_err_E 0.009462 rel_err_sd 0.04793 sd_ratio_to_mc 1.048 cvar_abs_err 470.9
+  fosm                 rel_err_E 0.06257 rel_err_sd 0.03912 sd_ratio_to_mc 1.03 cvar_abs_err 179.5
+  hybrid               rel_err_E 0.009462 rel_err_sd 0.03912 sd_ratio_to_mc 1.03 cvar_abs_err 532.1
+  clark-corr-keble     sd_ratio_to_mc 1.002 rel_err_sd 0.02721
+  paired: {'corr_bp_sd_err_below_raw': 5, 'corr_bp_sd_err_below_fosm': 3, 'clark_E_err_below_fosm': 10, 'corr_bp_cvar_err_below_fosm': 3}
+
+== christ-church: 34 windows, alpha_w median 0.15 (IQR 0.10-0.17), sigma med 1.234 m
+  clark                rel_err_E 0.01476 rel_err_sd 0.03849 sd_ratio_to_mc 0.9615 cvar_abs_err 542
+  clark-corr-baseprod  rel_err_E 0.01476 rel_err_sd 0.06016 sd_ratio_to_mc 1.06 cvar_abs_err 277.8
+  fosm                 rel_err_E 0.06344 rel_err_sd 0.0297 sd_ratio_to_mc 1.025 cvar_abs_err 195.7
+  hybrid               rel_err_E 0.01476 rel_err_sd 0.0297 sd_ratio_to_mc 1.025 cvar_abs_err 388.3
+  clark-corr-keble     sd_ratio_to_mc 1.014 rel_err_sd 0.03407
+  paired: {'corr_bp_sd_err_below_raw': 12, 'corr_bp_sd_err_below_fosm': 14, 'clark_E_err_below_fosm': 33, 'corr_bp_cvar_err_below_fosm': 13}
+
+== virgin: 44 windows, alpha_w median 0.14 (IQR 0.10-0.17), sigma med 1.038 m
+  clark                rel_err_E 0.0124 rel_err_sd 0.04268 sd_ratio_to_mc 0.9573 cvar_abs_err 570.3
+  clark-corr-baseprod  rel_err_E 0.0124 rel_err_sd 0.05782 sd_ratio_to_mc 1.058 cvar_abs_err 278.3
+  fosm                 rel_err_E 0.06344 rel_err_sd 0.03258 sd_ratio_to_mc 1.025 cvar_abs_err 191.6
+  hybrid               rel_err_E 0.0124 rel_err_sd 0.03258 sd_ratio_to_mc 1.025 cvar_abs_err 400.5
+  clark-corr-keble     sd_ratio_to_mc 1.01 rel_err_sd 0.03214
+  paired: {'corr_bp_sd_err_below_raw': 17, 'corr_bp_sd_err_below_fosm': 17, 'clark_E_err_below_fosm': 43, 'corr_bp_cvar_err_below_fosm': 16}
+wrote out_crosssite_overhang

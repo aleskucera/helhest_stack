@@ -1,0 +1,218 @@
+{
+ "n_rows": 111,
+ "n_scored": 56,
+ "n_flagged": 111,
+ "include_flagged": true,
+ "overhang_subset": true,
+ "n_overhang_flagged": 57,
+ "n_no_e1_record": 10,
+ "flags": {
+  "coverage": 1,
+  "sigma": 111
+ },
+ "law_baseprod": {
+  "a": 0.11,
+  "b": 1.0209
+ },
+ "law_keble_refit": {
+  "a": 0.0525,
+  "b": 0.05,
+  "sse": 0.008262265932749664,
+  "form": "d(alpha) = 1 - a*exp(-b*alpha); correction = 1/d"
+ },
+ "keble": {
+  "n_windows": 12,
+  "alpha_w_median": 0.11682996398170033,
+  "alpha_w_iqr": [
+   0.05793695098755086,
+   0.17001663685134832
+  ],
+  "sigma_med_m_median": 0.755355,
+  "overhang_gap_m_median": 14.024405717849731,
+  "arms": {
+   "clark": {
+    "rel_err_E": 0.02322326340864389,
+    "rel_err_sd": 0.05370286459417384,
+    "sd_ratio_to_mc": 0.9462971354058262,
+    "cvar_abs_err": 760.0960400441045
+   },
+   "clark-corr-baseprod": {
+    "rel_err_E": 0.02322326340864389,
+    "rel_err_sd": 0.0455578533451626,
+    "sd_ratio_to_mc": 1.0455578533451626,
+    "cvar_abs_err": 364.01957522330486
+   },
+   "fosm": {
+    "rel_err_E": 0.08376490821355931,
+    "rel_err_sd": 0.07797109737562186,
+    "sd_ratio_to_mc": 1.0488142682934467,
+    "cvar_abs_err": 206.27229701307033
+   },
+   "hybrid": {
+    "rel_err_E": 0.02322326340864389,
+    "rel_err_sd": 0.07797109737562186,
+    "sd_ratio_to_mc": 1.0488142682934467,
+    "cvar_abs_err": 383.20895798754646
+   },
+   "clark-corr-keble": {
+    "sd_ratio_to_mc": 0.9982694252510924,
+    "rel_err_sd": 0.013722411957082958
+   }
+  },
+  "paired": {
+   "corr_bp_sd_err_below_raw": 7,
+   "corr_bp_sd_err_below_fosm": 8,
+   "clark_E_err_below_fosm": 11,
+   "corr_bp_cvar_err_below_fosm": 5
+  }
+ },
+ "blenheim": {
+  "n_windows": 10,
+  "alpha_w_median": 0.1313919519456407,
+  "alpha_w_iqr": [
+   0.09083648238090612,
+   0.17088757049303469
+  ],
+  "sigma_med_m_median": 0.71393,
+  "overhang_gap_m_median": 19.128618240356445,
+  "arms": {
+   "clark": {
+    "rel_err_E": 0.009461756139473587,
+    "rel_err_sd": 0.05042769031769123,
+    "sd_ratio_to_mc": 0.9495723096823088,
+    "cvar_abs_err": 779.2513072577594
+   },
+   "clark-corr-baseprod": {
+    "rel_err_E": 0.009461756139473587,
+    "rel_err_sd": 0.047931125280326836,
+    "sd_ratio_to_mc": 1.0479311252803267,
+    "cvar_abs_err": 470.93878914385186
+   },
+   "fosm": {
+    "rel_err_E": 0.0625736141333798,
+    "rel_err_sd": 0.03911926884119182,
+    "sd_ratio_to_mc": 1.030080698877891,
+    "cvar_abs_err": 179.4777948087385
+   },
+   "hybrid": {
+    "rel_err_E": 0.009461756139473587,
+    "rel_err_sd": 0.03911926884119182,
+    "sd_ratio_to_mc": 1.030080698877891,
+    "cvar_abs_err": 532.1183095609408
+   },
+   "clark-corr-keble": {
+    "sd_ratio_to_mc": 1.0017152007578172,
+    "rel_err_sd": 0.027212120382604177
+   }
+  },
+  "paired": {
+   "corr_bp_sd_err_below_raw": 5,
+   "corr_bp_sd_err_below_fosm": 3,
+   "clark_E_err_below_fosm": 10,
+   "corr_bp_cvar_err_below_fosm": 3
+  }
+ },
+ "christ-church": {
+  "n_windows": 34,
+  "alpha_w_median": 0.14529508634783245,
+  "alpha_w_iqr": [
+   0.10311498318619043,
+   0.17418112608557357
+  ],
+  "sigma_med_m_median": 1.23405,
+  "overhang_gap_m_median": 12.445225715637207,
+  "arms": {
+   "clark": {
+    "rel_err_E": 0.014761334286812533,
+    "rel_err_sd": 0.03849109600929557,
+    "sd_ratio_to_mc": 0.9615089039907044,
+    "cvar_abs_err": 542.0359395420251
+   },
+   "clark-corr-baseprod": {
+    "rel_err_E": 0.014761334286812533,
+    "rel_err_sd": 0.06016113006879609,
+    "sd_ratio_to_mc": 1.060161130068796,
+    "cvar_abs_err": 277.7930707226185
+   },
+   "fosm": {
+    "rel_err_E": 0.06344398550448171,
+    "rel_err_sd": 0.029700402242332835,
+    "sd_ratio_to_mc": 1.0246352946836934,
+    "cvar_abs_err": 195.65872073549917
+   },
+   "hybrid": {
+    "rel_err_E": 0.014761334286812533,
+    "rel_err_sd": 0.029700402242332835,
+    "sd_ratio_to_mc": 1.0246352946836934,
+    "cvar_abs_err": 388.28654064344164
+   },
+   "clark-corr-keble": {
+    "sd_ratio_to_mc": 1.0144315069285552,
+    "rel_err_sd": 0.03407257589029433
+   }
+  },
+  "paired": {
+   "corr_bp_sd_err_below_raw": 12,
+   "corr_bp_sd_err_below_fosm": 14,
+   "clark_E_err_below_fosm": 33,
+   "corr_bp_cvar_err_below_fosm": 13
+  }
+ },
+ "virgin": {
+  "n_windows": 44,
+  "alpha_w_median": 0.14233736167059236,
+  "alpha_w_iqr": [
+   0.10130783781455441,
+   0.1727138524734893
+  ],
+  "sigma_med_m_median": 1.038325,
+  "overhang_gap_m_median": 12.857863903045654,
+  "arms": {
+   "clark": {
+    "rel_err_E": 0.012395155512607281,
+    "rel_err_sd": 0.04267719708106038,
+    "sd_ratio_to_mc": 0.9573228029189396,
+    "cvar_abs_err": 570.3051984728208
+   },
+   "clark-corr-baseprod": {
+    "rel_err_E": 0.012395155512607281,
+    "rel_err_sd": 0.05782418045182369,
+    "sd_ratio_to_mc": 1.0578241804518238,
+    "cvar_abs_err": 278.2693366807148
+   },
+   "fosm": {
+    "rel_err_E": 0.06344398550448171,
+    "rel_err_sd": 0.03258175857454593,
+    "sd_ratio_to_mc": 1.0246352946836934,
+    "cvar_abs_err": 191.5679056816689
+   },
+   "hybrid": {
+    "rel_err_E": 0.012395155512607281,
+    "rel_err_sd": 0.03258175857454593,
+    "sd_ratio_to_mc": 1.0246352946836934,
+    "cvar_abs_err": 400.4557669879541
+   },
+   "clark-corr-keble": {
+    "sd_ratio_to_mc": 1.0101264239473684,
+    "rel_err_sd": 0.0321361742132632
+   }
+  },
+  "paired": {
+   "corr_bp_sd_err_below_raw": 17,
+   "corr_bp_sd_err_below_fosm": 17,
+   "clark_E_err_below_fosm": 43,
+   "corr_bp_cvar_err_below_fosm": 16
+  }
+ },
+ "_meta": {
+  "written": "2026-09-14 16:08:24",
+  "spires_out_root": "/local/kuceral4/spires_windows",
+  "n_ref": 20000,
+  "overhang_json": [
+   "e1_flags/e1_heldout.json",
+   "e1_flags/e1_design_dryrun.json",
+   "e1_flags/e0_design.json"
+  ],
+  "note": "post hoc; Oxford Spires E1 windows scored with the v2 attitude cost; BASEPROD law frozen (F1.json); QC flags are BASEPROD's (sigma <= 0.10 m, observed fraction >= 0.70) plus the E1 overhang flag (belief-to-ground gap > 1 m along the track, RISK_CAL_DATA_AUDIT.md R1) when --overhang-json is given"
+ }
+}

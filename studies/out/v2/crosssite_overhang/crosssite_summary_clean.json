@@ -1,0 +1,218 @@
+{
+ "n_rows": 111,
+ "n_scored": 44,
+ "n_flagged": 111,
+ "include_flagged": true,
+ "overhang_subset": false,
+ "n_overhang_flagged": 57,
+ "n_no_e1_record": 10,
+ "flags": {
+  "coverage": 1,
+  "sigma": 111
+ },
+ "law_baseprod": {
+  "a": 0.11,
+  "b": 1.0209
+ },
+ "law_keble_refit": {
+  "a": 0.1625,
+  "b": 0.05,
+  "sse": 0.07128168634351544,
+  "form": "d(alpha) = 1 - a*exp(-b*alpha); correction = 1/d"
+ },
+ "keble": {
+  "n_windows": 13,
+  "alpha_w_median": 0.1722373640715832,
+  "alpha_w_iqr": [
+   0.12885869167821218,
+   0.18643856678666837
+  ],
+  "sigma_med_m_median": 0.21789,
+  "overhang_gap_m_median": 0.015642642974853516,
+  "arms": {
+   "clark": {
+    "rel_err_E": 0.034267896130896536,
+    "rel_err_sd": 0.15927231548529275,
+    "sd_ratio_to_mc": 0.8407276845147073,
+    "cvar_abs_err": 8.020460900599815
+   },
+   "clark-corr-baseprod": {
+    "rel_err_E": 0.034267896130896536,
+    "rel_err_sd": 0.07171240506705623,
+    "sd_ratio_to_mc": 0.9282875949329438,
+    "cvar_abs_err": 6.282224939744012
+   },
+   "fosm": {
+    "rel_err_E": 0.08233934945593702,
+    "rel_err_sd": 0.0531877788077777,
+    "sd_ratio_to_mc": 0.94790507455909,
+    "cvar_abs_err": 3.6693507018967466
+   },
+   "hybrid": {
+    "rel_err_E": 0.034267896130896536,
+    "rel_err_sd": 0.0531877788077777,
+    "sd_ratio_to_mc": 0.94790507455909,
+    "cvar_abs_err": 7.308454414419373
+   },
+   "clark-corr-keble": {
+    "sd_ratio_to_mc": 1.0021845648449559,
+    "rel_err_sd": 0.05867262152481345
+   }
+  },
+  "paired": {
+   "corr_bp_sd_err_below_raw": 13,
+   "corr_bp_sd_err_below_fosm": 5,
+   "clark_E_err_below_fosm": 13,
+   "corr_bp_cvar_err_below_fosm": 1
+  }
+ },
+ "blenheim": {
+  "n_windows": 26,
+  "alpha_w_median": 0.1689553091636083,
+  "alpha_w_iqr": [
+   0.1283464252167098,
+   0.21818873604142153
+  ],
+  "sigma_med_m_median": 0.31976499999999997,
+  "overhang_gap_m_median": 0.018502354621887207,
+  "arms": {
+   "clark": {
+    "rel_err_E": 0.02293916593790868,
+    "rel_err_sd": 0.11024003503759644,
+    "sd_ratio_to_mc": 0.8897599649624035,
+    "cvar_abs_err": 14.486617581597528
+   },
+   "clark-corr-baseprod": {
+    "rel_err_E": 0.02293916593790868,
+    "rel_err_sd": 0.03744269611045048,
+    "sd_ratio_to_mc": 0.9813368038484888,
+    "cvar_abs_err": 9.517428715663236
+   },
+   "fosm": {
+    "rel_err_E": 0.07860459525203911,
+    "rel_err_sd": 0.03149117504475951,
+    "sd_ratio_to_mc": 0.9872562811876056,
+    "cvar_abs_err": 4.655392915006182
+   },
+   "hybrid": {
+    "rel_err_E": 0.02293916593790868,
+    "rel_err_sd": 0.03149117504475951,
+    "sd_ratio_to_mc": 0.9872562811876056,
+    "cvar_abs_err": 8.797831969399297
+   },
+   "clark-corr-keble": {
+    "sd_ratio_to_mc": 1.060823471151393,
+    "rel_err_sd": 0.06528227249007534
+   }
+  },
+  "paired": {
+   "corr_bp_sd_err_below_raw": 25,
+   "corr_bp_sd_err_below_fosm": 14,
+   "clark_E_err_below_fosm": 26,
+   "corr_bp_cvar_err_below_fosm": 6
+  }
+ },
+ "christ-church": {
+  "n_windows": 5,
+  "alpha_w_median": 0.10774602672543578,
+  "alpha_w_iqr": [
+   0.1054478252556996,
+   0.15966322602567673
+  ],
+  "sigma_med_m_median": 0.65056,
+  "overhang_gap_m_median": 0.015619993209838867,
+  "arms": {
+   "clark": {
+    "rel_err_E": 0.009225539075661593,
+    "rel_err_sd": 0.030905328358647455,
+    "sd_ratio_to_mc": 0.9690946716413525,
+    "cvar_abs_err": 25.565994822877087
+   },
+   "clark-corr-baseprod": {
+    "rel_err_E": 0.009225539075661593,
+    "rel_err_sd": 0.0710114960469459,
+    "sd_ratio_to_mc": 1.071011496046946,
+    "cvar_abs_err": 8.42968380257264
+   },
+   "fosm": {
+    "rel_err_E": 0.04964101214712713,
+    "rel_err_sd": 0.010266037155352237,
+    "sd_ratio_to_mc": 0.9983783757645902,
+    "cvar_abs_err": 3.0418308450966833
+   },
+   "hybrid": {
+    "rel_err_E": 0.009225539075661593,
+    "rel_err_sd": 0.010266037155352237,
+    "sd_ratio_to_mc": 0.9983783757645902,
+    "cvar_abs_err": 22.360413466925706
+   },
+   "clark-corr-keble": {
+    "sd_ratio_to_mc": 1.156322772476368,
+    "rel_err_sd": 0.15632277247636805
+   }
+  },
+  "paired": {
+   "corr_bp_sd_err_below_raw": 2,
+   "corr_bp_sd_err_below_fosm": 0,
+   "clark_E_err_below_fosm": 5,
+   "corr_bp_cvar_err_below_fosm": 0
+  }
+ },
+ "virgin": {
+  "n_windows": 31,
+  "alpha_w_median": 0.15802723945558877,
+  "alpha_w_iqr": [
+   0.11082178720563936,
+   0.2071931583518115
+  ],
+  "sigma_med_m_median": 0.34236,
+  "overhang_gap_m_median": 0.018233060836791992,
+  "arms": {
+   "clark": {
+    "rel_err_E": 0.02072466841744769,
+    "rel_err_sd": 0.1047766089807941,
+    "sd_ratio_to_mc": 0.8952233910192059,
+    "cvar_abs_err": 14.64047686952361
+   },
+   "clark-corr-baseprod": {
+    "rel_err_E": 0.02072466841744769,
+    "rel_err_sd": 0.039027674203957696,
+    "sd_ratio_to_mc": 0.9859125143864792,
+    "cvar_abs_err": 8.991868708543507
+   },
+   "fosm": {
+    "rel_err_E": 0.07383175883001392,
+    "rel_err_sd": 0.028763713938337876,
+    "sd_ratio_to_mc": 0.9930646281577332,
+    "cvar_abs_err": 3.702732297584319
+   },
+   "hybrid": {
+    "rel_err_E": 0.02072466841744769,
+    "rel_err_sd": 0.028763713938337876,
+    "sd_ratio_to_mc": 0.9930646281577332,
+    "cvar_abs_err": 9.429260982384875
+   },
+   "clark-corr-keble": {
+    "sd_ratio_to_mc": 1.0665765201713535,
+    "rel_err_sd": 0.0666449390172712
+   }
+  },
+  "paired": {
+   "corr_bp_sd_err_below_raw": 27,
+   "corr_bp_sd_err_below_fosm": 14,
+   "clark_E_err_below_fosm": 31,
+   "corr_bp_cvar_err_below_fosm": 6
+  }
+ },
+ "_meta": {
+  "written": "2026-09-14 16:08:24",
+  "spires_out_root": "/local/kuceral4/spires_windows",
+  "n_ref": 20000,
+  "overhang_json": [
+   "e1_flags/e1_heldout.json",
+   "e1_flags/e1_design_dryrun.json",
+   "e1_flags/e0_design.json"
+  ],
+  "note": "post hoc; Oxford Spires E1 windows scored with the v2 attitude cost; BASEPROD law frozen (F1.json); QC flags are BASEPROD's (sigma <= 0.10 m, observed fraction >= 0.70) plus the E1 overhang flag (belief-to-ground gap > 1 m along the track, RISK_CAL_DATA_AUDIT.md R1) when --overhang-json is given"
+ }
+}
