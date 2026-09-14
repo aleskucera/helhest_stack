@@ -10,6 +10,46 @@
  },
  "conditions": {
   "foresight": {
+   "raw_k1_as_scored": {
+    "clark": {
+     "n_windows": 332,
+     "sd_ratio": 41.695790401586954,
+     "coverage_1sigma": 0.03313253012048193,
+     "mean_z": -8.81422269319563
+    },
+    "fosm": {
+     "n_windows": 332,
+     "sd_ratio": 33.91601931836626,
+     "coverage_1sigma": 0.07228915662650602,
+     "mean_z": -6.939591392411535
+    }
+   },
+   "raw_k1_excluding_defective_traverse_POSTHOC": {
+    "clark": {
+     "n_windows": 321,
+     "sd_ratio": 17.210680925723757,
+     "coverage_1sigma": 0.03426791277258567,
+     "mean_z": -7.059117860192836
+    },
+    "fosm": {
+     "n_windows": 321,
+     "sd_ratio": 15.862172961005076,
+     "coverage_1sigma": 0.07476635514018691,
+     "mean_z": -5.548227835078795
+    }
+   },
+   "fosm_frozen_k_as_scored": {
+    "n_windows": 332,
+    "sd_ratio": 2.016109935073865,
+    "coverage_1sigma": 0.7620481927710844,
+    "mean_z": -0.4125183153206177
+   },
+   "fosm_frozen_k_excluding_defective_traverse_POSTHOC": {
+    "n_windows": 321,
+    "sd_ratio": 0.9429138543161686,
+    "coverage_1sigma": 0.7850467289719626,
+    "mean_z": -0.329809850482611
+   },
    "k_frozen": 282.99667205586184,
    "excluded_traverse": "2023-07-20_19-12-27",
    "n_windows_excluded": 11,
@@ -54,6 +94,46 @@
    }
   },
   "hindsight": {
+   "raw_k1_as_scored": {
+    "clark": {
+     "n_windows": 334,
+     "sd_ratio": 53.84847195746908,
+     "coverage_1sigma": 0.041916167664670656,
+     "mean_z": -10.916703940932528
+    },
+    "fosm": {
+     "n_windows": 334,
+     "sd_ratio": 44.21125392376951,
+     "coverage_1sigma": 0.038922155688622756,
+     "mean_z": -8.85156932000988
+    }
+   },
+   "raw_k1_excluding_defective_traverse_POSTHOC": {
+    "clark": {
+     "n_windows": 323,
+     "sd_ratio": 19.644593480863886,
+     "coverage_1sigma": 0.043343653250773995,
+     "mean_z": -6.261783034051138
+    },
+    "fosm": {
+     "n_windows": 323,
+     "sd_ratio": 17.804410226427116,
+     "coverage_1sigma": 0.04024767801857585,
+     "mean_z": -4.9024923210982765
+    }
+   },
+   "fosm_frozen_k_as_scored": {
+    "n_windows": 334,
+    "sd_ratio": 2.6658965298797854,
+    "coverage_1sigma": 0.7035928143712575,
+    "mean_z": -0.5337412047822047
+   },
+   "fosm_frozen_k_excluding_defective_traverse_POSTHOC": {
+    "n_windows": 323,
+    "sd_ratio": 1.073588989831151,
+    "coverage_1sigma": 0.7244582043343654,
+    "mean_z": -0.2956156206090222
+   },
    "k_frozen": 275.0293778920172,
    "excluded_traverse": "2023-07-20_19-12-27",
    "n_windows_excluded": 11,

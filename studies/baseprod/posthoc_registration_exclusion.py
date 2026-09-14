@@ -43,8 +43,8 @@ def std(xs):
     return math.sqrt(sum((x - m) ** 2 for x in xs) / (len(xs) - 1))
 
 
-def pooled_stats(rows, k):
-    zs = [(r["j_truth"] - r["arms"]["clark"][0]) / (math.sqrt(k) * r["arms"]["clark"][1])
+def pooled_stats(rows, k, arm="clark"):
+    zs = [(r["j_truth"] - r["arms"][arm][0]) / (math.sqrt(k) * r["arms"][arm][1])
           for r in rows]
     return {
         "n_windows": len(zs),
@@ -110,7 +110,26 @@ def run(cond):
 
     kept = [r for r in pool if r["traverse"] != EXCLUDED_TRAVERSE]
     excluded = [r for r in pool if r["traverse"] == EXCLUDED_TRAVERSE]
+    # 2026-09-14 addition (author's request for the Limitations paragraph):
+    # the raw (k = 1) sd ratios of clark and fosm, and fosm at the frozen k,
+    # both as scored (asserted against the pooled table) and excluding the
+    # defective traverse. Same rows, same k, no new draws.
+    pc, pf = art["pooled"]["clark"], art["pooled"]["fosm"]
+    raw_c, raw_f = pooled_stats(pool, 1.0), pooled_stats(pool, 1.0, "fosm")
+    rec_f = pooled_stats(pool, k, "fosm")
+    assert abs(raw_c["sd_ratio"] - pc["raw"]["sd_ratio"]) < 5e-4, (cond, raw_c, pc["raw"])
+    assert abs(raw_f["sd_ratio"] - pf["raw"]["sd_ratio"]) < 5e-4, (cond, raw_f, pf["raw"])
+    assert abs(rec_f["coverage_1sigma"] - pf["recal"]["cov1"]) < 5e-4, (cond, rec_f, pf["recal"])
+    assert abs(rec_f["sd_ratio"] - pf["recal"]["sd_ratio"]) < 5e-4
+    extra = {
+        "raw_k1_as_scored": {"clark": raw_c, "fosm": raw_f},
+        "raw_k1_excluding_defective_traverse_POSTHOC": {
+            "clark": pooled_stats(kept, 1.0), "fosm": pooled_stats(kept, 1.0, "fosm")},
+        "fosm_frozen_k_as_scored": rec_f,
+        "fosm_frozen_k_excluding_defective_traverse_POSTHOC": pooled_stats(kept, k, "fosm"),
+    }
     return {
+        **extra,
         "k_frozen": k,
         "excluded_traverse": EXCLUDED_TRAVERSE,
         "n_windows_excluded": len(excluded),
@@ -155,6 +174,15 @@ def main():
             r["excluding_defective_traverse_POSTHOC"]["coverage_1sigma"]))
         b = r["residual_vs_bias_x_steps_regression"]
         print("  regression slope %.4f (predicted -1), R^2 %.3f" % (b["slope"], b["r2"]))
+        print("  raw sd_ratio clark %.2f -> %.2f, fosm %.2f -> %.2f; fosm recal cov %.4f -> %.4f, sd_ratio %.4f -> %.4f" % (
+            r["raw_k1_as_scored"]["clark"]["sd_ratio"],
+            r["raw_k1_excluding_defective_traverse_POSTHOC"]["clark"]["sd_ratio"],
+            r["raw_k1_as_scored"]["fosm"]["sd_ratio"],
+            r["raw_k1_excluding_defective_traverse_POSTHOC"]["fosm"]["sd_ratio"],
+            r["fosm_frozen_k_as_scored"]["coverage_1sigma"],
+            r["fosm_frozen_k_excluding_defective_traverse_POSTHOC"]["coverage_1sigma"],
+            r["fosm_frozen_k_as_scored"]["sd_ratio"],
+            r["fosm_frozen_k_excluding_defective_traverse_POSTHOC"]["sd_ratio"]))
         print("  cvar med %.4f -> %.4f" % (
             r["belief_referee_as_scored"]["clark_cvar_abs_err_median"],
             r["belief_referee_excluding_POSTHOC"]["clark_cvar_abs_err_median"]))

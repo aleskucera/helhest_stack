@@ -99,3 +99,15 @@
   its 4,096-draw cap, and the equal-accuracy count 4,946 is the 1/sqrt(D) extrapolation.
 - 2026-09-13: v2_posthoc_review.py binom_two_sided tolerance made relative (F-11 of the methodology
   review); the hindsight hybrid sign-test p changes from 2.4e-15 to 2.3e-18; no other number moves.
+
+### 2026-09-14: registration-exclusion analysis extended (raw and fosm statistics)
+
+`baseprod/posthoc_registration_exclusion.py` now also reports, over the same pooled
+rows and the same frozen k, the raw (k = 1) sd ratios of clark and fosm and fosm at
+the frozen k, as scored (asserted against the pooled tables in
+`heldout_score_{foresight,hindsight}.json`) and excluding traverse
+2023-07-20_19-12-27. No rebuild, no new draws. Excluding the traverse: raw clark
+17.21 / 19.64 (fosm 15.86 / 17.80); frozen-k fosm coverage 0.7850 / 0.7245,
+sd ratio 0.9429 / 1.0736. The existing fields are unchanged (clark 1.0231 / 1.1846,
+coverage 0.7352 / 0.6904). Post hoc; E2-ii's pre-registered verdict stands. Cited by
+the paper's Limitations paragraph.
