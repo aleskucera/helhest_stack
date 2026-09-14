@@ -112,8 +112,11 @@ def main(out_dir: Path):
         d["decision_paired"] = mc
         taus = {q: float(np.quantile(cv, q)) for q in (0.25, 0.5, 0.75, 0.9)}
         tv = {"thresholds": taus, "arms": {}}
-        for a in ARMS:
-            arm = np.array([r["arms"][a]["cvar_arm"] for r in rows])
+        # 2026-09-14: the C-FOSM (hybrid) verdicts, derived per window from the
+        # frozen arms (clark's E, fosm's sd), no new draws
+        arm_cvars = {a: np.array([r["arms"][a]["cvar_arm"] for r in rows]) for a in ARMS}
+        arm_cvars["hybrid"] = np.array([r["arms"]["clark"]["E"] + LAM_Q * r["arms"]["fosm"]["sd"] for r in rows])
+        for a, arm in arm_cvars.items():
             tv["arms"][a] = {str(q): {"disagree": float(np.mean((arm < t) != (cv < t))),
                                       "unsafe_called_safe": float(np.mean((arm < t) & (cv >= t))),
                                       "safe_called_unsafe": float(np.mean((arm >= t) & (cv < t)))}

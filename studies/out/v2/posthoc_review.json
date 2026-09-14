@@ -1,6 +1,6 @@
 {
  "_meta": {
-  "written": "2026-09-13 18:45:26",
+  "written": "2026-09-14 18:34:24",
   "lambda_q": 1.754983319324869,
   "q": 0.9,
   "source": "heldout_score_{foresight,hindsight}.json (unflagged, scoreable rows)"
@@ -264,6 +264,28 @@
       "disagree": 0.012618296529968454,
       "unsafe_called_safe": 0.0,
       "safe_called_unsafe": 0.012618296529968454
+     }
+    },
+    "hybrid": {
+     "0.25": {
+      "disagree": 0.015772870662460567,
+      "unsafe_called_safe": 0.015772870662460567,
+      "safe_called_unsafe": 0.0
+     },
+     "0.5": {
+      "disagree": 0.00946372239747634,
+      "unsafe_called_safe": 0.00946372239747634,
+      "safe_called_unsafe": 0.0
+     },
+     "0.75": {
+      "disagree": 0.0031545741324921135,
+      "unsafe_called_safe": 0.0031545741324921135,
+      "safe_called_unsafe": 0.0
+     },
+     "0.9": {
+      "disagree": 0.0,
+      "unsafe_called_safe": 0.0,
+      "safe_called_unsafe": 0.0
      }
     }
    }
@@ -595,6 +617,28 @@
       "disagree": 0.021671826625386997,
       "unsafe_called_safe": 0.0,
       "safe_called_unsafe": 0.021671826625386997
+     }
+    },
+    "hybrid": {
+     "0.25": {
+      "disagree": 0.0,
+      "unsafe_called_safe": 0.0,
+      "safe_called_unsafe": 0.0
+     },
+     "0.5": {
+      "disagree": 0.0030959752321981426,
+      "unsafe_called_safe": 0.0030959752321981426,
+      "safe_called_unsafe": 0.0
+     },
+     "0.75": {
+      "disagree": 0.0,
+      "unsafe_called_safe": 0.0,
+      "safe_called_unsafe": 0.0
+     },
+     "0.9": {
+      "disagree": 0.0,
+      "unsafe_called_safe": 0.0,
+      "safe_called_unsafe": 0.0
      }
     }
    }
