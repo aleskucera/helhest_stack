@@ -1,0 +1,202 @@
+{
+ "foresight": {
+  "n_windows": 363,
+  "belief_tau_median_m": 0.00936533137757911,
+  "arms": {
+   "clark-corr": {
+    "rel_err_E": 0.0019808697376929585,
+    "rel_err_sd": 0.026605173282596928,
+    "sd_ratio_to_mc": 0.9948734876873707,
+    "cvar_abs_err": 0.00446680723895021,
+    "cvar_abs_err_p95": 0.12034380414596502
+   },
+   "clark": {
+    "rel_err_E": 0.0019808697376929585,
+    "rel_err_sd": 0.06049850746172414,
+    "sd_ratio_to_mc": 0.9395014925382759,
+    "cvar_abs_err": 0.008671710548567413,
+    "cvar_abs_err_p95": 0.26061770798506956
+   },
+   "fosm": {
+    "rel_err_E": 0.023491183919975067,
+    "rel_err_sd": 0.03949520156669606,
+    "sd_ratio_to_mc": 1.000941034561983,
+    "cvar_abs_err": 0.01263837557414993,
+    "cvar_abs_err_p95": 0.8101713752948214
+   },
+   "hybrid": {
+    "rel_err_E": 0.0019808697376929585,
+    "rel_err_sd": 0.03949520156669606,
+    "sd_ratio_to_mc": 1.000941034561983,
+    "cvar_abs_err": 0.005158626385712239,
+    "cvar_abs_err_p95": 0.17099212190084145
+   },
+   "lse-0.005": {
+    "rel_err_E": 0.024144424893436156,
+    "rel_err_sd": 0.04546507768613228,
+    "sd_ratio_to_mc": 0.964441193669435,
+    "cvar_abs_err": 0.012802361522687433,
+    "cvar_abs_err_p95": 0.8410010029000929
+   },
+   "lse-0.01": {
+    "rel_err_E": 0.02885631972660596,
+    "rel_err_sd": 0.07163827521320365,
+    "sd_ratio_to_mc": 0.928919303355121,
+    "cvar_abs_err": 0.017334758938520267,
+    "cvar_abs_err_p95": 0.9564948281768189
+   },
+   "lse-0.02": {
+    "rel_err_E": 0.04468136894831365,
+    "rel_err_sd": 0.12065481634656428,
+    "sd_ratio_to_mc": 0.8793451836534357,
+    "cvar_abs_err": 0.02529204502517013,
+    "cvar_abs_err_p95": 1.1500148680696363
+   },
+   "lse-0.05": {
+    "rel_err_E": 0.09168473591550852,
+    "rel_err_sd": 0.1870018341731029,
+    "sd_ratio_to_mc": 0.8129981658268971,
+    "cvar_abs_err": 0.0372140682064174,
+    "cvar_abs_err_p95": 2.236615653393086
+   },
+   "lse-0.1": {
+    "rel_err_E": 0.12781065400538383,
+    "rel_err_sd": 0.2295727218654784,
+    "sd_ratio_to_mc": 0.7704272781345216,
+    "cvar_abs_err": 0.04476346929412223,
+    "cvar_abs_err_p95": 3.928003209543869
+   },
+   "lse-belief": {
+    "rel_err_E": 0.008594665316249084,
+    "rel_err_sd": 0.10437615164362846,
+    "sd_ratio_to_mc": 0.8956238483563715,
+    "cvar_abs_err": 0.01478771551487934,
+    "cvar_abs_err_p95": 0.17872210504937236
+   }
+  },
+  "best_global_tau_arm": "lse-0.005",
+  "paired": {
+   "lse-0.005": {
+    "E_err_below_fosm": 188,
+    "clark_E_err_below": 340,
+    "clark-corr_sd_err_below": 250,
+    "clark-corr_cvar_err_below": 287,
+    "hybrid_cvar_err_below": 282
+   },
+   "lse-belief": {
+    "E_err_below_fosm": 295,
+    "clark_E_err_below": 335,
+    "clark-corr_sd_err_below": 312,
+    "clark-corr_cvar_err_below": 351,
+    "hybrid_cvar_err_below": 328
+   }
+  }
+ },
+ "hindsight": {
+  "n_windows": 368,
+  "belief_tau_median_m": 0.008285814114396101,
+  "arms": {
+   "clark-corr": {
+    "rel_err_E": 0.0008469536413744927,
+    "rel_err_sd": 0.018773288137337807,
+    "sd_ratio_to_mc": 1.0124962244334208,
+    "cvar_abs_err": 0.001912354691481849,
+    "cvar_abs_err_p95": 0.15872465275895742
+   },
+   "clark": {
+    "rel_err_E": 0.0008469536413744927,
+    "rel_err_sd": 0.03595965645176896,
+    "sd_ratio_to_mc": 0.964040343548231,
+    "cvar_abs_err": 0.005402125436983207,
+    "cvar_abs_err_p95": 0.261263967328782
+   },
+   "fosm": {
+    "rel_err_E": 0.01452775670152423,
+    "rel_err_sd": 0.025995884197031915,
+    "sd_ratio_to_mc": 0.9961777972637578,
+    "cvar_abs_err": 0.007469368779071367,
+    "cvar_abs_err_p95": 0.9208222541135722
+   },
+   "hybrid": {
+    "rel_err_E": 0.0008469536413744927,
+    "rel_err_sd": 0.025995884197031915,
+    "sd_ratio_to_mc": 0.9961777972637578,
+    "cvar_abs_err": 0.003246334854803478,
+    "cvar_abs_err_p95": 0.20749857813558137
+   },
+   "lse-0.005": {
+    "rel_err_E": 0.008016836398393512,
+    "rel_err_sd": 0.03553651660076679,
+    "sd_ratio_to_mc": 0.967024415545681,
+    "cvar_abs_err": 0.007100102882181325,
+    "cvar_abs_err_p95": 0.9178218380587353
+   },
+   "lse-0.01": {
+    "rel_err_E": 0.017515655977525746,
+    "rel_err_sd": 0.066204737060583,
+    "sd_ratio_to_mc": 0.9350257984660332,
+    "cvar_abs_err": 0.012096679828377088,
+    "cvar_abs_err_p95": 1.0025820086904513
+   },
+   "lse-0.02": {
+    "rel_err_E": 0.03615634430593884,
+    "rel_err_sd": 0.10916435469257307,
+    "sd_ratio_to_mc": 0.8912869911873902,
+    "cvar_abs_err": 0.01923062316503616,
+    "cvar_abs_err_p95": 1.3179272531475732
+   },
+   "lse-0.05": {
+    "rel_err_E": 0.08050432705376809,
+    "rel_err_sd": 0.16860721479305796,
+    "sd_ratio_to_mc": 0.831392785206942,
+    "cvar_abs_err": 0.03236725286191036,
+    "cvar_abs_err_p95": 2.4619639466572805
+   },
+   "lse-0.1": {
+    "rel_err_E": 0.11641145516189405,
+    "rel_err_sd": 0.20773441838479967,
+    "sd_ratio_to_mc": 0.7928502165529132,
+    "cvar_abs_err": 0.04126258770309192,
+    "cvar_abs_err_p95": 4.189293165509621
+   },
+   "lse-belief": {
+    "rel_err_E": 0.005297510517610515,
+    "rel_err_sd": 0.06477546402883094,
+    "sd_ratio_to_mc": 0.9352245359711691,
+    "cvar_abs_err": 0.00899693014054486,
+    "cvar_abs_err_p95": 0.19629208359878447
+   }
+  },
+  "best_global_tau_arm": "lse-0.005",
+  "paired": {
+   "lse-0.005": {
+    "E_err_below_fosm": 227,
+    "clark_E_err_below": 337,
+    "clark-corr_sd_err_below": 243,
+    "clark-corr_cvar_err_below": 320,
+    "hybrid_cvar_err_below": 272
+   },
+   "lse-belief": {
+    "E_err_below_fosm": 305,
+    "clark_E_err_below": 349,
+    "clark-corr_sd_err_below": 290,
+    "clark-corr_cvar_err_below": 350,
+    "hybrid_cvar_err_below": 318
+   }
+  }
+ },
+ "_meta": {
+  "written": "2026-09-14 17:17:01",
+  "n_ref": 20000,
+  "windows_root": "out/windows",
+  "taus_m": [
+   0.005,
+   0.01,
+   0.02,
+   0.05,
+   0.1
+  ],
+  "logistic_match": 1.702,
+  "note": "post hoc; softened contact (LSE) at one global temperature (swept) and at the belief-scaled per-node temperature a/1.702; first-order propagation through the softmax weights; design and held-out windows both included"
+ }
+}

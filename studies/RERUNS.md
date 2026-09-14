@@ -144,3 +144,19 @@ the paper's Limitations paragraph.
   law's 0.0280 / 0.0180. Reading (the ICRA-style review's point): the alpha_w dependence of the
   correction is not established on the held-out record; a scalar does as well. Also records the
   reference CVaR_0.9 medians 0.500 / 0.630 (cost units) for the Table II caption.
+
+## 2026-09-14 softmax (log-sum-exp) arms, all v2 windows (post hoc)
+- studies/out/v2/softmax/: softmax_summary.json, softmax_windows.json, softmax_rows.jsonl, run.log,
+  from studies/baseprod/v2_softmax.py on dasenka (fast-BLAS venv, 24 workers, single-threaded
+  BLAS), referee re-drawn (20k, crc32 seeds), design and held-out windows both included (363 / 368
+  unflagged). Arms: the softened contact at one global temperature (5 mm to 10 cm, first-order
+  propagation through the softmax weights) and the belief-scaled softmax with the per-node
+  temperature a / 1.702 of Section III-C (the ICRA-style review's construction).
+- Reading (medians, foresight / hindsight): the global temperature is best at its smallest value
+  (5 mm), where it is linearization (rel err E 2.4e-2 / 8.0e-3 against fosm 2.4e-2 / 1.5e-2), and
+  degrades monotonically above it (10 cm: 0.13 / 0.12). The belief-scaled softmax recovers part of
+  the mean (8.6e-3 / 5.3e-3, below fosm in 295 / 363 and 305 / 368 windows) but not the fold's
+  (2.0e-3 / 8.5e-4; the fold below it in 335 / 363 and 349 / 368), and it understates the sd
+  (sd/MC 0.896 / 0.935, worse than the uncorrected fold's 0.940 / 0.964), so its CVaR error
+  (0.0148 / 0.0090) is above linearization's (0.0126 / 0.0075); clark-corr below it in 351 / 363 and
+  350 / 368 windows, the hybrid in 328 / 363 and 318 / 368.
