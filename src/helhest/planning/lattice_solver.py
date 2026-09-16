@@ -69,7 +69,7 @@ def _relax_lattice_pose_kernel(
     prim_dr: wp.array(dtype=wp.int32, ndim=2),  # [n_theta, n_prim] endpoint row offset
     prim_dc: wp.array(dtype=wp.int32, ndim=2),  # endpoint col offset
     prim_heading: wp.array(dtype=wp.int32, ndim=2),  # heading bin the arc ends at
-    prim_cost: wp.array(dtype=wp.float32, ndim=2),  # arc length
+    prim_cost: wp.array(dtype=wp.float32, ndim=2),  # realized displacement of the arc
     sweep_dr: wp.array(dtype=wp.int32, ndim=3),  # [n_theta, n_prim, max_sweep] swept-cell offsets
     sweep_dc: wp.array(dtype=wp.int32, ndim=3),
     sweep_n: wp.array(dtype=wp.int32, ndim=2),  # [n_theta, n_prim] swept-cell count
@@ -157,6 +157,7 @@ def _build_primitives(
     prim_dr = np.zeros((n_theta, n_prim), np.int32)
     prim_dc = np.zeros((n_theta, n_prim), np.int32)
     prim_heading = np.zeros((n_theta, n_prim), np.int32)
+    # default only; the loop below replaces this with each primitive's realized displacement
     prim_cost = np.full((n_theta, n_prim), step, np.float32)
     sweep_dr = np.zeros((n_theta, n_prim, max_sweep), np.int32)
     sweep_dc = np.zeros((n_theta, n_prim, max_sweep), np.int32)
@@ -173,6 +174,18 @@ def _build_primitives(
                 cells.append((int(round(y / resolution)), int(round(x / resolution))))
             prim_dc[it, p] = int(round(x / resolution))
             prim_dr[it, p] = int(round(y / resolution))
+            # Charge the displacement the lattice REALIZES, not the arc we asked for. The endpoint
+            # above is rounded to whole cells, so a turning primitive at step 0.3 on 0.1 m cells
+            # lands (dr, dc) = (2, 3) -- 0.36 m of ground covered for a flat 0.30 m charge. Billing
+            # every primitive the same `step` therefore makes weaving CHEAPER per metre than
+            # driving straight, and on featureless terrain the value iteration wanders metres off
+            # the direct line (scripts/flat_map_detour.py measures it). This is the chord, so a
+            # turning arc is still undercharged by ~1.5% of its true length at this turn radius --
+            # far below the rounding error it replaces. A primitive too short to resolve on this
+            # grid keeps the nominal `step`, so no move can ever become free.
+            reach = resolution * math.hypot(float(prim_dr[it, p]), float(prim_dc[it, p]))
+            if reach > 0.0:
+                prim_cost[it, p] = reach
             prim_heading[it, p] = int(math.floor(((th + dth_p) % (2.0 * math.pi)) / dth)) % n_theta
             uniq = sorted(set(cells))[:max_sweep]
             for s, (cr, cc) in enumerate(uniq):
