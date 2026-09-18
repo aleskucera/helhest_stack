@@ -1,0 +1,51 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+loaded trained weights from dfl_full.json (mse=[-0.03424949  0.03844172  0.03794547  0.32501209  0.39005596 -0.25183779], decision=[ 0.63516179  1.26993221  5.66576941  1.53997255 -2.95627656  1.06360404])
+reference (dfl_full.json, hybrid family): mse regret 0.1619, decision regret 1.6386
+
+building 80 held-out seeds (family=hybrid, noise=all) ...
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.20 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.28 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 8.07 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.68 ms  (cached)
+  done in 28.0s
+
+=== A: mechanism -- per-seed strata + fill error ===
+
+  -- stratified by GEOMETRIC (<=0.5m of a plan) --
+  stratum     model            n      bias      rmse
+  relevant    mse          41551   +0.0068    0.0872
+  relevant    decision     41551   +1.0547    1.1074
+  irrelevant  mse         442249   +0.0025    0.1050
+  irrelevant  decision    442249   +1.7560    2.3420
+  relevant fraction of unobserved cells: 8.588%
+
+  -- stratified by ADJOINT SUPPORT (|grad| sum > 1e-6) --
+  stratum     model            n      bias      rmse
+  relevant    mse          30119   +0.0132    0.0876
+  relevant    decision     30119   +0.9915    1.0445
+  irrelevant  mse         453681   +0.0022    0.1046
+  irrelevant  decision    453681   +1.7425    2.3209
+  relevant fraction of unobserved cells: 6.226%
+
+  corr(|extra error| of decision vs mse, adjoint-support mass), pooled over 483800 cells: r=-0.0976  (95% seed-bootstrap CI [-0.1034, -0.0918])
+
+=== B: transfer to the FAN plan family (no retraining) ===
+  built 80 fan-family harnesses in 14.5s
+
+  method          regret       tau   (fan-family plans)
+  zero_fill       0.4082    +0.596
+  mse             0.1482    +0.802
+  cost_space      0.0698    +0.830
+  decision        1.6382    +0.293
+
+  paired sign test, decision vs mse regret on fan plans (positive = decision wins): mean -1.4900  median -0.8354  wins 5/61 (ties dropped)  p=5.65e-12
+
+  verdict: decision-trained's edge over MSE-trained vanished or reversed on fan-family plan choice: the advantage is plan-family-specific and must be scoped to the hybrid family the loss was trained against.
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/dfl_mechanism.json  (54.5s total)

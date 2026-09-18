@@ -1,0 +1,98 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+plan family: hybrid -- PARTIALLY CONFOUNDED: 4 paths x 4 speed profiles. The case that actually discriminates.
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.25 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.30 ms  (cached)
+Module helhest.engine.step b170777 load on device 'cuda:0' took 6.65 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.66 ms  (cached)
+  50/200 seeds
+  100/200 seeds
+  150/200 seeds
+  200/200 seeds
+
+before sensing:  Kendall tau +0.122   top-1 correct 6%   (n=200)
+true cost spread across the 16 plans: 6.71 mean
+plan separation: endpoints 1.07 m apart, coverage spread 0.0346  (low = geometry cannot discriminate)
+
+tau  = agreement of the post-sensing ranking with the truth (1 = perfect)
+top1 = the believed-best plan really is the best
+reg  = true excess cost of the plan a planner would pick (0 = optimal)
+rch  = envelope cells actually moved per cell revealed (low = inert reveals)
+
+policy           tau@25  top1    reg    rch  tau@100  top1    reg    rch  tau@400  top1    reg    rch
+random           +0.102   5%   2.39    8.3   +0.085   8%   2.51    7.8   +0.056   4%   2.66    6.3
+entropy          +0.109   6%   2.36    8.4   +0.089   4%   2.58    7.9   +0.074   6%   2.53    6.3
+swath            +0.129  11%   2.06    6.2   +0.348  22%   1.38    3.1   +0.639  48%   0.53    1.5
+swath_best       +0.189   8%   1.90    3.4   +0.182  12%   1.74    1.7   +0.334  43%   0.90    1.2
+swath_var        +0.146   6%   2.14    4.1   +0.187   8%   1.98    2.6   +0.577  42%   0.75    1.5
+attribution      +0.140  12%   2.06    4.9   +0.195  23%   1.47    2.2   +0.278  36%   1.17    3.9
+magnitude        +0.122  12%   2.18    5.4   +0.257  20%   1.69    3.4   +0.815  71%   0.13    1.5
+margin           +0.153  11%   2.11    5.2   +0.254  25%   1.33    3.0   +0.481  57%   0.67    1.9
+disagreement     +0.098  10%   2.34    6.3   +0.276  22%   1.68    3.9   +0.819  71%   0.14    1.5
+magn_pooled      +0.069   5%   2.60    6.6   +0.118  12%   2.07    4.3   +0.523  40%   0.74    1.8
+disag_pooled     +0.066   6%   2.43    6.7   +0.104  16%   2.11    4.3   +0.506  41%   0.85    1.8
+oracle           +0.193  15%   1.80    8.6   +0.522  40%   0.77    4.3   +0.911  86%   0.04    1.7   <- ceiling, not a policy
+
+where each policy looked: mean range of the revealed cells [m], and their mean
+distance off the nearest plan [m], at 100 cells
+  random         range  4.93   off-plan  2.41
+  entropy        range  4.91   off-plan  2.42
+  swath          range  2.58   off-plan  0.03
+  swath_best     range  2.63   off-plan  0.11
+  swath_var      range  3.16   off-plan  0.06
+  attribution    range  2.59   off-plan  0.19
+  magnitude      range  2.49   off-plan  0.18
+  margin         range  2.65   off-plan  0.19
+  disagreement   range  2.66   off-plan  0.20
+  magn_pooled    range  2.37   off-plan  0.47
+  disag_pooled   range  2.38   off-plan  0.47
+  oracle         range  2.63   off-plan  0.19
+
+paired per seed, X minus entropy in tau (positive = X better):
+                                      @25                     @100                     @400
+  random          -0.007  75/167 p=2.2e-01  -0.004  94/193 p=7.7e-01  -0.018  85/195 p=8.5e-02
+  swath           +0.020 104/187 p=1.4e-01  +0.259 170/198 p=5.3e-26  +0.566 190/200 p=2.9e-44
+  swath_best      +0.079 129/194 p=5.1e-06  +0.093 128/195 p=1.5e-05  +0.260 153/198 p=5.8e-15
+  swath_var       +0.037 118/193 p=2.4e-03  +0.098 121/197 p=1.7e-03  +0.503 179/198 p=8.1e-34
+  attribution     +0.030 112/197 p=6.4e-02  +0.105 129/194 p=5.1e-06  +0.204 146/195 p=2.2e-12
+  magnitude       +0.013 103/194 p=4.3e-01  +0.167 140/196 p=1.7e-09  +0.741 200/200 p=1.2e-60
+  margin          +0.044 125/196 p=1.4e-04  +0.165 142/196 p=2.6e-10  +0.407 177/200 p=1.2e-30
+  disagreement    -0.011 100/195 p=7.7e-01  +0.187 141/196 p=6.8e-10  +0.745 200/200 p=1.2e-60
+  magn_pooled     -0.041  85/195 p=8.5e-02  +0.029 106/196 p=2.8e-01  +0.449 182/196 p=1.9e-38
+  disag_pooled    -0.043  89/196 p=2.2e-01  +0.015 105/193 p=2.5e-01  +0.432 182/197 p=1.3e-37
+  oracle          +0.084 125/197 p=2.0e-04  +0.432 183/199 p=4.2e-37  +0.837 200/200 p=1.2e-60
+
+paired per seed, X minus swath in tau (positive = X better):
+                                      @25                     @100                     @400
+  random          -0.027  88/196 p=1.7e-01  -0.262  35/195 p=2.7e-20  -0.583   6/200 p=1.1e-49
+  entropy         -0.020  83/187 p=1.4e-01  -0.259  28/198 p=5.3e-26  -0.566  10/200 p=2.9e-44
+  swath_best      +0.060 111/197 p=8.7e-02  -0.166  56/200 p=4.0e-10  -0.305  38/199 p=3.2e-19
+  swath_var       +0.017 107/192 p=1.3e-01  -0.160  50/192 p=2.1e-11  -0.063  75/193 p=2.4e-03
+  attribution     +0.011 100/194 p=7.2e-01  -0.153  63/197 p=4.7e-07  -0.362  28/197 p=9.2e-26
+  magnitude       -0.007  89/195 p=2.5e-01  -0.091  68/194 p=3.8e-05  +0.175 166/194 p=4.6e-25
+  margin          +0.024 108/195 p=1.5e-01  -0.094  73/189 p=2.2e-03  -0.158  60/198 p=3.0e-08
+  disagreement    -0.031  84/194 p=7.2e-02  -0.072  87/198 p=1.0e-01  +0.180 170/196 p=4.1e-27
+  magn_pooled     -0.061  71/190 p=6.1e-04  -0.230  41/197 p=5.4e-17  -0.116  56/196 p=1.7e-09
+  disag_pooled    -0.063  77/194 p=5.0e-03  -0.244  38/195 p=2.2e-18  -0.134  56/197 p=1.2e-09
+  oracle          +0.064 121/196 p=1.2e-03  +0.174 144/199 p=2.2e-10  +0.271 190/196 p=1.5e-48
+
+paired per seed, X minus swath_var in tau (positive = X better):
+                                      @25                     @100                     @400
+  random          -0.043  70/191 p=2.8e-04  -0.102  65/194 p=5.1e-06  -0.520  13/199 p=2.2e-40
+  entropy         -0.037  75/193 p=2.4e-03  -0.098  76/197 p=1.7e-03  -0.503  19/198 p=8.1e-34
+  swath           -0.017  85/192 p=1.3e-01  +0.160 142/192 p=2.1e-11  +0.063 118/193 p=2.4e-03
+  swath_best      +0.043 117/197 p=1.0e-02  -0.005  93/198 p=4.3e-01  -0.242  50/194 p=9.5e-12
+  attribution     -0.006 101/196 p=7.2e-01  +0.007 101/196 p=7.2e-01  -0.299  39/196 p=5.6e-18
+  magnitude       -0.024 101/195 p=6.7e-01  +0.069 117/197 p=1.0e-02  +0.238 176/194 p=9.3e-34
+  margin          +0.008 110/198 p=1.4e-01  +0.067 112/196 p=5.4e-02  -0.095  75/193 p=2.4e-03
+  disagreement    -0.048  88/196 p=1.7e-01  +0.089 126/200 p=2.9e-04  +0.243 182/198 p=7.8e-37
+  magn_pooled     -0.077  65/192 p=9.0e-06  -0.070  77/196 p=3.3e-03  -0.053  73/192 p=1.1e-03
+  disag_pooled    -0.080  70/195 p=1.0e-04  -0.084  81/196 p=1.8e-02  -0.071  80/195 p=1.5e-02
+  oracle          +0.047 110/195 p=8.5e-02  +0.334 173/199 p=7.7e-28  +0.334 196/199 p=3.3e-54
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/ranking_hybrid.json and ranking_hybrid.png

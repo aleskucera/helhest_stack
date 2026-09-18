@@ -1,0 +1,47 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.52 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.63 ms  (cached)
+Module helhest.engine.step b170777 load on device 'cuda:0' took 6.58 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.60 ms  (cached)
+Module studies.adjoint.sigma 0b23f26 load on device 'cuda:0' took 0.74 ms  (cached)
+  10/40 seeds
+  20/40 seeds
+  30/40 seeds
+  40/40 seeds
+
+n=40 seeds, 256 terrain draws each, CVaR at alpha=0.9 (kappa=1.755)
+true CVaR spread across the 16 plans: 13.24
+E[J] - J(belief) = +2.158  -- the wheel envelope's max biases the cost UP under uncertainty; a mean-map
+   planner is optimistic by this much before any risk term is added
+
+sum_t sigma_t spread across plans: 1.292 with an RMS footprint, 0.008 with a MAX
+   -- a max-aggregated per-cell risk cost cannot rank these plans AT ALL, because a
+      saturating sigma field pins it to the cap under every footprint
+
+DECISION QUALITY -- pick the argmin, pay its true CVaR
+estimator      regret  picked best  tau vs truth
+none            5.095          2%        +0.043
+sum_sigma       4.934          8%        +0.054
+step            4.315         10%        +0.079
+fosm            3.741          8%        +0.150  <- ours
+mc              0.000        100%        +1.000  <- truth
+
+ACCURACY of the risk term itself (only arms that produce a CVaR in cost units)
+estimator       |err|  est/true risk
+step            4.182           1.20
+fosm           11.947           1.82
+  (est/true risk = 1.0 is perfect; >1 over-conservative, <1 over-confident)
+
+paired per seed, regret difference (negative = first arm better)
+  fosm       vs step       mean  -0.574   better on  10/20    p=1.00e+00
+  fosm       vs sum_sigma  mean  -1.193   better on  12/22    p=8.32e-01
+  fosm       vs none       mean  -1.354   better on  13/24    p=8.39e-01
+  step       vs none       mean  -0.781   better on  10/14    p=1.80e-01
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/risk_hybrid_all.json

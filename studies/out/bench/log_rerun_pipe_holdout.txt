@@ -1,0 +1,35 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.48 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.46 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 8.12 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.71 ms  (cached)
+
+holdout confirmation: config A = default, config B = config_b
+
+design A  (n=120):
+  disagreement - corridor_mi   +0.001   better on  24/50    p=8.88e-01
+  disagreement - entropy_mi    -0.023   better on  34/79    p=2.60e-01
+  disagreement - entropy       -0.023   better on  43/94    p=4.70e-01
+
+holdout A  (n=120):
+  disagreement - corridor_mi   -0.010   better on  20/38    p=8.71e-01
+  disagreement - entropy_mi    -0.030   better on  35/72    p=9.06e-01
+  disagreement - entropy       -0.021   better on  42/84    p=1.00e+00
+
+design B  (n=100):
+  disagreement - corridor_mi   -0.003   better on  19/42    p=6.44e-01
+  disagreement - entropy_mi    -0.026   better on  29/68    p=2.75e-01
+  disagreement - entropy       -0.022   better on  36/78    p=5.72e-01
+
+holdout B  (n=120):
+  disagreement - corridor_mi   -0.010   better on  20/39    p=1.00e+00
+  disagreement - entropy_mi    -0.030   better on  34/71    p=8.13e-01
+  disagreement - entropy       -0.022   better on  42/84    p=1.00e+00
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/sensing/holdout.json

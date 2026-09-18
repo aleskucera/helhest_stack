@@ -1,0 +1,476 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.25 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.45 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 8.25 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.79 ms  (cached)
+Module studies.adjoint.sigma 0b23f26 load on device 'cuda:0' took 0.77 ms  (cached)
+  ran 10 seeds at n_draws=4096
+
+!! signal-strata floor ratio 0.110 > 0.1 -- escalating to n_draws=6144 and rerunning !!
+Warp CUDA error 2: out of memory (in function wp_alloc_device_async, /builds/omniverse/warp/warp/native/warp.cu:794)
+
+!! escalation OOM'd (Failed to allocate 199065600 bytes on device 'cuda:0') -- keeping the n_draws=4096 results !!
+============================================================================================
+SMOOTHNESS CHECK: g_clark(eps=0.5mm) vs g_clark(eps=2mm), relative spread
+  median = 0.0000  p90 = 0.1532  (bar: median < 0.02)
+  -> PASS -- Clark's FD gradient is well-defined independent of step size
+
+NOISE-FLOOR ACCOUNTING (CRN paired-difference SEM vs |dE_mc|)
+  n=600 (seed, cell, delta) triples; excluded by the 3x-SEM gate: 372
+  median SEM = 0.00002   median |dE_mc| = 0.00017   ratio = 0.110  (target < 0.1)
+
+ERROR TABLE (228/600 triples pass the |dE_mc| > 3x-floor gate)
+
+  delta = 0.01000 m  (n=67)
+    Clark-fn   median=0.4379  p90=4.0016
+    Clark-lin  median=0.4572  p90=2.9601
+    hard-adj   median=1.0000  p90=1.0017
+    [on_support             n=40 ]  Clark-lin med=0.3995  hard med=0.5995
+    [near_support           n=17 ]  Clark-lin med=0.7496  hard med=1.0000
+    [off_support_swath      n=10 ]  Clark-lin med=1.7648  hard med=1.0000
+
+  delta = 0.01447 m  (n=1)
+    Clark-fn   median=1.0000  p90=1.0000
+    Clark-lin  median=1.0000  p90=1.0000
+    hard-adj   median=0.5071  p90=0.5071
+    [on_support             n=1  ]  Clark-lin med=1.0000  hard med=0.5071
+
+  delta = 0.01462 m  (n=1)
+    Clark-fn   median=0.5030  p90=0.5030
+    Clark-lin  median=0.7112  p90=0.7112
+    hard-adj   median=0.0354  p90=0.0354
+    [on_support             n=1  ]  Clark-lin med=0.7112  hard med=0.0354
+
+  delta = 0.01634 m  (n=1)
+    Clark-fn   median=1.7634  p90=1.7634
+    Clark-lin  median=0.1508  p90=0.1508
+    hard-adj   median=1.1057  p90=1.1057
+    [on_support             n=1  ]  Clark-lin med=0.1508  hard med=1.1057
+
+  delta = 0.01693 m  (n=1)
+    Clark-fn   median=0.8612  p90=0.8612
+    Clark-lin  median=0.9364  p90=0.9364
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.9364  hard med=1.0000
+
+  delta = 0.02022 m  (n=1)
+    Clark-fn   median=0.6668  p90=0.6668
+    Clark-lin  median=0.8065  p90=0.8065
+    hard-adj   median=0.0340  p90=0.0340
+    [on_support             n=1  ]  Clark-lin med=0.8065  hard med=0.0340
+
+  delta = 0.02300 m  (n=1)
+    Clark-fn   median=0.1141  p90=0.1141
+    Clark-lin  median=0.5450  p90=0.5450
+    hard-adj   median=0.6404  p90=0.6404
+    [on_support             n=1  ]  Clark-lin med=0.5450  hard med=0.6404
+
+  delta = 0.02368 m  (n=1)
+    Clark-fn   median=0.0650  p90=0.0650
+    Clark-lin  median=0.4570  p90=0.4570
+    hard-adj   median=0.3281  p90=0.3281
+    [on_support             n=1  ]  Clark-lin med=0.4570  hard med=0.3281
+
+  delta = 0.02492 m  (n=1)
+    Clark-fn   median=0.1928  p90=0.1928
+    Clark-lin  median=0.3506  p90=0.3506
+    hard-adj   median=0.4558  p90=0.4558
+    [on_support             n=1  ]  Clark-lin med=0.3506  hard med=0.4558
+
+  delta = 0.02501 m  (n=1)
+    Clark-fn   median=0.3677  p90=0.3677
+    Clark-lin  median=0.6307  p90=0.6307
+    hard-adj   median=0.0638  p90=0.0638
+    [on_support             n=1  ]  Clark-lin med=0.6307  hard med=0.0638
+
+  delta = 0.02636 m  (n=1)
+    Clark-fn   median=1.0256  p90=1.0256
+    Clark-lin  median=0.2380  p90=0.2380
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.2380  hard med=1.0000
+
+  delta = 0.02639 m  (n=1)
+    Clark-fn   median=0.8799  p90=0.8799
+    Clark-lin  median=0.9396  p90=0.9396
+    hard-adj   median=1.0097  p90=1.0097
+    [on_support             n=1  ]  Clark-lin med=0.9396  hard med=1.0097
+
+  delta = 0.02661 m  (n=1)
+    Clark-fn   median=14.0901  p90=14.0901
+    Clark-lin  median=1.5179  p90=1.5179
+    hard-adj   median=1.0016  p90=1.0016
+    [on_support             n=1  ]  Clark-lin med=1.5179  hard med=1.0016
+
+  delta = 0.02825 m  (n=1)
+    Clark-fn   median=0.5543  p90=0.5543
+    Clark-lin  median=0.3783  p90=0.3783
+    hard-adj   median=0.6952  p90=0.6952
+    [on_support             n=1  ]  Clark-lin med=0.3783  hard med=0.6952
+
+  delta = 0.03000 m  (n=74)
+    Clark-fn   median=0.4853  p90=7.1403
+    Clark-lin  median=0.5900  p90=2.2205
+    hard-adj   median=1.0000  p90=1.0000
+    [on_support             n=39 ]  Clark-lin med=0.5891  hard med=0.5322
+    [near_support           n=21 ]  Clark-lin med=0.5488  hard med=1.0000
+    [off_support_swath      n=14 ]  Clark-lin med=1.4417  hard med=1.0000
+
+  delta = 0.03041 m  (n=1)
+    Clark-fn   median=0.0180  p90=0.0180
+    Clark-lin  median=0.6195  p90=0.6195
+    hard-adj   median=0.6477  p90=0.6477
+    [on_support             n=1  ]  Clark-lin med=0.6195  hard med=0.6477
+
+  delta = 0.03053 m  (n=1)
+    Clark-fn   median=0.4407  p90=0.4407
+    Clark-lin  median=0.5909  p90=0.5909
+    hard-adj   median=0.2281  p90=0.2281
+    [on_support             n=1  ]  Clark-lin med=0.5909  hard med=0.2281
+
+  delta = 0.03133 m  (n=2)
+    Clark-fn   median=2.1338  p90=3.2592
+    Clark-lin  median=1.3334  p90=1.6614
+    hard-adj   median=0.6343  p90=0.9269
+    [on_support             n=1  ]  Clark-lin med=0.9233  hard med=0.2685
+    [near_support           n=1  ]  Clark-lin med=1.7434  hard med=1.0000
+
+  delta = 0.03491 m  (n=1)
+    Clark-fn   median=0.2055  p90=0.2055
+    Clark-lin  median=0.3160  p90=0.3160
+    hard-adj   median=0.0570  p90=0.0570
+    [on_support             n=1  ]  Clark-lin med=0.3160  hard med=0.0570
+
+  delta = 0.03513 m  (n=1)
+    Clark-fn   median=0.5866  p90=0.5866
+    Clark-lin  median=0.8640  p90=0.8640
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.8640  hard med=1.0000
+
+  delta = 0.03661 m  (n=1)
+    Clark-fn   median=0.1300  p90=0.1300
+    Clark-lin  median=0.6281  p90=0.6281
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=0.6281  hard med=1.0000
+
+  delta = 0.03859 m  (n=1)
+    Clark-fn   median=0.2126  p90=0.2126
+    Clark-lin  median=0.3363  p90=0.3363
+    hard-adj   median=0.0679  p90=0.0679
+    [on_support             n=1  ]  Clark-lin med=0.3363  hard med=0.0679
+
+  delta = 0.04018 m  (n=1)
+    Clark-fn   median=0.2223  p90=0.2223
+    Clark-lin  median=0.9563  p90=0.9563
+    hard-adj   median=3.2428  p90=3.2428
+    [on_support             n=1  ]  Clark-lin med=0.9563  hard med=3.2428
+
+  delta = 0.04094 m  (n=1)
+    Clark-fn   median=0.1111  p90=0.1111
+    Clark-lin  median=0.2188  p90=0.2188
+    hard-adj   median=0.1951  p90=0.1951
+    [on_support             n=1  ]  Clark-lin med=0.2188  hard med=0.1951
+
+  delta = 0.04251 m  (n=1)
+    Clark-fn   median=4.7944  p90=4.7944
+    Clark-lin  median=0.3323  p90=0.3323
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.3323  hard med=1.0000
+
+  delta = 0.04619 m  (n=1)
+    Clark-fn   median=0.0241  p90=0.0241
+    Clark-lin  median=0.3424  p90=0.3424
+    hard-adj   median=0.7813  p90=0.7813
+    [on_support             n=1  ]  Clark-lin med=0.3424  hard med=0.7813
+
+  delta = 0.04759 m  (n=1)
+    Clark-fn   median=0.1279  p90=0.1279
+    Clark-lin  median=0.5391  p90=0.5391
+    hard-adj   median=0.9492  p90=0.9492
+    [on_support             n=1  ]  Clark-lin med=0.5391  hard med=0.9492
+
+  delta = 0.04762 m  (n=1)
+    Clark-fn   median=0.0445  p90=0.0445
+    Clark-lin  median=0.3110  p90=0.3110
+    hard-adj   median=0.5632  p90=0.5632
+    [on_support             n=1  ]  Clark-lin med=0.3110  hard med=0.5632
+
+  delta = 0.04862 m  (n=1)
+    Clark-fn   median=0.0302  p90=0.0302
+    Clark-lin  median=0.4283  p90=0.4283
+    hard-adj   median=0.1213  p90=0.1213
+    [on_support             n=1  ]  Clark-lin med=0.4283  hard med=0.1213
+
+  delta = 0.04904 m  (n=1)
+    Clark-fn   median=0.1584  p90=0.1584
+    Clark-lin  median=0.6839  p90=0.6839
+    hard-adj   median=0.1665  p90=0.1665
+    [on_support             n=1  ]  Clark-lin med=0.6839  hard med=0.1665
+
+  delta = 0.05106 m  (n=1)
+    Clark-fn   median=9.6739  p90=9.6739
+    Clark-lin  median=1.3788  p90=1.3788
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=1.3788  hard med=1.0000
+
+  delta = 0.05155 m  (n=1)
+    Clark-fn   median=0.4584  p90=0.4584
+    Clark-lin  median=0.7326  p90=0.7326
+    hard-adj   median=0.0815  p90=0.0815
+    [on_support             n=1  ]  Clark-lin med=0.7326  hard med=0.0815
+
+  delta = 0.05354 m  (n=1)
+    Clark-fn   median=0.3169  p90=0.3169
+    Clark-lin  median=0.6900  p90=0.6900
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.6900  hard med=1.0000
+
+  delta = 0.05831 m  (n=1)
+    Clark-fn   median=0.2749  p90=0.2749
+    Clark-lin  median=0.7377  p90=0.7377
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=0.7377  hard med=1.0000
+
+  delta = 0.06263 m  (n=1)
+    Clark-fn   median=0.3047  p90=0.3047
+    Clark-lin  median=0.6766  p90=0.6766
+    hard-adj   median=0.1443  p90=0.1443
+    [on_support             n=1  ]  Clark-lin med=0.6766  hard med=0.1443
+
+  delta = 0.07098 m  (n=1)
+    Clark-fn   median=0.5487  p90=0.5487
+    Clark-lin  median=0.0041  p90=0.0041
+    hard-adj   median=0.7507  p90=0.7507
+    [on_support             n=1  ]  Clark-lin med=0.0041  hard med=0.7507
+
+  delta = 0.07694 m  (n=1)
+    Clark-fn   median=15.0257  p90=15.0257
+    Clark-lin  median=4.9236  p90=4.9236
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=4.9236  hard med=1.0000
+
+  delta = 0.07707 m  (n=1)
+    Clark-fn   median=0.1801  p90=0.1801
+    Clark-lin  median=0.8748  p90=0.8748
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.8748  hard med=1.0000
+
+  delta = 0.07950 m  (n=1)
+    Clark-fn   median=0.0049  p90=0.0049
+    Clark-lin  median=0.8960  p90=0.8960
+    hard-adj   median=0.9976  p90=0.9976
+    [on_support             n=1  ]  Clark-lin med=0.8960  hard med=0.9976
+
+  delta = 0.08056 m  (n=1)
+    Clark-fn   median=0.1039  p90=0.1039
+    Clark-lin  median=0.8103  p90=0.8103
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.8103  hard med=1.0000
+
+  delta = 0.08238 m  (n=1)
+    Clark-fn   median=3.2322  p90=3.2322
+    Clark-lin  median=0.2917  p90=0.2917
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.2917  hard med=1.0000
+
+  delta = 0.08265 m  (n=1)
+    Clark-fn   median=1.5258  p90=1.5258
+    Clark-lin  median=0.6119  p90=0.6119
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.6119  hard med=1.0000
+
+  delta = 0.08282 m  (n=1)
+    Clark-fn   median=2.3971  p90=2.3971
+    Clark-lin  median=0.2396  p90=0.2396
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=0.2396  hard med=1.0000
+
+  delta = 0.08309 m  (n=1)
+    Clark-fn   median=0.9587  p90=0.9587
+    Clark-lin  median=0.9966  p90=0.9966
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.9966  hard med=1.0000
+
+  delta = 0.08489 m  (n=1)
+    Clark-fn   median=0.0688  p90=0.0688
+    Clark-lin  median=0.8880  p90=0.8880
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.8880  hard med=1.0000
+
+  delta = 0.08525 m  (n=1)
+    Clark-fn   median=2.7935  p90=2.7935
+    Clark-lin  median=0.1687  p90=0.1687
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=0.1687  hard med=1.0000
+
+  delta = 0.08596 m  (n=1)
+    Clark-fn   median=1.0000  p90=1.0000
+    Clark-lin  median=1.0000  p90=1.0000
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=1.0000  hard med=1.0000
+
+  delta = 0.08648 m  (n=1)
+    Clark-fn   median=2.9772  p90=2.9772
+    Clark-lin  median=0.4865  p90=0.4865
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.4865  hard med=1.0000
+
+  delta = 0.08676 m  (n=1)
+    Clark-fn   median=0.8670  p90=0.8670
+    Clark-lin  median=0.6962  p90=0.6962
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=0.6962  hard med=1.0000
+
+  delta = 0.08694 m  (n=1)
+    Clark-fn   median=1.0000  p90=1.0000
+    Clark-lin  median=1.0000  p90=1.0000
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=1.0000  hard med=1.0000
+
+  delta = 0.08724 m  (n=1)
+    Clark-fn   median=1.7614  p90=1.7614
+    Clark-lin  median=0.3987  p90=0.3987
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=0.3987  hard med=1.0000
+
+  delta = 0.08784 m  (n=1)
+    Clark-fn   median=0.1704  p90=0.1704
+    Clark-lin  median=0.6380  p90=0.6380
+    hard-adj   median=0.9699  p90=0.9699
+    [on_support             n=1  ]  Clark-lin med=0.6380  hard med=0.9699
+
+  delta = 0.08790 m  (n=1)
+    Clark-fn   median=0.1667  p90=0.1667
+    Clark-lin  median=0.7868  p90=0.7868
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=0.7868  hard med=1.0000
+
+  delta = 0.08791 m  (n=1)
+    Clark-fn   median=21.6745  p90=21.6745
+    Clark-lin  median=5.0072  p90=5.0072
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=5.0072  hard med=1.0000
+
+  delta = 0.08826 m  (n=1)
+    Clark-fn   median=0.3428  p90=0.3428
+    Clark-lin  median=0.8481  p90=0.8481
+    hard-adj   median=0.7573  p90=0.7573
+    [on_support             n=1  ]  Clark-lin med=0.8481  hard med=0.7573
+
+  delta = 0.08861 m  (n=1)
+    Clark-fn   median=0.8292  p90=0.8292
+    Clark-lin  median=0.1530  p90=0.1530
+    hard-adj   median=0.5354  p90=0.5354
+    [on_support             n=1  ]  Clark-lin med=0.1530  hard med=0.5354
+
+  delta = 0.08871 m  (n=1)
+    Clark-fn   median=0.4187  p90=0.4187
+    Clark-lin  median=0.9534  p90=0.9534
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.9534  hard med=1.0000
+
+  delta = 0.08891 m  (n=1)
+    Clark-fn   median=0.4655  p90=0.4655
+    Clark-lin  median=0.8039  p90=0.8039
+    hard-adj   median=0.4572  p90=0.4572
+    [on_support             n=1  ]  Clark-lin med=0.8039  hard med=0.4572
+
+  delta = 0.08998 m  (n=1)
+    Clark-fn   median=1.8215  p90=1.8215
+    Clark-lin  median=0.5020  p90=0.5020
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=0.5020  hard med=1.0000
+
+  delta = 0.09035 m  (n=1)
+    Clark-fn   median=0.1904  p90=0.1904
+    Clark-lin  median=0.9444  p90=0.9444
+    hard-adj   median=0.9381  p90=0.9381
+    [on_support             n=1  ]  Clark-lin med=0.9444  hard med=0.9381
+
+  delta = 0.09116 m  (n=1)
+    Clark-fn   median=14.0762  p90=14.0762
+    Clark-lin  median=1.4430  p90=1.4430
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=1.4430  hard med=1.0000
+
+  delta = 0.09216 m  (n=1)
+    Clark-fn   median=0.2727  p90=0.2727
+    Clark-lin  median=0.7024  p90=0.7024
+    hard-adj   median=0.9494  p90=0.9494
+    [on_support             n=1  ]  Clark-lin med=0.7024  hard med=0.9494
+
+  delta = 0.09361 m  (n=1)
+    Clark-fn   median=10.1008  p90=10.1008
+    Clark-lin  median=0.9792  p90=0.9792
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=0.9792  hard med=1.0000
+
+  delta = 0.09404 m  (n=1)
+    Clark-fn   median=0.1728  p90=0.1728
+    Clark-lin  median=0.7636  p90=0.7636
+    hard-adj   median=0.9965  p90=0.9965
+    [on_support             n=1  ]  Clark-lin med=0.7636  hard med=0.9965
+
+  delta = 0.09509 m  (n=1)
+    Clark-fn   median=1.0000  p90=1.0000
+    Clark-lin  median=1.0000  p90=1.0000
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=1.0000  hard med=1.0000
+
+  delta = 0.09516 m  (n=1)
+    Clark-fn   median=0.6178  p90=0.6178
+    Clark-lin  median=0.7265  p90=0.7265
+    hard-adj   median=1.0000  p90=1.0000
+    [near_support           n=1  ]  Clark-lin med=0.7265  hard med=1.0000
+
+  delta = 0.09771 m  (n=1)
+    Clark-fn   median=0.1194  p90=0.1194
+    Clark-lin  median=0.6340  p90=0.6340
+    hard-adj   median=0.3284  p90=0.3284
+    [on_support             n=1  ]  Clark-lin med=0.6340  hard med=0.3284
+
+  delta = 0.09840 m  (n=1)
+    Clark-fn   median=0.7648  p90=0.7648
+    Clark-lin  median=0.9659  p90=0.9659
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=0.9659  hard med=1.0000
+
+  delta = 0.09856 m  (n=1)
+    Clark-fn   median=3.5448  p90=3.5448
+    Clark-lin  median=0.0270  p90=0.0270
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=0.0270  hard med=1.0000
+
+  delta = 0.09944 m  (n=1)
+    Clark-fn   median=1.0000  p90=1.0000
+    Clark-lin  median=1.0000  p90=1.0000
+    hard-adj   median=1.0000  p90=1.0000
+    [off_support_swath      n=1  ]  Clark-lin med=1.0000  hard med=1.0000
+
+  delta = 0.10000 m  (n=18)
+    Clark-fn   median=0.4418  p90=8.2636
+    Clark-lin  median=0.8233  p90=1.7665
+    hard-adj   median=1.0000  p90=1.0000
+    [on_support             n=5  ]  Clark-lin med=0.8652  hard med=0.7557
+    [near_support           n=7  ]  Clark-lin med=0.8163  hard med=1.0000
+    [off_support_swath      n=6  ]  Clark-lin med=0.6907  hard med=1.0000
+
+ATTRIBUTION (Kendall tau of |gradient| vs |dE_mc(delta=sigma)|, mean over 10 seeds)
+  |g_clark| tau = +0.873
+  |g_hard|  tau = +0.637
+
+CATCH-22: fraction of |gradient| mass sitting on UNOBSERVED cells (over the full plan universe, not just the 20 test cells)
+  Clark: 0.325   hard adjoint: 0.161  (historically hard put ~5x LESS mass where sigma is largest)
+
+============================================================================================
+VERDICT vs the three pre-registered criteria
+  (i)   Clark-lin median |rel err| @1cm  < 0.10 : NO  (measured 0.457; hard adjoint historically 0.32)
+  (ii)  Clark-lin median |rel err| @sigma < 0.25: NO  (measured 0.733)
+  (iii) tau(|g_clark|) > tau(|g_hard|)          : YES  (0.873 vs 0.637)
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/clark_grad.json

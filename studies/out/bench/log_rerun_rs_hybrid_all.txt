@@ -1,0 +1,48 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+=== generator gate ===
+  field_std                  1.0044517611936152
+  plane_share_model          0.23682645634382238
+  plane_share_realized       0.24737866288356336
+  median_var_error           0.03770129938639285
+  max_var_error              0.0917678819062396
+  passed                     True
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 2.00 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 2.13 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 11.55 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.95 ms  (cached)
+  10/100 seeds, 0.1 min
+  20/100 seeds, 0.2 min
+  30/100 seeds, 0.3 min
+  40/100 seeds, 0.4 min
+  50/100 seeds, 0.4 min
+  60/100 seeds, 0.5 min
+  70/100 seeds, 0.6 min
+  80/100 seeds, 0.7 min
+  90/100 seeds, 0.8 min
+  100/100 seeds, 0.9 min
+  matched budget: MC needs N = None draws to match clark_cvar (0.0450); curve 4:0.338, 8:0.251, 16:0.171, 32:0.107, 64:0.090, 128:0.070
+
+=== hybrid/all under the MEASURED belief ===
+  clark_cvar   0.0450
+  clark_mean   0.0787
+  bracket      0.0982
+  fosm         0.1390
+  step         0.2140
+  none         0.3134
+  clark_cvar vs none     mean -0.2685  49/55  p=1.82e-09
+  clark_cvar vs step     mean -0.1691  45/54  p=7.29e-07
+  clark_cvar vs bracket  mean -0.0533  26/36  p=1.13e-02
+  clark_cvar vs fosm     mean -0.0940  32/41  p=4.31e-04
+  pooled sd-ratio median 0.886
+    [PASS] i_clark_lowest_mean_regret
+    [PASS] ii_beats_none_p05
+    [PASS] iii_beats_step_p05
+    [PASS] iv_sd_ratio_in_band
+  VERDICT: PASSED
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/realistic_sigma_hybrid_all.json

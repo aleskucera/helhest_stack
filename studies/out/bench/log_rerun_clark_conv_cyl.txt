@@ -1,0 +1,25 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+=== convolution form vs clark.py (cylinder element) ===
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.25 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.41 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 7.71 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.85 ms  (cached)
+  seed  0: rel dE 1.36e-01  rel dVar 2.91e-01    48.16 ->  1.07 ms/plan  (44.9x)
+  seed  1: rel dE 1.01e-01  rel dVar 3.82e-01    48.57 ->  1.08 ms/plan  (44.9x)
+  seed  2: rel dE 1.06e-01  rel dVar 2.24e-01    50.48 ->  1.51 ms/plan  (33.4x)
+  seed  3: rel dE 1.22e-01  rel dVar 4.69e-01    66.48 ->  1.45 ms/plan  (46.0x)
+  seed  4: rel dE 8.81e-02  rel dVar 1.49e-01    51.24 ->  1.09 ms/plan  (47.0x)
+  seed  5: rel dE 1.40e-01  rel dVar 1.85e-01    50.71 ->  1.13 ms/plan  (45.0x)
+  seed  6: rel dE 1.63e-01  rel dVar 3.72e-01    51.59 ->  1.09 ms/plan  (47.4x)
+  seed  7: rel dE 1.44e-01  rel dVar 3.03e-01    48.76 ->  1.13 ms/plan  (43.2x)
+
+  max relative dE   1.63e-01   (PHYSICS difference vs the sphere element, not an error)
+  max relative dVar 4.69e-01
+  median 50.59 -> 1.11 ms/plan  (45.0x)
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/clark_conv_cylinder.json

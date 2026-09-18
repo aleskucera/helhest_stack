@@ -1,0 +1,31 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.15 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.18 ms  (cached)
+Module helhest.engine.step b170777 load on device 'cuda:0' took 6.35 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.64 ms  (cached)
+  10/50 seeds
+  20/50 seeds
+  30/50 seeds
+  40/50 seeds
+  50/50 seeds
+
+=== family hybrid, n=50, curvature on the top 600 cells ===
+
+ROUTE 1 -- bias correction, NO sensing at all
+  tau            +0.121 -> +0.056   better on 22/49   p=5.68e-01
+  tau within     +0.098 -> +0.022   better on 24/48   p=1.00e+00
+  top-1          6% -> 6%
+  the correction spreads the plans by 303.005 against a true cost spread of 6.46
+
+ROUTE 2 -- cell selection, first vs second order, same shortlist
+  @25   tau +0.119 -> +0.030  (mean -0.0887, better on 20/47, p=3.82e-01)   top-1 10% -> 6%
+  @100  tau +0.250 -> +0.178  (mean -0.0717, better on 16/49, p=2.13e-02)   top-1 8% -> 12%
+  @400  tau +0.793 -> +0.730  (mean -0.0630, better on 17/47, p=7.89e-02)   top-1 68% -> 58%
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/second_order_hybrid.json

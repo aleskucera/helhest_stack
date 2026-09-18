@@ -1,0 +1,59 @@
+/home/kuceral4/projects/helhest_stack/studies/sensing/belief_sweep.py:94: RuntimeWarning: Mean of empty slice
+  mean_map = np.nanmean(maps, 0)
+/home/kuceral4/projects/helhest_stack/.venv/lib/python3.12/site-packages/numpy/lib/_nanfunctions_impl.py:1997: RuntimeWarning: Degrees of freedom <= 0 for slice.
+  var = nanvar(a, axis=axis, dtype=dtype, out=out, ddof=ddof,
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+   terrain      traj seed   obs   plane  offs cm  tilt x  tilt y  sigma cm  resid 1/e
+Module studies.sensing.lidar_belief a4b036c load on device 'cuda:0' took 1.59 ms  (cached)
+Module helhest.perception.heightmap.kernels f11eca4 load on device 'cuda:0' took 1.54 ms  (cached)
+       1.8  straight    0   86%   0.423     1.97    4.20    9.14      3.53       0.10
+       1.8  straight    1   78%   0.386     2.03    4.22    9.13      3.53       0.10
+       1.8  straight    2   88%   0.471     2.01    4.36    9.49      3.59       0.10
+       1.8       arc    0   82%   0.422     2.30    8.05    6.82      3.70       0.10
+       1.8       arc    1   84%   0.425     2.35    7.81    6.69      3.76       0.10
+       1.8       arc    2   84%   0.429     2.21    7.88    6.48      3.62       0.10
+       1.8      turn    0   84%   0.346     2.36    7.46    4.79      3.55       0.20
+       1.8      turn    1   81%   0.335     2.35    7.42    4.73      3.60       0.10
+       1.8      turn    2   83%   0.363     2.26    7.66    4.34      3.49       0.20
+       2.4  straight    0   88%   0.548     1.94    4.27    9.02      3.26       0.20
+       2.4  straight    1   78%   0.529     2.02    4.15    9.06      3.29       0.10
+       2.4  straight    2   89%   0.633     1.97    4.32    9.48      3.21       0.20
+       2.4       arc    0   84%   0.563     2.31    8.17    6.88      3.46       0.20
+       2.4       arc    1   86%   0.562     2.36    7.86    6.82      3.50       0.20
+       2.4       arc    2   87%   0.598     2.19    7.73    6.44      3.29       0.20
+       2.4      turn    0   85%   0.459     2.38    7.52    4.80      3.28       0.40
+       2.4      turn    1   84%   0.464     2.38    7.37    4.87      3.36       0.20
+       2.4      turn    2   86%   0.513     2.25    7.64    4.28      3.16       0.40
+       3.0  straight    0   92%   0.702     1.93    4.31    8.97      3.07       0.40
+       3.0  straight    1   83%   0.697     2.03    4.25    9.16      3.15       0.30
+       3.0  straight    2   94%   0.782     1.95    4.21    9.47      3.00       0.70
+       3.0       arc    0   89%   0.718     2.35    8.37    7.04      3.24       0.50
+       3.0       arc    1   92%   0.726     2.41    7.97    6.99      3.29       0.30
+       3.0       arc    2   91%   0.747     2.19    7.69    6.57      3.10       0.40
+       3.0      turn    0   91%   0.606     2.42    7.67    4.91      3.06       0.90
+       3.0      turn    1   89%   0.609     2.41    7.26    5.00      3.12       0.60
+       3.0      turn    2   93%   0.652     2.27    7.68    4.40      2.97       1.00
+  ramp_2.4  straight    0   84%   0.551     1.85    4.88    9.04      3.32       0.20
+  ramp_2.4  straight    1   78%   0.546     1.90    4.60    9.10      3.24       0.10
+  ramp_2.4  straight    2   88%   0.645     1.88    4.83    9.44      3.25       0.20
+  ramp_2.4       arc    0   83%   0.568     2.18    8.64    6.49      3.44       0.20
+  ramp_2.4       arc    1   84%   0.555     2.30    8.29    6.43      3.58       0.20
+  ramp_2.4       arc    2   86%   0.601     2.09    8.23    5.96      3.32       0.30
+  ramp_2.4      turn    0   85%   0.464     2.27    7.97    4.51      3.31       0.40
+  ramp_2.4      turn    1   83%   0.454     2.27    7.79    4.63      3.40       0.20
+  ramp_2.4      turn    2   87%   0.525     2.16    8.08    3.99      3.21       0.50
+
+  across all configurations       median      min      max
+    plane_share                   0.550    0.335    0.782
+    sd_offset_cm                  2.232    1.848    2.416
+    sd_tilt_x_mrad_per_m          7.650    4.152    8.636
+    sigma_median_cm               3.302    2.974    3.758
+    residual_1e_m                 0.200    0.100    1.000
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/belief_sweep.json

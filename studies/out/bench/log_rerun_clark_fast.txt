@@ -1,0 +1,28 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+=== equivalence + timing: lean fold vs clark.py ===
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.85 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.92 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 8.63 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.72 ms  (cached)
+  seed  0: dE 0.000e+00  dVar 0.000e+00    50.04 ->  13.16 ms/plan  (3.80x)
+  seed  1: dE 0.000e+00  dVar 0.000e+00    51.08 ->  13.46 ms/plan  (3.80x)
+  seed  2: dE 0.000e+00  dVar 0.000e+00    49.31 ->  13.33 ms/plan  (3.70x)
+  seed  3: dE 0.000e+00  dVar 0.000e+00    48.25 ->  13.60 ms/plan  (3.55x)
+  seed  4: dE 0.000e+00  dVar 0.000e+00    46.55 ->  13.23 ms/plan  (3.52x)
+  seed  5: dE 0.000e+00  dVar 0.000e+00    44.69 ->  13.03 ms/plan  (3.43x)
+  seed  6: dE 0.000e+00  dVar 0.000e+00    51.93 ->  13.36 ms/plan  (3.89x)
+  seed  7: dE 0.000e+00  dVar 0.000e+00    49.07 ->  13.27 ms/plan  (3.70x)
+  seed  8: dE 0.000e+00  dVar 0.000e+00    48.90 ->  13.63 ms/plan  (3.59x)
+  seed  9: dE 0.000e+00  dVar 0.000e+00    49.66 ->  13.52 ms/plan  (3.67x)
+
+  max relative dE   0.00e+00   (float round-off if ~1e-15)
+  max absolute dVar 0.00e+00
+  median 49.19 -> 13.34 ms/plan  (3.69x)
+  256-draw GPU Monte-Carlo, same machine, same run: 6.39 ms/plan
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/clark_fast.json

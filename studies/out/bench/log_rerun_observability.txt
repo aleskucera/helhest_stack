@@ -1,0 +1,33 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.30 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.33 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 7.10 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.71 ms  (cached)
+  10/40 seeds
+  20/40 seeds
+  30/40 seeds
+  40/40 seeds
+
+n=40 seeds
+
+SANITY GATE -- is obs_mass concentrated on/near the driven track?
+  fraction of obs_mass within 0.72 m of the track:  median 0.992  [p10 0.980, p90 1.000]
+  mean distance of the top-100 obs_mass cells to the track [m]:  median 0.483  [p10 0.372, p90 0.858]
+  seed 0 detail: on-track frac=0.990, top-100 dist=0.804 m
+
+DECISION-RELEVANT MASS UNCONSTRAINED BY DRIVING (fraction of rel_mass on cells where obs_mass ~ 0)
+  overall, fixed thr (1e-6 x max)         median 0.794  [p10 0.618, p90 0.881]
+  overall, adaptive thr (p99 off-track)   median 0.770  [p10 0.606, p90 0.881]
+  unobserved-only, fixed thr              median 0.984  [p10 0.945, p90 1.000]
+  unobserved-only, adaptive thr           median 0.984  [p10 0.942, p90 0.999]
+
+SPATIAL PICTURE
+  mean distance of the top-100 rel_mass cells to the driven track [m]:  median 0.533  [p10 0.431, p90 0.784]
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/observability.json

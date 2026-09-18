@@ -1,0 +1,22 @@
+/home/kuceral4/projects/helhest_stack/studies/sensing/lidar_belief.py:493: RuntimeWarning: Mean of empty slice
+  mean_map = np.nanmean(maps, axis=0)
+/home/kuceral4/projects/helhest_stack/.venv/lib/python3.12/site-packages/numpy/lib/_nanfunctions_impl.py:1997: RuntimeWarning: Degrees of freedom <= 0 for slice.
+  var = nanvar(a, axis=axis, dtype=dtype, out=out, ddof=ddof,
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+=== where does the bias come from? (all values in cm) ===
+Module __main__ a4b036c load on device 'cuda:0' took 1.56 ms  (cached)
+Module helhest.perception.heightmap.kernels f11eca4 load on device 'cuda:0' took 1.63 ms  (cached)
+  baseline                   |bias| med  4.37  p90  11.29   sigma  3.11   bias/MSE  78%   (resolvable > 0.55 cm)   obs 80%
+  noiseless vs cell AREA avg |bias| med  0.96  p90   3.42   sigma  0.00   bias/MSE 100%   (resolvable > 0.00 cm)   obs 81%
+  noiseless (geometry only)  |bias| med  2.59  p90   6.65   sigma  0.00   bias/MSE 100%   (resolvable > 0.00 cm)   obs 81%
+  no dropout                 |bias| med  4.65  p90  12.27   sigma  3.18   bias/MSE  80%   (resolvable > 0.56 cm)   obs 87%
+  half march step            |bias| med  4.42  p90  11.49   sigma  3.14   bias/MSE  79%   (resolvable > 0.55 cm)   obs 80%
+  FLAT, full noise           |bias| med  0.52  p90   0.97   sigma  2.25   bias/MSE   8%   (resolvable > 0.40 cm)   obs 99%
+  FLAT, noiseless            |bias| med  0.00  p90   0.00   sigma  0.00   bias/MSE   0%   (resolvable > 0.00 cm)   obs 100%
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/lidar_belief_diagnose.json

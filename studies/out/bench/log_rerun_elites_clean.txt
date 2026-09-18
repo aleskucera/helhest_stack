@@ -1,0 +1,168 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+Module helhest.engine.envelope 8494861 load on device 'cuda:0' took 0.96 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 7.18 ms  (cached)
+Module helhest.planning.costtogo d8ccbae load on device 'cuda:0' took 0.91 ms  (cached)
+Module helhest.planning.lattice_solver 4e28ec9 load on device 'cuda:0' took 0.70 ms  (cached)
+Module helhest.control.mppi 71cd3c8 load on device 'cuda:0' took 12.32 ms  (cached)
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.25 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.18 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.78 ms  (cached)
+  10/60 seeds
+  20/60 seeds
+  30/60 seeds
+  40/60 seeds
+  50/60 seeds
+  60/60 seeds
+
+=== C5: real MPPI elites vs synthetic plan families (n=60 seeds, noise=clean) ===
+MPPI convergence check: elite cost range [279.469, 283.981], pool min 279.469, pool median 2889.461  (elites should sit near the pool min)
+
+family             path_spread   coverage_spread
+                 mean (median)     mean (median)
+fan               1.133 (1.136)     0.0392 (0.0395)
+hybrid            1.069 (1.073)     0.0346 (0.0347)
+speed             0.001 (0.001)     0.0002 (0.0002)
+mppi_elites       0.203 (0.191)     0.0106 (0.0105)
+
+paired vs hybrid (elites - hybrid), sign test:
+  path_spread        mean   -0.8664  better on   0/60   p=1.73e-18
+  coverage_spread    mean   -0.0240  better on   0/60   p=1.73e-18
+
+--- disagreement FIELD (Var_k(dJ/dh) * sigma^2): elites vs hybrid ---
+hybrid         total mass      18.41   spread(cv)   5.952   top-400-cell mass frac  0.970
+mppi_elites    total mass      26.96   spread(cv)   7.822   top-400-cell mass frac  1.000
+  paired mass         (elites - hybrid) mean     +8.558  better on  39/60   p=2.73e-02
+  paired cv           (elites - hybrid) mean     +1.869  better on  59/60   p=1.06e-16
+  paired top400_frac  (elites - hybrid) mean    +0.0302  better on  60/60   p=1.73e-18
+
+--- full sensing comparison, REAL MPPI elites as the candidate set (n=60) ---
+
+before sensing:  Kendall tau +0.117   top-1 correct 5%   (n=60)
+true cost spread across the 16 plans: 3.74 mean
+plan separation: endpoints 0.20 m apart, coverage spread 0.0106  (low = geometry cannot discriminate)
+
+tau  = agreement of the post-sensing ranking with the truth (1 = perfect)
+top1 = the believed-best plan really is the best
+reg  = true excess cost of the plan a planner would pick (0 = optimal)
+rch  = envelope cells actually moved per cell revealed (low = inert reveals)
+
+policy           tau@25  top1    reg    rch  tau@100  top1    reg    rch  tau@400  top1    reg    rch
+random           +0.146   8%   1.50    8.7   +0.060   7%   1.67    8.0   +0.069  13%   1.54    6.4
+entropy          +0.117   5%   1.67    2.7   +0.117   5%   1.67    2.0   +0.117   5%   1.67    1.6
+swath            +0.208  18%   1.22    4.2   +0.366  27%   0.80    2.0   +0.928  87%   0.03    1.3
+swath_best       +0.109  15%   1.45    3.3   +0.306  23%   0.99    1.7   +0.845  80%   0.08    1.2
+swath_var        +0.170  10%   1.30    2.9   +0.311  23%   0.92    2.0   +0.707  53%   0.20    1.3
+corridor_sigma   +0.187  23%   1.23    2.8   +0.293  25%   0.93    1.7   +0.824  70%   0.10    1.3
+corridor_mi      +0.189  22%   1.17    2.8   +0.390  23%   0.84    1.7   +0.891  83%   0.03    1.3
+attribution      +0.197  22%   1.24    4.4   +0.335  23%   0.93    2.3   +0.579  42%   0.31    3.8
+magnitude        +0.249  17%   1.14    3.4   +0.453  35%   0.50    2.0   +0.935  88%   0.03    1.7
+margin           +0.195  15%   1.26    4.3   +0.341  25%   0.92    2.4   +0.676  50%   0.24    3.5
+disagreement     +0.237  17%   1.22    4.2   +0.470  37%   0.59    2.1   +0.937  88%   0.03    1.7
+magn_pooled      +0.248  20%   1.08    2.2   +0.457  32%   0.59    1.6   +0.948  92%   0.01    1.3
+disag_pooled     +0.273  18%   1.02    2.4   +0.475  33%   0.56    1.6   +0.913  87%   0.03    1.4
+oracle           +0.394  28%   0.73    5.4   +0.645  53%   0.24    2.9   +0.942  90%   0.03    1.7   <- ceiling, not a policy
+
+where each policy looked: mean range of the revealed cells [m], and their mean
+distance off the nearest plan [m], at 100 cells
+  random         range  4.94   off-plan  2.77
+  entropy        range  8.61   off-plan  5.34
+  swath          range  2.80   off-plan  0.04
+  swath_best     range  2.62   off-plan  0.06
+  swath_var      range  3.39   off-plan  0.15
+  corridor_sigma range  3.68   off-plan  0.13
+  corridor_mi    range  3.50   off-plan  0.08
+  attribution    range  2.78   off-plan  0.20
+  magnitude      range  2.94   off-plan  0.13
+  margin         range  2.84   off-plan  0.19
+  disagreement   range  3.05   off-plan  0.15
+  magn_pooled    range  2.97   off-plan  0.14
+  disag_pooled   range  3.08   off-plan  0.15
+  oracle         range  2.87   off-plan  0.18
+
+paired per seed, X minus entropy in tau (positive = X better):
+                                      @25                     @100                     @400
+  random          +0.029  19/32  p=3.8e-01  -0.057  25/58  p=3.6e-01  -0.048  27/57  p=7.9e-01
+  swath           +0.091  40/57  p=3.2e-03  +0.249  45/59  p=6.5e-05  +0.811  59/59  p=3.5e-18
+  swath_best      -0.007  28/59  p=7.9e-01  +0.189  41/58  p=2.2e-03  +0.728  58/59  p=2.1e-16
+  swath_var       +0.053  36/56  p=4.4e-02  +0.194  43/59  p=5.8e-04  +0.590  56/59  p=1.2e-13
+  corridor_sigma  +0.070  34/56  p=1.4e-01  +0.176  39/59  p=1.8e-02  +0.707  57/59  p=6.1e-15
+  corridor_mi     +0.073  34/55  p=1.0e-01  +0.273  46/59  p=1.9e-05  +0.774  59/59  p=3.5e-18
+  attribution     +0.080  33/54  p=1.3e-01  +0.218  49/59  p=2.7e-07  +0.462  55/57  p=2.3e-14
+  magnitude       +0.132  41/58  p=2.2e-03  +0.336  51/57  p=5.7e-10  +0.818  59/59  p=3.5e-18
+  margin          +0.078  39/59  p=1.8e-02  +0.224  45/57  p=1.3e-05  +0.559  59/59  p=3.5e-18
+  disagreement    +0.120  38/59  p=3.6e-02  +0.353  46/57  p=3.3e-06  +0.820  59/59  p=3.5e-18
+  magn_pooled     +0.131  45/57  p=1.3e-05  +0.340  50/59  p=5.3e-08  +0.831  59/59  p=3.5e-18
+  disag_pooled    +0.156  44/59  p=2.0e-04  +0.358  51/59  p=9.1e-09  +0.796  59/59  p=3.5e-18
+  oracle          +0.277  44/57  p=4.7e-05  +0.528  56/57  p=8.0e-16  +0.825  59/59  p=3.5e-18
+
+paired per seed, X minus swath in tau (positive = X better):
+                                      @25                     @100                     @400
+  random          -0.063  19/56  p=2.2e-02  -0.306  12/58  p=8.2e-06  -0.859   0/59  p=3.5e-18
+  entropy         -0.091  17/57  p=3.2e-03  -0.249  14/59  p=6.5e-05  -0.811   0/59  p=3.5e-18
+  swath_best      -0.099  24/57  p=2.9e-01  -0.061  28/57  p=1.0e+00  -0.083  11/48  p=2.2e-04
+  swath_var       -0.039  25/56  p=5.0e-01  -0.055  22/58  p=8.7e-02  -0.221   2/57  p=2.3e-14
+  corridor_sigma  -0.021  26/58  p=5.1e-01  -0.073  21/59  p=3.6e-02  -0.104   8/54  p=1.4e-07
+  corridor_mi     -0.019  27/57  p=7.9e-01  +0.024  31/56  p=5.0e-01  -0.037  11/44  p=1.3e-03
+  attribution     -0.011  31/57  p=6.0e-01  -0.032  22/56  p=1.4e-01  -0.349   1/59  p=2.1e-16
+  magnitude       +0.041  30/56  p=6.9e-01  +0.086  38/55  p=6.5e-03  +0.007  22/40  p=6.4e-01
+  margin          -0.013  30/58  p=9.0e-01  -0.026  24/56  p=3.5e-01  -0.251   2/59  p=6.1e-15
+  disagreement    +0.029  33/58  p=3.6e-01  +0.103  38/58  p=2.5e-02  +0.009  22/40  p=6.4e-01
+  magn_pooled     +0.039  32/55  p=2.8e-01  +0.091  38/57  p=1.6e-02  +0.020  32/48  p=2.9e-02
+  disag_pooled    +0.065  34/59  p=3.0e-01  +0.109  37/59  p=6.7e-02  -0.015  21/51  p=2.6e-01
+  oracle          +0.186  44/59  p=2.0e-04  +0.279  51/57  p=5.7e-10  +0.014  25/40  p=1.5e-01
+
+paired per seed, X minus swath_var in tau (positive = X better):
+                                      @25                     @100                     @400
+  random          -0.024  25/58  p=3.6e-01  -0.251  15/58  p=3.1e-04  -0.638   5/59  p=1.9e-11
+  entropy         -0.053  20/56  p=4.4e-02  -0.194  16/59  p=5.8e-04  -0.590   3/59  p=1.2e-13
+  swath           +0.039  31/56  p=5.0e-01  +0.055  36/58  p=8.7e-02  +0.221  55/57  p=2.3e-14
+  swath_best      -0.060  27/58  p=6.9e-01  -0.006  31/58  p=6.9e-01  +0.138  43/56  p=7.3e-05
+  corridor_sigma  +0.017  30/58  p=9.0e-01  -0.018  24/57  p=2.9e-01  +0.117  37/55  p=1.4e-02
+  corridor_mi     +0.020  29/57  p=1.0e+00  +0.079  33/57  p=2.9e-01  +0.184  47/55  p=8.1e-08
+  attribution     +0.027  32/58  p=5.1e-01  +0.023  33/58  p=3.6e-01  -0.129  14/58  p=1.0e-04
+  magnitude       +0.079  32/57  p=4.3e-01  +0.141  44/58  p=1.0e-04  +0.228  55/59  p=1.7e-12
+  margin          +0.026  31/57  p=6.0e-01  +0.029  35/57  p=1.1e-01  -0.031  25/57  p=4.3e-01
+  disagreement    +0.067  34/58  p=2.4e-01  +0.158  46/58  p=8.2e-06  +0.230  55/59  p=1.7e-12
+  magn_pooled     +0.078  35/59  p=1.9e-01  +0.146  43/59  p=5.8e-04  +0.240  58/58  p=6.9e-18
+  disag_pooled    +0.104  36/59  p=1.2e-01  +0.164  41/56  p=6.9e-04  +0.206  50/57  p=4.2e-09
+  oracle          +0.224  45/58  p=3.0e-05  +0.334  55/59  p=1.7e-12  +0.235  55/59  p=1.7e-12
+
+paired per seed, X minus corridor_sigma in tau (positive = X better):
+                                      @25                     @100                     @400
+  random          -0.041  28/59  p=7.9e-01  -0.233  17/58  p=2.2e-03  -0.755   2/59  p=6.1e-15
+  entropy         -0.070  22/56  p=1.4e-01  -0.176  20/59  p=1.8e-02  -0.707   2/59  p=6.1e-15
+  swath           +0.021  32/58  p=5.1e-01  +0.073  38/59  p=3.6e-02  +0.104  46/54  p=1.4e-07
+  swath_best      -0.078  26/55  p=7.9e-01  +0.012  29/57  p=1.0e+00  +0.021  35/54  p=4.0e-02
+  swath_var       -0.017  28/58  p=9.0e-01  +0.018  33/57  p=2.9e-01  -0.117  18/55  p=1.4e-02
+  corridor_mi     +0.002  26/53  p=1.0e+00  +0.097  44/57  p=4.7e-05  +0.067  41/52  p=3.6e-05
+  attribution     +0.010  30/59  p=1.0e+00  +0.041  33/58  p=3.6e-01  -0.245   6/59  p=1.8e-10
+  magnitude       +0.062  31/59  p=7.9e-01  +0.159  44/57  p=4.7e-05  +0.111  47/54  p=2.3e-08
+  margin          +0.008  28/59  p=7.9e-01  +0.047  35/59  p=1.9e-01  -0.147  11/54  p=1.4e-05
+  disagreement    +0.050  34/58  p=2.4e-01  +0.176  45/58  p=3.0e-05  +0.113  47/54  p=2.3e-08
+  magn_pooled     +0.061  34/59  p=3.0e-01  +0.164  44/57  p=4.7e-05  +0.124  51/54  p=2.9e-12
+  disag_pooled    +0.086  34/59  p=3.0e-01  +0.182  44/58  p=1.0e-04  +0.089  45/52  p=7.0e-08
+  oracle          +0.207  43/58  p=3.1e-04  +0.352  55/59  p=1.7e-12  +0.118  48/55  p=1.3e-08
+
+paired per seed, X minus corridor_mi in tau (positive = X better):
+                                      @25                     @100                     @400
+  random          -0.044  25/57  p=4.3e-01  -0.330  10/58  p=4.5e-07  -0.822   0/59  p=3.5e-18
+  entropy         -0.073  21/55  p=1.0e-01  -0.273  13/59  p=1.9e-05  -0.774   0/59  p=3.5e-18
+  swath           +0.019  30/57  p=7.9e-01  -0.024  25/56  p=5.0e-01  +0.037  33/44  p=1.3e-03
+  swath_best      -0.080  26/57  p=6.0e-01  -0.085  22/57  p=1.1e-01  -0.046  24/48  p=1.0e+00
+  swath_var       -0.020  28/57  p=1.0e+00  -0.079  24/57  p=2.9e-01  -0.184   8/55  p=8.1e-08
+  corridor_sigma  -0.002  27/53  p=1.0e+00  -0.097  13/57  p=4.7e-05  -0.067  11/52  p=3.6e-05
+  attribution     +0.008  29/59  p=1.0e+00  -0.056  29/59  p=1.0e+00  -0.312   1/58  p=4.1e-16
+  magnitude       +0.059  31/58  p=6.9e-01  +0.062  37/57  p=3.3e-02  +0.044  36/50  p=2.6e-03
+  margin          +0.006  29/59  p=1.0e+00  -0.049  26/58  p=5.1e-01  -0.214   4/59  p=1.7e-12
+  disagreement    +0.048  31/58  p=6.9e-01  +0.079  40/59  p=8.6e-03  +0.046  37/50  p=9.4e-04
+  magn_pooled     +0.058  33/59  p=4.3e-01  +0.067  37/57  p=3.3e-02  +0.057  41/51  p=1.5e-05
+  disag_pooled    +0.084  32/59  p=6.0e-01  +0.085  39/57  p=7.5e-03  +0.022  28/47  p=2.4e-01
+  oracle          +0.204  38/59  p=3.6e-02  +0.255  49/57  p=2.7e-08  +0.051  38/51  p=6.2e-04
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/elites_clean.json

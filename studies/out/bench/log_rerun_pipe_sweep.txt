@@ -1,0 +1,35 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.43 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.50 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 8.12 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.73 ms  (cached)
+fov30_range2_looks1:  none +0.361  random +0.380  entropy +0.381  entropy_mi +0.378  swath_var +0.398  swath_sigma +0.405  corridor_mi +0.401  disagreement +0.405  oracle +0.487
+    disagreement - corridor_mi = +0.004   better on 25/48   p=8.85e-01
+fov30_range4_looks1:  none +0.361  random +0.375  entropy +0.371  entropy_mi +0.376  swath_var +0.376  swath_sigma +0.374  corridor_mi +0.373  disagreement +0.367  oracle +0.492
+    disagreement - corridor_mi = -0.006   better on 11/27   p=4.42e-01
+fov30_range8_looks1:  none +0.361  random +0.399  entropy +0.409  entropy_mi +0.408  swath_var +0.374  swath_sigma +0.374  corridor_mi +0.375  disagreement +0.367  oracle +0.492
+    disagreement - corridor_mi = -0.007   better on 10/27   p=2.48e-01
+fov60_range2_looks1:  none +0.361  random +0.380  entropy +0.394  entropy_mi +0.379  swath_var +0.440  swath_sigma +0.443  corridor_mi +0.447  disagreement +0.436  oracle +0.546
+    disagreement - corridor_mi = -0.011   better on 20/45   p=5.51e-01
+fov60_range4_looks1:  none +0.361  random +0.392  entropy +0.390  entropy_mi +0.387  swath_var +0.397  swath_sigma +0.404  corridor_mi +0.404  disagreement +0.384  oracle +0.548
+    disagreement - corridor_mi = -0.019   better on 13/38   p=7.30e-02
+fov60_range8_looks1:  none +0.361  random +0.420  entropy +0.435  entropy_mi +0.430  swath_var +0.395  swath_sigma +0.400  corridor_mi +0.404  disagreement +0.384  oracle +0.548
+    disagreement - corridor_mi = -0.019   better on 8/31   p=1.07e-02
+fov120_range2_looks1:  none +0.361  random +0.415  entropy +0.423  entropy_mi +0.422  swath_var +0.461  swath_sigma +0.467  corridor_mi +0.459  disagreement +0.458  oracle +0.579
+    disagreement - corridor_mi = -0.000   better on 29/52   p=4.88e-01
+fov120_range4_looks1:  none +0.361  random +0.417  entropy +0.419  entropy_mi +0.423  swath_var +0.452  swath_sigma +0.449  corridor_mi +0.444  disagreement +0.435  oracle +0.584
+    disagreement - corridor_mi = -0.009   better on 19/46   p=3.02e-01
+fov120_range8_looks1:  none +0.361  random +0.464  entropy +0.457  entropy_mi +0.461  swath_var +0.452  swath_sigma +0.447  corridor_mi +0.438  disagreement +0.435  oracle +0.584
+    disagreement - corridor_mi = -0.003   better on 19/42   p=6.44e-01
+fov120_range8_looks2:  none +0.361  random +0.472  entropy +0.472  entropy_mi +0.476  swath_var +0.464  swath_sigma +0.459  corridor_mi +0.457  disagreement +0.453  oracle +0.630
+    disagreement - corridor_mi = -0.004   better on 28/60   p=6.99e-01
+fov120_range8_looks3:  none +0.361  random +0.476  entropy +0.472  entropy_mi +0.475  swath_var +0.468  swath_sigma +0.456  corridor_mi +0.460  disagreement +0.454  oracle +0.645
+    disagreement - corridor_mi = -0.005   better on 30/61   p=1.00e+00
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/sensing/sweep.json

@@ -1,0 +1,22 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+Module __main__ a4b036c load on device 'cuda:0' took 13.14 ms  (cached)
+Module helhest.perception.heightmap.kernels f11eca4 load on device 'cuda:0' took 1.84 ms  (cached)
+=== belief produced by simulated sensing ===
+  observed cells              79.7%
+  sigma  median / p90         3.11 / 5.03 cm
+  |bias| median / p90         1.51 / 11.29 cm
+  corr length, random part    190 / 80 cm (x/y)   vs 30 cm assumed, same 1/e rule
+  corr length, total error    10 cm
+  bias share of total MSE     78%
+  rigid global offset share   10% of the random variance
+  separability max |error|    0.508   (0 = rho(dy,dx) = rho1(dy) rho1(dx) exactly)
+  standardized error skew     +0.20
+  standardized excess kurt.   +9.98   (0 = Gaussian)
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/lidar_belief.json
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/lidar_belief.png

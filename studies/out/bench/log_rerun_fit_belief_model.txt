@@ -1,0 +1,26 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+Module studies.sensing.lidar_belief a4b036c load on device 'cuda:0' took 1.37 ms  (cached)
+Module helhest.perception.heightmap.kernels f11eca4 load on device 'cuda:0' took 1.05 ms  (cached)
+
+=== fitted belief model (32 realizations) ===
+                            fitted    HANDOFF 10.3.6
+sigma_offset [cm]             1.16              1.40
+tilt_x sigma [rad/m]        0.0040            0.0050
+tilt_y sigma [rad/m]        0.0060            0.0050
+plane share                   0.24              0.30
+stationary share              0.76              0.70
+residual rho @ 1 m           0.019             0.022
+residual rho @ 2 m          -0.006            -0.004
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/belief_model.npz
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/rho_measured.npy
+
+=== end-to-end check: model-predicted vs. empirical Var of a linear functional ===
+  median rel error 16.3%  max 42.3%  (tolerance 76.2% @ n=32)
+  PASSED

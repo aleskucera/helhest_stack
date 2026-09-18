@@ -1,0 +1,32 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+building 80 held-out seeds (family=hybrid, noise=all) ...
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.39 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.49 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 7.76 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.66 ms  (cached)
+  done in 28.2s
+
+measured pooled decision-fill bias on unobserved cells: +1.6958 m
+control shift applied to decision_shift: -1.6958 m
+
+computing adjoint support per seed/condition ...
+
+model             (a) mass unobs   (b) count unobs   (c) mass unobs <=0.5m
+zero_fill                29.443%           46.643%                 30.270%
+mse                      14.993%           42.133%                 15.544%
+decision                 49.681%           78.578%                  9.069%
+decision_shift            2.928%           25.220%                  3.006%
+
+per-seed corr(unobs-mass-share drop [mse-decision], regret improvement [mse-decision]): r=-0.1406  (n=80)
+
+shift control: decision unobs-mass share 49.681% -> shifted +-1.696m gives 2.928%  (mse 14.993%, zero_fill 29.443%)
+
+verdict: inert-fill hypothesis REFUTED
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/dfl_inert.json  (38.6s total)

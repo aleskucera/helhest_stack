@@ -16,6 +16,14 @@ dependencies = [
 viz = ["matplotlib>=3.8", "glfw>=2.6", "PyOpenGL>=3.1", "pillow>=10.0"]
 # Rosbag loading for calibration / eval (data.py).
 data = ["h5py>=3.0"]
+# Probabilistic elevation belief (mean + sigma + the drift/measurement split). A separate repo
+# rather than a vendored copy, deliberately: helhest.perception is a SNAPSHOT of terrain_toolkit
+# with no sync strategy, and the two will drift. A git pin has exactly one copy, so it cannot.
+# Same process either way -- this is an import, not a transport boundary.
+belief = ["elevation-belief"]
+# Map-uncertainty calibration harness (studies/calib): reads Odin .mcap bags directly, so no
+# ROS install is needed to replay them.
+calib = ["elevation-belief", "mcap>=1.2", "mcap-ros2-support>=0.5"]
 
 [tool.black]
 line-length = 100
@@ -28,5 +36,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/helhest"]
 
+[tool.uv.sources]
+elevation-belief = { git = "ssh://git@github.com/aleskucera/elevation_belief.git", rev = "375e4b2" }
+
 [dependency-groups]
-dev = ["matplotlib>=3.8", "pillow>=10.0", "h5py>=3.0", "plotly>=6.7.0"]
+dev = ["matplotlib>=3.8", "pillow>=10.0", "h5py>=3.0", "plotly>=6.7.0", "pytest>=7.0", "black>=24.0"]

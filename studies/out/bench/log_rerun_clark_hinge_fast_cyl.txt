@@ -1,0 +1,22 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+=== full cost (settle + clear_soft), convolution form, cylinder ===
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.91 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 2.02 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 10.03 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.86 ms  (cached)
+  seed  0: rel dE 9.62e-02  rel dVar 8.76e-01    62.73 ->  3.03 ms/plan  (20.7x)
+  seed  1: rel dE 2.21e-01  rel dVar 6.69e-01    59.70 ->  3.03 ms/plan  (19.7x)
+  seed  2: rel dE 1.52e-01  rel dVar 8.45e-01    59.80 ->  3.01 ms/plan  (19.8x)
+  seed  3: rel dE 1.70e-01  rel dVar 5.70e-01    58.54 ->  3.02 ms/plan  (19.4x)
+  seed  4: rel dE 1.78e-01  rel dVar 1.18e+00    59.42 ->  3.00 ms/plan  (19.8x)
+
+  max relative dE   2.21e-01   (PHYSICS difference vs the sphere element, not an error)
+  max relative dVar 1.18e+00
+  median 59.70 -> 3.02 ms/plan  (19.8x)
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/clark_hinge_fast_cylinder.json

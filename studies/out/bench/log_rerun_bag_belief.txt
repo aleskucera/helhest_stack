@@ -1,0 +1,18 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+Module helhest.perception.heightmap.kernels f11eca4 load on device 'cuda:0' took 11.74 ms  (cached)
+=== outdoor_experiment_new2: 40 scans, 325010 points in the window ===
+  grid 90x90 @ 0.1 m, observed 49%, 33 hits/cell, ground at -1.23 m
+  sigma of observed cells: median 1.60 cm
+
+  unobserved-cell policy        ms/plan  broken  E median  E spread  sd median
+  ground-referenced                3.10       0    -31.65     21.69      3.375
+  zero-filled (the old bug)        3.25       0     -1.93     45.88      3.446
+  raw (NaN left in)                0.01      16       nan       nan        nan
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/bag_belief.json

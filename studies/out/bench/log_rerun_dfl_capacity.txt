@@ -1,0 +1,73 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+=== RUNG 0 (reference, quoted from dfl_full.json, NOT rerun) ===
+  zero_fill       0.6063    +0.620        0.1170
+  plane_fit       0.3159    +0.699        0.2217
+  mse             0.1619    +0.820        0.1035
+  cost_space      0.0572    +0.847        0.1959
+  decision        1.6386    +0.352        2.2571
+
+building 80 train + 80 test seeds (shared by both rungs; family=hybrid, noise=all) ...
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.28 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.36 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 7.04 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.66 ms  (cached)
+  done in 60.9s
+
+=== RUNG 1: 6 -> 32 (tanh) -> 1  (257 params) ===
+  finite-difference gate (before any optimizer step):
+    mse          max rel err 7.238e-10  (eps=0.0001)  OK
+    cost_space   synthetic-wiring rel err 5.420e-11  OK  |  real-adjoint best 1.130e-03 (eps=0.0003, solver noise floor, informational)
+    decision     synthetic-wiring rel err 8.602e-11  OK  |  real-adjoint best 2.542e-02 (eps=0.0003, solver noise floor, informational)
+  clip norm set to 184.2 (10x the larger of cost_space/decision's probed median)
+  mse          lr=0.1    loss 0.3657 -> 0.009625  skipped 0/400  clipped 0/400  (16.8s)
+  cost_space   lr=0.003  loss 130.4 -> 0.4034  skipped 0/400  clipped 18/400  (114.3s)
+  decision     lr=0.003  loss 2.294 -> 1.616  skipped 0/400  clipped 0/400  (115.8s)
+  evaluating on held-out seeds ...
+
+  method          regret       tau   height RMSE
+  mse             0.1183    +0.831        0.1010
+  cost_space      0.0693    +0.852        0.1234
+  decision        0.2118    +0.737        0.2548
+  paired cost_space   vs mse: mean +0.0490  wins 10/14  p=0.18
+  paired decision     vs mse: mean -0.0935  wins 13/33  p=0.296
+
+=== RUNG 2: 31 -> 64 (tanh) -> 1  (2113 params) ===
+  finite-difference gate (before any optimizer step):
+    mse          max rel err 1.110e-09  (eps=0.0001)  OK
+    cost_space   synthetic-wiring rel err 1.079e-10  OK  |  real-adjoint best 1.456e-03 (eps=0.0003, solver noise floor, informational)
+    decision     synthetic-wiring rel err 1.408e-10  OK  |  real-adjoint best 8.688e-03 (eps=0.0003, solver noise floor, informational)
+  clip norm set to 4874 (10x the larger of cost_space/decision's probed median)
+  mse          lr=0.003  loss 0.04606 -> 0.009838  skipped 0/400  clipped 0/400  (93.1s)
+  cost_space   lr=0.003  loss 5.952 -> 0.8525  skipped 0/400  clipped 0/400  (271.0s)
+  decision     lr=0.003  loss 3.192 -> 1.541  skipped 0/400  clipped 8/400  (290.9s)
+  evaluating on held-out seeds ...
+
+  method          regret       tau   height RMSE
+  mse             0.0786    +0.846        0.0991
+  cost_space      0.1931    +0.822        0.2854
+  decision        0.5527    +0.580        0.4708
+  paired cost_space   vs mse: mean -0.1145  wins 3/12  p=0.146
+  paired decision     vs mse: mean -0.4740  wins 6/37  p=4.13e-05
+
+=== ladder summary: mean regret by rung x condition ===
+rung           mse  cost_space  decision
+0 (linear)    0.1619      0.0572    1.6386
+1           0.1183      0.0693    0.2118
+2           0.0786      0.1931    0.5527
+
+gap (mse - decision) at rung 0: -1.4767
+  rung 1: gap -0.0935  paired p=0.296  mse regret gain vs rung0 +0.0436  confound signature=False
+  rung 2: gap -0.4740  paired p=4.13e-05  mse regret gain vs rung0 +0.0833  confound signature=False
+
+MSE regret gain (rung0->2):      +0.0833
+decision regret gain (rung0->2):  +1.0859
+
+VERDICT: capacity confound NOT confirmed -- the gap persisted (or grew) at every rung checked.
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/dfl_capacity.json  (994.4s total)

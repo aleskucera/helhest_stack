@@ -1,0 +1,96 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+--- screening: quick (1024-draw) MC across 10 seeds x 3 gains ---
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.31 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.38 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 7.32 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.66 ms  (cached)
+Module studies.adjoint.sigma 0b23f26 load on device 'cuda:0' took 0.78 ms  (cached)
+  seed 0: g=1.0:p=0.4307, g=0.5:p=0.0859, g=0.3:p=0.0039
+  seed 1: g=1.0:p=0.5469, g=0.5:p=0.3018, g=0.3:p=0.0850
+  seed 2: g=1.0:p=0.1650, g=0.5:p=0.0010, g=0.3:p=0.0000
+  seed 3: g=1.0:p=0.3887, g=0.5:p=0.0342, g=0.3:p=0.0000
+  seed 4: g=1.0:p=0.5254, g=0.5:p=0.2627, g=0.3:p=0.0479
+  seed 5: g=1.0:p=0.6318, g=0.5:p=0.2598, g=0.3:p=0.0244
+  seed 6: g=1.0:p=0.8740, g=0.5:p=0.5127, g=0.3:p=0.0645
+  seed 7: g=1.0:p=0.5986, g=0.5:p=0.3477, g=0.3:p=0.1221
+  seed 8: g=1.0:p=0.6523, g=0.5:p=0.2656, g=0.3:p=0.0156
+  seed 9: g=1.0:p=0.4932, g=0.5:p=0.1914, g=0.3:p=0.0332
+[timing] screening took 14.0s
+
+selected 16 cases:
+  seed=0 gain=0.5 proxy_logP=-1.07
+  seed=0 gain=0.3 proxy_logP=-2.41
+  seed=1 gain=0.3 proxy_logP=-1.07
+  seed=2 gain=1.0 proxy_logP=-0.78
+  seed=2 gain=0.5 proxy_logP=-3.01
+  seed=3 gain=0.5 proxy_logP=-1.47
+  seed=4 gain=0.5 proxy_logP=-0.58
+  seed=4 gain=0.3 proxy_logP=-1.32
+  seed=5 gain=0.5 proxy_logP=-0.59
+  seed=5 gain=0.3 proxy_logP=-1.61
+  seed=6 gain=0.3 proxy_logP=-1.19
+  seed=7 gain=0.3 proxy_logP=-0.91
+  seed=8 gain=0.5 proxy_logP=-0.58
+  seed=8 gain=0.3 proxy_logP=-1.81
+  seed=9 gain=0.5 proxy_logP=-0.72
+  seed=9 gain=0.3 proxy_logP=-1.48
+  case 1/16 (seed=0, gain=0.5) p_ref=8.50e-02 (1024 draws) [7s elapsed]
+  case 2/16 (seed=0, gain=0.3) p_ref=4.71e-03 (11264 draws) [15s elapsed]
+[timing] 2 cases in 15.2s -> est. 2.0 min for 16 cases
+  case 3/16 (seed=1, gain=0.3) p_ref=7.23e-02 (1024 draws) [22s elapsed]
+  case 4/16 (seed=2, gain=1.0) p_ref=1.41e-01 (1024 draws) [29s elapsed]
+  case 5/16 (seed=2, gain=0.5) p_ref=1.99e-03 (25600 draws) [38s elapsed]
+  case 6/16 (seed=3, gain=0.5) p_ref=2.28e-02 (3072 draws) [46s elapsed]
+  case 7/16 (seed=4, gain=0.5) p_ref=2.43e-01 (1024 draws) [53s elapsed]
+  case 8/16 (seed=4, gain=0.3) p_ref=5.32e-02 (2048 draws) [60s elapsed]
+  case 9/16 (seed=5, gain=0.5) p_ref=2.42e-01 (1024 draws) [67s elapsed]
+  case 10/16 (seed=5, gain=0.3) p_ref=2.59e-02 (2048 draws) [74s elapsed]
+  case 11/16 (seed=6, gain=0.3) p_ref=5.18e-02 (1024 draws) [81s elapsed]
+  case 12/16 (seed=7, gain=0.3) p_ref=1.42e-01 (1024 draws) [88s elapsed]
+  case 13/16 (seed=8, gain=0.5) p_ref=2.66e-01 (1024 draws) [95s elapsed]
+  case 14/16 (seed=8, gain=0.3) p_ref=2.08e-02 (3072 draws) [102s elapsed]
+  case 15/16 (seed=9, gain=0.5) p_ref=2.18e-01 (1024 draws) [109s elapsed]
+  case 16/16 (seed=9, gain=0.3) p_ref=3.42e-02 (2048 draws) [116s elapsed]
+
+=== rare.py: n_cases=16  n_valid_reference=16 ===
+
+ seed  gain     p_ref  mc_naive      form attack_is    subset
+    0  0.50 8.50e-02   7.67e-02  3.17e-05  0.00e+00  9.16e-02
+    0  0.30 4.71e-03   3.33e-03  3.17e-05  0.00e+00  4.16e-03
+    1  0.30 7.23e-02   8.20e-02  3.17e-05  0.00e+00  7.12e-02
+    2  1.00 1.41e-01   1.58e-01  1.33e-02  0.00e+00  1.45e-01
+    2  0.50 1.99e-03   1.33e-03  3.17e-05  0.00e+00  2.88e-03
+    3  0.50 2.28e-02   2.33e-02  3.17e-05  0.00e+00  1.98e-02
+    4  0.50 2.43e-01   2.53e-01  5.35e-03  0.00e+00  2.62e-01
+    4  0.30 5.32e-02   4.93e-02  3.17e-05  0.00e+00  4.60e-02
+    5  0.50 2.42e-01   2.52e-01  3.17e-05  0.00e+00  2.24e-01
+    5  0.30 2.59e-02   1.87e-02  3.17e-05  0.00e+00  3.54e-02
+    6  0.30 5.18e-02   5.67e-02  3.17e-05  0.00e+00  4.72e-02
+    7  0.30 1.42e-01   1.14e-01  3.17e-05  0.00e+00  1.20e-01
+    8  0.50 2.66e-01   2.71e-01  3.17e-05  0.00e+00  2.52e-01
+    8  0.30 2.08e-02   2.40e-02  3.17e-05  0.00e+00  2.16e-02
+    9  0.50 2.18e-01   2.05e-01  1.81e-02  0.00e+00  2.10e-01
+    9  0.30 3.42e-02   4.27e-02  3.17e-05  0.00e+00  3.84e-02
+  (* = reference uncertain, <10 flips at the 2e5-draw cap -- excluded from scoring)
+
+method        med err  max err  med err<1e-2  within 0.5dex    tau  mean fwd  mean s
+mc_naive        0.048    0.174         0.162           100% +0.900      1500    0.29
+form            2.973    3.924         1.985             0% +0.366       355    5.71
+attack_is         inf      inf           inf             0% +0.000       477    5.80
+subset          0.037    0.160         0.107           100% +0.933       950    0.72
+
+SUCCESS CRITERION: best-of(form, attack_is) median err <= 0.5 dex in the P<1e-2 regime, AND matches/beats subset there.
+  best attack method = form, median err (P<1e-2) = 1.985
+  subset,             median err (P<1e-2) = 0.107
+  mc_naive,            median err (P<1e-2) = 0.162
+
+VERDICT: sampling wins again -- the gradient family's last niche closes.
+
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/rare.json
+[timing] total wall time 2.2 min

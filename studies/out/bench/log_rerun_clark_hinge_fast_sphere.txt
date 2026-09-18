@@ -1,0 +1,22 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+=== full cost (settle + clear_soft), convolution form, sphere ===
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.88 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 2.04 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 11.69 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.94 ms  (cached)
+  seed  0: rel dE 1.17e-16  rel dVar 6.29e-16    70.69 -> 11.30 ms/plan  (6.3x)
+  seed  1: rel dE 1.33e-16  rel dVar 1.40e-15    59.48 -> 11.36 ms/plan  (5.2x)
+  seed  2: rel dE 1.13e-16  rel dVar 1.30e-15    59.43 -> 11.34 ms/plan  (5.2x)
+  seed  3: rel dE 1.23e-16  rel dVar 1.66e-15    58.84 -> 11.47 ms/plan  (5.1x)
+  seed  4: rel dE 1.13e-16  rel dVar 1.27e-15    60.34 -> 11.20 ms/plan  (5.4x)
+
+  max relative dE   1.33e-16   (numerical error vs clark_hinge.py)
+  max relative dVar 1.66e-15
+  median 59.48 -> 11.34 ms/plan  (5.2x)
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/clark_hinge_fast_sphere.json

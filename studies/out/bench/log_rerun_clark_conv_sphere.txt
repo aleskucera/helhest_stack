@@ -1,0 +1,26 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+=== convolution form vs clark.py (sphere element) ===
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.63 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.70 ms  (cached)
+Module helhest.engine.step d361b6c load on device 'cuda:0' took 8.39 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.78 ms  (cached)
+  seed  0: rel dE 1.57e-16  rel dVar 2.48e-16    47.62 ->  2.81 ms/plan  (17.0x)  batched 1.69
+  seed  1: rel dE 2.00e-16  rel dVar 3.30e-16    49.31 ->  2.75 ms/plan  (17.9x)  batched 1.79
+  seed  2: rel dE 1.52e-16  rel dVar 2.03e-16    46.63 ->  2.79 ms/plan  (16.7x)  batched 1.67
+  seed  3: rel dE 1.93e-16  rel dVar 4.84e-16    48.98 ->  2.78 ms/plan  (17.6x)  batched 1.88
+  seed  4: rel dE 1.86e-16  rel dVar 1.87e-16    48.39 ->  2.82 ms/plan  (17.2x)  batched 1.88
+  seed  5: rel dE 1.78e-16  rel dVar 3.16e-16    49.01 ->  2.81 ms/plan  (17.4x)  batched 1.87
+  seed  6: rel dE 1.65e-16  rel dVar 5.38e-16    50.94 ->  2.77 ms/plan  (18.4x)  batched 1.80
+  seed  7: rel dE 1.80e-16  rel dVar 1.27e-16    47.33 ->  2.85 ms/plan  (16.6x)  batched 1.83
+
+  max relative dE   2.00e-16   (numerical error vs clark.py)
+  max relative dVar 5.38e-16
+  median 48.68 -> 2.80 ms/plan  (17.3x)
+  batched over the candidate set: 1.82 ms/plan  (26.8x overall, max rel dVar 5.4e-16)
+wrote /home/kuceral4/projects/helhest_stack/studies/out/bench/clark_conv_sphere.json

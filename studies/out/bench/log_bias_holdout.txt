@@ -1,0 +1,21 @@
+Warp 1.14.0 initialized:
+   CUDA Toolkit 12.9, Driver 13.3
+   Devices:
+     "cpu"      : "CPU"
+     "cuda:0"   : "NVIDIA RTX A500 Laptop GPU" (4 GiB, sm_86, mempool enabled)
+   Kernel cache:
+     /home/kuceral4/.cache/warp/1.14.0
+Module helhest.engine.envelope c4b8835 load on device 'cuda:0' took 1.19 ms  (cached)
+Module helhest.engine.envelope a927aac load on device 'cuda:0' took 1.19 ms  (cached)
+Module helhest.engine.step b170777 load on device 'cuda:0' took 6.13 ms  (cached)
+Module studies.adjoint.harness f65d5d1 load on device 'cuda:0' took 0.59 ms  (cached)
+  20/100
+  40/100
+  60/100
+  80/100
+  100/100
+
+HELD-OUT bias correction, seeds 100-199, top 100 cells
+(truncation fixed in advance from the seeds 0-19 sweep; evaluated here once)
+  tau          +0.129 -> +0.029   better on 38/99   p=2.65e-02
+  tau within   +0.169 -> -0.047   better on 34/95   p=7.31e-03
