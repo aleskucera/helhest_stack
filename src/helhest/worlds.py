@@ -10,16 +10,20 @@ for the stress harness. They target different weaknesses:
            a greedy Euclidean planner drives into the closed side and stalls
   ridge    a diagonal barrier with one notch -> direction-dependent crossing
   bumpy    rough terrain, some bumps tall enough to high-center -> tilt / settle feasibility
+  corridor a straight hallway too narrow for a forward-arc U-turn, goal BEHIND the start ->
+           only a point-turn (pivot_cost > 0) reaches it; see helhest.planning.turnmaps
 
 Render them:  python -m helhest.worlds [--out /tmp/worlds.png]
 """
 
 import argparse
+import math
 
 import numpy as np
 
 from .heightmap import _grid
 from .heightmap import Heightmap
+from .planning import turnmaps
 
 _WALL = 1.0  # impassable obstacle height (drive in -> infeasible settle)
 
@@ -102,6 +106,18 @@ def bumpy_world(cell=0.06, seed=0):
     return Heightmap(H, (xlim[0], ylim[0]), cell)
 
 
+def corridor_world(cell=turnmaps.DEFAULT_CELL):
+    """A turnmaps.py corridor at the width validated by tests/planning/test_pivot.py: wide
+    enough to pivot in place, too narrow for a forward-arc U-turn.
+
+    length/extent_y are pinned well past turnmaps' own tight defaults: this world gets consumed
+    through navigate_partial_view.py's cropped 9 m / 16 m planning windows, and any crop that
+    reaches past the scene's real edge is filled with elevation 0 (unmapped -> optimism), which
+    would silently turn the corridor's walls into a bypassable illusion the moment a window
+    samples past them. Sized so every crop this demo takes stays on REAL wall/floor."""
+    return turnmaps.bump_corridor(2.2, length=24.0, extent_y=22.0, cell=cell)
+
+
 WORLDS = {
     "gap": (gap_world, (0.0, 0.0, 0.0), (11.0, 0.0)),
     "slalom": (slalom_world, (0.0, 0.0, 0.0), (17.0, 0.0)),
@@ -109,6 +125,7 @@ WORLDS = {
     "pocket": (pocket_world, (0.0, 0.0, 0.0), (9.0, 0.0)),
     "ridge": (ridge_world, (0.0, -4.0, 0.0), (9.0, 2.5)),
     "bumpy": (bumpy_world, (0.0, 0.0, 0.0), (14.0, 0.0)),
+    "corridor": (corridor_world, (-3.0, 0.0, math.pi), (3.0, 0.0)),
 }
 
 

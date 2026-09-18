@@ -14,7 +14,9 @@ import argparse
 import numpy as np
 
 
-def run(world="pocket", n_theta=24, stride=1, lat_coarsen=6, device="cuda", out=None):
+def run(
+    world="pocket", n_theta=24, stride=1, lat_coarsen=6, pivot_cost=0.0, device="cuda", out=None
+):
     import warp as wp
     import matplotlib
 
@@ -50,6 +52,7 @@ def run(world="pocket", n_theta=24, stride=1, lat_coarsen=6, device="cuda", out=
         dynamics.planning_solver(),
         n_theta=n_theta,
         step=step,
+        pivot_cost=pivot_cost,
         device=device,
     )
     V = ctg.compute(
@@ -143,6 +146,12 @@ def main():
     ap.add_argument("--n-theta", type=int, default=24)
     ap.add_argument("--stride", type=int, default=1, help="draw an arrow every `stride` cells")
     ap.add_argument("--lat-coarsen", type=int, default=6, help="solve the router at 1/k resolution")
+    ap.add_argument(
+        "--pivot-cost",
+        type=float,
+        default=0.0,
+        help="m-equivalent cost per heading bin of a point-turn primitive; 0 = forward-arcs only",
+    )
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
@@ -151,6 +160,7 @@ def main():
         n_theta=args.n_theta,
         stride=args.stride,
         lat_coarsen=args.lat_coarsen,
+        pivot_cost=args.pivot_cost,
         device=args.device,
         out=args.out,
     )

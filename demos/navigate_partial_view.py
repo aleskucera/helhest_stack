@@ -206,6 +206,8 @@ def run(
     drift=0.0,
     drive=False,
     fan_n=160,
+    pivot_cost=0.0,
+    spin_frac=0.0,
     distrust_policy="flat",
     support_ratio=0.35,
     support_radius_m=0.5,
@@ -252,7 +254,9 @@ def run(
     planner = MppiGpu(
         plan_sim,
         CostParams(goal_running=0.3, effort=2e-3, turn=0.03),
-        sampling=SamplingConfig(wmax=8.0, straight_frac=0.2, elite_frac=0.01),
+        sampling=SamplingConfig(
+            wmax=8.0, straight_frac=0.2, spin_frac=spin_frac, elite_frac=0.01
+        ),
         n_theta=24,
     )
     planner.reset_nominal(1.5)
@@ -261,7 +265,12 @@ def run(
     rcny, rcnx, rccell = rwh // kr, rww // kr, cell * kr
     route_grid = GridParams(rcnx, rcny, rccell, 0.0, 0.0)
     ctg = CostToGo(
-        route_grid, dynamics.robot_params(), dynamics.planning_solver(), n_theta=24, device=device
+        route_grid,
+        dynamics.robot_params(),
+        dynamics.planning_solver(),
+        n_theta=24,
+        pivot_cost=pivot_cost,
+        device=device,
     )
     # arm the saturation fallback (explore toward an out-of-window goal)
     planner.cw.lattice_cap = ctg._vcap
@@ -534,6 +543,20 @@ def main():
     )
     ap.add_argument("--fan-n", type=int, default=160, help="how many rollouts to draw in window 2")
     ap.add_argument(
+        "--pivot-cost",
+        type=float,
+        default=0.0,
+        help="m-equivalent cost per heading bin of a point-turn lattice primitive (global "
+        "router); 0 = forward-arcs only",
+    )
+    ap.add_argument(
+        "--spin-frac",
+        type=float,
+        default=0.0,
+        help="fraction of MPPI rollout candidates drawn from the turn-in-place SPIN prior "
+        "(local planner); 0 = forward-only sampling",
+    )
+    ap.add_argument(
         "--distrust-policy",
         default="flat",
         choices=["flat", "height-split"],
@@ -576,6 +599,8 @@ def main():
         drift=args.drift,
         drive=args.drive,
         fan_n=args.fan_n,
+        pivot_cost=args.pivot_cost,
+        spin_frac=args.spin_frac,
         distrust_policy=args.distrust_policy,
         support_ratio=args.support_ratio,
         support_radius_m=args.support_radius_m,
