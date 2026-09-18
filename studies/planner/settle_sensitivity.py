@@ -42,12 +42,18 @@ def _sim(grid: GridParams, robot: RobotParams, solver: SolverParams):
     )
     sim.target_wheel_omega.zero_()
     sim.set_friction(
-        Heightmap(np.full((grid.cells_y, grid.cells_x), 0.8, np.float32), (grid.origin_x, grid.origin_y), CELL)
+        Heightmap(
+            np.full((grid.cells_y, grid.cells_x), 0.8, np.float32),
+            (grid.origin_x, grid.origin_y),
+            CELL,
+        )
     )
     return sim
 
 
-def settle_at(sim, elev: np.ndarray, x: float, y: float, yaw: float) -> tuple[float, float, float, float]:
+def settle_at(
+    sim, elev: np.ndarray, x: float, y: float, yaw: float
+) -> tuple[float, float, float, float]:
     """(z, pitch, roll, residual) for one pose on one terrain."""
     sim.set_terrain(wp.array(elev, dtype=wp.float32))
     sim.start_pose.assign(np.array([[x, y, yaw]], np.float32))
@@ -64,24 +70,38 @@ def main() -> None:
 
     robot = RobotParams()
     b, l = robot.half_track, robot.rear_offset
-    grid = GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=-N * CELL / 2, origin_y=-N * CELL / 2)
+    grid = GridParams(
+        cells_x=N, cells_y=N, cell_size=CELL, origin_x=-N * CELL / 2, origin_y=-N * CELL / 2
+    )
     sim = _sim(grid, robot, SolverParams())
 
     flat = np.zeros((N, N), np.float32)
     x = y = yaw = 0.0
     z0, p0, r0, res0 = settle_at(sim, flat, x, y, yaw)
-    print(f"flat ground: z {z0:+.4f} pitch {np.degrees(p0):+.3f} roll {np.degrees(r0):+.3f} "
-          f"residual {res0:.2e}")
+    print(
+        f"flat ground: z {z0:+.4f} pitch {np.degrees(p0):+.3f} roll {np.degrees(r0):+.3f} "
+        f"residual {res0:.2e}"
+    )
 
-    report = {"cell": CELL, "half_track": b, "rear_offset": l, "closed_form": {
-        "droll_de1_rad_per_m": 1.0 / (2 * b), "dpitch_de3_rad_per_m": 1.0 / l}}
+    report = {
+        "cell": CELL,
+        "half_track": b,
+        "rear_offset": l,
+        "closed_form": {"droll_de1_rad_per_m": 1.0 / (2 * b), "dpitch_de3_rad_per_m": 1.0 / l},
+    }
 
     def cell_of(wx, wy):
         return int((wy - grid.origin_y) / CELL), int((wx - grid.origin_x) / CELL)
 
     # --- 1. sensitivity under each wheel, against the closed form -------------------------
-    wheels = {"front-L": (0.0, +b, "roll"), "front-R": (0.0, -b, "roll"), "rear": (-l, 0.0, "pitch")}
-    print(f"\n{'wheel':9s} {'delta_m':>8s} {'d(roll)/dh':>11s} {'d(pitch)/dh':>12s} {'residual':>10s}")
+    wheels = {
+        "front-L": (0.0, +b, "roll"),
+        "front-R": (0.0, -b, "roll"),
+        "rear": (-l, 0.0, "pitch"),
+    }
+    print(
+        f"\n{'wheel':9s} {'delta_m':>8s} {'d(roll)/dh':>11s} {'d(pitch)/dh':>12s} {'residual':>10s}"
+    )
     sens = {}
     for name, (wx, wy, axis) in wheels.items():
         rows = []
@@ -99,7 +119,9 @@ def main() -> None:
 
     # --- 2. a contested contact: two cells competing for one wheel's support ---------------
     print("\ncontested contact -- two cells under the front-left wheel, lead swept through zero:")
-    print(f"{'lead_m':>9s} {'roll_deg':>9s} {'d(roll)/dh_A':>13s} {'d(roll)/dh_B':>13s} {'residual':>10s}")
+    print(
+        f"{'lead_m':>9s} {'roll_deg':>9s} {'d(roll)/dh_A':>13s} {'d(roll)/dh_B':>13s} {'residual':>10s}"
+    )
     contest = []
     # The cylinder envelope is `wheel_width` wide (0.10 m) and 2*wheel_radius long (0.70 m), so
     # at yaw = 0 the front-left wheel's footprint is x in [-0.35, 0.35], y in [0.315, 0.415].
@@ -114,8 +136,10 @@ def main() -> None:
         e[rb, cb] = 0.05  # cell B
         _, _, r_base, res_b = settle_at(sim, e, x, y, yaw)
         eps = 1e-3
-        ea = e.copy(); ea[ra, ca] += eps
-        eb = e.copy(); eb[rb, cb] += eps
+        ea = e.copy()
+        ea[ra, ca] += eps
+        eb = e.copy()
+        eb[rb, cb] += eps
         _, _, r_a, _ = settle_at(sim, ea, x, y, yaw)
         _, _, r_b, _ = settle_at(sim, eb, x, y, yaw)
         da, db = (r_a - r_base) / eps, (r_b - r_base) / eps
@@ -125,15 +149,24 @@ def main() -> None:
 
     # --- 3. does anything actually clamp? --------------------------------------------------
     sp = SolverParams()
-    print(f"\nsolver caps: tilt_clamp {np.degrees(sp.tilt_clamp):.0f} deg, "
-          f"max_step (z {sp.max_step[0]} m, pitch {np.degrees(sp.max_step[1]):.0f} deg, "
-          f"roll {np.degrees(sp.max_step[2]):.0f} deg), newton_iters {sp.newton_iters}")
+    print(
+        f"\nsolver caps: tilt_clamp {np.degrees(sp.tilt_clamp):.0f} deg, "
+        f"max_step (z {sp.max_step[0]} m, pitch {np.degrees(sp.max_step[1]):.0f} deg, "
+        f"roll {np.degrees(sp.max_step[2]):.0f} deg), newton_iters {sp.newton_iters}"
+    )
     worst = 0.0
     for slope_deg in (5, 10, 15, 20, 25, 30):
-        e = np.tile(np.linspace(-1, 1, N, dtype=np.float32) * (N * CELL / 2) * np.tan(np.radians(slope_deg)), (N, 1))
+        e = np.tile(
+            np.linspace(-1, 1, N, dtype=np.float32)
+            * (N * CELL / 2)
+            * np.tan(np.radians(slope_deg)),
+            (N, 1),
+        )
         _, p1, r1, res1 = settle_at(sim, np.ascontiguousarray(e.T), x, y, yaw)
         worst = max(worst, abs(res1))
-        print(f"   {slope_deg:2d} deg cross-slope -> roll {np.degrees(r1):+7.3f} deg  residual {res1:.2e}")
+        print(
+            f"   {slope_deg:2d} deg cross-slope -> roll {np.degrees(r1):+7.3f} deg  residual {res1:.2e}"
+        )
     report["max_residual_on_slopes"] = worst
 
     dst = os.path.join(args.out, "settle_sensitivity.json")

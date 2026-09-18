@@ -94,3 +94,84 @@ pivot primitives do not compose) is the one that still matters.
 - **3.3 needs a correction** before implementation: fold over offset-corrected heights, and
   account for the bilinear blend across four envelope cells.
 - Part A is otherwise unblocked.
+
+---
+
+# Part A built: the z-margin field (2026-09-18)
+
+`CostToGo` now optionally measures feasibility in **sigmas** rather than raw thresholds
+(`_margin_kernel`, `src/helhest/planning/costtogo.py`). `k_sigma = 0` is exactly the old
+behaviour, so nothing changes until a caller opts in.
+
+## What it computes
+
+```
+z_roll  = (max_roll - |roll|)        / sigma_roll
+z_climb = (max_pitch_up + pitch)     / sigma_pitch      (climb = NEGATIVE pitch)
+z_desc  = (max_pitch_down - pitch)   / sigma_pitch
+z_clear = (clearance - clear_margin) / sigma_clear
+z       = min over tests             -- the binding constraint, in sigmas
+
+blocked |= z < k_sigma
+tilt    += margin_weight * max(0, z_ref - z)
+```
+
+Dividing each test by its own sigma is what makes the `min` meaningful -- roll is in radians,
+clearance in metres, and a raw `min` over those compares nothing.
+
+## Sigma propagation, and an independent check on it
+
+From the settle's closed-form rows: `roll = (e1 - e2)/2b`, `pitch = (e3 - (e1+e2)/2)/l`, both
+verified exactly by finite difference in section 6.2 above. Both are **differences** of
+supports, so the pose drift shared across cells cancels and what enters is the belief's
+**measurement** sd, not its total. That is why `compute(sigma=...)` wants `meas_sd`.
+
+| per-cell sigma | predicted sigma_roll | predicted sigma_pitch |
+|---|---|---|
+| 1.0 cm | 1.11 deg | 0.94 deg |
+| **2.5 cm** | **2.77 deg** | **2.34 deg** |
+| 5.0 cm | 5.55 deg | 4.68 deg |
+
+`studies/calib/RESULTS.md` section 1 measured the attitude residual **end to end** -- settling
+on a real accumulated map and comparing against SLAM -- at **2.84 deg roll, 2.11 deg pitch**. A
+per-cell sigma of 2.5 cm reproduces 2.77 / 2.34 from geometry alone, within 3% on roll and 11%
+on pitch. The two measurements share no machinery, so this is corroboration of the chain rather
+than a restatement of it.
+
+## Operating points
+
+61x61 routing grid at 0.24 m, 12 headings, rolling terrain, uniform sigma:
+
+| `k_sigma` | per-cell sigma | blocked | window reachable | z p50 |
+|---|---|---|---|---|
+| 0.0 | 2.5 cm | 0.0% | 96.7% | — |
+| 2.0 | 0.5 cm | 9.8% | 84.7% | 4.0 |
+| 2.0 | 1.0 cm | 9.8% | 84.7% | 4.0 |
+| **2.0** | **2.5 cm** | **17.3%** | **76.0%** | **3.2** |
+| 3.0 | 2.5 cm | 44.8% | 7.8% | 3.2 |
+| 2.0 | 5.0 cm | 72.0% | 1.1% | 1.6 |
+
+At the measured map quality, `k_sigma = 2` costs about 17% of poses and leaves three quarters
+of the window reachable. The 0.5 and 1.0 cm rows are identical because `sigma_floor_m` (0.02 m)
+dominates both -- the floor doing its job.
+
+The last row is a warning worth stating plainly: **at a per-cell sigma of 5 cm, demanding two
+sigmas leaves almost nothing reachable.** That is not the field misbehaving, it is the honest
+consequence of a map that cannot resolve roll to better than 5.5 deg against a 15 deg envelope.
+It is also exactly the situation the plan's optimistic/pessimistic gap (section 4.3) is meant to
+detect and act on rather than sit in.
+
+## Two approximations, both marked in the source
+
+- **Sigma is sampled at each wheel centre**, not at the cell that won the envelope dilation.
+  Elevation sigma varies smoothly with observation range (~3 cm/m measured), so over the
+  <=0.35 m to the contact cell this is worth ~1 cm. The terrain max it stands in for is not
+  smooth; sigma is.
+- **The footprint maximum is not folded.** Reading sigma off one cell is the linearized, one-hot
+  estimate, which overstates the sd at contested contacts. The Clark fold at the dilation stage
+  is the fix, and per section 6.2 above it must fold **offset-corrected** heights, not raw ones.
+
+`sigma_clear` also drops the (negative, helpful) cross term between the belly and its supports,
+which overstates it -- the conservative direction.
+
+Tests: `tests/planning/test_zmargin.py`, 7 cases.

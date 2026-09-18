@@ -83,13 +83,18 @@ def main() -> None:
         r = time_solve(w, c, nt)
         r["name"] = name
         rows.append(r)
-        print(f"{name:30s} {r['poses']:9d} {r['median_ms']:10.2f} {r['p90_ms']:8.2f} "
-              f"{r['frame_frac']*100:7.1f}%")
+        print(
+            f"{name:30s} {r['poses']:9d} {r['median_ms']:10.2f} {r['p90_ms']:8.2f} "
+            f"{r['frame_frac']*100:7.1f}%"
+        )
 
     dep = rows[0]["median_ms"]
     print(f"\ntwo-solve schemes against a {FRAME_MS:.0f} ms frame:")
-    for name, extra in (("pessimistic x2", dep), ("pessimistic + 12-heading", rows[4]["median_ms"]),
-                        ("pessimistic + coarse 12-heading", rows[5]["median_ms"])):
+    for name, extra in (
+        ("pessimistic x2", dep),
+        ("pessimistic + 12-heading", rows[4]["median_ms"]),
+        ("pessimistic + coarse 12-heading", rows[5]["median_ms"]),
+    ):
         tot = dep + extra
         print(f"   {name:32s} {tot:6.2f} ms  = {tot/FRAME_MS*100:5.1f}% of a frame")
 

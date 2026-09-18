@@ -32,6 +32,8 @@ import warp as wp
 
 from ..engine import ForwardSimulator
 from ..engine.robot import Robot  # the built struct, passed straight into the feasibility kernel
+from ..engine.terrain import Grid
+from ..engine.terrain import sample_field
 from ..heightmap import Heightmap
 from ..profiling import StageProfiler
 from .lattice_solver import LatticeValueSolver
@@ -86,6 +88,126 @@ def _feasibility_kernel(
     else:
         blocked[r, c, t] = 0.0
     tilt[r, c, t] = robot.roll_cost_weight * wp.abs(roll) + robot.pitch_cost_weight * wp.abs(pitch)
+
+
+@wp.kernel
+def _margin_kernel(
+    derived: wp.array2d(dtype=wp.vec3f),  # (z, pitch, roll) per pose; row 0 = the static settle
+    clearance: wp.array2d(dtype=wp.float32),
+    sigma: wp.array2d(dtype=wp.float32),  # per-cell MEASUREMENT sd of the elevation belief [m]
+    grid: Grid,
+    robot: Robot,
+    n_theta: wp.int32,
+    sigma_floor_m: wp.float32,
+    k_sigma: wp.float32,
+    z_ref: wp.float32,
+    margin_weight: wp.float32,
+    blocked: wp.array3d(dtype=wp.float32),
+    tilt: wp.array3d(dtype=wp.float32),
+    zmargin: wp.array3d(dtype=wp.float32),
+):
+    """Safety margin in SIGMAS, and the veto and graded penalty that come off it.
+
+    Each feasibility test is asked how much room is left in units of its OWN uncertainty:
+
+        z_roll  = (max_roll - |roll|)           / sigma_roll
+        z_climb = (max_pitch_up + pitch)        / sigma_pitch     (climb = NEGATIVE pitch)
+        z_desc  = (max_pitch_down - pitch)      / sigma_pitch
+        z_clear = (clearance - clear_margin)    / sigma_clear
+        z       = min over tests                                  -- the binding constraint
+
+    Dividing each by its own sigma is what makes the `min` meaningful: roll is in radians and
+    clearance in metres, and a raw `min` over those compares nothing. `blocked = z < k_sigma`
+    then has one interpretable knob -- how many sigmas of room the robot insists on -- and the
+    same number drives the graded penalty, so pessimism and "how close is this to bad" are not
+    two independently-tuned things.
+
+    Attitude sigmas come from the settle's closed-form rows. With wheels at (0, +b), (0, -b),
+    (-l, 0), `roll = (e1 - e2)/2b` and `pitch = (e3 - (e1+e2)/2)/l`, and both are DIFFERENCES of
+    supports -- so the pose drift shared by every cell cancels exactly, and what enters is the
+    per-cell MEASUREMENT sd, not the total. That is why `sigma` here must be the belief's
+    `meas_sd` and not its `sigma`.
+
+    `sigma_floor_m` is not optional. Without it a perfectly known map makes a pose at 14.9 deg
+    of roll against a 15 deg limit read as infinitely safe; the floor is the irreducible error
+    -- localisation, controller tracking, model -- that never reaches zero.
+
+    Two approximations, both marked for upgrade:
+      - sigma is sampled at each WHEEL CENTRE rather than at the cell that won the envelope
+        dilation. Elevation sigma varies smoothly with observation range (~3 cm/m measured), so
+        over the <=0.35 m to the contact cell this is worth ~1 cm; the terrain max it stands in
+        for is not smooth at all, but sigma is.
+      - the footprint maximum is not folded. Reading sigma off one cell is the linearized,
+        one-hot estimate, which overstates the sd at contested contacts; the Clark fold at the
+        dilation stage is the fix, and it needs the envelope's own contact indices.
+    """
+    r, c, t = wp.tid()
+    nx = blocked.shape[1]
+    b = (r * nx + c) * n_theta + t
+    der = derived[0, b]
+    pitch = der[1]
+    roll = der[2]
+
+    x = grid.origin_x + float(c) * grid.cell_size
+    y = grid.origin_y + float(r) * grid.cell_size
+    yaw = (float(t) + 0.5) * 2.0 * 3.14159265 / float(n_theta)
+    ca = wp.cos(yaw)
+    sa = wp.sin(yaw)
+    # Read the layout off the robot itself rather than reconstructing it: `wheel_pos` is the
+    # same array the settle uses, so the sigma is sampled where the supports actually are.
+    w0 = robot.wheel_pos[0]
+    w1 = robot.wheel_pos[1]
+    w2 = robot.wheel_pos[2]
+    hb = w0[1]  # half track
+    rl = -w2[0]  # rear offset
+
+    # Measurement sd under each wheel, and midway back for the belly.
+    s1 = _sigma_at(
+        sigma, grid, x + ca * w0[0] - sa * w0[1], y + sa * w0[0] + ca * w0[1], sigma_floor_m
+    )
+    s2 = _sigma_at(
+        sigma, grid, x + ca * w1[0] - sa * w1[1], y + sa * w1[0] + ca * w1[1], sigma_floor_m
+    )
+    s3 = _sigma_at(
+        sigma, grid, x + ca * w2[0] - sa * w2[1], y + sa * w2[0] + ca * w2[1], sigma_floor_m
+    )
+    sb = _sigma_at(sigma, grid, x - ca * rl * 0.5, y - sa * rl * 0.5, sigma_floor_m)
+
+    two_b = 2.0 * hb
+    var_roll = (s1 * s1 + s2 * s2) / (two_b * two_b)
+    var_pitch = (s3 * s3 + 0.25 * (s1 * s1 + s2 * s2)) / (rl * rl)
+    # The belly sits on a weighted mean of the three supports (weights summing to one), so its
+    # own height carries about a third of their variance. The cross term against the ground
+    # beneath it is dropped, which OVERSTATES sigma_clear -- the conservative direction.
+    var_clear = sb * sb + (s1 * s1 + s2 * s2 + s3 * s3) / 9.0
+
+    sigma_roll = wp.sqrt(wp.max(var_roll, 1.0e-12))
+    sigma_pitch = wp.sqrt(wp.max(var_pitch, 1.0e-12))
+    sigma_clear = wp.sqrt(wp.max(var_clear, 1.0e-12))
+
+    z_roll = (robot.max_roll - wp.abs(roll)) / sigma_roll
+    z_climb = (robot.max_pitch_up + pitch) / sigma_pitch
+    z_desc = (robot.max_pitch_down - pitch) / sigma_pitch
+    z_clear = (clearance[0, b] - robot.clear_margin) / sigma_clear
+
+    z = wp.min(wp.min(z_roll, z_climb), wp.min(z_desc, z_clear))
+    zmargin[r, c, t] = z
+    if z < k_sigma:
+        blocked[r, c, t] = 1.0
+    if z < z_ref:  # graded: pay for being near a boundary, not only for crossing it
+        tilt[r, c, t] = tilt[r, c, t] + margin_weight * (z_ref - z)
+
+
+@wp.func
+def _sigma_at(
+    sigma: wp.array2d(dtype=wp.float32),
+    grid: Grid,
+    x: wp.float32,
+    y: wp.float32,
+    floor_m: wp.float32,
+) -> wp.float32:
+    """Elevation sd at a world point, floored. Outside the grid the map knows nothing."""
+    return wp.max(sample_field(sigma, grid, x, y), floor_m)
 
 
 @wp.kernel
@@ -202,12 +324,25 @@ class CostToGo:
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
         pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives so
         # a goal behind the robot routes as pivot-then-drive instead of a wide loop. 0 = OFF.
+        # --- probabilistic feasibility (z-margin). k_sigma = 0 is EXACTLY the old behaviour:
+        # the hard thresholds still veto, nothing is added, and `compute` need not be passed a
+        # sigma. Above 0 a pose must additionally hold k_sigma standard deviations of room on
+        # every test, measured against the elevation belief's own per-cell MEASUREMENT sd.
+        k_sigma: float = 0.0,
+        sigma_floor_m: float = 0.02,  # irreducible map error: localisation, tracking, model
+        z_ref: float = 4.0,  # start charging for proximity to a boundary below this many sigmas
+        margin_weight: float = 0.0,  # [m-equiv] per sigma of shortfall; 0 = veto only
         profile: bool = False,  # opt-in per-stage CUDA-event timing (tiny event nodes + per-call sync)
         device: wp.Device | str | None = None,
     ) -> None:
 
         self.device = wp.get_device(device)
         self.flatness_weight = flatness_weight
+        self.k_sigma = float(k_sigma)
+        self.sigma_floor_m = float(sigma_floor_m)
+        self.z_ref = float(z_ref)
+        self.margin_weight = float(margin_weight)
+        self.n_theta = int(n_theta)
         self.robot = robot_params.build(self.device)
         self.grid = grid_params.build()
         self.bounds = grid_params.bounds  # (xmin, xmax, ymin, ymax) the solver takes
@@ -266,11 +401,16 @@ class CostToGo:
             device=self.device,
         )
         self.blocked = wp.zeros_like(self.V)
+        self.zmargin = wp.zeros_like(self.V)  # safety margin in sigmas, per pose
         self.robust_blocked = wp.zeros_like(self.V)  # blocked after the disturbance-tube erosion
         self.graded_tilt = wp.zeros_like(self.V)
         self._step = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)  # per-cell prominence
 
         self._elev_in = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
+        # Per-cell measurement sd. Defaults to zero, which the floor then lifts to
+        # `sigma_floor_m` everywhere -- so an unsupplied sigma is a uniform-uncertainty map, not
+        # a claim of perfect knowledge.
+        self._sigma_in = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
         # Stable mask buffer the captured graph reads. Defaults to all-measured, so a caller that
         # passes no mask gets exactly the pre-mask behaviour.
         self._measured_in = wp.full((ny, nx), 1.0, dtype=wp.float32, device=self.device)
@@ -309,6 +449,25 @@ class CostToGo:
             outputs=[self.blocked, self.graded_tilt],
             device=self.device,
         )
+        if self.k_sigma > 0.0 or self.margin_weight > 0.0:
+            wp.launch(
+                _margin_kernel,
+                dim=self.V.shape,
+                inputs=[
+                    sim.derived,
+                    sim.clearance,
+                    self._sigma_in,
+                    self.grid,
+                    self.robot,
+                    self.n_theta,
+                    self.sigma_floor_m,
+                    self.k_sigma,
+                    self.z_ref,
+                    self.margin_weight,
+                ],
+                outputs=[self.blocked, self.graded_tilt, self.zmargin],
+                device=self.device,
+            )
         if self._step_gate > 0.0:  # hard-block tall steps the settle straddles (thin poles/sticks)
             wp.launch(
                 _local_step_kernel,
@@ -366,6 +525,7 @@ class CostToGo:
         elevation: wp.array,
         goal_xy: tuple[float, float],
         measured: wp.array | None = None,
+        sigma: wp.array | None = None,
     ) -> wp.array:
         """elevation [ny, nx] device wp.array + goal -> clamped V[ny, nx, n_theta]. The entire solve
         (settle + value iteration) is captured ONCE as a CUDA graph and replayed each call with the
@@ -373,12 +533,24 @@ class CostToGo:
 
         `measured` [ny, nx] (1 = observed, 0 = blind) is read ONLY by the obstacle_step_m gate, to
         keep the caller's blind-cell fill from reading as a real step. Omit it (or pass
-        obstacle_step_m=0) and every cell counts as observed."""
+        obstacle_step_m=0) and every cell counts as observed.
+
+        `sigma` [ny, nx] is the elevation belief's per-cell MEASUREMENT sd (its `meas_sd`, not
+        its `sigma`: pose drift is common-mode and cancels in the attitude differences). It is
+        read only when `k_sigma` or `margin_weight` is non-zero; omitted, every cell falls back
+        to `sigma_floor_m`."""
         assert (
             elevation.device == self.device
         ), f"elevation must be a wp.array on {self.device}, got {elevation.device}"
 
         wp.copy(self._elev_in, elevation)
+        if sigma is None:
+            self._sigma_in.zero_()  # the floor then applies uniformly
+        else:
+            assert (
+                sigma.device == self.device
+            ), f"sigma must be a wp.array on {self.device}, got {sigma.device}"
+            wp.copy(self._sigma_in, sigma)
         if self._step_gate > 0.0:  # only the gate reads the mask
             if measured is None:
                 self._measured_in.fill_(1.0)
