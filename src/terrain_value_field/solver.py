@@ -284,6 +284,11 @@ class ValueSolver:
         the sweeps dominate, so the per-body sync was never the cost. What the recording buys is
         that the solve can now nest inside a LARGER capture, which a host sync would forbid.
         """
+        if penalty_weight < 0.0:
+            raise ValueError(
+                f"penalty_weight must be >= 0 or a move can cost less than "
+                f"nothing, got {penalty_weight}"
+            )
         if capture and self.device.is_cuda:
             key = (pose_cost.ptr, seeds.ptr, float(penalty_weight))
             if self._graph_key != key:

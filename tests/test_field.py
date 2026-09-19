@@ -176,3 +176,25 @@ def test_solve_pair_leaves_the_believed_reading_in_place():
     for n, was in believed.items():
         np.testing.assert_allclose(getattr(f, n).numpy(), was, rtol=1e-5, err_msg=n)
     assert not np.allclose(f.V_certain.numpy(), f.V.numpy())
+
+
+def test_a_negative_penalty_weight_is_rejected():
+    """It would invert the sign encoding: every FREE state would read as vetoed and the whole
+    map would go unreachable, with nothing to show for it. See margin.POSE COST."""
+    with pytest.raises(ValueError, match="penalty_weight"):
+        _field(penalty_weight=-1.0)
+
+
+def test_a_negative_penalty_scale_is_rejected():
+    """A move that costs less than nothing breaks min-plus outright."""
+    with pytest.raises(ValueError, match="penalty_scale"):
+        _field(penalty_scale=-1.0)
+
+
+def test_the_solver_rejects_a_negative_scale_at_its_own_boundary():
+    from terrain_value_field.solver import ValueSolver
+
+    s = ValueSolver(CELL, 8, 8, n_theta=1, control_set=omni_control_set(CELL))
+    buf = wp.zeros((8, 8, 1), dtype=wp.float32)
+    with pytest.raises(ValueError, match="penalty_weight"):
+        s.value_iterate(buf, buf, -0.5)

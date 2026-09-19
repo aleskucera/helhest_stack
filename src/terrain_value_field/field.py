@@ -61,6 +61,20 @@ class TerrainValueField:
         units as a move's cost, and `penalty_scale` is the solver's multiplier on the resulting
         per-state cost. Setting `penalty_weight = 0` gives a pure veto.
         """
+        # Both knobs must be non-negative, and not as a matter of taste. `penalty_weight` < 0
+        # makes the graded penalty negative, and `pose_cost` carries the veto in its sign -- so
+        # every free state would read as vetoed and the whole map would go unreachable, silently.
+        # `penalty_scale` < 0 can drive a move's cost below zero, which breaks min-plus outright.
+        if penalty_weight < 0.0:
+            raise ValueError(
+                f"penalty_weight must be >= 0 (the veto rides in the sign of the "
+                f"graded cost; see margin.POSE COST), got {penalty_weight}"
+            )
+        if penalty_scale < 0.0:
+            raise ValueError(
+                f"penalty_scale must be >= 0 or a move can cost less than "
+                f"nothing, got {penalty_scale}"
+            )
         self.device = wp.get_device(device)
         self.rows, self.cols, self.n_theta = int(rows), int(cols), int(n_theta)
         self.resolution = float(resolution)
