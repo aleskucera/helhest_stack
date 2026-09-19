@@ -85,6 +85,7 @@ def arc_control_set(
     nseg: int,
     turn_weight: float = 0.0,
     pivot_cost: float | None = None,
+    sweep_spacing: float | None = None,
 ) -> tuple[
     int,
     np.ndarray,
@@ -117,8 +118,31 @@ def arc_control_set(
     into it never helps. `pivot_cost` overrides the price in metres per bin; `math.inf` leaves the
     primitives out altogether for a robot that cannot turn on the spot. Zero is rejected -- a free
     move with no displacement is a zero-cost cycle.
+
+    `sweep_spacing` [m] thins the swept cells to roughly that far apart, keeping the robot's own
+    cell and the endpoint. It is a speed knob with a CORRECTNESS COST, it is off by default, and
+    it should probably stay off.
+
+    The temptation is real. Every swept cell is a full footprint check, so sampling them one grid
+    cell apart is wildly redundant -- on a 1.45 m robot at 0.1 m cells consecutive checks overlap
+    93% -- and thinning is worth 1.34x at 0.2 m, 1.52x at 0.3 m and 1.77x at 0.5 m.
+
+    The argument for safety is WRONG, and measurably so. It runs: a footprint-aware `pose_cost`
+    has already grown every obstacle by the robot, so a blocked region is at least a footprint
+    across and no arc can straddle one. That holds for a SINGLE obstacle and not for a union of
+    them -- where two grown blobs just overlap they leave a thin blocked isthmus, and an arc can
+    cross it with both endpoints clear. Against a footprint-dilated map, arcs blocked at full
+    sampling but admitted after thinning: 0.18% at 0.2 m, 0.33% at 0.3 m, 0.58% at 0.5 m. That
+    reads small and is not, because value iteration hunts for the cheapest route and will find
+    exactly those: 1369 wrongly admitted arcs moved 14560 states from unreachable to reachable.
+
+    Done properly this would thin CONSERVATIVELY rather than by skipping -- a coarser field in
+    which a block wins over its neighbours can only ever refuse a clear arc, never admit a blocked
+    one. Only the caller knows the footprint, so there is no safe default: None checks every cell.
     """
     dth = 2.0 * math.pi / n_theta
+    if sweep_spacing is not None and sweep_spacing <= 0.0:
+        raise ValueError(f"sweep_spacing must be > 0 or None, got {sweep_spacing}")
     if pivot_cost is None:
         pivot_cost = DEFAULT_PIVOT_ARCS * turn_radius * dth
     if pivot_cost <= 0.0:
@@ -169,13 +193,25 @@ def arc_control_set(
             turned = float((end_bin - it + n_theta // 2) % n_theta - n_theta // 2) * dth
             chord = math.hypot(dc_p * resolution, dr_p * resolution)
             prim_cost[it, p] = _arc_length(chord, turned) + turn_weight * abs(turned)
-            if len(cells) > max_sweep:
+            # traversal order, not sorted: subsampling below is along the arc, and it also
+            # lets the kernel's early-out bail at the first blocked cell the robot would reach
+            uniq = list(cells)
+            if sweep_spacing is not None:
+                kept = [uniq[0]]
+                for cell in uniq[1:]:
+                    lr, lc = kept[-1]
+                    gap = math.hypot((cell[0] - lr) * resolution, (cell[1] - lc) * resolution)
+                    if gap >= sweep_spacing:
+                        kept.append(cell)
+                if (dr_p, dc_p) not in kept:
+                    kept.append((dr_p, dc_p))  # always check where the move lands
+                uniq = kept
+            if len(uniq) > max_sweep:
                 raise ValueError(
-                    f"arc_control_set: an arc crosses {len(cells)} cells but max_sweep is "
+                    f"arc_control_set: an arc crosses {len(uniq)} cells but max_sweep is "
                     f"{max_sweep}, so the collision check would silently skip some of them. "
-                    f"Raise max_sweep to at least {len(cells)}."
+                    f"Raise max_sweep to at least {len(uniq)}."
                 )
-            uniq = sorted(cells)
             for s, cell in enumerate(uniq):
                 sweep_dr[it, p, s] = cell[0]
                 sweep_dc[it, p, s] = cell[1]

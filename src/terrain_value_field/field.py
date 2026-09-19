@@ -53,6 +53,7 @@ class TerrainValueField:
         step: float | None = None,
         turn_weight: float = 0.0,
         pivot_cost: float | None = None,  # None = 8x the equal-turn arc; inf = none
+        sweep_spacing: float | None = None,  # [m] between checked poses; see arc_control_set
         device: wp.Device | str | None = None,
     ) -> None:
         """`k_sigma` is the one knob: how many standard deviations of room a state must hold.
@@ -113,6 +114,7 @@ class TerrainValueField:
             step=step,
             turn_weight=turn_weight,
             pivot_cost=pivot_cost,
+            sweep_spacing=sweep_spacing,
             control_set=control_set,
             device=self.device,
         )

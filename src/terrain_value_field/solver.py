@@ -162,6 +162,7 @@ class ValueSolver:
         step: float | None = None,
         turn_weight: float = 0.0,  # [m per rad] on top of arc length; makes straight < arc
         pivot_cost: float | None = None,  # [m] per bin; None = 8x the equal-turn arc
+        sweep_spacing: float | None = None,  # [m] between checked poses; None = every cell
         control_set: tuple | None = None,  # from control_set.py; None builds forward arcs
         device: wp.Device | None = None,
     ):
@@ -192,6 +193,7 @@ class ValueSolver:
                 nseg,
                 turn_weight=float(turn_weight),
                 pivot_cost=None if pivot_cost is None else float(pivot_cost),
+                sweep_spacing=sweep_spacing,
             )
         (
             n_prim,

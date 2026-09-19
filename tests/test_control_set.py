@@ -309,3 +309,24 @@ def test_an_oversized_sweep_is_rejected_rather_than_truncated():
     """Silently keeping only max_sweep cells would leave holes in the collision check."""
     with pytest.raises(ValueError, match="max_sweep"):
         arc_control_set(16, 0.02, closing_step(16, 0.5, 2), 0.5, 4, 64)
+
+
+@pytest.mark.parametrize("spacing,expect", [(None, 7), (0.2, 4), (0.3, 3), (0.5, 2)])
+def test_sweep_spacing_thins_the_swept_cells_but_keeps_the_endpoint(spacing, expect):
+    """Mechanical behaviour only. Whether thinning is a good idea is answered in the docstring,
+    and the answer is no -- it admits 0.18-0.58% of arcs that full sampling blocks."""
+    n_theta, turn_radius = 16, 0.6
+    step = closing_step(n_theta, turn_radius, 2)
+    cs = arc_control_set(n_theta, RES, step, turn_radius, 40, 64, sweep_spacing=spacing)
+    n_prim, dr, dc, _, _, sdr, sdc, _, sn = cs
+    assert int(sn[0, 4]) == expect
+    for it in range(n_theta):
+        for p in range(5):
+            cells = [(int(sdr[it, p, s]), int(sdc[it, p, s])) for s in range(int(sn[it, p]))]
+            assert cells[0] == (0, 0), "the robot's own cell is always checked"
+            assert (int(dr[it, p]), int(dc[it, p])) in cells, "so is where the move lands"
+
+
+def test_a_non_positive_sweep_spacing_is_rejected():
+    with pytest.raises(ValueError, match="sweep_spacing"):
+        arc_control_set(16, RES, closing_step(16, 0.6, 2), 0.6, 40, 64, sweep_spacing=0.0)
