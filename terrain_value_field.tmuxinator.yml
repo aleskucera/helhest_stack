@@ -2,10 +2,11 @@
 #
 # Symlink it once, then start from anywhere:
 #
-#   ln -s ~/projects/terrain_value_field/tvf.tmuxinator.yml ~/.config/tmuxinator/tvf.yml
-#   tmuxinator start tvf
-#   WATCH=1 tmuxinator start tvf          # re-run the tests whenever a file changes
-#   NO_REMOTE=1 tmuxinator start tvf      # skip the dasenka window
+#   ln -s ~/projects/terrain_value_field/terrain_value_field.tmuxinator.yml \
+#     ~/.config/tmuxinator/terrain_value_field.yml
+#   tmuxinator start terrain_value_field
+#   WATCH=1 tmuxinator start terrain_value_field          # re-run the tests whenever a file changes
+#   NO_REMOTE=1 tmuxinator start terrain_value_field      # skip the dasenka window
 #
 # This is a library, not a robot stack, so there is no Apptainer, no ROS and no rviz here --
 # the loop is tests, a REPL with a scene already built, and a shell on the box that owns the
@@ -34,8 +35,8 @@
   # Poll rather than depend on entr/watchexec being installed. 1 s is well under the time it
   # takes to read a failure, and cheap on a tree this size.
   test_cmd = watch ?
-    "while true; do clear; #{tests}; touch /tmp/.tvf_stamp; " \
-    "while [ \"$(find src tests -name '*.py' -newer /tmp/.tvf_stamp | wc -l)\" = 0 ]; do sleep 1; done; done" :
+    "while true; do clear; #{tests}; touch /tmp/.terrain_value_field_stamp; " \
+    "while [ \"$(find src tests -name '*.py' -newer /tmp/.terrain_value_field_stamp | wc -l)\" = 0 ]; do sleep 1; done; done" :
     tests
 
   # dasenka owns the two 3090s, the ostrich checkout and the worlds. The PYTHONPATH below is
@@ -47,12 +48,12 @@
   wt     = '/local/kuceral4/projects/ostrich-odinsim'
   site   = '/local/kuceral4/projects/ostrich/.venv/lib/python3.12/site-packages'
   remote = "export WT=#{wt} && " \
-           "export PYTHONPATH=$WT/src:$WT:$WT/third_party/newton:/local/kuceral4/projects/helhest_stack/src:/tmp/tvf/src:#{site} && " \
+           "export PYTHONPATH=$WT/src:$WT:$WT/third_party/newton:/local/kuceral4/projects/helhest_stack/src:/tmp/terrain_value_field/src:#{site} && " \
            "export PY=/local/kuceral4/projects/ostrich/.venv/bin/python && cd $WT"
   skip_remote = ENV['NO_REMOTE'] && !ENV['NO_REMOTE'].empty?
 %>
 
-name: tvf
+name: terrain_value_field
 root: <%= repo %>
 
 windows:
@@ -62,7 +63,7 @@ windows:
       panes:
         - tests:
           - <%= env %>
-          - touch /tmp/.tvf_stamp
+          - touch /tmp/.terrain_value_field_stamp
           - <%= test_cmd %>
         - shell:
           - <%= env %>
