@@ -1,89 +1,31 @@
-# tmuxinator project for developing terrain_value_field.
-#
-# Symlink it once, then start from anywhere:
+# Dev session for terrain_value_field. Same shape as helhest_stack / ostrich:
 #
 #   ln -s ~/projects/terrain_value_field/terrain_value_field.tmuxinator.yml \
 #     ~/.config/tmuxinator/terrain_value_field.yml
 #   tmuxinator start terrain_value_field
-#   WATCH=1 tmuxinator start terrain_value_field          # re-run the tests whenever a file changes
-#   NO_REMOTE=1 tmuxinator start terrain_value_field      # skip the dasenka window
 #
-# This is a library, not a robot stack, so there is no Apptainer, no ROS and no rviz here --
-# the loop is tests, a REPL with a scene already built, and a shell on the box that owns the
-# GPUs and the simulator.
-#
-# VENV: the repo has no venv of its own yet. It falls back to helhest_stack's, which already
-# carries a matching warp. `uv sync` in this repo makes a local one and it will be preferred.
-
-<%
-  home = ENV['HOME']
-  # Rendered through Erubis inside Project.load(path), so `path` is the ~/.config symlink;
-  # realpath follows it back here. REPO is the escape hatch if that ever changes.
-  repo = ENV['REPO'] || File.dirname(File.realpath(path))
-
-  local_venv = "#{repo}/.venv"
-  venv = ENV['VENV'] || (File.directory?(local_venv) ? local_venv : "#{home}/projects/helhest_stack/.venv")
-  py   = "#{venv}/bin/python"
-
-  # The library is not installed; run it from src. One export, used by every pane.
-  env  = "export PYTHONPATH=\"#{repo}/src:$PYTHONPATH\""
-
-  # Warp JITs its kernels on first launch (~2 s here) and caches them. Nothing to do but know
-  # that the first test run in a fresh session is slower than the rest.
-  tests = "#{py} -m pytest tests -q"
-  watch = ENV['WATCH'] && !ENV['WATCH'].empty?
-  # Poll rather than depend on entr/watchexec being installed. 1 s is well under the time it
-  # takes to read a failure, and cheap on a tree this size.
-  test_cmd = watch ?
-    "while true; do clear; #{tests}; touch /tmp/.terrain_value_field_stamp; " \
-    "while [ \"$(find src tests -name '*.py' -newer /tmp/.terrain_value_field_stamp | wc -l)\" = 0 ]; do sleep 1; done; done" :
-    tests
-
-  # dasenka owns the two 3090s, the ostrich checkout and the worlds. The PYTHONPATH below is
-  # the one odin_env.sh builds: this worktree first, then newton, then helhest_stack for the
-  # worlds, then the shared venv's site-packages. Getting its ORDER wrong silently picks up the
-  # other ostrich checkout, whose engine config API differs -- so it is spelled out once here
-  # rather than retyped.
-  host   = ENV['DASENKA'] || 'dasenka'
-  wt     = '/local/kuceral4/projects/ostrich-odinsim'
-  site   = '/local/kuceral4/projects/ostrich/.venv/lib/python3.12/site-packages'
-  remote = "export WT=#{wt} && " \
-           "export PYTHONPATH=$WT/src:$WT:$WT/third_party/newton:/local/kuceral4/projects/helhest_stack/src:/tmp/terrain_value_field/src:#{site} && " \
-           "export PY=/local/kuceral4/projects/ostrich/.venv/bin/python && cd $WT"
-  skip_remote = ENV['NO_REMOTE'] && !ENV['NO_REMOTE'].empty?
-%>
+# `uv sync --extra dev` makes .venv and installs the package editable, so
+# `import terrain_value_field` works without PYTHONPATH.
 
 name: terrain_value_field
-root: <%= repo %>
+root: ~/projects/terrain_value_field
 
 windows:
-  # The loop: failures on the left, a shell to fix them on the right.
-  - dev:
-      layout: main-vertical
+  - editor:
+      layout: even-horizontal
       panes:
-        - tests:
-          - <%= env %>
-          - touch /tmp/.terrain_value_field_stamp
-          - <%= test_cmd %>
-        - shell:
-          - <%= env %>
-          # A bare ": " inside an unquoted YAML scalar starts a mapping, so use "=".
-          - echo "venv=<%= venv %>"
-          - clear
-
-  # A prompt that lands on a built scene. `show()`, `show(sd=0.05)`, `show(k=3.0)`.
-  - repl:
+        - |
+          source .venv/bin/activate
+          nvim
+  - main-console:
+      layout: even-horizontal
       panes:
-        # NAMED, so both lines run in ONE pane. An unnamed list under `panes:` makes one pane
-        # per string, which would leave the interpreter without PYTHONPATH.
-        - repl:
-          - <%= env %>
-          - <%= py %> -i dev/repl.py
-
-<% unless skip_remote %>
-  # The box with the GPUs, the simulator and the worlds. Env is pre-set for a labelling run;
-  # $PY is ostrich's interpreter, not this repo's.
-  - ostrich:
+        - |
+          source .venv/bin/activate
+          clear
+  - claude:
+      layout: even-horizontal
       panes:
-        - ssh -t -o RemoteCommand=none <%= host %> 'bash -lc "<%= remote %> && exec bash"'
-<% end %>
+        - |
+          source .venv/bin/activate
+          claude
