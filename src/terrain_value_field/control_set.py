@@ -34,10 +34,13 @@ import numpy as np
 # The five turn rates, as fractions of the sharpest arc the turn radius allows.
 _TURN_FRACTIONS = (-1.0, -0.5, 0.0, 0.5, 1.0)
 
-# What a point turn costs by default, in arc lengths per heading bin. Expressed as a multiple
-# of `step` rather than a fixed distance so it means the same thing on any robot and any grid:
-# dear enough that an arc wins wherever one reaches, cheap enough that a dead end is not +inf.
-DEFAULT_PIVOT_STEPS = 4.0
+# What a point turn costs by default, as a multiple of the ARC that turns just as far. The
+# sharpest arc in the set runs at exactly `turn_radius`, so turning one bin costs it
+# turn_radius * bin_width of driving; a pivot is priced at this many of those. Stated as a ratio
+# to the arcs rather than as a distance (or as a multiple of `step`, which drifts with the step
+# you pick) it is the same trade on any robot, any grid and any step: wherever an arc reaches it
+# wins by this factor, and where none does the alternative is +inf so the pivot wins anyway.
+DEFAULT_PIVOT_ARCS = 8.0
 
 
 def closing_step(n_theta: int, turn_radius: float, bins: int = 2) -> float:
@@ -85,7 +88,8 @@ def arc_control_set(
     a straight is cheaper than an arc covering the same distance. 0 = distance only.
 
     Two POINT-TURN primitives (heading +-1 bin in place) are appended by default at
-    `DEFAULT_PIVOT_STEPS * step` -- the skid-steer can rotate on the spot, so `goal behind` routes
+    `DEFAULT_PIVOT_ARCS` times the arc that turns as far -- the skid-steer can rotate on the spot,
+    so `goal behind` routes
     as pivot-then-drive instead of a wide loop (or +inf), and a lattice without that is missing
     moves the robot has. A half turn is n_theta/2 of them, so the price already scales with angle.
     Endpoint-heading feasibility is enforced for free: a blocked pose holds V = +inf, so a pivot
@@ -93,12 +97,12 @@ def arc_control_set(
     primitives out altogether for a robot that cannot turn on the spot. Zero is rejected -- a free
     move with no displacement is a zero-cost cycle.
     """
+    dth = 2.0 * math.pi / n_theta
     if pivot_cost is None:
-        pivot_cost = DEFAULT_PIVOT_STEPS * step
+        pivot_cost = DEFAULT_PIVOT_ARCS * turn_radius * dth
     if pivot_cost <= 0.0:
         raise ValueError(f"pivot_cost must be > 0 (or math.inf for none), got {pivot_cost}")
     pivots = math.isfinite(pivot_cost)
-    dth = 2.0 * math.pi / n_theta
     sharpest = step / turn_radius  # dtheta over the step, at the min turn radius
     turns = [f * sharpest for f in _TURN_FRACTIONS]  # dtheta over the step
     if any(abs(t / dth - round(t / dth)) > 1.0e-6 for t in turns):

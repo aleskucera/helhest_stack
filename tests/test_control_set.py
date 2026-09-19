@@ -10,7 +10,7 @@ import pytest
 
 from terrain_value_field import arc_control_set
 from terrain_value_field import closing_step
-from terrain_value_field import DEFAULT_PIVOT_STEPS
+from terrain_value_field import DEFAULT_PIVOT_ARCS
 from terrain_value_field.solver import ValueSolver
 
 RES = 0.1
@@ -164,11 +164,30 @@ def test_cost_rises_monotonically_with_how_sharply_the_move_turns():
 # -- point turns ---------------------------------------------------------------------------
 
 
-def test_pivots_are_on_by_default_at_four_arc_lengths():
-    step, cs = build(16, 0.5)
+def test_pivots_are_on_by_default():
+    _, cs = build(16, 0.5)
     assert cs[0] == 7
-    assert cs[4][0, 5] == pytest.approx(DEFAULT_PIVOT_STEPS * step)
-    assert cs[4][0, 6] == pytest.approx(DEFAULT_PIVOT_STEPS * step)
+    assert cs[4][0, 5] == cs[4][0, 6]  # left and right cost the same
+
+
+@pytest.mark.parametrize(
+    "n_theta,turn_radius,bins",
+    [(16, 0.5, 2), (16, 0.5, 4), (32, 0.5, 2), (16, 1.0, 2), (32, 0.75, 4), (8, 0.5, 2)],
+)
+def test_a_pivot_costs_a_fixed_multiple_of_the_arc_that_turns_as_far(n_theta, turn_radius, bins):
+    # the property the default exists to hold: the pivot/arc trade must not drift with the step,
+    # the heading resolution or the robot. Pricing off `step` instead doubled it from bins=2 to 4.
+    _, cs = build(n_theta, turn_radius, bins)
+    arc_per_bin = turn_radius * (2.0 * math.pi / n_theta)  # sharpest arc runs at turn_radius
+    assert cs[4][0, 5] / arc_per_bin == pytest.approx(DEFAULT_PIVOT_ARCS)
+
+
+def test_a_half_turn_by_pivot_costs_that_multiple_of_the_u_turn_arc():
+    n_theta, turn_radius = 16, 0.5
+    _, cs = build(n_theta, turn_radius, 2)
+    by_pivot = cs[4][0, 5] * (n_theta // 2)
+    by_arc = math.pi * turn_radius  # half circle at the min turn radius
+    assert by_pivot / by_arc == pytest.approx(DEFAULT_PIVOT_ARCS)
 
 
 def test_an_infinite_pivot_cost_leaves_the_primitives_out_entirely():
