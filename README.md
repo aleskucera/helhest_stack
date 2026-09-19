@@ -57,6 +57,8 @@ Two control sets ship, and the solver never learns which it was given:
 - `arc_control_set` — forward arcs capped by a minimum turn radius, optional point turns. Orientation matters, so states are (x, y, heading).
 - `omni_control_set` — eight neighbours at one heading bin. With `n_theta = 1` the same kernel is grid value iteration for a holonomic robot. No special case.
 
+An arc is integrated in continuous space and then snapped to the lattice, so it records the heading the robot actually reaches only if its turn lands on a bin boundary. When it does not, every move is off by up to half a bin — and since the margin field is indexed by heading, feasibility gets checked at a pose the robot will not occupy. `closing_step(n_theta, turn_radius, bins)` gives a step that closes (`bins` even, because the half-rate arcs have to close too), and `arc_control_set` warns when handed one that does not. A move costs the **realized** arc length through its snapped endpoint rather than the nominal step, so no curvature gets a rounding discount on ground covered; `turn_weight` [m per rad] is charged on top of that, and `pivot_cost` [m per heading bin] buys point turns.
+
 Seeds are a **mask**, not a goal cell: value iteration takes many sources for free where a graph search needs a virtual node. One seed is goal-seeking, a seeded frontier is exploration, a seeded set of docks is "reach any of these".
 
 ## Usage
@@ -92,4 +94,4 @@ One detail worth knowing, because the obvious implementation is wrong: **step is
 PYTHONPATH=src python -m pytest tests -q
 ```
 
-30 tests. The margin reduction is checked against the algebra rather than another implementation; the producer against planes and steps of known geometry; and there is a guard, with tests, for a map whose shape disagrees with its grid — that reads out of bounds and returns *plausible nonsense* rather than failing, which cost real debugging time.
+56 tests. Lattice closure and the cost model are pinned by their own file — the arc cost is checked against a numerically integrated circle rather than the closed form it uses. The margin reduction is checked against the algebra rather than another implementation; the producer against planes and steps of known geometry; and there is a guard, with tests, for a map whose shape disagrees with its grid — that reads out of bounds and returns *plausible nonsense* rather than failing, which cost real debugging time.
