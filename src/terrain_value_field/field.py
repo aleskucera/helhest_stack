@@ -114,22 +114,38 @@ class TerrainValueField:
         floors. That is not a cheaper approximation -- it is the second half of the pair that
         makes `doubt` meaningful, and on its own it is the optimistic reading.
         """
-        wp.launch(
-            _margin.margin_to_z_kernel,
-            dim=(self.rows, self.cols, self.n_theta),
-            inputs=[constraints.margin, constraints.sigma, constraints.floor],
-            outputs=[self.z, self.z_certain],
-            device=self.device,
-        )
-        z_used = self.z_certain if certain else self.z
         self._k.assign(np.array([self.k_sigma], np.float32))
         wp.launch(
-            _margin.classify_kernel,
+            _margin.margin_to_fields_kernel,
             dim=(self.rows, self.cols, self.n_theta),
-            inputs=[z_used, self.z_certain, self._k, self.z_ref, self.penalty_weight],
-            outputs=[self.blocked, self.penalty, self.doubt],
+            inputs=[
+                constraints.margin,
+                constraints.sigma,
+                constraints.floor,
+                self._k,
+                self.z_ref,
+                self.penalty_weight,
+            ],
+            outputs=[self.z, self.z_certain, self.blocked, self.penalty, self.doubt],
             device=self.device,
         )
+        if certain:
+            # The optimistic reading classifies `z_certain` against itself. Re-running the
+            # classify half alone is the cheap way to say that without a second fused kernel
+            # whose only difference is which of two registers it compares.
+            wp.launch(
+                _margin.classify_kernel,
+                dim=(self.rows, self.cols, self.n_theta),
+                inputs=[
+                    self.z_certain,
+                    self.z_certain,
+                    self._k,
+                    self.z_ref,
+                    self.penalty_weight,
+                ],
+                outputs=[self.blocked, self.penalty, self.doubt],
+                device=self.device,
+            )
         result = self.solver._record_solve(
             self.blocked, self.penalty, self._seeds, self.penalty_scale, capture=False
         )

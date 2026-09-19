@@ -108,3 +108,44 @@ def test_doubt_is_ignorance_and_only_ignorance():
     assert _classify(1.0, 0.5)[2] == pytest.approx(0.0), "fails even when certain: bad ground"
     assert _classify(1.0, 9.0)[2] == pytest.approx(8.0, rel=1e-5), "passes when certain: ignorance"
     assert _classify(9.0, 9.0)[2] == pytest.approx(0.0), "not blocked at all"
+
+
+def test_fusion_matches_the_split_pair():
+    """The fused kernel must reproduce the readable pair exactly, not approximately.
+
+    Fusing is a performance change and nothing else, so anything but bit-identical output means
+    the two have drifted apart and one of them is now wrong.
+    """
+    rng = np.random.default_rng(7)
+    shape = (5, 9, 11, 3)  # constraints, rows, cols, headings
+    out3 = shape[1:]
+    margin = rng.uniform(-0.3, 0.6, shape).astype(np.float32)
+    margin[0, ::7] = float(M.IGNORED)  # exercise the opt-out branch too
+    mar = wp.array(margin, dtype=wp.float32)
+    sig = wp.array(rng.uniform(0.0, 0.2, shape).astype(np.float32), dtype=wp.float32)
+    flo = wp.array(rng.uniform(0.01, 0.05, shape[0]).astype(np.float32), dtype=wp.float32)
+    k = wp.array(np.array([2.0], np.float32), dtype=wp.float32)
+    z_ref, w = 4.0, 1.5
+
+    split = [wp.zeros(out3, dtype=wp.float32) for _ in range(5)]
+    wp.launch(M.margin_to_z_kernel, dim=out3, inputs=[mar, sig, flo], outputs=split[:2])
+    wp.launch(
+        M.classify_kernel,
+        dim=out3,
+        inputs=[split[0], split[1], k, z_ref, w],
+        outputs=split[2:],
+    )
+
+    fused = [wp.zeros(out3, dtype=wp.float32) for _ in range(5)]
+    wp.launch(
+        M.margin_to_fields_kernel,
+        dim=out3,
+        inputs=[mar, sig, flo, k, z_ref, w],
+        outputs=fused,
+    )
+
+    names = ("z", "z_certain", "blocked", "penalty", "doubt")
+    for name, a, b in zip(names, split, fused):
+        np.testing.assert_array_equal(a.numpy(), b.numpy(), err_msg=f"{name} drifted")
+    assert (fused[2].numpy() > 0).any(), "the scene must actually block something"
+    assert (fused[4].numpy() > 0).any(), "and produce some doubt, or this proves little"

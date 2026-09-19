@@ -34,6 +34,54 @@ IGNORED = wp.constant(1.0e30)
 
 
 @wp.kernel
+def margin_to_fields_kernel(
+    margin: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading]
+    sigma: wp.array4d(dtype=wp.float32),  # same shape; per-constraint standard deviation
+    floor: wp.array(dtype=wp.float32),  # [constraint] irreducible sd, in that constraint's units
+    k_sigma: wp.array(dtype=wp.float32),  # device scalar, so a captured graph can be retuned
+    z_ref: wp.float32,
+    penalty_weight: wp.float32,
+    z: wp.array3d(dtype=wp.float32),
+    z_certain: wp.array3d(dtype=wp.float32),
+    blocked: wp.array3d(dtype=wp.float32),
+    penalty: wp.array3d(dtype=wp.float32),
+    doubt: wp.array3d(dtype=wp.float32),
+):
+    """Reduce the constraints and classify the result, in one pass.
+
+    `margin_to_z_kernel` and `classify_kernel` below do the same work split in two, and remain
+    the reference this is tested against. They are kept because they are easier to read, not
+    because either is a fallback.
+
+    Fusing them is worth doing for one reason, and it is measurable: `classify` reads exactly
+    what the reduction just wrote, so splitting the two sends `z` and `z_certain` out to DRAM
+    and straight back in for nothing. On 2.56 M states with two constraints that is 1.31 ms
+    against 1.10 ms, a 1.20x saving (`dev/bench_margin.py`).
+
+    There is nothing else to win here. The reduction runs at 82.6 GB/s against a measured peak
+    of 80 GB/s on this device -- it is already at the memory wall, with no compute to hide and
+    no data reused between threads, which is also why tiling it would cost rather than help.
+    """
+    r, c, t = wp.tid()
+    best = float(IGNORED)
+    best_certain = float(IGNORED)
+    for i in range(margin.shape[0]):
+        m = margin[i, r, c, t]
+        if m >= IGNORED:
+            continue  # this constraint declines to speak about this state
+        f = floor[i]
+        s = wp.max(sigma[i, r, c, t], f)
+        best = wp.min(best, m / s)
+        best_certain = wp.min(best_certain, m / f)
+    z[r, c, t] = best
+    z_certain[r, c, t] = best_certain
+    k = k_sigma[0]
+    blocked[r, c, t] = wp.where(best < k, 1.0, 0.0)
+    penalty[r, c, t] = wp.where(best < z_ref, penalty_weight * (z_ref - best), 0.0)
+    doubt[r, c, t] = wp.where(best < k and best_certain >= k, best_certain - best, 0.0)
+
+
+@wp.kernel
 def margin_to_z_kernel(
     margin: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading]
     sigma: wp.array4d(dtype=wp.float32),  # same shape; per-constraint standard deviation
@@ -46,6 +94,10 @@ def margin_to_z_kernel(
     `z` uses the supplied sigma; `z_certain` uses only the floor -- the same state scored as if
     the map carried no uncertainty beyond the irreducible. The pair is what separates a state
     that is bad ground from one that is merely unknown, and neither reading alone can.
+
+    The library runs `margin_to_fields_kernel`, which is this plus `classify_kernel` in one
+    pass. This split pair is the readable statement of what that computes, and the oracle it is
+    held to in `test_fusion_matches_the_split_pair`.
     """
     r, c, t = wp.tid()
     best = float(IGNORED)
@@ -74,6 +126,9 @@ def classify_kernel(
     doubt: wp.array3d(dtype=wp.float32),
 ):
     """Turn the two margins into a veto, a graded cost, and a doubt field.
+
+    See `margin_to_fields_kernel`: the library fuses this with the reduction. Kept as the
+    readable reference.
 
     `doubt` is the distinction that makes an uncertainty-aware value function worth more than a
     conservative one: a state that fails on ANY map is bad ground, and no amount of looking at
