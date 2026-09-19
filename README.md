@@ -59,7 +59,23 @@ Two control sets ship, and the solver never learns which it was given:
 
 An arc is integrated in continuous space and then snapped to the lattice, so it records the heading the robot actually reaches only if its turn lands on a bin boundary. When it does not, every move is off by up to half a bin — and since the margin field is indexed by heading, feasibility gets checked at a pose the robot will not occupy. `closing_step(n_theta, turn_radius, bins)` gives a step that closes (`bins` even, because the half-rate arcs have to close too), and `arc_control_set` warns when handed one that does not. A move costs the **realized** arc length through its snapped endpoint rather than the nominal step, so no curvature gets a rounding discount on ground covered; `turn_weight` [m per rad] is charged on top of that. Point turns are **on by default**, priced at eight times the arc that turns just as far — a skid-steer has that move, and without it a goal behind the robot routes as a wide loop or not at all. Quoting the price as a ratio to the arcs, rather than as a distance, is what makes the number mean the same thing on any robot, grid and step; `pivot_cost` overrides the price and `math.inf` leaves the primitives out for a robot that cannot rotate on the spot.
 
-Seeds are a **mask**, not a goal cell: value iteration takes many sources for free where a graph search needs a virtual node. One seed is goal-seeking, a seeded frontier is exploration, a seeded set of docks is "reach any of these".
+Seeds are **costs**, not a goal cell: the seed field is the initial value function, `+inf` means "not a source", and a goal mask is the special case where every source costs 0. Value iteration takes many sources for free where a graph search needs a virtual node — one seeded state is goal-seeking, a seeded frontier is exploration, a seeded set of docks is "reach any of these". Sources that already carry a price are what make the next part work.
+
+## Two layers
+
+Cost goes as roughly the cube of the span — states are quadratic in it, sweeps linear, since information crosses one primitive per sweep. So halving the window is worth about 8×, which is enough to buy heading resolution rather than merely pocket it. A cheap global solve says which way; a fine local one says how.
+
+```python
+coarse.solve(coarse_constraints, certain=True)      # whole map, omni_control_set, n_theta=1
+fine.seed_from_coarse(coarse.V, coarse_grid, fine_grid)
+fine.solve(fine_constraints)
+```
+
+The window border is seeded with what the coarse layer says it costs to *leave there*, so the fine solve pays the real price of each exit instead of treating every way out as equally good. `certain=True` on the coarse layer is the point rather than a shortcut: the optimistic reading keeps global routing from being blocked by ignorance about terrain the robot has not reached yet, and keeping the coarse layer strictly more permissive than the fine one is what stops the two disagreeing forever.
+
+Measured on an A500, 40 m of world with a 14 m window at 0.2 m cells and 32 headings: coarse 1.38 ms, seeding 0.22 ms, fine 10.42 ms — **11.9 ms** against 121 ms for one 40 m layer at half the heading resolution.
+
+Size the window to what the map actually knows, not to what it stores. On the robot this was built for, the accumulated map ahead into new terrain is complete to 4 m, 74–85% at 6 m, 41–49% at 8 m and 12–14% at 12 m; past that a larger fine window plans over whatever filled the unobserved cells.
 
 ## Usage
 

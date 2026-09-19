@@ -4,6 +4,7 @@ from .control_set import arc_control_set
 from .control_set import closing_step
 from .control_set import DEFAULT_PIVOT_ARCS
 from .control_set import omni_control_set
+from .hierarchical import boundary_seeds_kernel
 from .field import Constraints
 from .field import TerrainValueField
 from .grid import build_grid
@@ -15,6 +16,7 @@ __all__ = [
     "TerrainValueField",
     "arc_control_set",
     "closing_step",
+    "boundary_seeds_kernel",
     "DEFAULT_PIVOT_ARCS",
     "build_grid",
     "omni_control_set",

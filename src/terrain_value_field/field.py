@@ -17,7 +17,9 @@ from dataclasses import dataclass
 import numpy as np
 import warp as wp
 
+from . import hierarchical as _hier
 from . import margin as _margin
+from .grid import Grid
 from .solver import ValueSolver
 
 
@@ -54,6 +56,7 @@ class TerrainValueField:
         turn_weight: float = 0.0,
         pivot_cost: float | None = None,  # None = 8x the equal-turn arc; inf = none
         sweep_spacing: float | None = None,  # [m] between checked poses; see arc_control_set
+        free_blocked_seeds: bool = True,  # False when seeds come from a coarser layer
         device: wp.Device | str | None = None,
     ) -> None:
         """`k_sigma` is the one knob: how many standard deviations of room a state must hold.
@@ -92,6 +95,7 @@ class TerrainValueField:
         self.z_ref = float(z_ref)
         self.penalty_weight = float(penalty_weight)
         self.penalty_scale = float(penalty_scale)
+        self.solver_inf = 1.0e30  # the "unreachable"/"not a seed" sentinel
 
         shape = (self.rows, self.cols, self.n_theta)
         with wp.ScopedDevice(self.device):
@@ -102,7 +106,8 @@ class TerrainValueField:
             self.doubt = wp.zeros(shape, dtype=wp.float32)
             self.V = wp.zeros(shape, dtype=wp.float32)
             self.V_certain = wp.zeros(shape, dtype=wp.float32)
-            self._seeds = wp.zeros(shape, dtype=wp.float32)
+            # +inf = not a seed. zeros would mean EVERY state is a free goal.
+            self._seeds = wp.full(shape, float(self.solver_inf), dtype=wp.float32)
             self._k = wp.array([self.k_sigma], dtype=wp.float32)
 
         self.solver = ValueSolver(
@@ -116,22 +121,73 @@ class TerrainValueField:
             pivot_cost=pivot_cost,
             sweep_spacing=sweep_spacing,
             control_set=control_set,
+            free_blocked_seeds=free_blocked_seeds,
             device=self.device,
         )
 
     # -- seeds ----------------------------------------------------------------------------
     def seed_states(self, mask: np.ndarray | wp.array) -> None:
-        """Set the zero-cost states directly. `mask` is [rows, cols, headings], non-zero = seed."""
-        if isinstance(mask, wp.array):
-            wp.copy(self._seeds, mask)
-        else:
-            self._seeds.assign(np.ascontiguousarray(mask, dtype=np.float32))
+        """Zero-cost sources from a 0/1 mask, `[rows, cols, headings]`, non-zero = seed.
+
+        A MASK rather than a single goal cell, because value iteration takes multiple sources for
+        free where a graph search would need a virtual node. One seeded state is goal-seeking; a
+        seeded frontier is exploration; a seeded set of docks is "reach any of these". Which of
+        those a robot wants is not this library's decision -- it only has to be expressible.
+        """
+        m = mask.numpy() if isinstance(mask, wp.array) else np.asarray(mask)
+        self.seed_values(np.where(m > 0.5, 0.0, self.solver_inf).astype(np.float32))
 
     def seed_cell(self, row: int, col: int) -> None:
         """Seed one cell at every heading -- the ordinary "drive to here" case."""
-        m = np.zeros((self.rows, self.cols, self.n_theta), np.float32)
-        m[int(row), int(col), :] = 1.0
-        self._seeds.assign(m)
+        v = np.full((self.rows, self.cols, self.n_theta), self.solver_inf, np.float32)
+        v[int(row), int(col), :] = 0.0
+        self.seed_values(v)
+
+    def seed_values(self, values: np.ndarray | wp.array) -> None:
+        """Seed with COSTS rather than a mask: `[rows, cols, headings]`, +inf = not a seed.
+
+        The seed field is the initial value function. A goal mask is the special case where every
+        source costs 0; what this adds is sources that already carry a price. That is what a
+        coarser layer hands down -- "leaving the window here still costs you this much" -- and it
+        is what makes the fine solve prefer the right exit instead of treating every boundary cell
+        as equally good. See `boundary_seeds`.
+        """
+        if isinstance(values, wp.array):
+            wp.copy(self._seeds, values)
+        else:
+            self._seeds.assign(np.ascontiguousarray(values, dtype=np.float32))
+
+    def seed_from_coarse(
+        self,
+        coarse_value: wp.array,
+        coarse_grid: Grid,
+        fine_grid: Grid,
+        band: int | None = None,
+    ) -> None:
+        """Seed this window's border from a coarser layer's cost-to-go. See `hierarchical`.
+
+        `fine_grid` says where the window sits in the world THIS frame -- it moves with the robot,
+        so it is an argument rather than state. `band` is the ring thickness in cells and defaults
+        to the furthest a single move reaches, because a thinner ring can be jumped clean over.
+        """
+        if coarse_value.shape[2] != 1:
+            raise ValueError(
+                f"the coarse layer is expected to be heading-free (n_theta=1, omni_control_set); "
+                f"got {coarse_value.shape[2]} headings"
+            )
+        wp.launch(
+            _hier.boundary_seeds_kernel,
+            dim=(self.rows, self.cols, self.n_theta),
+            inputs=[
+                coarse_value,
+                coarse_grid,
+                fine_grid,
+                int(self.solver.reach_cells if band is None else band),
+                float(self.solver_inf),
+            ],
+            outputs=[self._seeds],
+            device=self.device,
+        )
 
     # -- solve ----------------------------------------------------------------------------
     def solve(self, constraints: Constraints, certain: bool = False) -> wp.array:

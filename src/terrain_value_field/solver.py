@@ -31,31 +31,22 @@ from .control_set import closing_step
 @wp.kernel
 def _free_seeds_kernel(
     seeds: wp.array(dtype=wp.float32, ndim=3),
+    inf: wp.float32,
     pose_cost: wp.array(dtype=wp.float32, ndim=3),
 ):
-    """A seeded state is a source, so it may not also be vetoed -- the iteration needs somewhere
-    to start. Flipping the sign back lifts the veto and restores the state's graded penalty
-    exactly (-1 - (-1 - p) = p), so a seeded state still costs what it costs to stand on."""
-    r, c, t = wp.tid()
-    if seeds[r, c, t] > 0.5 and pose_cost[r, c, t] < 0.0:
-        pose_cost[r, c, t] = -1.0 - pose_cost[r, c, t]
+    """Lift the veto on seeded states, so the iteration has somewhere to start.
 
+    Flipping the sign back restores the state's graded penalty exactly (-1 - (-1 - p) = p), so a
+    seeded state still costs what it costs to stand on.
 
-@wp.kernel
-def _init_kernel(
-    seeds: wp.array(dtype=wp.float32, ndim=3),
-    inf: wp.float32,
-    dist: wp.array(dtype=wp.float32, ndim=3),
-):
-    """Seed: 0 wherever the mask is set, +inf elsewhere.
-
-    A MASK rather than a single goal cell, because value iteration takes multiple sources for
-    free where a graph search would need a virtual node. One seeded state is goal-seeking; a
-    seeded frontier is exploration; a seeded set of docks is "reach any of these". Which of
-    those a robot wants is not this library's decision -- it only has to be expressible.
+    Whether this SHOULD run depends on what the seeds mean. A single goal cell on marginal ground
+    is still where the robot was told to go, so freeing it is right. A ring of boundary seeds
+    handed down from a coarser layer is not: a blocked boundary cell is not a usable exit, and
+    freeing it would invent one. Hence `ValueSolver(free_blocked_seeds=...)`.
     """
     r, c, t = wp.tid()
-    dist[r, c, t] = wp.where(seeds[r, c, t] > 0.5, 0.0, inf)
+    if seeds[r, c, t] < inf and pose_cost[r, c, t] < 0.0:
+        pose_cost[r, c, t] = -1.0 - pose_cost[r, c, t]
 
 
 @wp.kernel
@@ -164,12 +155,14 @@ class ValueSolver:
         pivot_cost: float | None = None,  # [m] per bin; None = 8x the equal-turn arc
         sweep_spacing: float | None = None,  # [m] between checked poses; None = every cell
         control_set: tuple | None = None,  # from control_set.py; None builds forward arcs
+        free_blocked_seeds: bool = True,  # see _free_seeds_kernel
         device: wp.Device | None = None,
     ):
         self.resolution = resolution
         self.height = height
         self.width = width
         self.n_theta = n_theta
+        self.free_blocked_seeds = bool(free_blocked_seeds)
         self.device = wp.get_device(device)
         self._inf = 1.0e30
         # The default step CLOSES on the lattice: an arc that does not land on a heading bin
@@ -320,6 +313,23 @@ class ValueSolver:
             self._iterate(pose_cost, seeds, penalty_scale)
         return self._dist_a
 
+    @property
+    def reach_cells(self) -> int:
+        """The furthest a single move reaches, in cells -- endpoint or swept cell, whichever.
+
+        A ring of boundary seeds thinner than this can be JUMPED: an arc starting inside the
+        window can land outside it without ever touching a seeded cell, and the solve then never
+        learns what leaving costs. `boundary_seeds` uses this as its default band.
+        """
+        return int(
+            max(
+                np.abs(self._prim_dr.numpy()).max(),
+                np.abs(self._prim_dc.numpy()).max(),
+                np.abs(self._sweep_dr.numpy()).max(),
+                np.abs(self._sweep_dc.numpy()).max(),
+            )
+        )
+
     def converged(self) -> bool:
         """Did the last solve reach a fixed point, or stop at the iteration cap?
 
@@ -348,20 +358,18 @@ class ValueSolver:
         """The launches themselves: seed, initialise, then sweep until nothing improves."""
         grid_dim = (self.height, self.width, self.n_theta)
 
-        wp.launch(
-            _free_seeds_kernel,
-            dim=grid_dim,
-            inputs=[seeds],
-            outputs=[pose_cost],
-            device=self.device,
-        )
-        wp.launch(
-            _init_kernel,
-            dim=grid_dim,
-            inputs=[seeds, self._inf],
-            outputs=[self._dist_a],
-            device=self.device,
-        )
+        if self.free_blocked_seeds:
+            wp.launch(
+                _free_seeds_kernel,
+                dim=grid_dim,
+                inputs=[seeds, self._inf],
+                outputs=[pose_cost],
+                device=self.device,
+            )
+        # The seed field IS the initial value function: a state starts at the cost the seeds say
+        # it already carries, and +inf means "not a seed". A plain goal mask is the special case
+        # where that cost is 0; a boundary ring handed down from a coarser layer is not.
+        wp.copy(self._dist_a, seeds)
         self._keep_running.fill_(1)
         self._iter.zero_()
 

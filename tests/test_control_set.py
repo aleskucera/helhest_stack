@@ -318,7 +318,7 @@ def test_sweep_spacing_thins_the_swept_cells_but_keeps_the_endpoint(spacing, exp
     n_theta, turn_radius = 16, 0.6
     step = closing_step(n_theta, turn_radius, 2)
     cs = arc_control_set(n_theta, RES, step, turn_radius, 40, 64, sweep_spacing=spacing)
-    n_prim, dr, dc, _, _, sdr, sdc, _, sn = cs
+    dr, dc, sdr, sdc, sn = cs[1], cs[2], cs[5], cs[6], cs[8]
     assert int(sn[0, 4]) == expect
     for it in range(n_theta):
         for p in range(5):
