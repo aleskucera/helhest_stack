@@ -223,3 +223,20 @@ def test_a_heavy_pivot_outprices_every_arc():
     _, cs = build(16, 0.5, pivot_cost=4.0 * closing_step(16, 0.5, 2))
     cost = cs[4]
     assert cost[0, 5] > cost[0, :5].max()
+
+
+@pytest.mark.filterwarnings("ignore:arc_control_set")  # it also fails closure; not the point here
+def test_a_step_too_small_for_the_cell_is_rejected():
+    """Arcs that snap back onto their own state are self-loops: nothing propagates and the solve
+    reports the goal unreachable on an open map. A silent wrong answer, so it raises."""
+    with pytest.raises(ValueError, match="move nowhere"):
+        arc_control_set(16, 0.5, 0.05, 0.6, SWEEP, NSEG)  # step 0.05 m on 0.5 m cells
+
+
+def test_every_arc_of_a_closing_set_actually_moves():
+    for n_theta, turn_radius, bins in [(16, 0.5, 2), (32, 0.5, 2), (8, 0.5, 2), (16, 1.0, 4)]:
+        _, cs = build(n_theta, turn_radius, bins)
+        n_prim, dr, dc, head, *_ = cs
+        for it in range(n_theta):
+            for p in range(5):  # the arcs; pivots legitimately stay put
+                assert (dr[it, p], dc[it, p]) != (0, 0) or head[it, p] != it

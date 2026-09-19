@@ -159,6 +159,24 @@ def arc_control_set(
                 prim_heading[it, p] = (it + dbin) % n_theta
                 prim_cost[it, p] = pivot_cost
                 sweep_n[it, p] = 1
+    # An ARC that snaps to its own cell AND its own heading bin is a self-loop at positive cost:
+    # it can never win a min, so nothing propagates and the solve leaves +inf almost everywhere.
+    # That surfaces as "the goal is unreachable" on a wide-open map, which reads like a map or a
+    # goal problem rather than the configuration error it is. Closure only warns; this raises,
+    # because the lattice does not work at all.
+    dead = [
+        (it, p)
+        for it in range(n_theta)
+        for p in range(n_arc)
+        if prim_dr[it, p] == 0 and prim_dc[it, p] == 0 and prim_heading[it, p] == it
+    ]
+    if dead:
+        raise ValueError(
+            f"arc_control_set: {len(dead)} of {n_theta * n_arc} arcs move nowhere -- step="
+            f"{step:.4f} is too small to clear one {resolution} m cell, so they snap back onto "
+            f"the state they start from and the lattice cannot propagate. Raise the step (a "
+            f"larger `bins` in closing_step), or use coarser cells."
+        )
     return n_prim, prim_dr, prim_dc, prim_heading, prim_cost, sweep_dr, sweep_dc, sweep_n
 
 
