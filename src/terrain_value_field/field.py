@@ -7,7 +7,7 @@ graded cost, and value-iterates to a fixed point.
 It estimates and it stops. There is no controller here, no frontier policy, no goal-versus-
 explore arbitration: those are decisions about what a particular robot should do, and a robot
 that disagrees with ours should not have to fork a planner to say so. What comes out is a field
--- `V`, and the `z`, `blocked` and `doubt` it was built from -- and the robot decides the rest.
+-- `V`, and the `z`, `pose_cost` and `doubt` it was built from -- and the robot decides the rest.
 """
 
 from __future__ import annotations
@@ -73,8 +73,8 @@ class TerrainValueField:
         with wp.ScopedDevice(self.device):
             self.z = wp.zeros(shape, dtype=wp.float32)
             self.z_certain = wp.zeros(shape, dtype=wp.float32)
-            self.blocked = wp.zeros(shape, dtype=wp.float32)
-            self.penalty = wp.zeros(shape, dtype=wp.float32)
+            # graded cost with the veto in the sign; see margin.POSE COST
+            self.pose_cost = wp.zeros(shape, dtype=wp.float32)
             self.doubt = wp.zeros(shape, dtype=wp.float32)
             self.V = wp.zeros(shape, dtype=wp.float32)
             self.V_certain = wp.zeros(shape, dtype=wp.float32)
@@ -128,7 +128,7 @@ class TerrainValueField:
                 self.z_ref,
                 self.penalty_weight,
             ],
-            outputs=[self.z, self.z_certain, self.blocked, self.penalty, self.doubt],
+            outputs=[self.z, self.z_certain, self.pose_cost, self.doubt],
             device=self.device,
         )
         if certain:
@@ -145,12 +145,10 @@ class TerrainValueField:
                     self.z_ref,
                     self.penalty_weight,
                 ],
-                outputs=[self.blocked, self.penalty, self.doubt],
+                outputs=[self.pose_cost, self.doubt],
                 device=self.device,
             )
-        result = self.solver.value_iterate(
-            self.blocked, self.penalty, self._seeds, self.penalty_scale
-        )
+        result = self.solver.value_iterate(self.pose_cost, self._seeds, self.penalty_scale)
         wp.copy(self.V, result)
         return self.V
 
@@ -170,7 +168,7 @@ class TerrainValueField:
         # Park every field the believed-map solve produced. `solve` reuses these buffers, so
         # without this the object would end up describing the certain solve while claiming to
         # hold the believed one -- a mismatch that reads as a library bug from the outside.
-        parked = {n: wp.clone(getattr(self, n)) for n in ("V", "z", "blocked", "penalty", "doubt")}
+        parked = {n: wp.clone(getattr(self, n)) for n in ("V", "z", "pose_cost", "doubt")}
         self.solve(constraints, certain=True)
         wp.copy(self.V_certain, self.V)
         for n, buf in parked.items():

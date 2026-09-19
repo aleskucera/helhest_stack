@@ -31,13 +31,14 @@ from .control_set import closing_step
 @wp.kernel
 def _free_seeds_kernel(
     seeds: wp.array(dtype=wp.float32, ndim=3),
-    blocked: wp.array(dtype=wp.float32, ndim=3),
+    pose_cost: wp.array(dtype=wp.float32, ndim=3),
 ):
     """A seeded state is a source, so it may not also be vetoed -- the iteration needs somewhere
-    to start. Nothing else is cleared."""
+    to start. Flipping the sign back lifts the veto and restores the state's graded penalty
+    exactly (-1 - (-1 - p) = p), so a seeded state still costs what it costs to stand on."""
     r, c, t = wp.tid()
-    if seeds[r, c, t] > 0.5:
-        blocked[r, c, t] = 0.0
+    if seeds[r, c, t] > 0.5 and pose_cost[r, c, t] < 0.0:
+        pose_cost[r, c, t] = -1.0 - pose_cost[r, c, t]
 
 
 @wp.kernel
@@ -77,12 +78,7 @@ def _keep_going_kernel(
 @wp.kernel
 def _relax_kernel(
     dist_in: wp.array(dtype=wp.float32, ndim=3),
-    blocked: wp.array(
-        dtype=wp.float32, ndim=3
-    ),  # [h, w, n_theta] PER-POSE feasibility (1 = blocked)
-    penalty: wp.array(
-        dtype=wp.float32, ndim=3
-    ),  # [rows, cols, headings] graded cost from the margin
+    pose_cost: wp.array(dtype=wp.float32, ndim=3),  # [rows, cols, headings]
     prim_dr: wp.array(dtype=wp.int32, ndim=2),  # [n_theta, n_prim] endpoint row offset
     prim_dc: wp.array(dtype=wp.int32, ndim=2),  # endpoint col offset
     prim_heading: wp.array(dtype=wp.int32, ndim=2),  # heading bin the arc ends at
@@ -111,7 +107,7 @@ def _relax_kernel(
     r, c, t = wp.tid()
     h = dist_in.shape[0]
     w = dist_in.shape[1]
-    if blocked[r, c, t] > 0.5:
+    if pose_cost[r, c, t] < 0.0:
         dist_out[r, c, t] = inf
         return
     best = dist_in[r, c, t]
@@ -127,9 +123,12 @@ def _relax_kernel(
                 inb = 1
             scr = wp.clamp(sr, 0, h - 1)
             scc = wp.clamp(sc, 0, w - 1)
-            if inb == 0 or blocked[scr, scc, t] > 0.5:
+            # ONE load carries both the veto (sign) and the graded cost (magnitude). A vetoed
+            # cell poisons tsum, which is fine: ok is already 0 and the sum is discarded.
+            pc = pose_cost[scr, scc, t]
+            if inb == 0 or pc < 0.0:
                 ok = 0
-            tsum += penalty[scr, scc, t]
+            tsum += pc
         if ok == 1:
             nr = r + prim_dr[t, p]
             nc = c + prim_dc[t, p]
@@ -219,8 +218,7 @@ class ValueSolver:
         self,
         dist_in: wp.array,
         dist_out: wp.array,
-        blocked: wp.array,
-        penalty: wp.array,
+        pose_cost: wp.array,
         penalty_weight: float,
     ) -> None:
         """One min-relaxation sweep dist_in -> dist_out (race-free pull); raises self._changed if any
@@ -230,8 +228,7 @@ class ValueSolver:
             dim=(self.height, self.width, self.n_theta),
             inputs=[
                 dist_in,
-                blocked,
-                penalty,
+                pose_cost,
                 self._prim_dr,
                 self._prim_dc,
                 self._prim_heading,
@@ -249,8 +246,7 @@ class ValueSolver:
 
     def value_iterate(
         self,
-        blocked: wp.array,
-        penalty: wp.array,
+        pose_cost: wp.array,
         seeds: wp.array,
         penalty_weight: float,
         capture: bool = True,
@@ -285,20 +281,19 @@ class ValueSolver:
         that the solve can now nest inside a LARGER capture, which a host sync would forbid.
         """
         if capture and self.device.is_cuda:
-            key = (blocked.ptr, penalty.ptr, seeds.ptr, float(penalty_weight))
+            key = (pose_cost.ptr, seeds.ptr, float(penalty_weight))
             if self._graph_key != key:
                 with wp.ScopedCapture(device=self.device) as cap:
-                    self._iterate(blocked, penalty, seeds, penalty_weight)
+                    self._iterate(pose_cost, seeds, penalty_weight)
                 self._graph, self._graph_key = cap.graph, key
             wp.capture_launch(self._graph)
         else:
-            self._iterate(blocked, penalty, seeds, penalty_weight)
+            self._iterate(pose_cost, seeds, penalty_weight)
         return self._dist_a
 
     def _iterate(
         self,
-        blocked: wp.array,
-        penalty: wp.array,
+        pose_cost: wp.array,
         seeds: wp.array,
         penalty_weight: float,
     ) -> None:
@@ -309,7 +304,7 @@ class ValueSolver:
             _free_seeds_kernel,
             dim=grid_dim,
             inputs=[seeds],
-            outputs=[blocked],
+            outputs=[pose_cost],
             device=self.device,
         )
         wp.launch(
@@ -324,8 +319,8 @@ class ValueSolver:
 
         def body() -> None:
             self._changed.zero_()
-            self._relax(self._dist_a, self._dist_b, blocked, penalty, penalty_weight)
-            self._relax(self._dist_b, self._dist_a, blocked, penalty, penalty_weight)
+            self._relax(self._dist_a, self._dist_b, pose_cost, penalty_weight)
+            self._relax(self._dist_b, self._dist_a, pose_cost, penalty_weight)
             wp.launch(
                 _keep_going_kernel,
                 dim=1,

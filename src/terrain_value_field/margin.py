@@ -22,6 +22,17 @@ than a part of one robot's planner.
 `floor_i` is not optional. Without it a perfectly known map makes a state at 14.9 degrees of
 roll against a 15 degree limit read as infinitely safe. The floor is the irreducible error --
 localisation, controller tracking, model mismatch -- that no map improvement removes.
+
+POSE COST. The veto and the graded cost travel as ONE field, with the veto in the sign:
+
+    pose_cost = penalty          a state the robot may occupy, penalty >= 0
+              = -1 - penalty     a vetoed state
+
+The graded penalty is never negative, so the sign bit is free, and -1 - (-1 - p) = p recovers
+it exactly -- nothing is lost, unlike a sentinel. This is not tidiness. The relax kernel reads
+this field about 35 times per thread per sweep, once for every swept cell of every primitive,
+and it is bandwidth-bound; as two arrays that was two loads from two cache lines for one
+decision. `blocked = pose_cost < 0` wherever you want to look at it separately.
 """
 
 from __future__ import annotations
@@ -43,8 +54,7 @@ def margin_to_fields_kernel(
     penalty_weight: wp.float32,
     z: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading]
-    blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading]
-    penalty: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    pose_cost: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
 ):
     """Reduce the constraints and classify the result, in one pass.
@@ -79,8 +89,9 @@ def margin_to_fields_kernel(
     z[r, c, t] = best
     z_certain[r, c, t] = best_certain
     k = k_sigma[0]
-    blocked[r, c, t] = wp.where(best < k, 1.0, 0.0)
-    penalty[r, c, t] = wp.where(best < z_ref, penalty_weight * (z_ref - best), 0.0)
+    pen = wp.where(best < z_ref, penalty_weight * (z_ref - best), 0.0)
+    # veto in the sign; see POSE COST above
+    pose_cost[r, c, t] = wp.where(best < k, -1.0 - pen, pen)
     doubt[r, c, t] = wp.where(best < k and best_certain >= k, best_certain - best, 0.0)
 
 
@@ -124,8 +135,7 @@ def classify_kernel(
     k_sigma: wp.array(dtype=wp.float32),  # [1]
     z_ref: wp.float32,
     penalty_weight: wp.float32,
-    blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading]
-    penalty: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    pose_cost: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
 ):
     """Turn the two margins into a veto, a graded cost, and a doubt field.
@@ -143,6 +153,6 @@ def classify_kernel(
     k = k_sigma[0]
     zz = z[r, c, t]
     zc = z_certain[r, c, t]
-    blocked[r, c, t] = wp.where(zz < k, 1.0, 0.0)
-    penalty[r, c, t] = wp.where(zz < z_ref, penalty_weight * (z_ref - zz), 0.0)
+    pen = wp.where(zz < z_ref, penalty_weight * (z_ref - zz), 0.0)
+    pose_cost[r, c, t] = wp.where(zz < k, -1.0 - pen, pen)  # veto in the sign
     doubt[r, c, t] = wp.where(zz < k and zc >= k, zc - zz, 0.0)

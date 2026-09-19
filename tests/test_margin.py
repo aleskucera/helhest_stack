@@ -82,14 +82,21 @@ def _classify(z, zc, k=2.0, z_ref=4.0, w=1.0):
     shape = (1, 1, 1)
     az = wp.array(np.full(shape, z, np.float32), dtype=wp.float32)
     azc = wp.array(np.full(shape, zc, np.float32), dtype=wp.float32)
-    out = [wp.zeros(shape, dtype=wp.float32) for _ in range(3)]
+    out = [wp.zeros(shape, dtype=wp.float32) for _ in range(2)]
     wp.launch(
         M.classify_kernel,
         dim=shape,
         inputs=[az, azc, wp.array(np.array([k], np.float32), dtype=wp.float32), z_ref, w],
         outputs=out,
     )
-    return [float(o.numpy()[0, 0, 0]) for o in out]
+    pose_cost, doubt = (float(o.numpy()[0, 0, 0]) for o in out)
+    return [*_decode(pose_cost), doubt]
+
+
+def _decode(pose_cost):
+    """(blocked, penalty) from the sign-encoded field -- see margin.POSE COST."""
+    pc = np.asarray(pose_cost)
+    return np.where(pc < 0.0, 1.0, 0.0), np.where(pc < 0.0, -1.0 - pc, pc)
 
 
 @pytest.mark.parametrize("z,expect", [(1.99, 1.0), (2.01, 0.0)])
@@ -127,7 +134,7 @@ def test_fusion_matches_the_split_pair():
     k = wp.array(np.array([2.0], np.float32), dtype=wp.float32)
     z_ref, w = 4.0, 1.5
 
-    split = [wp.zeros(out3, dtype=wp.float32) for _ in range(5)]
+    split = [wp.zeros(out3, dtype=wp.float32) for _ in range(4)]
     wp.launch(M.margin_to_z_kernel, dim=out3, inputs=[mar, sig, flo], outputs=split[:2])
     wp.launch(
         M.classify_kernel,
@@ -136,7 +143,7 @@ def test_fusion_matches_the_split_pair():
         outputs=split[2:],
     )
 
-    fused = [wp.zeros(out3, dtype=wp.float32) for _ in range(5)]
+    fused = [wp.zeros(out3, dtype=wp.float32) for _ in range(4)]
     wp.launch(
         M.margin_to_fields_kernel,
         dim=out3,
@@ -144,8 +151,23 @@ def test_fusion_matches_the_split_pair():
         outputs=fused,
     )
 
-    names = ("z", "z_certain", "blocked", "penalty", "doubt")
+    names = ("z", "z_certain", "pose_cost", "doubt")
     for name, a, b in zip(names, split, fused):
         np.testing.assert_array_equal(a.numpy(), b.numpy(), err_msg=f"{name} drifted")
-    assert (fused[2].numpy() > 0).any(), "the scene must actually block something"
-    assert (fused[4].numpy() > 0).any(), "and produce some doubt, or this proves little"
+    assert (fused[2].numpy() < 0).any(), "the scene must actually block something"
+    assert (fused[3].numpy() > 0).any(), "and produce some doubt, or this proves little"
+
+
+def test_the_pose_cost_encoding_loses_nothing_at_a_vetoed_state():
+    """Why the veto rides in the SIGN rather than replacing the value with a sentinel.
+
+    A blocked state still has a graded penalty, and it is still exactly recoverable. That is
+    what lets `_free_seeds_kernel` un-block a seeded state by flipping the sign back instead of
+    inventing a number for it.
+    """
+    blocked, penalty, _ = _classify(1.0, 99.0)  # z=1 < k=2, so vetoed, and z < z_ref so graded
+    assert blocked == 1.0
+    assert penalty == pytest.approx(3.0, rel=1e-5)  # w * (z_ref - z) = 1.0 * (4 - 1)
+    # and the round trip is exact, not approximate
+    encoded = -1.0 - penalty
+    assert float(_decode(encoded)[1]) == pytest.approx(penalty, rel=0, abs=0)

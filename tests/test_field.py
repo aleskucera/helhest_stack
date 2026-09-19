@@ -148,7 +148,7 @@ def test_zero_uncertainty_degenerates_to_deterministic_planning():
     cons = _produce(np.zeros((N, N)), np.zeros((N, N)))
     f.seed_cell(N // 2, N // 2)
     f.solve_pair(cons)
-    assert f.blocked.numpy().mean() == 0.0
+    assert (f.pose_cost.numpy() < 0).mean() == 0.0
     assert (f.doubt.numpy() == 0.0).all()
     np.testing.assert_allclose(f.V.numpy(), f.V_certain.numpy(), rtol=1e-6)
 
@@ -171,7 +171,7 @@ def test_solve_pair_leaves_the_believed_reading_in_place():
     f = _field()
     f.seed_cell(N // 2, N - 3)
     f.solve(_produce(*cons_args))
-    believed = {n: getattr(f, n).numpy().copy() for n in ("V", "z", "blocked", "penalty", "doubt")}
+    believed = {n: getattr(f, n).numpy().copy() for n in ("V", "z", "pose_cost", "doubt")}
     f.solve_pair(_produce(*cons_args))
     for n, was in believed.items():
         np.testing.assert_allclose(getattr(f, n).numpy(), was, rtol=1e-5, err_msg=n)

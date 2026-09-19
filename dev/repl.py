@@ -42,7 +42,7 @@ def show(sd: float = 0.02, k: float = 2.0):
     """One line of the numbers that usually matter."""
     st = solve(sd, k)
     print(
-        f"sd={sd:.3f} k={k:.1f} | blocked {field.blocked.numpy().mean() * 100:5.1f}% "
+        f"sd={sd:.3f} k={k:.1f} | blocked {(field.pose_cost.numpy() < 0).mean() * 100:5.1f}% "
         f"doubt>0 {(field.doubt.numpy() > 0).mean() * 100:5.1f}% "
         f"z p50 {np.percentile(field.z.numpy(), 50):5.1f} | "
         f"reachable {st['reachable']} (certain {st['reachable_if_certain']})"
