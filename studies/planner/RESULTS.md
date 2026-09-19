@@ -175,3 +175,82 @@ detect and act on rather than sit in.
 which overstates it -- the conservative direction.
 
 Tests: `tests/planning/test_zmargin.py`, 7 cases.
+
+---
+
+# Part B built: the doubt field and the two-solve gap (2026-09-19)
+
+Plan sections 4.2 and 4.3. `CostToGo` gains a `doubt` field, `solve_gap`, `gap_at` and
+`doubt_targets`. Tests: `tests/planning/test_gap.py`, 9 cases.
+
+## Doubt: ignorance is not the same as bad ground
+
+Each pose is scored twice in one kernel pass — once against the believed map, once as if every
+cell sat at `sigma_floor_m`:
+
+| condition | meaning |
+|---|---|
+| `z_opt < k` | genuinely bad terrain; looking at it will not help |
+| `z_opt >= k` but `z < k` | **blocked by ignorance** — worth going to look |
+
+`doubt = z_opt − z` on the second, zero otherwise. One extra scalar per pose, no extra launch.
+
+This is the distinction between purposeful exploration and wandering toward whatever is least
+observed. On rolling terrain at a per-cell sigma of 5 cm, **99.5% of blocked poses turn out to
+be blocked by ignorance rather than terrain** — the map, not the ground, is what stops the
+robot.
+
+## The gap: what ignorance costs, in metres
+
+`solve_gap` solves twice and keeps both value functions; `gap_at` reads
+`V_pessimistic − V_optimistic` at the robot's own pose. Uniform sigma, robot at one end of a
+16 m window, goal at the other:
+
+| per-cell sigma | V_pess | V_opt | gap | reachable (pess) | ignorance-blocked |
+|---|---|---|---|---|---|
+| 0.5 cm | 16.06 | 16.06 | **0.00** | yes | no |
+| 2.0 cm | 16.06 | 16.06 | **0.00** | yes | no |
+| 4.0 cm | capped | 16.06 | — | **no** | **yes** |
+| 10 cm | capped | 16.06 | — | **no** | **yes** |
+
+Below the floor the two solves coincide and the trigger stays silent — correct, since there is
+nothing to gain by looking. Past 4 cm the goal is unreachable on the believed map and reachable
+on a certain one, which is **the blind-cell failure diagnosing itself**: not bad terrain, not
+knowing, with a defined response (go look, or relax `k_sigma`) instead of a planner that
+reports no route.
+
+Worth noting that `gap` and `doubt` are complementary, not redundant. At 0.5 cm the gap is zero
+while 9.6% of poses still carry doubt — those are ignorance-blocked but not on the route, so
+resolving them buys nothing. Only the gap knows that.
+
+## Targets: where to look
+
+`doubt_targets` follows the OPTIMISTIC policy greedily from the robot and collects the doubtful
+poses along it — the cells whose resolution would unlock the better route. On a frontier-shaped
+map (0.01 m behind the robot, 0.06 m ahead), every target returned lies in the uncertain half,
+ranked by doubt. That is the cheap form of `SENSITIVITY_PLAN.md`'s C4: a policy rollout rather
+than an adjoint.
+
+## Timing, and a correction to section 6.7
+
+Deployed shape (67×67 at 0.24 m, 24 headings), 69 ms frame:
+
+| | time | % frame |
+|---|---|---|
+| single solve | 3.18 ms | 4.6% |
+| **`solve_gap` (both)** | **11.58 ms** | **16.8%** |
+| `doubt_targets` (host walk) | 1.06 ms | 1.5% |
+
+**Section 6.7 estimated the two-solve scheme at about 2× the single solve. Measured, it is
+3.6×.** The optimistic solve is the more expensive of the two: blocking fewer poses leaves a
+larger reachable set, so the value iteration needs more sweeps to converge. The conclusion is
+unchanged — 16.8% of a frame is affordable — but the estimate was low, and a coarser optimistic
+solve is worth more than section 6.7 suggested, not less.
+
+## What is left in the plan
+
+- **4.1 frontier seeding** — zero `V` at frontier poses instead of at a goal. Not built.
+- **3.3 the Clark fold** at the dilation stage, over offset-corrected heights.
+- **6.6 carrot and pivot primitives do not compose** — untouched, and the only remaining item
+  that is a design hole rather than an upgrade.
+- Nothing has yet run on the robot.

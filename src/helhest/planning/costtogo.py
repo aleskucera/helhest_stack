@@ -99,12 +99,14 @@ def _margin_kernel(
     robot: Robot,
     n_theta: wp.int32,
     sigma_floor_m: wp.float32,
-    k_sigma: wp.float32,
+    k_sigma: wp.array(dtype=wp.float32),  # device scalar: settable between CUDA-graph replays
+    sigma_scale: wp.array(dtype=wp.float32),  # 1 = believe the map, 0 = optimistic (floor only)
     z_ref: wp.float32,
     margin_weight: wp.float32,
     blocked: wp.array3d(dtype=wp.float32),
     tilt: wp.array3d(dtype=wp.float32),
     zmargin: wp.array3d(dtype=wp.float32),
+    doubt: wp.array3d(dtype=wp.float32),
 ):
     """Safety margin in SIGMAS, and the veto and graded penalty that come off it.
 
@@ -162,16 +164,17 @@ def _margin_kernel(
     rl = -w2[0]  # rear offset
 
     # Measurement sd under each wheel, and midway back for the belly.
+    scale = sigma_scale[0]
     s1 = _sigma_at(
-        sigma, grid, x + ca * w0[0] - sa * w0[1], y + sa * w0[0] + ca * w0[1], sigma_floor_m
+        sigma, grid, x + ca * w0[0] - sa * w0[1], y + sa * w0[0] + ca * w0[1], sigma_floor_m, scale
     )
     s2 = _sigma_at(
-        sigma, grid, x + ca * w1[0] - sa * w1[1], y + sa * w1[0] + ca * w1[1], sigma_floor_m
+        sigma, grid, x + ca * w1[0] - sa * w1[1], y + sa * w1[0] + ca * w1[1], sigma_floor_m, scale
     )
     s3 = _sigma_at(
-        sigma, grid, x + ca * w2[0] - sa * w2[1], y + sa * w2[0] + ca * w2[1], sigma_floor_m
+        sigma, grid, x + ca * w2[0] - sa * w2[1], y + sa * w2[0] + ca * w2[1], sigma_floor_m, scale
     )
-    sb = _sigma_at(sigma, grid, x - ca * rl * 0.5, y - sa * rl * 0.5, sigma_floor_m)
+    sb = _sigma_at(sigma, grid, x - ca * rl * 0.5, y - sa * rl * 0.5, sigma_floor_m, scale)
 
     two_b = 2.0 * hb
     var_roll = (s1 * s1 + s2 * s2) / (two_b * two_b)
@@ -192,7 +195,37 @@ def _margin_kernel(
 
     z = wp.min(wp.min(z_roll, z_climb), wp.min(z_desc, z_clear))
     zmargin[r, c, t] = z
-    if z < k_sigma:
+
+    # The same pose scored as if the map were CERTAIN -- every cell at the irreducible floor.
+    # The attitude sigmas are linear in the per-cell sd, so the optimistic ones follow from the
+    # same rows with s1 = s2 = s3 = sb = floor. They are NOT simply the floor: a pose's roll
+    # uncertainty is the floor propagated through the track width, not the floor itself.
+    k = k_sigma[0]
+    f = sigma_floor_m
+    o_roll = wp.sqrt(2.0 * f * f) / two_b
+    o_pitch = wp.sqrt(f * f + 0.5 * f * f) / rl
+    o_clear = wp.sqrt(f * f + f * f / 3.0)
+    z_opt = wp.min(
+        wp.min(
+            (robot.max_roll - wp.abs(roll)) / o_roll,
+            (robot.max_pitch_up + pitch) / o_pitch,
+        ),
+        wp.min(
+            (robot.max_pitch_down - pitch) / o_pitch,
+            (clearance[0, b] - robot.clear_margin) / o_clear,
+        ),
+    )
+
+    # Doubt: blocked by IGNORANCE, not by terrain. A pose the robot would accept on a certain
+    # map and refuses on this one is worth going to look at; a pose that fails either way is
+    # simply bad ground and looking at it will not help. This is the distinction that separates
+    # purposeful exploration from wandering toward whatever is least observed.
+    if z < k and z_opt >= k:
+        doubt[r, c, t] = z_opt - z
+    else:
+        doubt[r, c, t] = 0.0
+
+    if z < k:
         blocked[r, c, t] = 1.0
     if z < z_ref:  # graded: pay for being near a boundary, not only for crossing it
         tilt[r, c, t] = tilt[r, c, t] + margin_weight * (z_ref - z)
@@ -205,9 +238,14 @@ def _sigma_at(
     x: wp.float32,
     y: wp.float32,
     floor_m: wp.float32,
+    scale: wp.float32,
 ) -> wp.float32:
-    """Elevation sd at a world point, floored. Outside the grid the map knows nothing."""
-    return wp.max(sample_field(sigma, grid, x, y), floor_m)
+    """Elevation sd at a world point, scaled then floored.
+
+    `scale = 0` collapses every cell to the floor, which is the optimistic reading: what the
+    robot would believe if the map carried no uncertainty beyond the irreducible.
+    """
+    return wp.max(scale * sample_field(sigma, grid, x, y), floor_m)
 
 
 @wp.kernel
@@ -402,6 +440,10 @@ class CostToGo:
         )
         self.blocked = wp.zeros_like(self.V)
         self.zmargin = wp.zeros_like(self.V)  # safety margin in sigmas, per pose
+        self.doubt = wp.zeros_like(self.V)  # > 0 where a pose is blocked by IGNORANCE alone
+        self.V_optimistic = wp.zeros_like(self.V)  # filled by solve_gap()
+        self.V_pessimistic = wp.zeros_like(self.V)  # ditto; `compute` reuses self.V
+        self.doubt_pessimistic = wp.zeros_like(self.V)
         self.robust_blocked = wp.zeros_like(self.V)  # blocked after the disturbance-tube erosion
         self.graded_tilt = wp.zeros_like(self.V)
         self._step = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)  # per-cell prominence
@@ -414,14 +456,154 @@ class CostToGo:
         # Stable mask buffer the captured graph reads. Defaults to all-measured, so a caller that
         # passes no mask gets exactly the pre-mask behaviour.
         self._measured_in = wp.full((ny, nx), 1.0, dtype=wp.float32, device=self.device)
+        # Device scalars so `compute` can retune them between CUDA-graph replays: a captured
+        # graph freezes host floats at record time, and the two-solve gap needs to vary them.
+        self._k_sigma_d = wp.array([self.k_sigma], dtype=wp.float32, device=self.device)
+        self._sigma_scale_d = wp.array([1.0], dtype=wp.float32, device=self.device)
         self._goal_xy = wp.zeros(2, dtype=wp.float32, device=self.device)
         self._goal_rc = wp.zeros(2, dtype=wp.int32, device=self.device)
+        self._prims: tuple | None = None  # host copy of the primitive tables, for policy walks
         self._graph = None
 
         self._prof = StageProfiler(
             self.device, ("settle", "feasibility", "route", "clamp"), profile
         )
         self._n_compute = 0
+
+    def solve_gap(
+        self,
+        elevation: wp.array,
+        goal_xy: tuple[float, float],
+        sigma: wp.array,
+        measured: wp.array | None = None,
+    ) -> None:
+        """Solve twice -- believing the map, then as if it were certain -- and keep both.
+
+        The difference between the two value functions is what IGNORANCE is costing, in the
+        plan cost's own units. It is the signal neither solve gives alone: a pessimistic
+        planner never explores, because not knowing is expensive; an optimistic one always
+        does, because not knowing is free. The gap between them is the honest quantity, and
+        `gap_at` reads it at the robot's own pose.
+
+        Results land in `V_pessimistic` / `V_optimistic` and `doubt_pessimistic`, because
+        `compute` reuses `self.V` and `self.doubt` for whichever solve ran last.
+
+        Costs one extra solve. Measured on the deployed 16 m window
+        (`studies/planner/RESULTS.md` section 6.7) that is 7.9 ms for the first and as little as
+        2.0 ms for a coarser second -- about 3% of a 69 ms sensor frame.
+        """
+        self.compute(elevation, goal_xy, measured, sigma)
+        wp.copy(self.V_pessimistic, self.V)
+        wp.copy(self.doubt_pessimistic, self.doubt)
+        self.compute(elevation, goal_xy, measured, sigma, sigma_scale=0.0)
+        wp.copy(self.V_optimistic, self.V)
+
+    def gap_at(self, x: float, y: float, yaw: float) -> dict:
+        """What ignorance costs at one pose: `V_pessimistic - V_optimistic`, in metres.
+
+        Three things come off it, and they are the whole of the plan's section 4.3:
+
+        - a **trigger**: explore only when `gap` is worth the detour. Equal value functions mean
+          uncertainty is costing nothing here and the robot should simply drive.
+        - a **target**: roll the optimistic policy out from here and collect the high-`doubt`
+          poses along it -- those are the cells whose resolution would unlock the better route.
+        - a **safety net**: `unreachable_by_ignorance` is true when the goal is out of reach on
+          the believed map but in reach on a certain one. That is the blind-cell failure
+          diagnosing itself, with a defined response (go look, or relax `k_sigma`) instead of a
+          planner that simply reports no path.
+
+        Call after `solve_gap`. Nearest-cell lookup: this is one scalar of control data, not a
+        field, so the host is the right place for it.
+        """
+        r, c, t = self._pose_index(x, y, yaw)
+        v_pess = float(self.V_pessimistic.numpy()[r, c, t])
+        v_opt = float(self.V_optimistic.numpy()[r, c, t])
+        unreachable = self._vcap * 0.99
+        return {
+            "v_pessimistic": v_pess,
+            "v_optimistic": v_opt,
+            "gap_m": v_pess - v_opt,
+            "reachable_pessimistic": v_pess < unreachable,
+            "reachable_optimistic": v_opt < unreachable,
+            "unreachable_by_ignorance": v_pess >= unreachable and v_opt < unreachable,
+        }
+
+    def doubt_targets(
+        self,
+        x: float,
+        y: float,
+        yaw: float,
+        max_steps: int = 40,
+        top_k: int = 8,
+    ) -> list[dict]:
+        """Where to look: the doubtful poses along the route the robot would take if it knew.
+
+        Follows the OPTIMISTIC policy greedily from the robot's pose and collects the poses
+        carrying `doubt` -- blocked by ignorance rather than by terrain. Those are the cells
+        whose resolution would unlock the better route, so resolving them is what the plan
+        means by decision-focused sensing: sense where the decision rests, not where entropy is
+        highest. Maximising information gain instead sends the robot to look at whatever is
+        least observed, which is usually the far edge of the map.
+
+        This is the cheap form of `SENSITIVITY_PLAN.md`'s C4 -- a policy rollout rather than an
+        adjoint. Call after `solve_gap`. The primitive tables come to the host once and the walk
+        is 40 steps of table lookup, so it is control data, not a field.
+        """
+        if self._prims is None:
+            sv = self.solver
+            self._prims = (
+                sv._prim_dr.numpy(),
+                sv._prim_dc.numpy(),
+                sv._prim_heading.numpy(),
+                sv._prim_cost.numpy(),
+            )
+        prim_dr, prim_dc, prim_head, prim_cost = self._prims
+        v_opt = self.V_optimistic.numpy()
+        doubt = self.doubt_pessimistic.numpy()
+        ny, nx = self.grid.cells_y, self.grid.cells_x
+        cap = self._vcap * 0.99
+
+        r, c, t = self._pose_index(x, y, yaw)
+        hits: list[dict] = []
+        seen = set()
+        for _ in range(max_steps):
+            if v_opt[r, c, t] >= cap:
+                break  # the optimistic route does not reach the goal from here either
+            if doubt[r, c, t] > 0.0 and (r, c, t) not in seen:
+                seen.add((r, c, t))
+                hits.append(
+                    {
+                        "x": float(self.grid.origin_x + c * self.grid.cell_size),
+                        "y": float(self.grid.origin_y + r * self.grid.cell_size),
+                        "heading": float((t + 0.5) * 2.0 * np.pi / self.n_theta),
+                        "doubt": float(doubt[r, c, t]),
+                    }
+                )
+            best, best_next = np.inf, None
+            for pmt in range(self.solver.n_prim):
+                nr, nc = r + int(prim_dr[t, pmt]), c + int(prim_dc[t, pmt])
+                if not (0 <= nr < ny and 0 <= nc < nx):
+                    continue
+                nt = int(prim_head[t, pmt])
+                total = float(prim_cost[t, pmt]) + float(v_opt[nr, nc, nt])
+                if total < best:
+                    best, best_next = total, (nr, nc, nt)
+            if best_next is None or best >= v_opt[r, c, t] + 1e-6:
+                break  # no primitive makes progress: the goal cell, or a dead end
+            r, c, t = best_next
+        hits.sort(key=lambda h: -h["doubt"])
+        return hits[:top_k]
+
+    def _pose_index(self, x: float, y: float, yaw: float) -> tuple[int, int, int]:
+        """World pose -> (row, col, heading bin), clamped into the window."""
+        c = int(
+            np.clip(round((x - self.grid.origin_x) / self.grid.cell_size), 0, self.grid.cells_x - 1)
+        )
+        r = int(
+            np.clip(round((y - self.grid.origin_y) / self.grid.cell_size), 0, self.grid.cells_y - 1)
+        )
+        t = int(np.floor(yaw / (2.0 * np.pi / self.n_theta))) % self.n_theta
+        return r, c, t
 
     def reset_timing(self) -> None:
         """Clear the accumulated per-stage timing stats (e.g. after a warmup run)."""
@@ -461,11 +643,12 @@ class CostToGo:
                     self.robot,
                     self.n_theta,
                     self.sigma_floor_m,
-                    self.k_sigma,
+                    self._k_sigma_d,
+                    self._sigma_scale_d,
                     self.z_ref,
                     self.margin_weight,
                 ],
-                outputs=[self.blocked, self.graded_tilt, self.zmargin],
+                outputs=[self.blocked, self.graded_tilt, self.zmargin, self.doubt],
                 device=self.device,
             )
         if self._step_gate > 0.0:  # hard-block tall steps the settle straddles (thin poles/sticks)
@@ -526,6 +709,8 @@ class CostToGo:
         goal_xy: tuple[float, float],
         measured: wp.array | None = None,
         sigma: wp.array | None = None,
+        k_sigma: float | None = None,
+        sigma_scale: float | None = None,
     ) -> wp.array:
         """elevation [ny, nx] device wp.array + goal -> clamped V[ny, nx, n_theta]. The entire solve
         (settle + value iteration) is captured ONCE as a CUDA graph and replayed each call with the
@@ -559,6 +744,10 @@ class CostToGo:
                     measured.device == self.device
                 ), f"measured must be a wp.array on {self.device}, got {measured.device}"
                 wp.copy(self._measured_in, measured)
+        self._k_sigma_d.assign(np.array([self.k_sigma if k_sigma is None else k_sigma], np.float32))
+        self._sigma_scale_d.assign(
+            np.array([1.0 if sigma_scale is None else sigma_scale], np.float32)
+        )
         self._goal_xy.assign(np.asarray(goal_xy[:2], np.float32))
 
         if self.device.is_cuda:
