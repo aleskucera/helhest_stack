@@ -235,7 +235,7 @@ class ValueSolver:
             device=self.device,
         )
 
-    def _record_solve(
+    def value_iterate(
         self,
         blocked: wp.array,
         penalty: wp.array,
@@ -243,10 +243,26 @@ class ValueSolver:
         penalty_weight: float,
         capture: bool,
     ) -> wp.array:
-        """Record the device-side value iteration: free the seeds, initialise, then min-relax to a fixed
-        point. The convergence loop runs ON DEVICE via capture_while (graph-safe) -- a 2-SWEEP body
-        (a->b->a) keeps the ping-pong buffers fixed inside the captured graph, so the result always
-        lands in self._dist_a. capture=False uses an eager host while-loop (CPU / no-graph fallback).
+        """Run value iteration to a fixed point. Returns the cost-to-go.
+
+        Seed the sources, set everything else to +inf, then sweep the Bellman update until a
+        sweep improves nothing:
+
+            V[s] = min( V[s],  min over moves of  cost(move) + V[next(s, move)] )
+
+        Information spreads exactly one move per sweep, so the number of sweeps is the length
+        of the longest route in moves. That is more total arithmetic than Dijkstra needs, and
+        faster anyway: a priority queue is inherently sequential, while this has no ordering at
+        all and runs one thread per state.
+
+        The body is TWO sweeps, not one. `_relax` reads one buffer and writes the other so a
+        state sees the previous sweep's values rather than half-updated ones; doing a->b->a
+        lands the answer back in `_dist_a` every time, which the captured graph relies on.
+
+        `capture=True` records the whole loop into a CUDA graph and evaluates the continue
+        condition ON the device (`capture_while`, and why `_keep_going_kernel` is a kernel).
+        `capture=False` is an eager host loop that reads the flag back each iteration -- one
+        GPU-to-CPU sync per body, which on a small map is most of the runtime.
         """
         grid_dim = (self.height, self.width, self.n_theta)
 
