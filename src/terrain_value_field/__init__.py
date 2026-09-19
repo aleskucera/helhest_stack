@@ -1,6 +1,7 @@
 """Cost-to-go over a terrain belief, where feasibility is measured in sigmas of margin."""
 
 from .control_set import arc_control_set
+from .control_set import closing_step
 from .control_set import omni_control_set
 from .field import Constraints
 from .field import TerrainValueField
@@ -12,6 +13,7 @@ __all__ = [
     "Grid",
     "TerrainValueField",
     "arc_control_set",
+    "closing_step",
     "build_grid",
     "omni_control_set",
 ]

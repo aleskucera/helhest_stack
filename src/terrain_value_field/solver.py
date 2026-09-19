@@ -25,6 +25,7 @@ import numpy as np
 import warp as wp
 
 from .control_set import arc_control_set
+from .control_set import closing_step
 
 
 @wp.kernel
@@ -151,7 +152,8 @@ class ValueSolver:
         n_theta: int = 16,
         turn_radius: float = 0.6,
         step: float | None = None,
-        pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives
+        turn_weight: float = 0.0,  # [m per rad] on top of arc length; makes straight < arc
+        pivot_cost: float | None = None,  # [m] per heading bin; None = no point turns
         control_set: tuple | None = None,  # from control_set.py; None builds forward arcs
         device: wp.Device | None = None,
     ):
@@ -161,7 +163,11 @@ class ValueSolver:
         self.n_theta = n_theta
         self.device = wp.get_device(device)
         self._inf = 1.0e30
-        self._step = float(step) if step is not None else 2.0 * self.resolution
+        # The default step CLOSES on the lattice: an arc that does not land on a heading bin
+        # records an end heading the robot never reaches (see control_set.closing_step).
+        self._step = (
+            float(step) if step is not None else closing_step(self.n_theta, float(turn_radius))
+        )
 
         # a single arc can sweep ~step/resolution cells; size the swept-cell buffer + arc sampling
         # to that ratio so fine grids don't truncate the collision check and jump thin walls.
@@ -176,7 +182,8 @@ class ValueSolver:
                 float(turn_radius),
                 max_sweep,
                 nseg,
-                pivot_cost=float(pivot_cost),
+                turn_weight=float(turn_weight),
+                pivot_cost=None if pivot_cost is None else float(pivot_cost),
             )
         n_prim, prim_dr, prim_dc, prim_heading, prim_cost, sweep_dr, sweep_dc, sweep_n = control_set
         self.n_prim = n_prim

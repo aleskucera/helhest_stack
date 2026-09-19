@@ -51,7 +51,8 @@ class TerrainValueField:
         control_set: tuple | None = None,
         turn_radius: float = 0.6,
         step: float | None = None,
-        pivot_cost: float = 0.0,
+        turn_weight: float = 0.0,
+        pivot_cost: float | None = None,
         device: wp.Device | str | None = None,
     ) -> None:
         """`k_sigma` is the one knob: how many standard deviations of room a state must hold.
@@ -87,6 +88,7 @@ class TerrainValueField:
             n_theta=self.n_theta,
             turn_radius=turn_radius,
             step=step,
+            turn_weight=turn_weight,
             pivot_cost=pivot_cost,
             control_set=control_set,
             device=self.device,
