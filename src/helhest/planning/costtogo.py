@@ -18,14 +18,23 @@ knob: how much detour to trade for flatness). The lattice arc cost is
 flatness_weight is the only global gain; the per-axis weights only set the shape (keep them a ratio,
 e.g. 1.0 : 0.5, not a second gain).
 
-This is the settle-based feasibility PRODUCER: it settles the robot at every pose to make the per-pose
-blocked / graded-tilt fields, then hands them to the LatticeValueSolver (lattice_solver.py) that does
-the forward-arc value iteration. (The solver was vendored from helhest.perception.)
+This is the settle-based feasibility PRODUCER, and that is now ALL it is. It settles the robot at
+every pose to make the per-pose blocked / graded-tilt fields, packs them into the one signed field
+`terrain_value_field` reads, and hands the value iteration to it.
+
+The split is deliberate. What is here is Odin's physics -- the settle, the tall-step gate, the
+robust-tube erosion -- and it is worth nothing to another robot. What moved out is the cost-to-go
+machinery, which is worth the same to every robot and was previously a copy that had drifted: it
+charged a flat step for arcs that covered different ground, took heading bins at their midpoints
+so no move ran along a grid axis, and checked every swept cell at the heading the arc STARTED in
+even where the arc had turned 45 degrees by the time it got there.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
+import math
 
 import numpy as np
 import warp as wp
@@ -36,7 +45,7 @@ from ..engine.terrain import Grid
 from ..engine.terrain import sample_field
 from ..heightmap import Heightmap
 from ..profiling import StageProfiler
-from .lattice_solver import LatticeValueSolver
+from terrain_value_field.solver import ValueSolver
 
 if TYPE_CHECKING:
     from ..engine import GridParams
@@ -347,6 +356,40 @@ def _goal_cell_kernel(
     goal_rc[1] = wp.clamp(int((goal_xy[0] - xmin) / resolution), 0, width - 1)  # col from x
 
 
+@wp.kernel
+def _pose_cost_kernel(
+    blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    graded_tilt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    pose_cost: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+):
+    """Pack this robot's feasibility into the one signed field the solver reads.
+
+    The veto rides in the sign and the graded cost in the magnitude (terrain_value_field.margin,
+    POSE COST), which halves the loads in the relax kernel's inner loop. The clamp at zero is not
+    defensive noise: a negative penalty would read as a veto and quietly make a passable pose
+    impassable, so the encoding's one precondition is enforced where it is produced.
+    """
+    r, c, t = wp.tid()
+    pen = wp.max(graded_tilt[r, c, t], 0.0)
+    pose_cost[r, c, t] = wp.where(blocked[r, c, t] > 0.5, -1.0 - pen, pen)
+
+
+@wp.kernel
+def _seed_goal_kernel(
+    goal_rc: wp.array(dtype=wp.int32),  # [2]
+    inf: wp.float32,
+    seeds: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+):
+    """Seed the goal cell at every heading, on DEVICE.
+
+    The goal cell is resolved inside the captured graph (`_goal_cell_kernel`), so the seeding has
+    to be too -- reading it back to call a host-side seeder would put a sync in the middle of the
+    graph and defeat the point of capturing it.
+    """
+    r, c, t = wp.tid()
+    seeds[r, c, t] = wp.where(r == goal_rc[0] and c == goal_rc[1], 0.0, inf)
+
+
 class CostToGo:
     def __init__(
         self,
@@ -412,7 +455,11 @@ class CostToGo:
         rr, cc, tt = np.meshgrid(np.arange(ny), np.arange(nx), np.arange(n_theta), indexing="ij")
         px = (self.grid.origin_x + cc * self.grid.cell_size).ravel().astype(np.float32)
         py = (self.grid.origin_y + rr * self.grid.cell_size).ravel().astype(np.float32)
-        ph = ((tt + 0.5) * 2.0 * np.pi / n_theta).ravel().astype(np.float32)  # bin-center heading
+        # Heading bin `it` means exactly it*dth -- the solver's convention. It used to be the bin
+        # MIDPOINT, which tilts every primitive half a bin off the grid and costs the left/right
+        # symmetry of the fan; the settle poses have to move with it or feasibility would be
+        # produced at one set of headings and consumed at another.
+        ph = (tt * 2.0 * np.pi / n_theta).ravel().astype(np.float32)
         self.settle_sim.start_pose.assign(np.stack([px, py, ph], 1))
         self.settle_sim.target_wheel_omega.zero_()
         self._mu = Heightmap(
@@ -422,14 +469,16 @@ class CostToGo:
         )
         self.settle_sim.set_friction(self._mu)
 
-        self.solver = LatticeValueSolver(
+        self.solver = ValueSolver(
             self.grid.cell_size,
             self.grid.cells_y,
             self.grid.cells_x,
             n_theta=n_theta,
-            turn_radius=self.robot.min_turn_radius,
+            turn_radius=float(self.robot.min_turn_radius),
             step=step,
-            pivot_cost=pivot_cost,
+            # helhest spells "no point turns" as 0.0; the solver spells it as an infinite price,
+            # which leaves the two primitives out of the table instead of pricing them out.
+            pivot_cost=math.inf if pivot_cost <= 0.0 else float(pivot_cost),
             device=self.device,
         )
 
@@ -446,6 +495,9 @@ class CostToGo:
         self.doubt_pessimistic = wp.zeros_like(self.V)
         self.robust_blocked = wp.zeros_like(self.V)  # blocked after the disturbance-tube erosion
         self.graded_tilt = wp.zeros_like(self.V)
+        # what the solver actually reads: veto in the sign, graded cost in the magnitude
+        self._pose_cost = wp.zeros_like(self.V)
+        self._seeds = wp.zeros_like(self.V)
         self._step = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)  # per-cell prominence
 
         self._elev_in = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
@@ -690,8 +742,25 @@ class CostToGo:
             outputs=[self._goal_rc],
             device=self.device,
         )
-        result = self.solver._record_solve(
-            feas, self.graded_tilt, self._goal_rc, self.flatness_weight, capture
+        wp.launch(
+            _pose_cost_kernel,
+            dim=self.V.shape,
+            inputs=[feas, self.graded_tilt],
+            outputs=[self._pose_cost],
+            device=self.device,
+        )
+        wp.launch(
+            _seed_goal_kernel,
+            dim=self.V.shape,
+            inputs=[self._goal_rc, self.solver._inf],
+            outputs=[self._seeds],
+            device=self.device,
+        )
+        # capture=False: `compute` has already opened a ScopedCapture around this whole pipeline,
+        # and value_iterate would try to nest a second one. Its `capture_while` still builds a
+        # device-side conditional node inside the OUTER capture, so the loop stays on the GPU.
+        result = self.solver.value_iterate(
+            self._pose_cost, self._seeds, self.flatness_weight, capture=False
         )
         self._prof.mark(3)  # value iteration done (goal cell + solve)
         wp.launch(

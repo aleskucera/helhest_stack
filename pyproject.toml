@@ -24,6 +24,11 @@ belief = ["elevation-belief"]
 # Map-uncertainty calibration harness (studies/calib): reads Odin .mcap bags directly, so no
 # ROS install is needed to replay them.
 calib = ["elevation-belief", "mcap>=1.2", "mcap-ros2-support>=0.5"]
+# The cost-to-go solver. Same reasoning as `belief` above: a separate repo because it is meant to
+# serve more than this robot, git-pinned because a pin has exactly one copy and cannot drift.
+# What stays HERE is the producer -- the settle, the step gate, the erosion -- because that is
+# Odin's physics and belongs to Odin.
+planner = ["terrain-value-field"]
 
 [tool.black]
 line-length = 100
@@ -38,6 +43,7 @@ packages = ["src/helhest"]
 
 [tool.uv.sources]
 elevation-belief = { git = "ssh://git@github.com/aleskucera/elevation_belief.git", rev = "375e4b2" }
+terrain-value-field = { git = "ssh://git@github.com/aleskucera/terrain_value_field.git", rev = "6b044c9" }
 
 [dependency-groups]
 dev = ["matplotlib>=3.8", "pillow>=10.0", "h5py>=3.0", "plotly>=6.7.0", "pytest>=7.0", "black>=24.0"]

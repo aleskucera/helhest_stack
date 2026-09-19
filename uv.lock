@@ -130,7 +130,7 @@ wheels = [
 [[package]]
 name = "elevation-belief"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=36da14e#36da14edf13ace71a941c504be7f81c0439203bc" }
+source = { git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=375e4b2#375e4b22c4ab783354477e2529a0641fb43d6ab0" }
 dependencies = [
     { name = "numpy" },
     { name = "warp-lang" },
@@ -273,6 +273,9 @@ calib = [
 data = [
     { name = "h5py" },
 ]
+planner = [
+    { name = "terrain-value-field" },
+]
 viz = [
     { name = "glfw" },
     { name = "matplotlib" },
@@ -292,8 +295,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "elevation-belief", marker = "extra == 'belief'", git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=36da14e" },
-    { name = "elevation-belief", marker = "extra == 'calib'", git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=36da14e" },
+    { name = "elevation-belief", marker = "extra == 'belief'", git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=375e4b2" },
+    { name = "elevation-belief", marker = "extra == 'calib'", git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=375e4b2" },
     { name = "glfw", marker = "extra == 'viz'", specifier = ">=2.6" },
     { name = "h5py", marker = "extra == 'data'", specifier = ">=3.0" },
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.8" },
@@ -302,9 +305,10 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "pillow", marker = "extra == 'viz'", specifier = ">=10.0" },
     { name = "pyopengl", marker = "extra == 'viz'", specifier = ">=3.1" },
+    { name = "terrain-value-field", marker = "extra == 'planner'", git = "ssh://git@github.com/aleskucera/terrain_value_field.git?rev=6b044c9" },
     { name = "warp-lang", specifier = ">=1.13" },
 ]
-provides-extras = ["viz", "data", "belief", "calib"]
+provides-extras = ["viz", "data", "belief", "calib", "planner"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -818,6 +822,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "terrain-value-field"
+version = "0.1.0"
+source = { git = "ssh://git@github.com/aleskucera/terrain_value_field.git?rev=6b044c9#6b044c9fa9f61a6458176604a10e625e198a5fa2" }
+dependencies = [
+    { name = "numpy" },
+    { name = "warp-lang" },
 ]
 
 [[package]]
