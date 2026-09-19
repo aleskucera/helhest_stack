@@ -25,7 +25,7 @@ def build(n_theta, turn_radius, bins=2, **kw):
 
 def heading_errors(n_theta, turn_radius, step, cs):
     """Recorded heading change minus the one the arc actually turns through, per primitive."""
-    _, _, _, head, _, _, _, _ = cs
+    head = cs[3]
     dth = 2.0 * math.pi / n_theta
     out = []
     for it in range(n_theta):
@@ -198,7 +198,7 @@ def test_an_infinite_pivot_cost_leaves_the_primitives_out_entirely():
 
 def test_pivots_turn_one_bin_in_place_at_the_price_asked():
     _, cs = build(16, 0.5, pivot_cost=1.5)
-    n_prim, dr, dc, head, cost, _, _, sweep_n = cs
+    n_prim, dr, dc, head, cost, _, _, _, sweep_n = cs
     assert n_prim == 7
     for it in range(16):
         for p, dbin in ((5, -1), (6, +1)):
@@ -236,7 +236,48 @@ def test_a_step_too_small_for_the_cell_is_rejected():
 def test_every_arc_of_a_closing_set_actually_moves():
     for n_theta, turn_radius, bins in [(16, 0.5, 2), (32, 0.5, 2), (8, 0.5, 2), (16, 1.0, 4)]:
         _, cs = build(n_theta, turn_radius, bins)
-        n_prim, dr, dc, head, *_ = cs
+        dr, dc, head = cs[1], cs[2], cs[3]
         for it in range(n_theta):
             for p in range(5):  # the arcs; pivots legitimately stay put
                 assert (dr[it, p], dc[it, p]) != (0, 0) or head[it, p] != it
+
+
+def test_the_swept_heading_offsets_match_the_arc_that_was_integrated():
+    """Re-integrate each arc and check the recorded offset against the heading it is genuinely
+    facing when it first enters each cell. Independent of how the table was built."""
+    n_theta, turn_radius, nseg = 16, 0.5, 64
+    step = closing_step(n_theta, turn_radius, 2)
+    cs = arc_control_set(n_theta, RES, step, turn_radius, 40, nseg)
+    _, _, _, _, _, sdr, sdc, sdt, sn = cs
+    dth = 2.0 * math.pi / n_theta
+    for it in (0, 5, 11):
+        th0 = (it + 0.5) * dth
+        for p, frac in enumerate((-1.0, -0.5, 0.0, 0.5, 1.0)):
+            x = y = 0.0
+            first = {}
+            for s in range(1, nseg):
+                cth = th0 + frac * (step / turn_radius) * (s - 0.5) / (nseg - 1)
+                x += (step / (nseg - 1)) * math.cos(cth)
+                y += (step / (nseg - 1)) * math.sin(cth)
+                first.setdefault((round(y / RES), round(x / RES)), cth)
+            for s in range(int(sn[it, p])):
+                cell = (int(sdr[it, p, s]), int(sdc[it, p, s]))
+                want = (int(math.floor((first[cell] % (2 * math.pi)) / dth)) - it) % n_theta
+                assert int(sdt[it, p, s]) == want, f"bin {it}, prim {p}, cell {cell}"
+
+
+def test_a_turning_arc_crosses_cells_at_a_heading_it_did_not_start_in():
+    # if this were not so, the offsets would all be 0 and the table would be pointless
+    step = closing_step(16, 0.5, 2)
+    _, _, _, _, _, _, _, sdt, sn = arc_control_set(16, RES, step, 0.5, 40, 64)
+    sharp = [int(sdt[0, 4, s]) for s in range(int(sn[0, 4]))]
+    straight = [int(sdt[0, 2, s]) for s in range(int(sn[0, 2]))]
+    assert set(straight) == {0}, "a straight arc never leaves its heading bin"
+    assert max(sharp) == 2, "the sharpest arc turns two bins over one step"
+    assert sum(1 for o in sharp if o != 0) > len(sharp) // 2, "and most of it is spent turning"
+
+
+def test_an_oversized_sweep_is_rejected_rather_than_truncated():
+    """Silently keeping only max_sweep cells would leave holes in the collision check."""
+    with pytest.raises(ValueError, match="max_sweep"):
+        arc_control_set(16, 0.02, closing_step(16, 0.5, 2), 0.5, 4, 64)

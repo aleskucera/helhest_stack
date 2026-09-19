@@ -85,6 +85,7 @@ def _relax_kernel(
     prim_cost: wp.array(dtype=wp.float32, ndim=2),  # arc length
     sweep_dr: wp.array(dtype=wp.int32, ndim=3),  # [n_theta, n_prim, max_sweep] swept-cell offsets
     sweep_dc: wp.array(dtype=wp.int32, ndim=3),
+    sweep_dt: wp.array(dtype=wp.int32, ndim=3),  # heading-bin offset at each swept cell
     sweep_n: wp.array(dtype=wp.int32, ndim=2),  # [n_theta, n_prim] swept-cell count
     n_prim: wp.int32,
     penalty_scale: wp.float32,  # 0 -> pure distance; >0 -> prefer states with more margin
@@ -99,14 +100,16 @@ def _relax_kernel(
 
     cost(p) = arc_length * (1 + penalty_scale * mean penalty over the swept cells), so with
     penalty_scale > 0 the geodesic PREFERS flatter poses (not just avoids blocked ones). Feasibility and
-    graded cost come from the PER-POSE field (the robot's settle), sampled at the swept cells using the
-    state's own heading t (the arc rotates little over one step), so a wall face -- where a body tilts or
-    high-centers -- blocks the crossing arc while flat ground stays cheap. The whole swept arc must be
+    graded cost come from the PER-POSE field (the robot's settle), sampled at each swept cell using the
+    heading the arc is FACING there (`sweep_dt`), not the heading it started in -- the sharpest arc turns
+    a full `bins` worth of bins over one step, so the two differ for most of the arc. A wall face, where
+    a body tilts or high-centers, blocks the crossing arc while flat ground stays cheap. The whole swept arc must be
     clear (not just the endpoint), so the robot can't jump a thin wall. Iterating to a fixed point gives
     the forward-only cost-to-go; a misaligned pose from which the goal is unreachable stays +inf."""
     r, c, t = wp.tid()
     h = dist_in.shape[0]
     w = dist_in.shape[1]
+    nt = dist_in.shape[2]
     if pose_cost[r, c, t] < 0.0:
         dist_out[r, c, t] = inf
         return
@@ -128,7 +131,9 @@ def _relax_kernel(
             # does not matter because ok = 0 discards it. Worth 4-6%, and flat in how much of
             # the map is blocked -- the loop still runs until every thread in the warp has left,
             # so only whole warps bailing together actually save anything.
-            pc = pose_cost[scr, scc, t]
+            # the heading the robot is FACING at this cell, not the one it started the arc in
+            tt = (t + sweep_dt[t, p, s]) % nt
+            pc = pose_cost[scr, scc, tt]
             if inb == 0 or pc < 0.0:
                 ok = 0
                 break
@@ -188,7 +193,17 @@ class ValueSolver:
                 turn_weight=float(turn_weight),
                 pivot_cost=None if pivot_cost is None else float(pivot_cost),
             )
-        n_prim, prim_dr, prim_dc, prim_heading, prim_cost, sweep_dr, sweep_dc, sweep_n = control_set
+        (
+            n_prim,
+            prim_dr,
+            prim_dc,
+            prim_heading,
+            prim_cost,
+            sweep_dr,
+            sweep_dc,
+            sweep_dt,
+            sweep_n,
+        ) = control_set
         self.n_prim = n_prim
         # motion-primitive table on device, indexed [heading_bin, primitive]: where each forward arc
         # lands + what it crosses (see _build_primitives). The relax kernel reads these every sweep.
@@ -202,6 +217,8 @@ class ValueSolver:
             # row offsets of the cells the arc crosses
             self._sweep_dr = wp.array(sweep_dr, dtype=wp.int32)
             self._sweep_dc = wp.array(sweep_dc, dtype=wp.int32)  # col offsets of those swept cells
+            # heading-bin offset from the state's own bin at each swept cell
+            self._sweep_dt = wp.array(sweep_dt, dtype=wp.int32)
             self._sweep_n = wp.array(sweep_n, dtype=wp.int32)  # how many swept cells each arc has
             # two value buffers, ping-ponged each sweep (read one, write the other, swap); +changed flag
             self._dist_a = wp.zeros((self.height, self.width, self.n_theta), dtype=wp.float32)
@@ -239,6 +256,7 @@ class ValueSolver:
                 self._prim_cost,
                 self._sweep_dr,
                 self._sweep_dc,
+                self._sweep_dt,
                 self._sweep_n,
                 self.n_prim,
                 float(penalty_scale),

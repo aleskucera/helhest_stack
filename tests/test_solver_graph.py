@@ -11,6 +11,8 @@ import numpy as np
 import pytest
 import warp as wp
 
+from terrain_value_field import arc_control_set
+from terrain_value_field import closing_step
 from terrain_value_field import TerrainValueField
 from terrain_value_field.field import Constraints
 
@@ -132,3 +134,39 @@ def test_a_capped_solve_reports_that_it_did_not_converge():
     assert f.solver.bodies_used() == 2
     # and the damage is real: most of the map reads unreachable although nothing blocks it
     assert (_finite(f.V) < 0).mean() > 0.5
+
+
+def test_the_solver_checks_each_swept_cell_at_the_heading_it_is_crossed_at():
+    """The defect this closes: an arc that turns 45 degrees was judged entirely at the heading it
+    STARTED in, although two thirds of its swept cells are crossed one or two bins later.
+
+    The scene makes every ODD heading bin impassable and every even one clear. From bin 0 the
+    sharpest arc ends at bin 2 -- legal at both ends -- but crosses four cells at odd bins in
+    between. Honouring `sweep_dt` rejects it; ignoring it lets the robot drive through.
+    """
+    nt, cell, R = 16, 0.1, 0.5
+    step = closing_step(nt, R, 2)
+    cs = arc_control_set(nt, cell, step, R, 40, 64)
+    blind = (*cs[:7], np.zeros_like(cs[7]), cs[8])  # the same set, heading offsets discarded
+
+    def solve_with(control_set):
+        f = TerrainValueField(N, N, cell, n_theta=nt, k_sigma=2.0, control_set=control_set)
+        m = np.empty((1, N, N, nt), np.float32)
+        for t in range(nt):
+            m[0, :, :, t] = -1.0 if t % 2 else 1.0  # odd bins impassable, even bins clear
+        con = Constraints(
+            margin=wp.array(m, dtype=wp.float32),
+            sigma=wp.array(np.full((1, N, N, nt), 0.05, np.float32), dtype=wp.float32),
+            floor=wp.array([0.01], dtype=wp.float32),
+        )
+        f.seed_cell(N // 2, N // 2)
+        return _finite(f.solve(con)).copy()
+
+    seeing = solve_with(cs)
+    blindly = solve_with(blind)
+    assert not np.array_equal(seeing, blindly), "sweep_dt is not reaching the kernel"
+    # honouring the heading can only refuse moves the blind version allowed, so on this scene it
+    # is nowhere cheaper and somewhere dearer -- unreachable (-1) counts as the dearest of all
+    reachable_both = (seeing >= 0) & (blindly >= 0)
+    assert (seeing[reachable_both] >= blindly[reachable_both] - 1e-5).all()
+    assert (seeing < 0).sum() > (blindly < 0).sum(), "and it blocks routes the blind one took"

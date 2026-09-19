@@ -11,8 +11,11 @@ produce the same tables, so the solver never learns which it was given:
                       degenerates to grid value iteration -- the same kernel, no special case.
 
 Each set gives, per (heading bin, move): the endpoint cell offset, the heading it ends at, its
-cost, and every cell it crosses. The swept cells are the point: checking only the endpoint lets
-a robot step over a wall thinner than one move.
+cost, every cell it crosses, and THE HEADING IT IS FACING WHEN IT CROSSES EACH ONE. The swept
+cells are the point: checking only the endpoint lets a robot step over a wall thinner than one
+move. The per-cell heading matters for the same reason the state space has a heading at all --
+feasibility is a property of the pose, and an arc that turns 45 degrees is in a different pose
+by the end of it than at the start.
 
 LATTICE CLOSURE. An arc is integrated in continuous space and then snapped to the lattice, so the
 heading the table records is the heading the robot actually reaches ONLY if the turn lands on a
@@ -74,7 +77,17 @@ def arc_control_set(
     nseg: int,
     turn_weight: float = 0.0,
     pivot_cost: float | None = None,
-) -> tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    int,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
     """Host-side forward-arc motion primitives. For each heading bin and each turn rate, integrate
     the arc of length `step`, and record: endpoint cell offset (dr, dc), resulting heading bin, arc
     cost, and the swept cells (offsets) the arc passes through (for collision). Min turn radius
@@ -124,17 +137,18 @@ def arc_control_set(
     prim_cost = np.zeros((n_theta, n_prim), np.float32)
     sweep_dr = np.zeros((n_theta, n_prim, max_sweep), np.int32)
     sweep_dc = np.zeros((n_theta, n_prim, max_sweep), np.int32)
+    sweep_dt = np.zeros((n_theta, n_prim, max_sweep), np.int32)
     sweep_n = np.zeros((n_theta, n_prim), np.int32)
     for it in range(n_theta):
         th = (it + 0.5) * dth
         for p, dth_p in enumerate(turns):
             x, y = 0.0, 0.0
-            cells = []
+            cells = {}  # cell -> heading the arc is facing when it FIRST enters that cell
             for s in range(1, nseg):
                 cth = th + dth_p * (float(s) - 0.5) / float(nseg - 1)
                 x += (step / float(nseg - 1)) * math.cos(cth)
                 y += (step / float(nseg - 1)) * math.sin(cth)
-                cells.append((int(round(y / resolution)), int(round(x / resolution))))
+                cells.setdefault((int(round(y / resolution)), int(round(x / resolution))), cth)
             dc_p = int(round(x / resolution))
             dr_p = int(round(y / resolution))
             end_bin = int(math.floor(((th + dth_p) % (2.0 * math.pi)) / dth)) % n_theta
@@ -147,10 +161,20 @@ def arc_control_set(
             turned = float((end_bin - it + n_theta // 2) % n_theta - n_theta // 2) * dth
             chord = math.hypot(dc_p * resolution, dr_p * resolution)
             prim_cost[it, p] = _arc_length(chord, turned) + turn_weight * abs(turned)
-            uniq = sorted(set(cells))[:max_sweep]
-            for s, (cr, cc) in enumerate(uniq):
-                sweep_dr[it, p, s] = cr
-                sweep_dc[it, p, s] = cc
+            if len(cells) > max_sweep:
+                raise ValueError(
+                    f"arc_control_set: an arc crosses {len(cells)} cells but max_sweep is "
+                    f"{max_sweep}, so the collision check would silently skip some of them. "
+                    f"Raise max_sweep to at least {len(cells)}."
+                )
+            uniq = sorted(cells)
+            for s, cell in enumerate(uniq):
+                sweep_dr[it, p, s] = cell[0]
+                sweep_dc[it, p, s] = cell[1]
+                # bin offset from the state's OWN bin, so the kernel reads (t + this) % n_theta
+                # and the same table serves every starting heading
+                at = int(math.floor((cells[cell] % (2.0 * math.pi)) / dth)) % n_theta
+                sweep_dt[it, p, s] = (at - it) % n_theta
             sweep_n[it, p] = len(uniq)
         if pivots:
             for p, dbin in ((n_arc, -1), (n_arc + 1, +1)):
@@ -177,13 +201,33 @@ def arc_control_set(
             f"the state they start from and the lattice cannot propagate. Raise the step (a "
             f"larger `bins` in closing_step), or use coarser cells."
         )
-    return n_prim, prim_dr, prim_dc, prim_heading, prim_cost, sweep_dr, sweep_dc, sweep_n
+    return (
+        n_prim,
+        prim_dr,
+        prim_dc,
+        prim_heading,
+        prim_cost,
+        sweep_dr,
+        sweep_dc,
+        sweep_dt,
+        sweep_n,
+    )
 
 
 def omni_control_set(
     resolution: float,
     diagonal_cost_scale: float = math.sqrt(2.0),
-) -> tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    int,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
     """Eight neighbours at a single heading bin: grid value iteration, same kernel.
 
     For a robot whose feasibility does not depend on which way it faces. Diagonals cost
@@ -197,6 +241,7 @@ def omni_control_set(
     prim_cost = np.zeros((1, n_prim), np.float32)
     sweep_dr = np.zeros((1, n_prim, 1), np.int32)
     sweep_dc = np.zeros((1, n_prim, 1), np.int32)
+    sweep_dt = np.zeros((1, n_prim, 1), np.int32)  # one heading bin: nothing to offset
     sweep_n = np.ones((1, n_prim), np.int32)
     for p, (dr, dc) in enumerate(moves):
         prim_dr[0, p], prim_dc[0, p] = dr, dc
@@ -204,4 +249,14 @@ def omni_control_set(
         prim_cost[0, p] = resolution * (diagonal_cost_scale if diagonal else 1.0)
         # One swept cell -- the destination. A single-cell step cannot straddle anything.
         sweep_dr[0, p, 0], sweep_dc[0, p, 0] = dr, dc
-    return n_prim, prim_dr, prim_dc, prim_heading, prim_cost, sweep_dr, sweep_dc, sweep_n
+    return (
+        n_prim,
+        prim_dr,
+        prim_dc,
+        prim_heading,
+        prim_cost,
+        sweep_dr,
+        sweep_dc,
+        sweep_dt,
+        sweep_n,
+    )
