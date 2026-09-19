@@ -35,18 +35,17 @@ IGNORED = wp.constant(1.0e30)
 
 @wp.kernel
 def margin_to_fields_kernel(
-    margin: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading] room left
-    sigma: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading] sd of that margin
-    floor: wp.array(dtype=wp.float32),  # [constraint] irreducible sd, in the same units
-    # Device scalar so a captured CUDA graph can be retuned without re-recording it.
-    k_sigma: wp.array(dtype=wp.float32),  # [1] sigmas of room the robot insists on
-    z_ref: wp.float32,  # scalar: start charging below this many sigmas
-    penalty_weight: wp.float32,  # scalar: cost per sigma of shortfall
-    z: wp.array3d(dtype=wp.float32),  # [row, col, heading] sigmas of room, believed map
-    z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading] the same, at the floor only
-    blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading] 1 = vetoed (float for the solver)
-    penalty: wp.array3d(dtype=wp.float32),  # [row, col, heading] added cost, in move-cost units
-    doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading] sigmas the ignorance costs, else 0
+    margin: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading]
+    sigma: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading]
+    floor: wp.array(dtype=wp.float32),  # [constraint]
+    k_sigma: wp.array(dtype=wp.float32),  # [1]
+    z_ref: wp.float32,
+    penalty_weight: wp.float32,
+    z: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    penalty: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
 ):
     """Reduce the constraints and classify the result, in one pass.
 
@@ -58,6 +57,9 @@ def margin_to_fields_kernel(
     what the reduction just wrote, so splitting the two sends `z` and `z_certain` out to DRAM
     and straight back in for nothing. On 2.56 M states with two constraints that is 1.31 ms
     against 1.10 ms, a 1.20x saving (`dev/bench_margin.py`).
+
+    `k_sigma` is an array rather than a float so a captured CUDA graph can be retuned
+    without re-recording it.
 
     There is nothing else to win here. The reduction runs at 82.6 GB/s against a measured peak
     of 80 GB/s on this device -- it is already at the memory wall, with no compute to hide and
@@ -84,11 +86,11 @@ def margin_to_fields_kernel(
 
 @wp.kernel
 def margin_to_z_kernel(
-    margin: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading] room left
-    sigma: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading] sd of that margin
-    floor: wp.array(dtype=wp.float32),  # [constraint] irreducible sd, in the same units
-    z: wp.array3d(dtype=wp.float32),  # [row, col, heading] sigmas of room, believed map
-    z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading] the same, at the floor only
+    margin: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading]
+    sigma: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading]
+    floor: wp.array(dtype=wp.float32),  # [constraint]
+    z: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading]
 ):
     """Reduce per-constraint (margin, sigma) to the binding margin, twice.
 
@@ -117,15 +119,14 @@ def margin_to_z_kernel(
 
 @wp.kernel
 def classify_kernel(
-    z: wp.array3d(dtype=wp.float32),  # [row, col, heading] sigmas of room, believed map
-    z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading] the same, at the floor only
-    # Device scalar so a captured CUDA graph can be retuned without re-recording it.
-    k_sigma: wp.array(dtype=wp.float32),  # [1] sigmas of room the robot insists on
-    z_ref: wp.float32,  # scalar: start charging below this many sigmas
-    penalty_weight: wp.float32,  # scalar: cost per sigma of shortfall
-    blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading] 1 = vetoed (float for the solver)
-    penalty: wp.array3d(dtype=wp.float32),  # [row, col, heading] added cost, in move-cost units
-    doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading] sigmas the ignorance costs, else 0
+    z: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    k_sigma: wp.array(dtype=wp.float32),  # [1]
+    z_ref: wp.float32,
+    penalty_weight: wp.float32,
+    blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    penalty: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
 ):
     """Turn the two margins into a veto, a graded cost, and a doubt field.
 
