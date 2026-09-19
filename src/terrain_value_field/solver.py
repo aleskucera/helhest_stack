@@ -209,6 +209,11 @@ class ValueSolver:
             self._keep_running = wp.zeros(1, dtype=wp.int32)
             self._iter = wp.zeros(1, dtype=wp.int32)
         self._cap = self.height + self.width  # max bodies (each = 2 sweeps -> 2*(h+w) sweeps total)
+        # Recorded solve, replayed while it stays valid. A graph bakes in the pointers and the
+        # scalar it was recorded with, so the key is what has to match -- the array CONTENTS may
+        # change freely between replays, which is the whole point: the map is new every frame.
+        self._graph: wp.Graph | None = None
+        self._graph_key: tuple | None = None
 
     def _relax(
         self,
@@ -248,7 +253,7 @@ class ValueSolver:
         penalty: wp.array,
         seeds: wp.array,
         penalty_weight: float,
-        capture: bool,
+        capture: bool = True,
     ) -> wp.array:
         """Run value iteration to a fixed point. Returns the cost-to-go.
 
@@ -266,11 +271,38 @@ class ValueSolver:
         state sees the previous sweep's values rather than half-updated ones; doing a->b->a
         lands the answer back in `_dist_a` every time, which the captured graph relies on.
 
-        `capture=True` records the whole loop into a CUDA graph and evaluates the continue
-        condition ON the device (`capture_while`, and why `_keep_going_kernel` is a kernel).
-        `capture=False` is an eager host loop that reads the flag back each iteration -- one
-        GPU-to-CPU sync per body, which on a small map is most of the runtime.
+        `capture=True` records the whole thing into a CUDA graph once and replays it, so the
+        continue condition is evaluated ON the device and the host is not in the loop at all.
+        `capture=False` runs the same launches eagerly, reading the flag back each body.
+
+        Note `wp.capture_while` only builds a device-side conditional node when a capture is
+        ACTIVE; called on its own it falls back to exactly that host loop. So the recording here
+        is not optional decoration -- without it the flag would mean nothing.
+
+        Do not expect much from it. Measured on an A500 the replay is 1.17x at 64x64x16 and
+        within noise of the host loop from 128x128 up: the relax kernel is bandwidth-bound and
+        the sweeps dominate, so the per-body sync was never the cost. What the recording buys is
+        that the solve can now nest inside a LARGER capture, which a host sync would forbid.
         """
+        if capture and self.device.is_cuda:
+            key = (blocked.ptr, penalty.ptr, seeds.ptr, float(penalty_weight))
+            if self._graph_key != key:
+                with wp.ScopedCapture(device=self.device) as cap:
+                    self._iterate(blocked, penalty, seeds, penalty_weight)
+                self._graph, self._graph_key = cap.graph, key
+            wp.capture_launch(self._graph)
+        else:
+            self._iterate(blocked, penalty, seeds, penalty_weight)
+        return self._dist_a
+
+    def _iterate(
+        self,
+        blocked: wp.array,
+        penalty: wp.array,
+        seeds: wp.array,
+        penalty_weight: float,
+    ) -> None:
+        """The launches themselves: seed, initialise, then sweep until nothing improves."""
         grid_dim = (self.height, self.width, self.n_theta)
 
         wp.launch(
@@ -301,11 +333,4 @@ class ValueSolver:
                 device=self.device,
             )
 
-        if capture:
-            wp.capture_while(self._keep_running, body)
-        else:
-            while True:
-                body()
-                if int(self._keep_running.numpy()[0]) == 0:
-                    break
-        return self._dist_a
+        wp.capture_while(self._keep_running, body)

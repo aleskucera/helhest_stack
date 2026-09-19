@@ -149,7 +149,7 @@ class TerrainValueField:
                 device=self.device,
             )
         result = self.solver.value_iterate(
-            self.blocked, self.penalty, self._seeds, self.penalty_scale, capture=False
+            self.blocked, self.penalty, self._seeds, self.penalty_scale
         )
         wp.copy(self.V, result)
         return self.V
