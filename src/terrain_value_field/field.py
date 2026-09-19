@@ -52,7 +52,7 @@ class TerrainValueField:
         turn_radius: float = 0.6,
         step: float | None = None,
         turn_weight: float = 0.0,
-        pivot_cost: float | None = None,
+        pivot_cost: float | None = None,  # None = 4x step; math.inf = no point turns
         device: wp.Device | str | None = None,
     ) -> None:
         """`k_sigma` is the one knob: how many standard deviations of room a state must hold.

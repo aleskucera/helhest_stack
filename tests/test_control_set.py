@@ -10,6 +10,7 @@ import pytest
 
 from terrain_value_field import arc_control_set
 from terrain_value_field import closing_step
+from terrain_value_field import DEFAULT_PIVOT_STEPS
 from terrain_value_field.solver import ValueSolver
 
 RES = 0.1
@@ -126,7 +127,7 @@ def test_cost_tracks_the_snapped_endpoint_rather_than_the_nominal_step():
     # the bias this replaced: every arc charged `step` while realized displacement spread ~13%
     step, cs = build(16, 0.5, bins=2)
     _, _, _, _, cost, *_ = cs
-    assert cost[0].std() > 0.01 * step
+    assert cost[0, :5].std() > 0.01 * step
 
 
 # -- turn surcharge ------------------------------------------------------------------------
@@ -163,8 +164,16 @@ def test_cost_rises_monotonically_with_how_sharply_the_move_turns():
 # -- point turns ---------------------------------------------------------------------------
 
 
-def test_no_pivots_by_default():
-    _, cs = build(16, 0.5)
+def test_pivots_are_on_by_default_at_four_arc_lengths():
+    step, cs = build(16, 0.5)
+    assert cs[0] == 7
+    assert cs[4][0, 5] == pytest.approx(DEFAULT_PIVOT_STEPS * step)
+    assert cs[4][0, 6] == pytest.approx(DEFAULT_PIVOT_STEPS * step)
+
+
+def test_an_infinite_pivot_cost_leaves_the_primitives_out_entirely():
+    # a robot that cannot turn on the spot should not pay to relax two moves it will never take
+    _, cs = build(16, 0.5, pivot_cost=math.inf)
     assert cs[0] == 5
 
 

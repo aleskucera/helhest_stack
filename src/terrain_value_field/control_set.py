@@ -34,6 +34,11 @@ import numpy as np
 # The five turn rates, as fractions of the sharpest arc the turn radius allows.
 _TURN_FRACTIONS = (-1.0, -0.5, 0.0, 0.5, 1.0)
 
+# What a point turn costs by default, in arc lengths per heading bin. Expressed as a multiple
+# of `step` rather than a fixed distance so it means the same thing on any robot and any grid:
+# dear enough that an arc wins wherever one reaches, cheap enough that a dead end is not +inf.
+DEFAULT_PIVOT_STEPS = 4.0
+
 
 def closing_step(n_theta: int, turn_radius: float, bins: int = 2) -> float:
     """Arc length whose sharpest turn spans exactly `bins` heading bins.
@@ -79,15 +84,20 @@ def arc_control_set(
     will take it. `turn_weight` [m per rad of heading change] is charged on top of that length, so
     a straight is cheaper than an arc covering the same distance. 0 = distance only.
 
-    `pivot_cost` [m per heading bin] appends two POINT-TURN primitives (heading +-1 bin in place)
-    -- the skid-steer can rotate on the spot, so `goal behind` routes as pivot-then-drive instead
-    of a wide loop (or +inf). A half turn is n_theta/2 of them, so the price already scales with
-    angle; 3-5x `step` keeps pivots to the dead ends that need them. Endpoint-heading feasibility
-    is enforced for free: a blocked pose holds V = +inf, so a pivot into it never helps. None =
-    forward arcs only. Zero is rejected -- a free move with no displacement is a zero-cost cycle.
+    Two POINT-TURN primitives (heading +-1 bin in place) are appended by default at
+    `DEFAULT_PIVOT_STEPS * step` -- the skid-steer can rotate on the spot, so `goal behind` routes
+    as pivot-then-drive instead of a wide loop (or +inf), and a lattice without that is missing
+    moves the robot has. A half turn is n_theta/2 of them, so the price already scales with angle.
+    Endpoint-heading feasibility is enforced for free: a blocked pose holds V = +inf, so a pivot
+    into it never helps. `pivot_cost` overrides the price in metres per bin; `math.inf` leaves the
+    primitives out altogether for a robot that cannot turn on the spot. Zero is rejected -- a free
+    move with no displacement is a zero-cost cycle.
     """
-    if pivot_cost is not None and pivot_cost <= 0.0:
-        raise ValueError(f"pivot_cost must be > 0 or None, got {pivot_cost}")
+    if pivot_cost is None:
+        pivot_cost = DEFAULT_PIVOT_STEPS * step
+    if pivot_cost <= 0.0:
+        raise ValueError(f"pivot_cost must be > 0 (or math.inf for none), got {pivot_cost}")
+    pivots = math.isfinite(pivot_cost)
     dth = 2.0 * math.pi / n_theta
     sharpest = step / turn_radius  # dtheta over the step, at the min turn radius
     turns = [f * sharpest for f in _TURN_FRACTIONS]  # dtheta over the step
@@ -103,7 +113,7 @@ def arc_control_set(
             stacklevel=2,
         )
     n_arc = len(turns)
-    n_prim = n_arc + (2 if pivot_cost is not None else 0)
+    n_prim = n_arc + (2 if pivots else 0)
     prim_dr = np.zeros((n_theta, n_prim), np.int32)
     prim_dc = np.zeros((n_theta, n_prim), np.int32)
     prim_heading = np.zeros((n_theta, n_prim), np.int32)
@@ -138,7 +148,7 @@ def arc_control_set(
                 sweep_dr[it, p, s] = cr
                 sweep_dc[it, p, s] = cc
             sweep_n[it, p] = len(uniq)
-        if pivot_cost is not None:
+        if pivots:
             for p, dbin in ((n_arc, -1), (n_arc + 1, +1)):
                 # in place: endpoint = same cell, heading one bin over; sweep = the cell itself so
                 # the pivot picks up the pose's graded tilt like any arc

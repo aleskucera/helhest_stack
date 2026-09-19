@@ -2,6 +2,7 @@
 
 from .control_set import arc_control_set
 from .control_set import closing_step
+from .control_set import DEFAULT_PIVOT_STEPS
 from .control_set import omni_control_set
 from .field import Constraints
 from .field import TerrainValueField
@@ -14,6 +15,7 @@ __all__ = [
     "TerrainValueField",
     "arc_control_set",
     "closing_step",
+    "DEFAULT_PIVOT_STEPS",
     "build_grid",
     "omni_control_set",
 ]

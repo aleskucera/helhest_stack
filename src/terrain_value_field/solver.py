@@ -153,7 +153,7 @@ class ValueSolver:
         turn_radius: float = 0.6,
         step: float | None = None,
         turn_weight: float = 0.0,  # [m per rad] on top of arc length; makes straight < arc
-        pivot_cost: float | None = None,  # [m] per heading bin; None = no point turns
+        pivot_cost: float | None = None,  # [m] per bin; None = 4x step, math.inf = no pivots
         control_set: tuple | None = None,  # from control_set.py; None builds forward arcs
         device: wp.Device | None = None,
     ):
