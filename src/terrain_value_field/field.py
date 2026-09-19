@@ -32,7 +32,7 @@ class Constraints:
     """
 
     margin: wp.array  # [n_constraints, rows, cols, headings]
-    sigma: wp.array  # same shape
+    sigma: wp.array  # [n_constraints, rows, cols, headings]
     floor: wp.array  # [n_constraints]
 
 
@@ -69,16 +69,16 @@ class TerrainValueField:
         self.penalty_scale = float(penalty_scale)
 
         shape = (self.rows, self.cols, self.n_theta)
-        f = lambda: wp.zeros(shape, dtype=wp.float32, device=self.device)  # noqa: E731
-        self.z = f()
-        self.z_certain = f()
-        self.blocked = f()
-        self.penalty = f()
-        self.doubt = f()
-        self.V = f()
-        self.V_certain = f()  # filled by solve_pair(); every other field stays the believed one
-        self._seeds = f()
-        self._k = wp.array([self.k_sigma], dtype=wp.float32, device=self.device)
+        with wp.ScopedDevice(self.device):
+            self.z = wp.zeros(shape, dtype=wp.float32)
+            self.z_certain = wp.zeros(shape, dtype=wp.float32)
+            self.blocked = wp.zeros(shape, dtype=wp.float32)
+            self.penalty = wp.zeros(shape, dtype=wp.float32)
+            self.doubt = wp.zeros(shape, dtype=wp.float32)
+            self.V = wp.zeros(shape, dtype=wp.float32)
+            self.V_certain = wp.zeros(shape, dtype=wp.float32)
+            self._seeds = wp.zeros(shape, dtype=wp.float32)
+            self._k = wp.array([self.k_sigma], dtype=wp.float32)
 
         self.solver = ValueSolver(
             self.resolution,

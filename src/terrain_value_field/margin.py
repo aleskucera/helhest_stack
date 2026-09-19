@@ -35,17 +35,18 @@ IGNORED = wp.constant(1.0e30)
 
 @wp.kernel
 def margin_to_fields_kernel(
-    margin: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading]
-    sigma: wp.array4d(dtype=wp.float32),  # same shape; per-constraint standard deviation
-    floor: wp.array(dtype=wp.float32),  # [constraint] irreducible sd, in that constraint's units
-    k_sigma: wp.array(dtype=wp.float32),  # device scalar, so a captured graph can be retuned
-    z_ref: wp.float32,
-    penalty_weight: wp.float32,
-    z: wp.array3d(dtype=wp.float32),
-    z_certain: wp.array3d(dtype=wp.float32),
-    blocked: wp.array3d(dtype=wp.float32),
-    penalty: wp.array3d(dtype=wp.float32),
-    doubt: wp.array3d(dtype=wp.float32),
+    margin: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading] room left
+    sigma: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading] sd of that margin
+    floor: wp.array(dtype=wp.float32),  # [constraint] irreducible sd, in the same units
+    # Device scalar so a captured CUDA graph can be retuned without re-recording it.
+    k_sigma: wp.array(dtype=wp.float32),  # [1] sigmas of room the robot insists on
+    z_ref: wp.float32,  # scalar: start charging below this many sigmas
+    penalty_weight: wp.float32,  # scalar: cost per sigma of shortfall
+    z: wp.array3d(dtype=wp.float32),  # [row, col, heading] sigmas of room, believed map
+    z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading] the same, at the floor only
+    blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading] 1 = vetoed (float for the solver)
+    penalty: wp.array3d(dtype=wp.float32),  # [row, col, heading] added cost, in move-cost units
+    doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading] sigmas the ignorance costs, else 0
 ):
     """Reduce the constraints and classify the result, in one pass.
 
@@ -83,11 +84,11 @@ def margin_to_fields_kernel(
 
 @wp.kernel
 def margin_to_z_kernel(
-    margin: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading]
-    sigma: wp.array4d(dtype=wp.float32),  # same shape; per-constraint standard deviation
-    floor: wp.array(dtype=wp.float32),  # [constraint] irreducible sd, in that constraint's units
-    z: wp.array3d(dtype=wp.float32),
-    z_certain: wp.array3d(dtype=wp.float32),
+    margin: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading] room left
+    sigma: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading] sd of that margin
+    floor: wp.array(dtype=wp.float32),  # [constraint] irreducible sd, in the same units
+    z: wp.array3d(dtype=wp.float32),  # [row, col, heading] sigmas of room, believed map
+    z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading] the same, at the floor only
 ):
     """Reduce per-constraint (margin, sigma) to the binding margin, twice.
 
@@ -116,14 +117,15 @@ def margin_to_z_kernel(
 
 @wp.kernel
 def classify_kernel(
-    z: wp.array3d(dtype=wp.float32),
-    z_certain: wp.array3d(dtype=wp.float32),
-    k_sigma: wp.array(dtype=wp.float32),  # device scalar, so a captured graph can be retuned
-    z_ref: wp.float32,
-    penalty_weight: wp.float32,
-    blocked: wp.array3d(dtype=wp.float32),
-    penalty: wp.array3d(dtype=wp.float32),
-    doubt: wp.array3d(dtype=wp.float32),
+    z: wp.array3d(dtype=wp.float32),  # [row, col, heading] sigmas of room, believed map
+    z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading] the same, at the floor only
+    # Device scalar so a captured CUDA graph can be retuned without re-recording it.
+    k_sigma: wp.array(dtype=wp.float32),  # [1] sigmas of room the robot insists on
+    z_ref: wp.float32,  # scalar: start charging below this many sigmas
+    penalty_weight: wp.float32,  # scalar: cost per sigma of shortfall
+    blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading] 1 = vetoed (float for the solver)
+    penalty: wp.array3d(dtype=wp.float32),  # [row, col, heading] added cost, in move-cost units
+    doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading] sigmas the ignorance costs, else 0
 ):
     """Turn the two margins into a veto, a graded cost, and a doubt field.
 
