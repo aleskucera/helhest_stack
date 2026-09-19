@@ -17,6 +17,14 @@ move. The per-cell heading matters for the same reason the state space has a hea
 feasibility is a property of the pose, and an arc that turns 45 degrees is in a different pose
 by the end of it than at the start.
 
+HEADING BINS. Bin `it` means exactly `it * (2 pi / n_theta)`, and an angle belongs to the
+NEAREST bin. Taking the bin's lower edge as its meaning and flooring instead would give the same
++-half-bin error, but taking its MIDPOINT as its meaning -- the obvious choice, and the one this
+started with -- tilts every primitive by half a bin. Then no move runs along a grid axis and the
+left and right arcs of a fan stop being mirror images of each other (from bin 0 they ended at
+(-1,5),(0,5),(1,5),(2,4),(3,4): reflect that and it is not itself). The grid has four-fold
+symmetry; a lattice laid on it should too.
+
 LATTICE CLOSURE. An arc is integrated in continuous space and then snapped to the lattice, so the
 heading the table records is the heading the robot actually reaches ONLY if the turn lands on a
 bin boundary. When it does not, the recorded end heading is wrong by up to half a bin on every
@@ -140,7 +148,7 @@ def arc_control_set(
     sweep_dt = np.zeros((n_theta, n_prim, max_sweep), np.int32)
     sweep_n = np.zeros((n_theta, n_prim), np.int32)
     for it in range(n_theta):
-        th = (it + 0.5) * dth
+        th = it * dth  # bin `it` MEANS this angle; see HEADING BINS
         for p, dth_p in enumerate(turns):
             x, y = 0.0, 0.0
             cells = {}  # cell -> heading the arc is facing when it FIRST enters that cell
@@ -151,7 +159,7 @@ def arc_control_set(
                 cells.setdefault((int(round(y / resolution)), int(round(x / resolution))), cth)
             dc_p = int(round(x / resolution))
             dr_p = int(round(y / resolution))
-            end_bin = int(math.floor(((th + dth_p) % (2.0 * math.pi)) / dth)) % n_theta
+            end_bin = int(round(((th + dth_p) % (2.0 * math.pi)) / dth)) % n_theta
             prim_dc[it, p] = dc_p
             prim_dr[it, p] = dr_p
             prim_heading[it, p] = end_bin
@@ -173,7 +181,7 @@ def arc_control_set(
                 sweep_dc[it, p, s] = cell[1]
                 # bin offset from the state's OWN bin, so the kernel reads (t + this) % n_theta
                 # and the same table serves every starting heading
-                at = int(math.floor((cells[cell] % (2.0 * math.pi)) / dth)) % n_theta
+                at = int(round((cells[cell] % (2.0 * math.pi)) / dth)) % n_theta
                 sweep_dt[it, p, s] = (at - it) % n_theta
             sweep_n[it, p] = len(uniq)
         if pivots:

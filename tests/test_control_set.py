@@ -79,7 +79,7 @@ def test_the_documented_broken_default_is_as_bad_as_advertised():
     assert math.degrees(np.abs(heading_errors(8, 0.5, 0.3, cs)).max()) == pytest.approx(
         17.2, abs=0.1
     )
-    assert duplicate_count(cs) == 8  # of 40
+    assert duplicate_count(cs) == 16  # of 56, pivots included
 
 
 def test_the_solver_default_step_closes():
@@ -106,13 +106,14 @@ def test_cost_is_the_length_of_the_arc_through_the_recorded_endpoint(bins, turn_
     # For any circular arc, length/chord depends only on how far it turns. So the cost divided by
     # the recorded endpoint's distance must equal that ratio -- checked here against a numerically
     # integrated circle, not against the formula the cost is computed with.
-    step, cs = build(16, 0.5, bins=bins)
+    # (an arc whose endpoint happens to round exactly then DOES cost the nominal step -- that is
+    # the right answer, not the flat-step bug this replaced, so it is the ratio that is pinned)
+    _, cs = build(16, 0.5, bins=bins)
     _, dr, dc, _, cost, *_ = cs
     expected = length_over_chord(math.radians(turn_deg))
     for p in (0, 4):  # the two sharpest arcs, which turn `turn_deg`
         chord = math.hypot(dr[0, p] * RES, dc[0, p] * RES)
         assert cost[0, p] / chord == pytest.approx(expected, rel=1e-4)
-        assert cost[0, p] != pytest.approx(step, rel=1e-3)  # NOT the nominal step
 
 
 def test_the_straight_primitive_costs_the_distance_it_actually_covers():
@@ -158,7 +159,34 @@ def test_cost_rises_monotonically_with_how_sharply_the_move_turns():
     for it in range(16):
         straight, gentle, sharp = cost[it, 2], cost[it, 3], cost[it, 4]
         assert straight < gentle < sharp
-        assert cost[it, 1] == pytest.approx(gentle, abs=0.02)  # left/right roughly symmetric
+
+
+def test_the_fan_mirrors_where_the_bin_lies_on_a_grid_symmetry_axis():
+    """Bin `it` means `it * bin_width`, so at multiples of 45 degrees the fan sits on one of the
+    square grid's own symmetry axes and its left and right halves are exact reflections. Taking
+    the bin MIDPOINT as its meaning put every bin off-axis and made that true of none of them.
+
+    Off-axis bins keep a residual: the endpoint still rounds to a square grid, and 22.5 degrees
+    is not a symmetry direction of one. That part is not fixable without sub-cell endpoints.
+    """
+    n_theta, turn_radius = 16, 0.5
+    _, cs = build(n_theta, turn_radius, bins=2)
+    _, dr, dc, _, cost, *_ = cs
+    on_axis = [it for it in range(n_theta) if (it * 360 // n_theta) % 45 == 0]
+    assert len(on_axis) == 8, "16 bins put half of them on a 45-degree axis"
+    for it in on_axis:
+        a = -it * 2.0 * math.pi / n_theta
+        local = [
+            (
+                -(math.sin(a) * dc[it, p] + math.cos(a) * dr[it, p]),
+                math.cos(a) * dc[it, p] - math.sin(a) * dr[it, p],
+            )
+            for p in range(5)
+        ]
+        for i in range(5):
+            assert local[i][0] == pytest.approx(-local[4 - i][0], abs=1e-6), f"bin {it}"
+            assert local[i][1] == pytest.approx(local[4 - i][1], abs=1e-6), f"bin {it}"
+            assert cost[it, i] == pytest.approx(cost[it, 4 - i], abs=1e-6), f"bin {it}"
 
 
 # -- point turns ---------------------------------------------------------------------------
@@ -251,7 +279,7 @@ def test_the_swept_heading_offsets_match_the_arc_that_was_integrated():
     _, _, _, _, _, sdr, sdc, sdt, sn = cs
     dth = 2.0 * math.pi / n_theta
     for it in (0, 5, 11):
-        th0 = (it + 0.5) * dth
+        th0 = it * dth
         for p, frac in enumerate((-1.0, -0.5, 0.0, 0.5, 1.0)):
             x = y = 0.0
             first = {}
@@ -262,7 +290,7 @@ def test_the_swept_heading_offsets_match_the_arc_that_was_integrated():
                 first.setdefault((round(y / RES), round(x / RES)), cth)
             for s in range(int(sn[it, p])):
                 cell = (int(sdr[it, p, s]), int(sdc[it, p, s]))
-                want = (int(math.floor((first[cell] % (2 * math.pi)) / dth)) - it) % n_theta
+                want = (int(round((first[cell] % (2 * math.pi)) / dth)) - it) % n_theta
                 assert int(sdt[it, p, s]) == want, f"bin {it}, prim {p}, cell {cell}"
 
 
