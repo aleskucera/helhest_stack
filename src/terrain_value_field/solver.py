@@ -87,7 +87,7 @@ def _relax_kernel(
     sweep_dc: wp.array(dtype=wp.int32, ndim=3),
     sweep_n: wp.array(dtype=wp.int32, ndim=2),  # [n_theta, n_prim] swept-cell count
     n_prim: wp.int32,
-    penalty_weight: wp.float32,  # 0 -> pure distance; >0 -> prefer states with more margin
+    penalty_scale: wp.float32,  # 0 -> pure distance; >0 -> prefer states with more margin
     inf: wp.float32,
     dist_out: wp.array(dtype=wp.float32, ndim=3),
     changed: wp.array(dtype=wp.int32),
@@ -97,8 +97,8 @@ def _relax_kernel(
         V_out[s] = min( V_in[s], min over forward-arc primitives p
                          of  cost(p) + V_in[ next(s, p) ]   if p's swept cells are all free )
 
-    cost(p) = arc_length * (1 + penalty_weight * mean penalty over the swept cells), so with
-    penalty_weight > 0 the geodesic PREFERS flatter poses (not just avoids blocked ones). Feasibility and
+    cost(p) = arc_length * (1 + penalty_scale * mean penalty over the swept cells), so with
+    penalty_scale > 0 the geodesic PREFERS flatter poses (not just avoids blocked ones). Feasibility and
     graded cost come from the PER-POSE field (the robot's settle), sampled at the swept cells using the
     state's own heading t (the arc rotates little over one step), so a wall face -- where a body tilts or
     high-centers -- blocks the crossing arc while flat ground stays cheap. The whole swept arc must be
@@ -139,7 +139,7 @@ def _relax_kernel(
             if nr >= 0 and nr < h and nc >= 0 and nc < w:
                 arc = prim_cost[t, p]
                 if ns > 0:
-                    arc = arc * (1.0 + penalty_weight * tsum / float(ns))
+                    arc = arc * (1.0 + penalty_scale * tsum / float(ns))
                 best = wp.min(best, arc + dist_in[nr, nc, prim_heading[t, p]])
     dist_out[r, c, t] = best
     if best < dist_in[r, c, t]:
@@ -223,7 +223,7 @@ class ValueSolver:
         dist_in: wp.array,
         dist_out: wp.array,
         pose_cost: wp.array,
-        penalty_weight: float,
+        penalty_scale: float,
     ) -> None:
         """One min-relaxation sweep dist_in -> dist_out (race-free pull); raises self._changed if any
         cell improved."""
@@ -241,7 +241,7 @@ class ValueSolver:
                 self._sweep_dc,
                 self._sweep_n,
                 self.n_prim,
-                float(penalty_weight),
+                float(penalty_scale),
                 self._inf,
             ],
             outputs=[dist_out, self._changed],
@@ -252,7 +252,7 @@ class ValueSolver:
         self,
         pose_cost: wp.array,
         seeds: wp.array,
-        penalty_weight: float,
+        penalty_scale: float,
         capture: bool = True,
     ) -> wp.array:
         """Run value iteration to a fixed point. Returns the cost-to-go.
@@ -284,27 +284,46 @@ class ValueSolver:
         the sweeps dominate, so the per-body sync was never the cost. What the recording buys is
         that the solve can now nest inside a LARGER capture, which a host sync would forbid.
         """
-        if penalty_weight < 0.0:
+        if penalty_scale < 0.0:
             raise ValueError(
-                f"penalty_weight must be >= 0 or a move can cost less than "
-                f"nothing, got {penalty_weight}"
+                f"penalty_scale must be >= 0 or a move can cost less than "
+                f"nothing, got {penalty_scale}"
             )
         if capture and self.device.is_cuda:
-            key = (pose_cost.ptr, seeds.ptr, float(penalty_weight))
+            key = (pose_cost.ptr, seeds.ptr, float(penalty_scale))
             if self._graph_key != key:
                 with wp.ScopedCapture(device=self.device) as cap:
-                    self._iterate(pose_cost, seeds, penalty_weight)
+                    self._iterate(pose_cost, seeds, penalty_scale)
                 self._graph, self._graph_key = cap.graph, key
             wp.capture_launch(self._graph)
         else:
-            self._iterate(pose_cost, seeds, penalty_weight)
+            self._iterate(pose_cost, seeds, penalty_scale)
         return self._dist_a
+
+    def converged(self) -> bool:
+        """Did the last solve reach a fixed point, or stop at the iteration cap?
+
+        The cap exists so a misconfigured control set cannot spin forever, but a solve that hits
+        it returns a V that is too HIGH -- routes that exist read as longer than they are, or as
+        unreachable altogether. Nothing else distinguishes that from an honestly walled-off map,
+        so a caller that trusts "unreachable" should ask.
+
+        `_changed` is the exact signal, not the body count: the loop stops either because a whole
+        body improved nothing (converged) or because the cap bound (and then the last body DID
+        improve something). Reads back from the device, so it costs a sync -- ask when you want
+        to know, not every frame.
+        """
+        return int(self._changed.numpy()[0]) == 0
+
+    def bodies_used(self) -> int:
+        """Loop bodies the last solve ran, two sweeps each. Syncs; for diagnostics."""
+        return int(self._iter.numpy()[0])
 
     def _iterate(
         self,
         pose_cost: wp.array,
         seeds: wp.array,
-        penalty_weight: float,
+        penalty_scale: float,
     ) -> None:
         """The launches themselves: seed, initialise, then sweep until nothing improves."""
         grid_dim = (self.height, self.width, self.n_theta)
@@ -328,8 +347,8 @@ class ValueSolver:
 
         def body() -> None:
             self._changed.zero_()
-            self._relax(self._dist_a, self._dist_b, pose_cost, penalty_weight)
-            self._relax(self._dist_b, self._dist_a, pose_cost, penalty_weight)
+            self._relax(self._dist_a, self._dist_b, pose_cost, penalty_scale)
+            self._relax(self._dist_b, self._dist_a, pose_cost, penalty_scale)
             wp.launch(
                 _keep_going_kernel,
                 dim=1,

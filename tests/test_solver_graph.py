@@ -111,3 +111,24 @@ def test_changing_the_seeds_is_honoured_by_the_replay():
     assert f.solver._graph is graph
     assert not np.array_equal(corner, far)
     assert far[N - 3, N - 3, :].max() == pytest.approx(0.0)
+
+
+def test_a_finished_solve_reports_convergence():
+    f = _field()
+    f.seed_cell(N // 2, N // 2)
+    f.solve(_constraints(None))
+    assert f.converged()
+    assert f.solver.bodies_used() < f.solver._cap
+
+
+def test_a_capped_solve_reports_that_it_did_not_converge():
+    """The failure this exists to catch: a capped solve leaves V too high, and 'unreachable'
+    then means the same thing it means for a genuinely walled-off map."""
+    f = _field()
+    f.seed_cell(2, 2)  # corner seed, so the route across the map is long
+    f.solver._cap = 2  # set BEFORE the first solve: the cap is baked into the captured graph
+    f.solve(_constraints(None))
+    assert not f.converged()
+    assert f.solver.bodies_used() == 2
+    # and the damage is real: most of the map reads unreachable although nothing blocks it
+    assert (_finite(f.V) < 0).mean() > 0.5

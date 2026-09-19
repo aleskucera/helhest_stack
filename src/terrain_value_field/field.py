@@ -57,9 +57,18 @@ class TerrainValueField:
     ) -> None:
         """`k_sigma` is the one knob: how many standard deviations of room a state must hold.
 
-        `penalty_weight` charges for proximity to a boundary below `z_ref` sigmas, in the same
-        units as a move's cost, and `penalty_scale` is the solver's multiplier on the resulting
-        per-state cost. Setting `penalty_weight = 0` gives a pure veto.
+        Two penalty knobs, and they act in different places -- read them together once:
+
+        `penalty_weight` is charged in the MARGIN kernel. It turns "how many sigmas of room is
+        left below `z_ref`" into a per-state cost, so it sets the units. `penalty_weight = 0`
+        gives a pure veto and no gradient at all.
+
+        `penalty_scale` is applied in the SOLVER. It multiplies the mean per-state cost along a
+        move's swept cells into that move's price. It trades route length against room: 0 makes
+        the field a pure shortest path over the unvetoed states.
+
+        Both must be >= 0. The solver's own parameter is also called `penalty_scale`; nothing
+        downstream of here is called `penalty_weight`.
         """
         # Both knobs must be non-negative, and not as a matter of taste. `penalty_weight` < 0
         # makes the graded penalty negative, and `pose_cost` carries the veto in its sign -- so
@@ -190,6 +199,14 @@ class TerrainValueField:
         return self.V, self.V_certain
 
     # -- read -----------------------------------------------------------------------------
+    def converged(self) -> bool:
+        """Did the last solve reach a fixed point? See `ValueSolver.converged`. Syncs.
+
+        Worth asking before trusting an `unreachable` reading: a capped solve reports the same
+        thing a genuinely walled-off map does.
+        """
+        return self.solver.converged()
+
     def unreachable_value(self) -> float:
         """Values at or above this mean "no route under the control set"."""
         return float(self.solver._inf) * 0.99

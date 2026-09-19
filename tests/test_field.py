@@ -196,5 +196,5 @@ def test_the_solver_rejects_a_negative_scale_at_its_own_boundary():
 
     s = ValueSolver(CELL, 8, 8, n_theta=1, control_set=omni_control_set(CELL))
     buf = wp.zeros((8, 8, 1), dtype=wp.float32)
-    with pytest.raises(ValueError, match="penalty_weight"):
+    with pytest.raises(ValueError, match="penalty_scale"):
         s.value_iterate(buf, buf, -0.5)
