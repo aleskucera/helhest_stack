@@ -164,7 +164,6 @@ def run(
         dynamics.robot_params(),
         dynamics.planning_solver(),
         n_theta=24,
-        step=max(0.3, 1.6 * ccell),
         device=device,
     )
     ctg.compute(wp.array(Hc, dtype=wp.float32, device=device), goalv)

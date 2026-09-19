@@ -45,6 +45,7 @@ from ..engine.terrain import Grid
 from ..engine.terrain import sample_field
 from ..heightmap import Heightmap
 from ..profiling import StageProfiler
+from terrain_value_field import closing_step
 from terrain_value_field.solver import ValueSolver
 
 if TYPE_CHECKING:
@@ -397,7 +398,7 @@ class CostToGo:
         robot_params: RobotParams,
         solver_params: SolverParams,
         n_theta: int = 24,
-        step: float = 0.3,
+        step: float | None = None,  # None = the longest arc that CLOSES; see below
         flatness_weight: float = 2.0,  # planner strength: how much detour to trade for flat ground
         robust_margin_m: float = 0.0,  # lateral disturbance tube -> erode the feasible set by this
         robust_margin_deg: float = 0.0,  # heading disturbance tube (orientation-aware erosion)
@@ -435,6 +436,27 @@ class CostToGo:
         # tall-step obstacle gate: block cells within a robot footprint of a step > obstacle_step_m.
         self._step_gate = float(obstacle_step_m)
         self._foot_r = max(1, int(round(robot_params.half_track / self.grid.cell_size)))
+
+        # A lattice arc has to end on a heading BIN or the table records a heading the robot
+        # never reaches -- up to half a bin of error on every move, compounding, with feasibility
+        # then evaluated at a pose the robot will not occupy. It closes when the sharpest turn,
+        # step / min_turn_radius, is a whole number of bins, and an EVEN number of them, because
+        # the half-rate arcs have to land on a bin too. The step at bins=2 can round to nothing on
+        # a coarse grid, and a lattice whose arcs go nowhere cannot propagate at all, so take the
+        # smallest closing step that still clears a couple of cells.
+        # The search stops at a quarter turn: past 90 degrees in ONE primitive the arc is a large
+        # committed manoeuvre to collision-check as a unit, and routing gets coarse enough that
+        # the lattice stops being worth its cost.
+        if step is None:
+            bins, bins_max = 2, max(2, (n_theta // 4) // 2 * 2)
+            while (
+                closing_step(n_theta, robot_params.min_turn_radius, bins)
+                < 2.0 * self.grid.cell_size
+                and bins + 2 <= bins_max
+            ):
+                bins += 2
+            step = closing_step(n_theta, robot_params.min_turn_radius, bins)
+        self.step = float(step)
 
         self._vcap = (
             1.5
@@ -475,7 +497,7 @@ class CostToGo:
             self.grid.cells_x,
             n_theta=n_theta,
             turn_radius=float(self.robot.min_turn_radius),
-            step=step,
+            step=self.step,
             # helhest spells "no point turns" as 0.0; the solver spells it as an infinite price,
             # which leaves the two primitives out of the table instead of pricing them out.
             pivot_cost=math.inf if pivot_cost <= 0.0 else float(pivot_cost),

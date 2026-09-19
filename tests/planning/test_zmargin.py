@@ -35,9 +35,7 @@ def _terrain(amplitude: float = 0.25) -> wp.array:
 
 
 def _solve(k_sigma: float, sigma_m: float, **kw):
-    ctg = CostToGo(
-        _grid(), RobotParams(), SolverParams(), n_theta=12, step=3 * CELL, k_sigma=k_sigma, **kw
-    )
+    ctg = CostToGo(_grid(), RobotParams(), SolverParams(), n_theta=12, k_sigma=k_sigma, **kw)
     sigma = wp.array(np.full((N, N), sigma_m, np.float32), dtype=wp.float32)
     v = ctg.compute(_terrain(), GOAL, sigma=sigma)
     return ctg, v.numpy()
@@ -97,7 +95,7 @@ def test_attitude_sigma_matches_the_closed_form_and_the_measurement():
     assert sigma_roll == pytest.approx(2.84, rel=0.05), "vs the measured end-to-end roll residual"
 
     # And the kernel's own z on flat ground must be the same quantity: max_roll / sigma_roll.
-    ctg = CostToGo(_grid(), rp, SolverParams(), n_theta=12, step=3 * CELL, k_sigma=0.1)
+    ctg = CostToGo(_grid(), rp, SolverParams(), n_theta=12, k_sigma=0.1)
     flat = wp.array(np.zeros((N, N), np.float32), dtype=wp.float32)
     ctg.compute(flat, GOAL, sigma=wp.array(np.full((N, N), s, np.float32), dtype=wp.float32))
     z = ctg.zmargin.numpy()

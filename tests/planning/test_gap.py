@@ -30,7 +30,7 @@ def _ctg(**kw) -> CostToGo:
     )
     kw.setdefault("k_sigma", 2.0)
     kw.setdefault("sigma_floor_m", FLOOR)
-    return CostToGo(grid, RobotParams(), SolverParams(), n_theta=12, step=3 * CELL, **kw)
+    return CostToGo(grid, RobotParams(), SolverParams(), n_theta=12, **kw)
 
 
 def _terrain() -> wp.array:
