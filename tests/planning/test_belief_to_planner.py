@@ -167,10 +167,7 @@ def test_passing_the_wrong_variance_is_visibly_the_wrong_answer():
     var_meas = float(np.median(lay["meas_var"].numpy()[seen]))
     predicted = np.sqrt(1.0 + DriftRates.odin_slam().q_z * dt / var_meas)
     got = float(np.median(wrong[seen])) / float(np.median(right[seen]))
-    assert got == pytest.approx(
-        predicted, rel=0.15
-    ), f"{got:.2f} against a predicted {predicted:.2f}"
-    assert got > 3.0, "and it is much larger, even on a pose that barely drifts"
+    assert got == pytest.approx(predicted, rel=0.05), f"{got:.2f} vs predicted {predicted:.2f}"
 
 
 def test_the_drift_is_optional_all_the_way_through():
