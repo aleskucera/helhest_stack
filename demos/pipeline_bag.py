@@ -11,12 +11,22 @@ description, not a defect -- something else has to remember the far field.
 The goal is taken from the robot's own future pose, a fixed distance further along the track it
 actually drove, so it is always somewhere it genuinely went.
 
-AS IT STANDS THE PLANNER REFUSES THIS MAP, and that is the honest output rather than a bug to
-tune away. The window holds ~54 tall blobs, 78% of them one 0.2 m cell wide and around 1.1 m
-high, each re-measured as often as the ground beside it. Dilated by a 1.45 m robot they close
-every corridor, so 77.9% of cells are blocked at some heading and the goal is unreachable --
-while the real robot drove straight through, over ground its own track shows to be flat to
-3.3 cm at p90. Something has to give, and which thing is the open question: see `despike`.
+WITHOUT THE CARVE THE PLANNER REFUSES THIS MAP, and the reason is the fusion, not the terrain.
+Nothing in a Kalman update over heights can ever LOWER a cell: a reading far below the stored
+surface takes the lower-conflict branch, which keeps the height and only inflates the variance.
+So anything that moves -- a person crossing the robot's path -- writes its silhouette into the
+map permanently. Ray-carving is the only mechanism that can take a height back out.
+
+Measured here at frame 900, 14 m window, 0.2 m cells:
+
+    carve off (package default 1.0 m):  blocked 86.7%   goal 4 m ahead UNREACHABLE
+    carve 3 m:                          blocked 64.1%   4.52 m
+    carve 6 m:                          blocked 32.7%   4.52 m
+
+for 0.41% of ground cells lost, and with 21 of the 85 tall cells surviving -- the persistently
+measured ones, which is what you want kept. The carve decides on VISIBILITY evidence rather than
+on shape, so it drops the ghost and keeps the post. `--despike` does the opposite and is why it
+is off.
 
     PYTHONPATH=studies:src .venv/bin/python demos/pipeline_bag.py out_odin0 --shots 4
     PYTHONPATH=studies:src .venv/bin/python demos/pipeline_bag.py out_odin0 --span 10 --cell 0.15
@@ -88,7 +98,9 @@ def despike(height, k=1):
     return np.median(st, 0)
 
 
-def replay(bag, span, cell, n_theta, k_sigma, shots, max_frames, outdir, device, despike_k):
+def replay(
+    bag, span, cell, n_theta, k_sigma, shots, max_frames, outdir, device, despike_k, carve_range
+):
     import os
 
     import numpy as np
@@ -171,6 +183,12 @@ def replay(bag, span, cell, n_theta, k_sigma, shots, max_frames, outdir, device,
         if prev_t is not None and t > prev_t:
             belief.motion_update(t - prev_t, rxy)
         prev_t = t
+        # Carve BEFORE fusing: retire cells this sweep's rays passed through. Without it a
+        # person who walks across the robot's path writes a permanent wall -- the fusion's
+        # lower-conflict branch keeps the height and only inflates the variance, so nothing in
+        # the filter can ever remove a height. This is the only thing that can.
+        if carve_range > 0:
+            belief.carve(w, odom.xyz[i], max_range=carve_range, margin=0.15, persist=8)
         belief.measure_scan(w, odom.xyz[i])
         k += 1
 
@@ -300,6 +318,13 @@ def main():
     ap.add_argument("--max-frames", type=int, default=100000)
     ap.add_argument("--outdir", default="/tmp/pipeline_bag")
     ap.add_argument(
+        "--carve",
+        type=float,
+        default=6.0,
+        help="[m] visibility-carve range; 0 = off. The package default is 1.0, too short to "
+        "retire anything a person leaves at 3-6 m",
+    )
+    ap.add_argument(
         "--despike",
         type=int,
         default=0,
@@ -318,6 +343,7 @@ def main():
         a.outdir,
         a.device,
         a.despike,
+        a.carve,
     )
     render(shots, a.outdir)
 
