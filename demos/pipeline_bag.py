@@ -11,6 +11,13 @@ description, not a defect -- something else has to remember the far field.
 The goal is taken from the robot's own future pose, a fixed distance further along the track it
 actually drove, so it is always somewhere it genuinely went.
 
+AS IT STANDS THE PLANNER REFUSES THIS MAP, and that is the honest output rather than a bug to
+tune away. The window holds ~54 tall blobs, 78% of them one 0.2 m cell wide and around 1.1 m
+high, each re-measured as often as the ground beside it. Dilated by a 1.45 m robot they close
+every corridor, so 77.9% of cells are blocked at some heading and the goal is unreachable --
+while the real robot drove straight through, over ground its own track shows to be flat to
+3.3 cm at p90. Something has to give, and which thing is the open question: see `despike`.
+
     PYTHONPATH=studies:src .venv/bin/python demos/pipeline_bag.py out_odin0 --shots 4
     PYTHONPATH=studies:src .venv/bin/python demos/pipeline_bag.py out_odin0 --span 10 --cell 0.15
 """
@@ -50,22 +57,24 @@ def fill_from_ground(height, seen, passes=24):
 
 
 def despike(height, k=1):
-    """Median filter the height before the settle reads it, and this is NOT cosmetic.
+    """Median filter the height. OFF by default, and it is not a fix -- read this first.
 
-    `measure_scan` keeps the HIGHEST return in a cell, which is right for not missing a rock and
-    wrong for describing ground: outdoors it latches onto grass, a sparse far return, an outlier,
-    and leaves isolated cells standing 30 cm proud. The settle then does exactly what it should
-    -- refuses to drive onto a 30 cm spike -- and the map becomes unroutable.
+    It looks like one. On out_odin0 at 82% coverage it takes the blocked fraction from 77.9% to
+    22.8% and turns an unreachable goal into a 3.43 m route. But what it removes is not noise:
 
-    Measured on out_odin0 at 82% coverage, 14 m window, 0.2 m cells:
+        the three tallest "spikes" stand 1.08-1.11 m above their neighbours
+        each is built from 3-7 returns, not one stray point
+        they are re-measured as often as the ground (19 returns/cell against 23)
+        and as recently (both last seen 0.0 s ago)
+        78% of the 54 tall blobs are a SINGLE 0.2 m cell
 
-        raw belief height   |roll| p90 22.9 deg   blocked 77.9%   V at robot UNREACHABLE
-        3x3 median          |roll| p90 13.8 deg   blocked 22.8%   V at robot 3.43 m
-        5x5 median          |roll| p90 10.0 deg   blocked 17.4%   V at robot 3.32 m
+    Persistently observed, metre-tall, and thinner than the robot. That is the description of a
+    post or a sapling -- and of the thin sticks this project has already driven through once
+    because the settle straddled them. A 3x3 median flattens all three of those cells straight
+    back to ground level. It deletes obstacles.
 
-    `--no-despike` reproduces the failure. The real fix is a mapping-side decision -- the planner
-    wants a ground surface, obstacle detection wants the highest return, and they are not the
-    same layer -- but a median here shows what is at stake without pretending to settle it.
+    So it stays here as an instrument, not a default: `--despike 1` shows how much of the
+    blocking those tall thin things account for, which is most of it.
     """
     import numpy as np
 
@@ -290,7 +299,12 @@ def main():
     ap.add_argument("--shots", type=int, default=4)
     ap.add_argument("--max-frames", type=int, default=100000)
     ap.add_argument("--outdir", default="/tmp/pipeline_bag")
-    ap.add_argument("--despike", type=int, default=1, help="median filter half-width; 0 = off")
+    ap.add_argument(
+        "--despike",
+        type=int,
+        default=0,
+        help="median filter half-width. NOT a fix -- it deletes real obstacles; see despike()",
+    )
     ap.add_argument("--device", default="cuda")
     a = ap.parse_args()
     shots = replay(
