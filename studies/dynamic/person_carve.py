@@ -10,7 +10,7 @@ import numpy as np, warp as wp
 from elevation_belief import DriftRates, ElevationBelief, NoiseModel
 
 wp.init()
-d = np.load("studies/dynamic/out/person.npz")
+d = np.load("studies/dynamic/out/person_clear.npz")
 pts, cnt, robot, person, stamp, mount = (
     d["points"],
     d["counts"],
@@ -98,7 +98,6 @@ for cr in (0.0, 1.0, 3.0, 6.0, 10.0):
         f"{dist:>10d} of {int(gm.sum())}"
     )
 
-print("\n=== where are the 28 that survive a 10 m carve? ===")
 bel, occ, clr, h, valid = run(10.0)
 final = {c for c, l in occ.items() if l == len(cnt) - 1}
 trail = [c for c in occ if c not in final]
@@ -111,6 +110,7 @@ def ydist(c):  # how far along the walk, relative to where the person STOPPED
     return abs((bel.ymin + (c[0] + 0.5) * CELL) - py_end)
 
 
+print(f"\n=== where are the {len(ghosts)} that survive a 10 m carve? ===")
 gy = np.array([ydist(c) for c in ghosts])
 cy = np.array([ydist(c) for c in cleared])
 print(f"  distance from where the person came to rest:")
