@@ -192,7 +192,7 @@ def test_a_state_every_constraint_declines_to_judge_reads_as_perfect_ground():
         inputs=[mar, sig, flo, wp.array(np.array([2.0], np.float32), dtype=wp.float32), 4.0, 1.0],
         outputs=out,
     )
-    z, z_certain, pose_cost, doubt = (float(o.numpy()[0, 0, 0]) for o in out)
+    z, _, pose_cost, doubt = (float(o.numpy()[0, 0, 0]) for o in out)
     assert z >= float(M.IGNORED), "nothing spoke, so nothing bounds the margin"
     assert pose_cost >= 0.0, "NOT vetoed"
     assert pose_cost == pytest.approx(0.0), "and not even penalised"
