@@ -38,6 +38,23 @@ class Constraints:
     floor: wp.array  # [n_constraints]
 
 
+@wp.kernel
+def _seed_doubt_kernel(
+    doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    min_doubt: wp.float32,
+    inf: wp.float32,
+    seeds: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+):
+    """Make every sufficiently doubted state a zero-cost source.
+
+    The value field that comes out is then "how far to the nearest thing worth looking at",
+    which is the other half of the explore-or-push trade: the gap says what ignorance costs,
+    this says what it costs to go and resolve some of it.
+    """
+    r, c, t = wp.tid()
+    seeds[r, c, t] = wp.where(doubt[r, c, t] > min_doubt, 0.0, inf)
+
+
 class TerrainValueField:
     def __init__(
         self,
@@ -189,6 +206,21 @@ class TerrainValueField:
             device=self.device,
         )
 
+    def seed_doubt(self, min_doubt: float = 0.0) -> None:
+        """Seed every state whose `doubt` exceeds `min_doubt`. Solve after this and the field is
+        the cost of reaching the nearest state that is blocked by ignorance rather than by ground.
+
+        `doubt` is whatever the last solve left behind, so this follows a solve rather than
+        replacing one.
+        """
+        wp.launch(
+            _seed_doubt_kernel,
+            dim=(self.rows, self.cols, self.n_theta),
+            inputs=[self.doubt, float(min_doubt), float(self.solver_inf)],
+            outputs=[self._seeds],
+            device=self.device,
+        )
+
     # -- solve ----------------------------------------------------------------------------
     def solve(self, constraints: Constraints, certain: bool = False) -> wp.array:
         """Reduce the constraints, classify, and value-iterate. Returns `V` (device-resident).
@@ -255,6 +287,64 @@ class TerrainValueField:
         for n, buf in parked.items():
             wp.copy(getattr(self, n), buf)
         return self.V, self.V_certain
+
+    def value_of_looking(
+        self,
+        constraints: Constraints,
+        row: int,
+        col: int,
+        heading_bin: int = 0,
+        min_doubt: float = 0.0,
+    ) -> dict:
+        """Should the robot go and look, or push on? Three solves and the trade between them.
+
+        `gap` is what ignorance costs at this state, in the plan's own units: solve believing the
+        map, solve as if it were certain, subtract. It is an UPPER BOUND on what any amount of
+        looking could save, because the certain solve is what the robot would do if every doubt
+        were resolved in its favour.
+
+        `cost_to_look` is what it costs to get somewhere that would resolve some of it -- the same
+        field seeded on the doubted states instead of the goal, solved optimistically because the
+        route to a place you have not seen runs through places you have not seen.
+
+        Looking is worth it when the gap exceeds the detour. Both sides are metres, so the
+        comparison needs no tuned threshold -- but `worth_looking` is a convenience and the
+        decision belongs to the robot: a detour costs time and risk this does not model.
+
+        Three cases have no number. `blocked_by_ignorance` is the strongest signal there is:
+        believing the map the goal is unreachable, and it would be reachable if the doubts went
+        the robot's way -- not knowing is costing the entire route, so `gap` is infinite. If
+        neither solve reaches the goal the map is genuinely walled off and there is nothing to
+        learn. And if nothing is doubted there is nowhere to go and `cost_to_look` is infinite.
+        """
+        self.solve_pair(constraints)
+        here = self.at(row, col, heading_bin)
+        n_doubted = int((self.doubt.numpy() > min_doubt).sum())
+
+        parked = {n: wp.clone(getattr(self, n)) for n in ("V", "z", "pose_cost", "doubt")}
+        parked_seeds = wp.clone(self._seeds)
+        self.seed_doubt(min_doubt)
+        # optimistic: the way to somewhere unseen runs through the unseen, so the believed
+        # reading would refuse to plan the very trip this is costing
+        look = float(self.solve(constraints, certain=True).numpy()[row, col, heading_bin])
+        for n, buf in parked.items():
+            wp.copy(getattr(self, n), buf)
+        wp.copy(self._seeds, parked_seeds)
+
+        cap = self.unreachable_value()
+        blocked_by_ignorance = here["unreachable_by_ignorance"]
+        gap = float("inf") if blocked_by_ignorance else here["gap"]
+        cost_to_look = look if look < cap else float("inf")
+        return {
+            "gap": gap,
+            "cost_to_look": cost_to_look,
+            "worth_looking": gap > cost_to_look,
+            "blocked_by_ignorance": blocked_by_ignorance,
+            "walled_off": not here["reachable"] and not here["reachable_if_certain"],
+            "doubted_states": n_doubted,
+            "v": here["v"],
+            "v_certain": here["v_certain"],
+        }
 
     # -- read -----------------------------------------------------------------------------
     def converged(self) -> bool:
