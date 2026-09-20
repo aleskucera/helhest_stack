@@ -35,6 +35,7 @@ import numpy as np
 import warp as wp
 
 from calib import bagio
+from elevation_belief import DriftRates
 from elevation_belief import ElevationBelief
 from elevation_belief import NoiseModel
 
@@ -70,7 +71,11 @@ def _build(odom: bagio.Odometry, pad: float) -> tuple[ElevationBelief, tuple[flo
     ymin = float(odom.xyz[:, 1].min() - pad)
     xmax = float(odom.xyz[:, 0].max() + pad)
     ymax = float(odom.xyz[:, 1].max() + pad)
-    belief = ElevationBelief((xmin, xmax, ymin, ymax), CELL, noise=DTOF_NOISE)
+    # Odin's pose is on-device SLAM, not the design-site handheld rig the shipped
+    # rates were fitted to; see studies/calib/fit_drift.py and RESULTS.md section 4.
+    belief = ElevationBelief(
+        (xmin, xmax, ymin, ymax), CELL, noise=DTOF_NOISE, rates=DriftRates.odin_slam()
+    )
     return belief, (xmin, ymin)
 
 
@@ -86,7 +91,9 @@ def run_bag(
     belief, _ = _build(odom, pad)
     prev_t = frames[0].t
     for f in frames:
-        belief.motion_update(max(f.t - prev_t, 0.0), (float(f.sensor_xyz[0]), float(f.sensor_xyz[1])))
+        belief.motion_update(
+            max(f.t - prev_t, 0.0), (float(f.sensor_xyz[0]), float(f.sensor_xyz[1]))
+        )
         prev_t = f.t
         pts = crop(f, z_above, z_below)
         if len(pts) == 0:
@@ -165,13 +172,17 @@ def main() -> None:
             "n_valid": baselines[b]["n_valid"],
             "resid_rms": baselines[b]["resid_rms"],
         }
-        print(f"baseline {b:11s} valid {baselines[b]['n_valid']:7d}  resid_rms {baselines[b]['resid_rms']:.4f} m")
+        print(
+            f"baseline {b:11s} valid {baselines[b]['n_valid']:7d}  resid_rms {baselines[b]['resid_rms']:.4f} m"
+        )
 
     for name, values in sweeps.items():
         report["sweeps"][name] = {}
         print(f"\n--- {name} " + "-" * 60)
-        print(f"{'value':>8s} {'lost%':>7s} {'<2m':>7s} {'2-5m':>7s} {'5-8m':>7s} {'>8m':>7s} "
-              f"{'resid_rms':>10s} {'d_resid':>9s}")
+        print(
+            f"{'value':>8s} {'lost%':>7s} {'<2m':>7s} {'2-5m':>7s} {'5-8m':>7s} {'>8m':>7s} "
+            f"{'resid_rms':>10s} {'d_resid':>9s}"
+        )
         for v in values:
             gates = CarveGates(**{name: v})
             rows = []
@@ -180,9 +191,11 @@ def main() -> None:
                 rows.append(_erosion(baselines[b], run_bag(odom, frames, gates, args.pad)))
             agg = {k: float(np.mean([r[k] for r in rows])) for k in rows[0]}
             report["sweeps"][name][str(v)] = agg
-            print(f"{v:>8} {agg['lost_frac']*100:6.2f}% {agg['lost_0_2m']*100:6.2f}% "
-                  f"{agg['lost_2_5m']*100:6.2f}% {agg['lost_5_8m']*100:6.2f}% "
-                  f"{agg['lost_over_8m']*100:6.2f}% {agg['resid_rms']:10.4f} {agg['resid_delta']:+9.4f}")
+            print(
+                f"{v:>8} {agg['lost_frac']*100:6.2f}% {agg['lost_0_2m']*100:6.2f}% "
+                f"{agg['lost_2_5m']*100:6.2f}% {agg['lost_5_8m']*100:6.2f}% "
+                f"{agg['lost_over_8m']*100:6.2f}% {agg['resid_rms']:10.4f} {agg['resid_delta']:+9.4f}"
+            )
 
     dst = os.path.join(args.out, "fit_carve.json")
     with open(dst, "w") as fh:

@@ -46,8 +46,12 @@ def _scan(rng, n=40000, x_lo=-HALF, x_hi=HALF):
 
 
 def _belief() -> ElevationBelief:
+    # Odin's pose is on-device SLAM; the shipped rates are a handheld rig's and are 100x larger
     return ElevationBelief(
-        (-HALF, HALF, -HALF, HALF), CELL, noise=NoiseModel("linear", a=0.02, b=0.01)
+        (-HALF, HALF, -HALF, HALF),
+        CELL,
+        noise=NoiseModel("linear", a=0.02, b=0.01),
+        rates=DriftRates.odin_slam(),
     )
 
 
@@ -135,10 +139,18 @@ def test_passing_the_wrong_variance_is_visibly_the_wrong_answer():
     """Why the belief publishes `drift_var` at all. `raw_var` is the absolute height variance,
     which grows for every cell as time passes even when nothing about the ground changed.
     Feeding THAT to a planner vetoes a map it measured perfectly, on a timer.
+
+    The size of the effect is predicted rather than asserted: after `dt` at rate `q_z` a cell's
+    height variance is `var_meas + q_z*dt`, so the sd ratio is sqrt(1 + q_z*dt/var_meas). Writing
+    a bare threshold here instead would just encode whichever drift rate happened to be current,
+    which is the mistake this whole chain of work came out of. On this scene it comes out at
+    1.48x after 60 s, 2.63x after 300 s and 4.33x after 900 s -- and the prediction lands on all
+    three, so what is really being checked is that the belief's drift bookkeeping is honest.
     """
+    dt = 300.0
     b = _belief()
     b.measure_scan(_scan(np.random.default_rng(4)), SENSOR)
-    b.motion_update(60.0, (0.0, 0.0))
+    b.motion_update(dt, (0.0, 0.0))
     lay = b.layers()
     h = wp.array(
         np.ascontiguousarray(np.nan_to_num(lay["raw_h"].numpy(), nan=0.0), np.float32),
@@ -150,7 +162,15 @@ def test_passing_the_wrong_variance_is_visibly_the_wrong_answer():
     ok = _plan(h, _a(right), _a(b.drift().numpy())).blocked.numpy().mean()
     bad = _plan(h, _a(wrong), _a(b.drift().numpy())).blocked.numpy().mean()
     assert bad > ok + 0.1, f"absolute height variance should veto far more ({bad:.2f} vs {ok:.2f})"
-    assert float(np.median(wrong)) > 5.0 * float(np.median(right)), "and it is much larger"
+
+    seen = lay["valid"].numpy() != 0
+    var_meas = float(np.median(lay["meas_var"].numpy()[seen]))
+    predicted = np.sqrt(1.0 + DriftRates.odin_slam().q_z * dt / var_meas)
+    got = float(np.median(wrong[seen])) / float(np.median(right[seen]))
+    assert got == pytest.approx(
+        predicted, rel=0.15
+    ), f"{got:.2f} against a predicted {predicted:.2f}"
+    assert got > 3.0, "and it is much larger, even on a pose that barely drifts"
 
 
 def test_the_drift_is_optional_all_the_way_through():
