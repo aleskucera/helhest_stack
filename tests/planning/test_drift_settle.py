@@ -6,10 +6,14 @@ random walk, so it cancels in every one of those differences and only the part a
 older contact was last seen survives -- `|drift_A - drift_B|`, which the footprint's max-min
 spread bounds.
 
-That matters because a footprint is not measured all at once. On a real run within 5 m of the
-robot the age spread across a footprint is 1.11 s at the median -- the sensor's sparsity, not
-revisits -- which is 0.095 m of sd on a height difference against the 0.028 m the measurement
-term alone claims.
+That matters because a footprint is not measured all at once: on a real run the age spread across
+one is 1.11 s at the median within 5 m of the robot -- the sensor's sparsity, not revisits -- with
+a p90 near 88 s wherever the robot crosses its own earlier track.
+
+What the spread COSTS depends on Odin's own drift rate, which `studies/calib/fit_drift.py` puts at
+q_z = 7.5e-05 m^2/s, about 1% of the shipped dead-reckoning default. At that rate the median
+spread is worth 1.07x on a height difference and a revisit seam is worth 3.4x. A seam correction,
+then -- but seams are where a map goes wrong.
 """
 
 from __future__ import annotations

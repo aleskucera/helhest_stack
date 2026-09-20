@@ -277,3 +277,61 @@ A second caveat: with `margin = 0.02` the erosion is highest and the residual wo
 the carve evidence at small margins is driven by measurement noise rather than moved geometry.
 At a per-cell sigma of 2-18 cm (section 3 above), a margin below ~0.10 m cannot distinguish
 "this surface moved" from "this surface reads high today".
+
+
+---
+
+## 4. Odin's own pose-drift rate `q_z`
+
+`elevation_belief` grows every cell's height variance by `q_z * dt` between measurements, and
+that growth is what makes a SEAM between old and new data expensive to plan over. The shipped
+`DriftRates` are the Oxford Spires **dead-reckoning** calibration; Odin's pose is on-device SLAM.
+
+Reproduce:
+
+```
+PYTHONPATH=studies:src .venv/bin/python studies/calib/fit_drift.py out_odin0
+```
+
+A cell measured at `t1` and re-measured at `t2` differs by measurement noise plus whatever drift
+accrued in between, so `E[(h2-h1)^2] = 2*var_meas + q_z*dt`. Fitted over 1.41 M re-measurement
+pairs within 6 m on `out_odin0` (141 m driven), restricted to cells with >= 4 returns and under
+2 cm of within-cell roughness so a shifted sample pattern is not read as drift:
+
+| | fitted | shipped default | ratio |
+|---|---|---|---|
+| `q_z` | **7.5e-05** m²/s | 7.43e-03 | **0.010x** |
+| `var_meas` | 3.1e-04 m² (sd **1.75 cm**) | — | — |
+
+Bins are weighted by how many pairs stand behind them; weighting them equally instead gives
+`q_z = 4.9e-05`, so read the estimate as **5–8e-05**. The fitted `var_meas` is a free sanity
+check and lands where section 1's sigma work put it.
+
+**The point estimate is soft** — R² 0.31, the binned variances are not monotone in `dt`, and
+cells re-measured after a long gap are seen from a different viewpoint, which inflates the long
+bins. **The conclusion is not.** No observed bin comes within an order of magnitude of the
+inherited rate:
+
+| dt | observed sd | default predicts | ratio |
+|---|---|---|---|
+| 0.4 s | 0.018 m | 0.061 m | 3.3x |
+| 7.9 s | 0.034 m | 0.243 m | 7.1x |
+| 21 s | 0.065 m | 0.395 m | 6.1x |
+| 96 s | 0.096 m | 0.846 m | 8.8x |
+| 112 s | 0.062 m | 0.910 m | 14.7x |
+
+### What it changes
+
+The footprint age spread (1.11 s median within 5 m, p90 88 s at a revisit, 76 s in the coarse
+layer) is a property of the **sensor's sparsity** and is unaffected. What the fitted rate changes
+is what that spread COSTS:
+
+| age spread | at 7.4e-03 | at 7.5e-05 |
+|---|---|---|
+| 1.11 s (median, fine window) | 0.095 m, 3.8x | 0.026 m, **1.07x** |
+| 87.7 s (a revisit) | 0.808 m, 32.6x | 0.085 m, **3.43x** |
+| 76.5 s (coarse ground) | 0.754 m, 30.4x | 0.080 m, **3.22x** |
+
+So the drift-spread term is a **seam correction**, not a general one. In a continuously
+re-measured fine window it moves the margin by a few per cent; where old data meets new it is
+still worth a factor of three, in the optimistic direction.
