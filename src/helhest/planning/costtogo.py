@@ -573,6 +573,7 @@ class CostToGo:
         goal_xy: tuple[float, float],
         sigma: wp.array,
         measured: wp.array | None = None,
+        drift: wp.array | None = None,
     ) -> None:
         """Solve twice -- believing the map, then as if it were certain -- and keep both.
 
@@ -589,10 +590,13 @@ class CostToGo:
         (`studies/planner/RESULTS.md` section 6.7) that is 7.9 ms for the first and as little as
         2.0 ms for a coarser second -- about 3% of a 69 ms sensor frame.
         """
-        self.compute(elevation, goal_xy, measured, sigma)
+        self.compute(elevation, goal_xy, measured, sigma, drift)
         wp.copy(self.V_pessimistic, self.V)
         wp.copy(self.doubt_pessimistic, self.doubt)
-        self.compute(elevation, goal_xy, measured, sigma, sigma_scale=0.0)
+        # sigma_scale=0 discounts the measurement sd AND the drift spread together: the
+        # optimistic reading asks what the robot would believe of a certain map, and a map with a
+        # stale half is not one.
+        self.compute(elevation, goal_xy, measured, sigma, drift, sigma_scale=0.0)
         wp.copy(self.V_optimistic, self.V)
 
     def gap_at(self, x: float, y: float, yaw: float) -> dict:
