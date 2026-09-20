@@ -46,6 +46,7 @@ from ..engine.terrain import sample_field
 from ..heightmap import Heightmap
 from ..profiling import StageProfiler
 from terrain_value_field import closing_step
+from terrain_value_field.drift import footprint_drift_spread
 from terrain_value_field.solver import ValueSolver
 
 if TYPE_CHECKING:
@@ -105,6 +106,7 @@ def _margin_kernel(
     derived: wp.array2d(dtype=wp.vec3f),  # (z, pitch, roll) per pose; row 0 = the static settle
     clearance: wp.array2d(dtype=wp.float32),
     sigma: wp.array2d(dtype=wp.float32),  # per-cell MEASUREMENT sd of the elevation belief [m]
+    spread: wp.array2d(dtype=wp.float32),  # per-cell footprint DRIFT spread [m^2]
     grid: Grid,
     robot: Robot,
     n_theta: wp.int32,
@@ -186,13 +188,21 @@ def _margin_kernel(
     )
     sb = _sigma_at(sigma, grid, x - ca * rl * 0.5, y - sa * rl * 0.5, sigma_floor_m, scale)
 
+    # Pose drift is ONE shared random walk, so it cancels between two contacts and only the part
+    # accrued since the older of them was last seen survives: Var(h_A - h_B) picks up
+    # |drift_A - drift_B|, which the footprint's max-min spread bounds. Charged to each variance
+    # directly rather than folded into s1..s3, because each difference here has its own lever arm
+    # and inflating the sds would land the wrong coefficient on pitch. `scale` gates it with the
+    # measurement term: the optimistic reading assumes a map with no drift either.
+    sp = scale * sample_field(spread, grid, x, y)
+
     two_b = 2.0 * hb
-    var_roll = (s1 * s1 + s2 * s2) / (two_b * two_b)
-    var_pitch = (s3 * s3 + 0.25 * (s1 * s1 + s2 * s2)) / (rl * rl)
+    var_roll = (s1 * s1 + s2 * s2 + sp) / (two_b * two_b)
+    var_pitch = (s3 * s3 + 0.25 * (s1 * s1 + s2 * s2) + sp) / (rl * rl)
     # The belly sits on a weighted mean of the three supports (weights summing to one), so its
     # own height carries about a third of their variance. The cross term against the ground
     # beneath it is dropped, which OVERSTATES sigma_clear -- the conservative direction.
-    var_clear = sb * sb + (s1 * s1 + s2 * s2 + s3 * s3) / 9.0
+    var_clear = sb * sb + (s1 * s1 + s2 * s2 + s3 * s3) / 9.0 + sp
 
     sigma_roll = wp.sqrt(wp.max(var_roll, 1.0e-12))
     sigma_pitch = wp.sqrt(wp.max(var_pitch, 1.0e-12))
@@ -527,6 +537,19 @@ class CostToGo:
         # `sigma_floor_m` everywhere -- so an unsupplied sigma is a uniform-uncertainty map, not
         # a claim of perfect knowledge.
         self._sigma_in = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
+        # Pose-drift variance per cell (`var_h - var_meas` from the belief), and the footprint
+        # spread reduced from it. Zero everywhere is a map of one age, which contributes nothing
+        # -- so a caller that passes no drift gets exactly the no-drift behaviour.
+        self._drift_in = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
+        self._spread = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
+        # The settle differences heights under the three wheels and midway back, so the spread has
+        # to cover every contact: the furthest of them from the pose centre.
+        self._drift_r = max(
+            1,
+            int(
+                round(max(robot_params.rear_offset, robot_params.half_track) / self.grid.cell_size)
+            ),
+        )
         # Stable mask buffer the captured graph reads. Defaults to all-measured, so a caller that
         # passes no mask gets exactly the pre-mask behaviour.
         self._measured_in = wp.full((ny, nx), 1.0, dtype=wp.float32, device=self.device)
@@ -706,6 +729,7 @@ class CostToGo:
             device=self.device,
         )
         if self.k_sigma > 0.0 or self.margin_weight > 0.0:
+            footprint_drift_spread(self._drift_in, self._drift_r, out=self._spread)
             wp.launch(
                 _margin_kernel,
                 dim=self.V.shape,
@@ -713,6 +737,7 @@ class CostToGo:
                     sim.derived,
                     sim.clearance,
                     self._sigma_in,
+                    self._spread,
                     self.grid,
                     self.robot,
                     self.n_theta,
@@ -800,6 +825,7 @@ class CostToGo:
         goal_xy: tuple[float, float],
         measured: wp.array | None = None,
         sigma: wp.array | None = None,
+        drift: wp.array | None = None,
         k_sigma: float | None = None,
         sigma_scale: float | None = None,
     ) -> wp.array:
@@ -810,6 +836,12 @@ class CostToGo:
         `measured` [ny, nx] (1 = observed, 0 = blind) is read ONLY by the obstacle_step_m gate, to
         keep the caller's blind-cell fill from reading as a real step. Omit it (or pass
         obstacle_step_m=0) and every cell counts as observed.
+
+        `drift` [ny, nx] is the belief's pose-drift variance (`var_h - var_meas`) [m^2], negative
+        where nothing was measured. Two contacts share whatever drift accrued over their common
+        interval, so only the SPREAD across the footprint reaches a margin -- see
+        `terrain_value_field.drift`. Omit it and every cell is treated as one age, which is what
+        the old behaviour assumed without saying so.
 
         `sigma` [ny, nx] is the elevation belief's per-cell MEASUREMENT sd (its `meas_sd`, not
         its `sigma`: pose drift is common-mode and cancels in the attitude differences). It is
@@ -827,6 +859,13 @@ class CostToGo:
                 sigma.device == self.device
             ), f"sigma must be a wp.array on {self.device}, got {sigma.device}"
             wp.copy(self._sigma_in, sigma)
+        if drift is None:
+            self._drift_in.zero_()  # one age everywhere -> no spread -> no extra uncertainty
+        else:
+            assert (
+                drift.device == self.device
+            ), f"drift must be a wp.array on {self.device}, got {drift.device}"
+            wp.copy(self._drift_in, drift)
         if self._step_gate > 0.0:  # only the gate reads the mask
             if measured is None:
                 self._measured_in.fill_(1.0)
