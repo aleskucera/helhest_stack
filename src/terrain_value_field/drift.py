@@ -16,9 +16,24 @@ That assumption is not true, and not because of revisits. On a 14.5 Hz sensor wh
 only about a third of 0.2 m cells per frame, neighbouring cells inside one footprint are painted
 several sweeps apart. Measured on a real run, within 5 m of the robot: the age spread across a
 footprint is 1.11 s at the median -- the same early in the run and late, so it is the sensor's
-sparsity rather than the driving -- which is 0.095 m of sd on a height difference against the
-0.028 m that `var_meas` alone would claim. A factor of 3.4, in the optimistic direction, in the
-freshest part of the map. Out at 5-15 m the median spread reaches 76 s and 0.75 m.
+sparsity rather than the driving -- with a p90 reaching 88 s wherever the robot crosses its own
+earlier track. Out at 5-15 m the median reaches 76 s.
+
+What that costs depends on the PLATFORM's drift rate, and by a lot. Those same age spreads, on a
+map whose measurement sd is 1.75 cm:
+
+    age spread          q_z = 7.4e-03 (dead reckoning)   q_z = 7.5e-05 (on-device SLAM)
+    1.11 s  (median)              0.095 m   3.8x                 0.026 m   1.07x
+    87.7 s  (a revisit)           0.808 m  32.6x                 0.085 m   3.43x
+    76.5 s  (coarse ground)       0.754 m  30.4x                 0.080 m   3.22x
+
+So on a well-localised robot this is a SEAM correction and not a general one: where the ages
+under a footprint match, which is the ordinary case in a window that is continuously re-measured,
+it moves the answer by a few per cent. Where old data meets new -- a revisit, a window edge, the
+coarse layer's aged ground -- it is worth a factor of three, in the optimistic direction, which
+is the direction that drives a robot into things.
+
+Fit your own rate. The two columns above differ by 100x and the conclusions differ with them.
 
 `max - min` over a footprint bounds `|drift_A - drift_B|` for every pair inside it, so a producer
 that inflates with it is conservative and never optimistic. Which is the right way to be wrong.

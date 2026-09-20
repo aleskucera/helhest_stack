@@ -6,9 +6,11 @@ drift accrued since the older of them was last seen. Feeding a planner the absol
 variance vetoes a perfectly measured patch because a minute passed; feeding it the measurement
 variance alone assumes every cell under the robot was measured at the same instant.
 
-Measured on a real run, that assumption is wrong by 3.4x in the freshest part of the map -- the
-age spread across a footprint is 1.11 s at the median within 5 m of the robot, which is 0.095 m
-of sd on a height difference against the 0.028 m measurement alone would claim.
+Measured on a real run, the age spread across a footprint is 1.11 s at the median within 5 m of
+the robot, with a p90 reaching 88 s where it crosses its own earlier track. What that costs
+depends on the platform's drift rate: on dead reckoning it is 3.8x at the median, on a robot with
+on-device SLAM it is 1.07x at the median and still 3.4x at a seam. A seam correction, then --
+but seams are where a map goes wrong.
 """
 
 from __future__ import annotations
@@ -106,18 +108,17 @@ def test_a_seam_widens_the_sigma_the_margins_are_judged_against():
     np.testing.assert_allclose(seamed[:, :, 0, 0], plain[:, :, 0, 0], rtol=1e-5)
 
 
-def test_half_the_spread_per_cell_makes_a_PAIR_carry_the_whole_of_it():
-    """The reason it is half and not the whole. Both constraints are differences built from two
-    cells' sds, so half each sums to the full spread -- the bound on |drift_A - drift_B|. Giving
-    each cell the whole spread would double the variance, and since the spread usually dominates
-    the measurement term that is a real 1.41x shrink of every margin.
+@pytest.mark.parametrize("meas,spread", [(0.02, Q_Z * 1.11), (0.0175, 7.5e-5 * 87.7), (0.05, 0.0)])
+def test_half_the_spread_per_cell_makes_a_PAIR_carry_the_whole_of_it(meas, spread):
+    """The reason it is half and not the whole, and it is an identity rather than a number.
+
+    Both constraints are differences built from two cells' sds, so half each sums to the full
+    spread -- the bound on |drift_A - drift_B|. Giving each cell the whole spread would double the
+    variance, and wherever the spread dominates the measurement term that is a real 1.41x shrink
+    of every margin.
     """
-    meas, spread = 0.02, Q_Z * 1.11  # the measured median age spread within 5 m
-    inflated_var = meas**2 + 0.5 * spread
-    pair_var = 2.0 * inflated_var
-    assert pair_var == pytest.approx(2.0 * meas**2 + spread)
-    assert math.sqrt(pair_var) == pytest.approx(0.095, abs=0.001), "the measured 0.095 m"
-    assert math.sqrt(2.0 * meas**2) == pytest.approx(0.028, abs=0.001), "against 0.028 m"
+    pair_var = 2.0 * (meas**2 + 0.5 * spread)
+    assert pair_var == pytest.approx(2.0 * meas**2 + spread), "exactly the bound, at any rate"
 
 
 def test_the_drift_map_must_match_the_grid():
