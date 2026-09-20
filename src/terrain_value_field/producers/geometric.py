@@ -26,12 +26,32 @@ from __future__ import annotations
 import numpy as np
 import warp as wp
 
+from ..drift import footprint_drift_spread
 from ..field import Constraints
 from ..grid import Grid
 from ..grid import sample
 
 SLOPE = wp.constant(0)
 STEP = wp.constant(1)
+
+
+@wp.kernel
+def _inflate_sd_kernel(
+    height_sd: wp.array2d(dtype=wp.float32),  # [row, col]
+    spread: wp.array2d(dtype=wp.float32),  # [row, col]
+    sd_out: wp.array2d(dtype=wp.float32),  # [row, col]
+):
+    """Fold the footprint's drift spread into each cell's sd, HALF to each cell.
+
+    Both constraints below are differences, and this producer builds their sd from the two cells
+    being differenced. Giving each cell half the spread makes that pair sum to the whole of it,
+    which is the bound on |drift_A - drift_B| -- tight rather than doubled. Full spread per cell
+    would be conservative by 2x in variance, and since the spread usually DOMINATES the
+    measurement term that is a real 1.41x shrink of every margin, not a rounding choice.
+    """
+    r, c = wp.tid()
+    sd = height_sd[r, c]
+    sd_out[r, c] = wp.sqrt(sd * sd + 0.5 * spread[r, c])
 
 
 @wp.kernel
@@ -133,13 +153,30 @@ class GeometricProducer:
         shape = (self.N_CONSTRAINTS, int(rows), int(cols), int(n_theta))
         self.margin = wp.zeros(shape, dtype=wp.float32, device=self.device)
         self.sigma = wp.zeros(shape, dtype=wp.float32, device=self.device)
+        # scratch for the drift path; allocated on first use, since a caller with no belief map
+        # never needs them
+        self._spread: wp.array | None = None
+        self._sd_eff: wp.array | None = None
         self.floor = wp.array(
             np.array([slope_floor_rad, step_floor_m], np.float32),
             dtype=wp.float32,
             device=self.device,
         )
 
-    def __call__(self, height: wp.array, height_sd: wp.array, grid: Grid) -> Constraints:
+    def __call__(
+        self,
+        height: wp.array,
+        height_sd: wp.array,
+        grid: Grid,
+        drift: wp.array | None = None,
+    ) -> Constraints:
+        """`drift` is the belief's `var_h - var_meas` [m^2], negative where nothing was measured.
+
+        Pass it and the sd each constraint is judged against carries the footprint's drift SPREAD
+        as well as its measurement error -- see `terrain_value_field.drift` for why the spread and
+        not the drift itself, and for what it costs to leave it out. Omit it and the producer
+        behaves exactly as before, which is right for a map with no pose drift to speak of.
+        """
         # A map whose shape disagrees with the grid reads out of bounds and returns plausible
         # nonsense rather than failing -- `locate` clamps to the GRID's extent, not the array's.
         # Caught the hard way by a test that passed a (1, N) broadcast row as an (N, N) map.
@@ -149,6 +186,23 @@ class GeometricProducer:
                 raise ValueError(f"{name} is {tuple(arr.shape)}, but the grid is {want}")
         if tuple(self.margin.shape[1:3]) != want:
             raise ValueError(f"producer built for {tuple(self.margin.shape[1:3])}, grid is {want}")
+        if drift is not None:
+            if tuple(drift.shape) != want:
+                raise ValueError(f"drift is {tuple(drift.shape)}, but the grid is {want}")
+            if self._spread is None:
+                self._spread = wp.zeros(want, dtype=wp.float32, device=self.device)
+                self._sd_eff = wp.zeros(want, dtype=wp.float32, device=self.device)
+            # the footprint is the producer's business: only it knows how big the robot is
+            radius = max(1, int(round(0.5 * self.footprint_m / grid.cell_size)))
+            footprint_drift_spread(drift, radius, out=self._spread)
+            wp.launch(
+                _inflate_sd_kernel,
+                dim=want,
+                inputs=[height_sd, self._spread],
+                outputs=[self._sd_eff],
+                device=self.device,
+            )
+            height_sd = self._sd_eff
         wp.launch(
             geometric_margins_kernel,
             dim=self.margin.shape[1:],
