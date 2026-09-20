@@ -1,0 +1,62 @@
+# Driving on a belief
+
+The first loop in which the probabilistic stack changes what the robot does.
+
+Everything under `elevation_belief` and `terrain_value_field` has until now been computed, tested
+and consumed by nothing. The thing that drives is handed a height array and a measured mask; the
+per-cell measurement sd, the pose drift and the lattice's two readings of the map reach no
+decision, and `k_sigma` is never set. A quantity no decision depends on cannot be judged. So:
+
+| | |
+|---|---|
+| reality | ostrich `odin_sim` -- the measured 256x192 dToF ray table, contact physics, wheel dynamics |
+| perception | `elevation_belief`: per-cell Kalman fusion, the visibility carve, pose drift since each cell was last seen |
+| routing | `terrain_value_field` via `CostToGo`, **given the sd and the drift**, so a pose is vetoed on its margin in SIGMAS |
+| control | MPPI rollouts on a fine window cropped from the same belief |
+
+Localization is ground truth from the simulator. That is deliberate: this tests the planner, not
+ICP, and mixing the two would make a failure impossible to attribute.
+
+## Running it
+
+The simulator only exists on dasenka, and the planner only exists on `study/tvf-migration`, which
+is not what dasenka's `helhest_stack` is checked out to. So it runs against a worktree, created
+once:
+
+```bash
+# on dasenka, once
+cd /local/kuceral4/projects/helhest_stack
+git worktree add /local/kuceral4/projects/hs_tvf study/tvf-migration
+cd /local/kuceral4/projects && git clone ssh://git@github.com/aleskucera/elevation_belief.git
+git clone ssh://git@github.com/aleskucera/terrain_value_field.git
+```
+
+`env.sh` puts that worktree first on `PYTHONPATH`, so the main-branch checkout can never shadow
+it. Then:
+
+```bash
+cd /local/kuceral4/projects/ostrich-odinsim
+HELHEST_MOUNT=/local /local/kuceral4/projects/helhest-singularity/exec.sh bash -c \
+  'source <this dir>/env.sh && python3 <this dir>/drive_sim.py'
+```
+
+## The self-filter, and why it is not optional
+
+`odin_sim` casts every ray against the robot's own wheels and chassis, deliberately -- "exactly
+as on the real sensor". 22% of returns land inside 0.5 m. Fed to the belief unfiltered they paint
+the robot as a ~0.6 m obstacle that it then carries around with it: the 5x5 cells under a
+stationary robot read +0.59, +0.64, +0.62 where the ground is at +0.005.
+
+The planner is then walled in by its own body. Measured, with the filter off: 73% of seen cells
+blocked at some heading, and the robot drives 3 m, circles, and stops 12 m short of the goal.
+
+`--no-self-filter` reproduces that. The filter itself is `ScanPreprocessor`'s existing `self_box`
+gate, run in the robot's base frame where the box is exact, with the survivors rotated to world
+by `transform_points` -- the cloud is uploaded once and never comes back to the host.
+
+## Unmeasured cells
+
+Filled from the median measured height, never with 0.0. A zero fill reads as flat ground wherever
+the robot has not looked, and where the ground itself sits below zero that is a phantom plateau
+which walls the routing window off in a closed ring and makes the goal unreachable. That has been
+diagnosed on real bags twice.

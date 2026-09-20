@@ -207,3 +207,14 @@ def upsample_inject_kernel(
         v = coarse[ci, cj]
         if not wp.isnan(v):
             fine[i, j] = v
+
+
+@wp.kernel
+def finite_mask_kernel(
+    src: wp.array2d(dtype=wp.float32),
+    fixed: wp.array2d(dtype=wp.int32),
+):
+    """1 where `src` holds a real height, 0 where it is NaN -- the inpaint's Dirichlet set."""
+    i, j = wp.tid()
+    v = src[i, j]
+    fixed[i, j] = wp.where(wp.isnan(v), 0, 1)
