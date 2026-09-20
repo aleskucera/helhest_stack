@@ -16,6 +16,14 @@ then falls forever and scans nothing but its own hull. Building the world whole 
 unwanted boxes 50 m keeps the terrain, and the pillars worlds stamp their obstacles ONTO flat
 ground (`ground_only` clears those cells back to 0.0), so what is left behind is clear ground
 and not a pit.
+
+`--viewer` opens ostrich's GL window and walks the same person past the robot, to watch rather
+than to measure: it writes no npz. The viewer path cannot own the same loop -- ViewerGL plus
+CUDA graphs faults the context from a hand-written loop, so `OdinViewerSim` inverts it and calls
+back per segment, which puts the scan AFTER the step rather than before it. That is a one-frame
+shift between the person's labelled position and the cloud it appears in, and the labels are the
+entire point of this study, so the recording stays on the headless path and there is exactly one
+code path for anything that gets measured.
 """
 
 import argparse
@@ -46,12 +54,17 @@ ap.add_argument(
     help="[m] largest half-extent a borrowed box may have to pass as a person",
 )
 ap.add_argument("--out", default="/local/kuceral4/tmp/person_clear.npz")
+ap.add_argument(
+    "--viewer",
+    action="store_true",
+    help="watch the walk in ostrich's GL window instead of recording it (writes no npz)",
+)
 a = ap.parse_args()
 
 dt = 1.0 / a.rate
 # always build the world whole -- see the module docstring for why turning the obstacles off
 # at BUILD time takes the terrain with them
-sim = build_sim(world=a.world, dt=dt, viewer=False)
+sim = build_sim(world=a.world, dt=dt, viewer=a.viewer)
 sensor = OdinSensor(sim.model, 0, ODIN_MOUNT_XYZ, seed=0)
 m = sim.model
 st0 = m.shape_transform.numpy().copy()
@@ -75,7 +88,10 @@ if not len(compact):
         f"  static shapes: {sizes}"
     )
 d = np.hypot(st0[compact, 0] - robot[0], st0[compact, 1] - robot[1])
-person = int(compact[int(np.argmax(d))])
+# Round before ranking. `pillars` has two candidate boxes the same distance out either side of
+# the robot, and the settle leaves it ~0.05 mm off centre, so a bare argmax picks a different one
+# from run to run -- which is a silly thing for a labelled scenario to be nondeterministic about.
+person = int(compact[np.lexsort((compact, -np.round(d, 3)))[0]])
 hx, hy, hz = scale[person]  # the label must be the box's TRUE extent
 print(f"world={a.world}  robot at ({robot[0]:.2f}, {robot[1]:.2f}, {robot[2]:.2f})")
 print(
@@ -88,15 +104,39 @@ if not a.obstacles:
     print(f"sank {len(static) - 1} other static shapes; the person walks over clear ground")
 
 span = a.to_y - a.from_y
-clouds, robots, people, stamps = [], [], [], []
-for k in range(a.frames):
-    t = k * dt
-    # walk across at constant speed, then hold at the far side
-    y = a.from_y + min(span, a.speed * t)
+
+
+def place(k: int) -> tuple[float, float]:
+    """Where the person stands on frame `k`: across at constant speed, then holding."""
+    y = a.from_y + min(span, a.speed * k * dt)
     px, py = robot[0] + a.cross_x, robot[1] + y
     tf = st0.copy()
     tf[person, 0], tf[person, 1], tf[person, 2] = px, py, 0.85
     m.shape_transform.assign(tf)
+    return px, py
+
+
+if a.viewer:
+    # no enable_viewer() here -- build_sim(viewer=True) already owns a ViewerGL, and calling it
+    # again builds a second one over the top of the first
+    step = 0
+
+    def on_segment() -> None:
+        global step
+        px, py = place(step)
+        step += sim.steps_per_segment
+        if step % 40 < sim.steps_per_segment:
+            print(f"  step {step:>4d}  person at ({px:5.2f}, {py:6.2f})")
+
+    sim.on_segment = on_segment
+    print("viewer: SPACE pauses, and nothing is recorded. Close the window to quit.")
+    sim.run()
+    raise SystemExit(0)
+
+clouds, robots, people, stamps = [], [], [], []
+for k in range(a.frames):
+    t = k * dt
+    px, py = place(k)
     sim.step()
     pts = sensor.scan(sim.current_state)
     clouds.append(pts.astype(np.float32))

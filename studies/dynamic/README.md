@@ -28,6 +28,31 @@ frame. Copy that to `studies/dynamic/out/` and analyse it anywhere:
 .venv/bin/python studies/dynamic/person_figure.py    # the picture
 ```
 
+### Watching it instead
+
+`--viewer` opens ostrich's GL window and walks the same person past the robot in physical
+reality, rather than drawing what the mapper believes. dasenka is headless, so it needs the
+virtual display:
+
+```bash
+# on dasenka
+./start-vnc.sh                                  # Xvfb :77, x11vnc on 5977, localhost only
+DISPLAY=:77 __GLX_VENDOR_LIBRARY_NAME=nvidia OSTRICH_ALLOW_NVIDIA_GLX=1 \
+HELHEST_MOUNT=/local projects/helhest-singularity/exec.sh bash -c \
+  'source projects/ostrich-odinsim/odin_env.sh && python3 tmp/person_sim.py --viewer'
+
+# from the laptop, in another shell
+ssh -L 5977:localhost:5977 dasenka              # then point a VNC client at localhost:5977
+```
+
+Both GL variables are needed, and the second is the one that is easy to miss. ostrich *strips*
+`__GLX_VENDOR_LIBRARY_NAME=nvidia` by default, because pinning GL to the same NVIDIA GPU that is
+running the CUDA graphs kills a laptop run after ~60 s with an Xid 13 that surfaces as
+`CUDA error 719`. dasenka has no integrated GPU to fall back to, so unpinning drops it to Mesa
+llvmpipe -- software. `OSTRICH_ALLOW_NVIDIA_GLX=1` keeps the pin. Measured here: **14.50 it/s,
+exactly real time, with the override; 1.07 it/s without**, and no fault past the 60 s mark with
+two 3090s to spread across. SPACE pauses. It records nothing -- see below for why.
+
 ## The scenario
 
 A 0.9 x 0.9 x 1.0 m box, standing from 0.35 m to 1.35 m, walks across the robot's view at
@@ -39,6 +64,13 @@ The person is an existing static shape relocated each frame. The ray-cast kernel
 moved shape is visible to the sensor immediately and costs nothing to move. The world's other
 boxes and its perimeter walls are **sunk 50 m** rather than switched off, so the person walks over
 clear ground: a ghost next to a wall is not a ghost you can measure.
+
+The viewer does not record. `OdinViewerSim` inverts the loop -- ViewerGL plus CUDA graphs faults
+the context from a hand-written loop, so ostrich's `run()` owns it and calls back once per
+segment, which puts the scan *after* the step rather than before it. That is a one-frame shift
+between the person's labelled position and the cloud it appears in, and the labels are the entire
+point of this study. So `--viewer` is for watching and the headless path is the only thing that
+writes an npz: one code path for anything that gets measured.
 
 ### Two ways of picking the mover that both give a scene worth nothing
 
