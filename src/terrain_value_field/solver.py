@@ -304,7 +304,7 @@ class ValueSolver:
             )
         if capture and self.device.is_cuda:
             key = (pose_cost.ptr, seeds.ptr, float(penalty_scale))
-            if self._graph_key != key:
+            if self._graph is None or self._graph_key != key:
                 with wp.ScopedCapture(device=self.device) as cap:
                     self._iterate(pose_cost, seeds, penalty_scale)
                 self._graph, self._graph_key = cap.graph, key
