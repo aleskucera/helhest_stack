@@ -171,3 +171,29 @@ def test_the_pose_cost_encoding_loses_nothing_at_a_vetoed_state():
     # and the round trip is exact, not approximate
     encoded = -1.0 - penalty
     assert float(_decode(encoded)[1]) == pytest.approx(penalty, rel=0, abs=0)
+
+
+def test_a_state_every_constraint_declines_to_judge_reads_as_perfect_ground():
+    """The trap the module docstring warns about, pinned so the warning cannot go stale.
+
+    `IGNORED` means "this constraint does not apply here", and a state where every constraint
+    declines comes out unvetoed, unpenalised and undoubted -- identical to flat, certain, ideal
+    terrain. A producer that spells "unmeasured" this way gets silent optimism. Unmeasured
+    belongs in the sigma, where it produces a veto AND a doubt signal.
+    """
+    shape = (2, 1, 1, 1)  # two constraints, one state
+    mar = wp.array(np.full(shape, float(M.IGNORED), np.float32), dtype=wp.float32)
+    sig = wp.array(np.full(shape, 0.5, np.float32), dtype=wp.float32)
+    flo = wp.array(np.array([0.01, 0.01], np.float32), dtype=wp.float32)
+    out = [wp.zeros(shape[1:], dtype=wp.float32) for _ in range(4)]
+    wp.launch(
+        M.margin_to_fields_kernel,
+        dim=shape[1:],
+        inputs=[mar, sig, flo, wp.array(np.array([2.0], np.float32), dtype=wp.float32), 4.0, 1.0],
+        outputs=out,
+    )
+    z, z_certain, pose_cost, doubt = (float(o.numpy()[0, 0, 0]) for o in out)
+    assert z >= float(M.IGNORED), "nothing spoke, so nothing bounds the margin"
+    assert pose_cost >= 0.0, "NOT vetoed"
+    assert pose_cost == pytest.approx(0.0), "and not even penalised"
+    assert doubt == pytest.approx(0.0), "and no doubt raised -- this is the silent part"

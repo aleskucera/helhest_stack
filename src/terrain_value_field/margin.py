@@ -23,6 +23,30 @@ than a part of one robot's planner.
 roll against a 15 degree limit read as infinitely safe. The floor is the irreducible error --
 localisation, controller tracking, model mismatch -- that no map improvement removes.
 
+IGNORED IS NOT "UNMEASURED", AND CONFUSING THE TWO IS SILENT. A constraint set to `IGNORED`
+declines to speak about a state, and `min` then skips it. If EVERY constraint declines, `z` stays
+at IGNORED -- enormously above any `k_sigma`, and above `z_ref` too -- so the state is not vetoed,
+carries no penalty, and produces NO DOUBT. An unmeasured cell becomes indistinguishable from
+perfect flat ground, and nothing anywhere says so. Measured on a goal placed past the horizon,
+with the 25 columns between the robot and the goal never observed:
+
+    unknown encoded as  V at robot  V optimistic   doubt out there
+   observed everywhere       17.50         17.50              0.00
+              declines       17.50         17.50              0.00   <-- silently optimistic
+             uncertain UNREACHABLE         17.50             38.86
+                filled UNREACHABLE   UNREACHABLE              0.00   <-- silently pessimistic
+
+`declines` drives straight at a goal through terrain nobody has seen, at exactly the cost it
+would charge for measured ground. `filled` -- an invented height reported with a confident sigma
+-- is the opposite failure: the planner believes a wall is there and the doubt field says there
+is nothing to learn, which is indistinguishable from a genuinely walled-off map.
+
+Unmeasured belongs in the SIGMA. Report the best guess with an honest sigma and all three
+readings do their job: the pessimistic solve refuses to drive blind, the optimistic one shows a
+route exists if the ground is as good as it looks, and `doubt` says which cells are responsible.
+`IGNORED` is for a constraint that does not APPLY to a state -- a slope test where no plane was
+fitted -- not for one whose input was never measured.
+
 POSE COST. The veto and the graded cost travel as ONE field, with the veto in the sign:
 
     pose_cost = penalty          a state the robot may occupy, penalty >= 0
