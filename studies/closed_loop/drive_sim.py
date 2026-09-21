@@ -55,6 +55,7 @@ from helhest.engine import GridParams
 from helhest.perception import multigrid_inpaint
 from helhest.perception import ScanPreprocessor
 from helhest.perception import transform_points
+from helhest.planning.coarse import CoarseRouter
 from helhest.planning.costtogo import CostToGo
 
 # The robot in its own base frame: origin at the front axle, rear wheel 0.75 m behind, wheels
@@ -116,7 +117,8 @@ def crop_kernel(
     off: wp.int32,
     out: wp.array2d(dtype=wp.float32),
 ):
-    """The fine window out of the routing window. Both are square and share a centre cell."""
+    """A centred square crop. Every window here shares the belief's centre cell, so one offset
+    describes the crop completely."""
     i, j = wp.tid()
     out[i, j] = src[i + off, j + off]
 
@@ -141,14 +143,28 @@ def drive(a: argparse.Namespace) -> dict:
         rates=DriftRates.odin_slam(),  # on-device SLAM, 100x below the dead-reckoning default
     )
 
-    # The MPPI window is a centred crop of the belief's, so the offset between the two is a
-    # constant and the captured replan graph can hold it.
+    # Three windows, each a centred crop of the belief's, so every offset between them is a
+    # constant the captured replan graph can hold. n // 2 - k // 2 rather than (n - k) // 2: the
+    # two differ by a cell when the difference is odd, and only this one puts the robot's centre
+    # CELL at the centre of all of them.
+    #
+    #   belief / coarse   the whole window, pooled to `coarsen` cells -- WHICH WAY round
+    #   routing           a crop, at full resolution, settle-based       -- HOW to get there
+    #   MPPI              a smaller crop, where the rollouts live
+    #
+    # The routing window is deliberately much smaller than the belief. A fine window larger than
+    # the sensor's reliable coverage is not planning over terrain, it is planning over whatever
+    # filled the unobserved cells -- and a 14 m one was measured to produce no usable plan at all,
+    # because its boundary ring sat outside the 6 m horizon.
     nw = int(round(a.fine / a.cell))
-    # n // 2 - nw // 2, not (n - nw) // 2: the two differ by a cell when the difference is
-    # odd, and only this one puts the robot's centre CELL at the centre of both windows.
-    off = n // 2 - nw // 2
+    nr = int(round(a.route / a.cell))
+    if not nw <= nr <= n:
+        raise SystemExit(f"need fine <= route <= window, got {a.fine} <= {a.route} <= {a.window}")
+    off_w = n // 2 - nw // 2
+    off_r = n // 2 - nr // 2
     win_grid = GridParams(nw, nw, a.cell, 0.0, 0.0)
-    route_grid = GridParams(n, n, a.cell, 0.0, 0.0)
+    route_grid = GridParams(nr, nr, a.cell, 0.0, 0.0)
+    belief_grid = GridParams(n, n, a.cell, 0.0, 0.0)
     plan_sim = ForwardSimulator(
         dynamics.robot_params(a.wheel_width),
         # command_delay 0: nothing here feeds sim.command_history, and rolling out against an
@@ -171,14 +187,38 @@ def drive(a: argparse.Namespace) -> dict:
         device=a.device,
     )
     planner.cw.lattice_cap = ctg._vcap
-    sgrid = GridParams(n, n, a.cell, -off * a.cell, -off * a.cell).build()
+    # the routing field expressed in the MPPI window's frame: a constant cell offset apart
+    sgrid = GridParams(nr, nr, a.cell, (off_r - off_w) * a.cell, (off_r - off_w) * a.cell).build()
+
+    coarse = None
+    if a.coarsen > 0:
+        coarse = CoarseRouter(
+            belief_grid, factor=a.coarsen, max_step_m=a.coarse_step, device=a.device
+        )
+        # the coarse grid covers the whole belief window; express its origin in the ROUTING
+        # window's frame, which is where the fine solve reads it
+        ctg.set_coarse(
+            GridParams(
+                coarse.grid.cells_x,
+                coarse.grid.cells_y,
+                coarse.grid.cell_size,
+                -off_r * a.cell,
+                -off_r * a.cell,
+            )
+        )
 
     # Preallocated so the per-frame path allocates nothing and touches no host memory. `scratch`
     # exists because `multigrid_inpaint` fills IN PLACE, and the array it would fill is the
     # belief's own height layer.
     zeros2d = lambda k: wp.zeros((k, k), dtype=wp.float32, device=a.device)  # noqa: E731
-    scratch, measured_d, sd_d, fine_d = zeros2d(n), zeros2d(n), zeros2d(n), zeros2d(nw)
+    scratch, measured_d, sd_d = zeros2d(n), zeros2d(n), zeros2d(n)
+    h_r, m_r, sd_r, drift_r = zeros2d(nr), zeros2d(nr), zeros2d(nr), zeros2d(nr)
+    fine_d = zeros2d(nw)
     height_d = scratch  # so a run that arrives before its first frame can still dump
+
+    def crop(src: wp.array, off: int, out: wp.array) -> wp.array:
+        wp.launch(crop_kernel, dim=out.shape, inputs=[src, off], outputs=[out], device=a.device)
+        return out
 
     pre = ScanPreprocessor(sensor.n_rays, device=a.device)
     box = self_box(dynamics.robot_params(a.wheel_width)) if a.self_filter else None
@@ -239,23 +279,30 @@ def drive(a: argparse.Namespace) -> dict:
         )
         wp.launch(sd_kernel, dim=(n, n), inputs=[lay["meas_var"]], outputs=[sd_d], device=a.device)
 
-        # ROUTING -- the belief's uncertainty reaches the planner here, and nowhere before
+        # WHICH WAY -- the coarse layer over the whole belief window, which is the only layer
+        # that can see far enough to choose a side. Its value prices the routing window's border.
+        vc = None
+        if coarse is not None:
+            vc = coarse.solve(height_d, measured_d, (goal[0] - belief.xmin, goal[1] - belief.ymin))
+
+        # HOW -- the settle-based routing window, a crop, where the belief's uncertainty reaches
+        # the planner and nowhere before
+        r0 = belief.xmin + off_r * a.cell
+        s0 = belief.ymin + off_r * a.cell
         V = ctg.compute(
-            height_d,
-            (goal[0] - belief.xmin, goal[1] - belief.ymin),
-            measured=measured_d,
-            sigma=sd_d,
-            drift=belief.drift(),
+            crop(height_d, off_r, h_r),
+            (goal[0] - r0, goal[1] - s0),
+            measured=crop(measured_d, off_r, m_r),
+            sigma=crop(sd_d, off_r, sd_r),
+            drift=crop(belief.drift(), off_r, drift_r),
+            coarse_value=vc,
         )
         planner.set_lattice(V, sgrid)
 
         # CONTROL -- fine window, cropped from the same belief
-        wx0 = belief.xmin + off * a.cell
-        wy0 = belief.ymin + off * a.cell
-        wp.launch(
-            crop_kernel, dim=(nw, nw), inputs=[height_d, off], outputs=[fine_d], device=a.device
-        )
-        plan_sim.set_terrain(fine_d)
+        wx0 = belief.xmin + off_w * a.cell
+        wy0 = belief.ymin + off_w * a.cell
+        plan_sim.set_terrain(crop(height_d, off_w, fine_d))
         state_l = np.array([rx - wx0, ry - wy0, yaw], np.float32)
         goal_l = (goal[0] - wx0, goal[1] - wy0)
         if d < a.dock:
@@ -284,19 +331,25 @@ def drive(a: argparse.Namespace) -> dict:
                 f"{100*blk[seen].mean():4.1f}% of poses"
             )
     if a.out:
-        seen = measured_d.numpy() != 0.0
+        # The belief and the routing window are different sizes now, so each array is dumped with
+        # the origin it is expressed in. Anything that reads this and assumes one grid is wrong.
         np.savez_compressed(
             a.out,
             trail=np.array(trail, np.float64),
             body_z=np.array(body_z, np.float64),
             goal=goal,
-            height=height_d.numpy(),
-            seen=seen,
-            blocked=ctg.blocked.numpy(),
-            V=ctg.V.numpy(),
-            bounds=np.array([belief.xmin, belief.ymin], np.float64),
             cell=a.cell,
             reached=reached,
+            height=height_d.numpy(),
+            seen=measured_d.numpy() != 0.0,
+            bounds=np.array([belief.xmin, belief.ymin], np.float64),
+            blocked=ctg.blocked.numpy(),
+            V=ctg.V.numpy(),
+            route_bounds=np.array(
+                [belief.xmin + off_r * a.cell, belief.ymin + off_r * a.cell], np.float64
+            ),
+            coarse_V=(np.zeros((0, 0)) if coarse is None else coarse.V.numpy()[:, :, 0]),
+            coarse_cell=(0.0 if coarse is None else coarse.grid.cell_size),
         )
         print(f"wrote {a.out}")
 
@@ -319,8 +372,11 @@ def main() -> None:
     p.add_argument("--frames", type=int, default=900)
     p.add_argument("--rate", type=float, default=14.5)  # the real sensor's rate
     p.add_argument("--settle", type=int, default=40)
-    p.add_argument("--window", type=float, default=14.0, help="[m] belief + routing window")
+    p.add_argument("--window", type=float, default=30.0, help="[m] belief + coarse window")
+    p.add_argument("--route", type=float, default=10.0, help="[m] settle-based routing window")
     p.add_argument("--fine", type=float, default=9.0, help="[m] MPPI window, a centred crop")
+    p.add_argument("--coarsen", type=int, default=5, help="fine cells per coarse cell; 0 = OFF")
+    p.add_argument("--coarse-step", type=float, default=0.25, help="[m] climbable step, coarse")
     p.add_argument("--cell", type=float, default=0.2)
     p.add_argument("--carve", type=float, default=6.0, help="[m] 0 disables the visibility carve")
     p.add_argument("--k-sigma", type=float, default=2.0, help="veto below this many sigmas")

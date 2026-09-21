@@ -401,6 +401,63 @@ def _seed_goal_kernel(
     seeds[r, c, t] = wp.where(r == goal_rc[0] and c == goal_rc[1], 0.0, inf)
 
 
+@wp.kernel
+def _seed_goal_and_boundary_kernel(
+    goal_xy: wp.array(dtype=wp.float32),  # [2], this window's frame -- UNCLAMPED on purpose
+    coarse_value: wp.array3d(dtype=wp.float32),  # [cy, cx, 1], the coarse layer's cost-to-go
+    coarse_origin_x: wp.float32,  # the coarse grid, expressed in THIS window's frame
+    coarse_origin_y: wp.float32,
+    coarse_cell: wp.float32,
+    origin_x: wp.float32,  # this window's own origin, same frame
+    origin_y: wp.float32,
+    cell_size: wp.float32,
+    band: wp.int32,  # ring thickness, in fine cells
+    inf: wp.float32,
+    seeds: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+):
+    """Seed the goal AND the window's border, in one pass because each writes every cell.
+
+    A border cell is seeded at what the coarse layer says it costs to carry on from there, so the
+    fine solve pays the real price of each exit and prefers the right one instead of treating
+    every way out of the window as equally good. See `terrain_value_field.hierarchical`; this is
+    that kernel fused with the goal seeding, which the fine layer does on device because the goal
+    is resolved inside the captured graph.
+
+    The goal is taken UNCLAMPED here, unlike the single-layer path. Clamping an out-of-window goal
+    onto the border is what makes one layer work at all -- it becomes a carrot the window drags
+    along -- but with a coarse layer it is actively wrong: a zero-cost seed on the border beats
+    every finite coarse value, so the ring is overridden and the robot chases the exit nearest the
+    goal even when the coarse layer knows that exit is a dead end. When the goal is outside, the
+    ring IS the goal information and nothing else should be seeded.
+
+    The coarse value is read from the NEAREST coarse cell, never interpolated: unreachable cells
+    hold +inf, and blending that with a finite neighbour yields a large finite number -- a cell
+    that reads as reachable at an invented price, which is worse than either truth.
+    """
+    r, c, t = wp.tid()
+    rows = seeds.shape[0]
+    cols = seeds.shape[1]
+    gc = int((goal_xy[0] - origin_x) / cell_size)
+    gr = int((goal_xy[1] - origin_y) / cell_size)
+    if gr >= 0 and gr < rows and gc >= 0 and gc < cols:
+        # The goal is in the window, so the window is not missing anything and the ring is not
+        # seeded at all. It would not merely be redundant: the coarse layer is omnidirectional and
+        # pays no turn cost, so it UNDERSTATES distance in the fine layer's own metric, and a ring
+        # priced that way reads as a shortcut. The fine solve would route the robot out of the
+        # window and back to reach a goal sitting a few metres in front of it.
+        seeds[r, c, t] = wp.where(r == gr and c == gc, 0.0, inf)
+        return
+    v = inf
+    if r < band or r >= rows - band or c < band or c >= cols - band:
+        x = origin_x + (float(c) + 0.5) * cell_size
+        y = origin_y + (float(r) + 0.5) * cell_size
+        cc = int(wp.round((x - coarse_origin_x) / coarse_cell))
+        cr = int(wp.round((y - coarse_origin_y) / coarse_cell))
+        if cr >= 0 and cr < coarse_value.shape[0] and cc >= 0 and cc < coarse_value.shape[1]:
+            v = coarse_value[cr, cc, 0]
+    seeds[r, c, t] = v
+
+
 class CostToGo:
     def __init__(
         self,
@@ -500,6 +557,13 @@ class CostToGo:
             self.grid.cell_size,
         )
         self.settle_sim.set_friction(self._mu)
+
+        # Two-layer routing is opt-in and is armed by `set_coarse`, not by the constructor: the
+        # coarse grid's geometry is CONSTANT (both windows recenter together, so their offset is),
+        # and only the values change per frame -- which is what keeps the captured graph valid.
+        self._coarse_in: wp.array | None = None
+        self._coarse_geom = (0.0, 0.0, 0.0)  # origin_x, origin_y, cell_size, in this window's frame
+        self._band = 0
 
         self.solver = ValueSolver(
             self.grid.cell_size,
@@ -800,13 +864,34 @@ class CostToGo:
             outputs=[self._pose_cost],
             device=self.device,
         )
-        wp.launch(
-            _seed_goal_kernel,
-            dim=self.V.shape,
-            inputs=[self._goal_rc, self.solver._inf],
-            outputs=[self._seeds],
-            device=self.device,
-        )
+        if self._coarse_in is None:
+            wp.launch(
+                _seed_goal_kernel,
+                dim=self.V.shape,
+                inputs=[self._goal_rc, self.solver._inf],
+                outputs=[self._seeds],
+                device=self.device,
+            )
+        else:
+            cox, coy, cocell = self._coarse_geom
+            wp.launch(
+                _seed_goal_and_boundary_kernel,
+                dim=self.V.shape,
+                inputs=[
+                    self._goal_xy,
+                    self._coarse_in,
+                    cox,
+                    coy,
+                    cocell,
+                    self.bounds[0],
+                    self.bounds[2],
+                    self.grid.cell_size,
+                    self._band,
+                    self.solver._inf,
+                ],
+                outputs=[self._seeds],
+                device=self.device,
+            )
         # capture=False: `compute` has already opened a ScopedCapture around this whole pipeline,
         # and value_iterate would try to nest a second one. Its `capture_while` still builds a
         # device-side conditional node inside the OUTER capture, so the loop stays on the GPU.
@@ -823,6 +908,37 @@ class CostToGo:
         )
         self._prof.mark(4)  # clamp done
 
+    def set_coarse(
+        self,
+        coarse_grid: GridParams,
+        band: int | None = None,
+    ) -> None:
+        """Arm two-layer routing: this window's border is seeded from a coarser layer's V.
+
+        `coarse_grid` is the coarse layer's geometry expressed in THIS window's frame. Both
+        windows are robot-centred and recenter in whole cells together, so that offset is a
+        constant and is safe to bake into the captured graph -- only the values move.
+
+        `band` is the ring thickness in FINE cells and defaults to the furthest a single
+        primitive reaches. A thinner ring can be stepped clean over by one arc, which seeds
+        nothing and silently returns the single-layer behaviour.
+
+        Call before the first `compute`. Arming it later would invalidate a graph already built
+        around the single-layer seeding, so it refuses rather than replay a stale one.
+        """
+        if self._graph is not None:
+            raise RuntimeError("set_coarse must be called before the first compute()")
+        cy, cx = int(coarse_grid.cells_y), int(coarse_grid.cells_x)
+        self._coarse_in = wp.zeros((cy, cx, 1), dtype=wp.float32, device=self.device)
+        self._coarse_geom = (
+            float(coarse_grid.origin_x),
+            float(coarse_grid.origin_y),
+            float(coarse_grid.cell_size),
+        )
+        self._band = int(self.solver.reach_cells if band is None else band)
+        if self._band < 1:
+            raise ValueError(f"band must be >= 1 fine cell, got {self._band}")
+
     def compute(
         self,
         elevation: wp.array,
@@ -832,6 +948,7 @@ class CostToGo:
         drift: wp.array | None = None,
         k_sigma: float | None = None,
         sigma_scale: float | None = None,
+        coarse_value: wp.array | None = None,
     ) -> wp.array:
         """elevation [ny, nx] device wp.array + goal -> clamped V[ny, nx, n_theta]. The entire solve
         (settle + value iteration) is captured ONCE as a CUDA graph and replayed each call with the
@@ -882,6 +999,10 @@ class CostToGo:
         self._sigma_scale_d.assign(
             np.array([1.0 if sigma_scale is None else sigma_scale], np.float32)
         )
+        if coarse_value is not None:
+            if self._coarse_in is None:
+                raise RuntimeError("pass coarse_value only after set_coarse()")
+            wp.copy(self._coarse_in, coarse_value)
         self._goal_xy.assign(np.asarray(goal_xy[:2], np.float32))
 
         if self.device.is_cuda:
