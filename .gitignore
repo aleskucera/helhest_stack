@@ -14,6 +14,9 @@ dist/
 *.html
 *.png
 *.gif
+# ... except a page that IS source. The scrub viewer is hand-written and its data directory is
+# what gets generated, so the rule above would quietly drop the only copy of it.
+!studies/closed_loop/scrub_page.html
 
 # Data files
 *.npy
@@ -30,3 +33,4 @@ data/
 # MkDocs build output
 site/
 .tools/
+studies/dynamic/out/
