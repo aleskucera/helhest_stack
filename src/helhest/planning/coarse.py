@@ -11,9 +11,33 @@ Pooled to 1.0 m the same map is 85% known at 10 m where the 0.2 m grid is 26%. S
 layer can see the shape of the world at a range where the fine layer cannot see anything -- which
 is the range at which "go left or go right" is decided.
 
-Two deliberate differences from the fine layer, both of which make this layer STRICTLY more
-permissive. That is the property that stops the two from disagreeing in a loop: a route the
-coarse layer promises and the fine layer then refuses makes the robot oscillate between them.
+KNOWN DEFECT, measured 2026-09-21 and not yet fixed. This layer is NOT strictly more permissive
+than the fine one, which is the property the pairing needs, and the two paragraphs below are
+where it goes wrong. On the `gap` world -- a wall at x = 6 with a 1.8 m opening -- the coarse
+column through that opening reads SEALED in every frame from the sixteenth on, so the coarse
+field prices the far side at 3.4 m and the robot's own side at 18.5 m with no connection between
+them. Two causes, and the second is the larger:
+
+  The reduction is wrong. MAX answers "how bad is the worst thing in this block", which is the
+  fine layer's question. This layer asks "is there a way through this block" -- an ANY question.
+  MAX makes it pessimistic about obstacles, and pessimistic about obstacles is the one thing a
+  coarse routing layer must never be.
+
+  The step test blocks a cell for its NEIGHBOUR. A cell in the middle of a gap is vetoed for
+  sitting next to a wall, so at 1.0 m cells everything within a metre of an obstacle is blocked
+  and a corridor needs ~3 m of clearance before its centre survives. A 1.8 m gap cannot pass at
+  any grid alignment.
+
+The reason `gap` still reached is not reassuring: 748 of its 818 routable coarse cells had never
+been measured and 483 of those lie outside the world's 16 x 10 m extent, so the layer routed
+around the OUTSIDE of the world and the fine layer, which sees the real opening, drove through it
+regardless. The fix is to pool passability rather than height -- ANY fine cell in the block
+climbable -- drop the between-cell step test, and bound the optimism to a frontier around
+ever-measured ground.
+
+Two deliberate differences from the fine layer, INTENDED to make this layer strictly more
+permissive. That is the property that stops the two disagreeing in a loop: a route the coarse
+layer promises and the fine layer then refuses makes the robot oscillate between them.
 
   No settle. A 1.0 m cell is smaller than the robot, so placing a 1.5 m chassis on one and
   solving its contacts says nothing the pooling has not already said. Feasibility here is a step
@@ -26,8 +50,9 @@ coarse layer promises and the fine layer then refuses makes the robot oscillate 
   `terrain_value_field.hierarchical`, in the one place it belongs.
 
 The pooling is a MAX over each block, so an obstacle is never averaged away by the ground around
-it. Combined with the step test that makes the layer pessimistic about obstacles and optimistic
-about ignorance, which is the right way round for both.
+it. That was chosen to keep the layer from missing an obstacle, and it is the defect above: it
+makes the layer pessimistic about obstacles and optimistic about ignorance, which is the wrong
+way round for the first and only right for the second.
 """
 
 from __future__ import annotations
@@ -75,6 +100,10 @@ def _step_cost_kernel(
     pose_cost: wp.array3d(dtype=wp.float32),  # coarse [cy, cx, 1]
 ):
     """Block a cell when the step to any 8-neighbour exceeds what the robot can climb.
+
+    This vetoes a cell for its neighbour's height, which seals any corridor narrower than about
+    three cells -- see the module docstring's KNOWN DEFECT. Kept until the passability pooling
+    that replaces it lands, so the behaviour on record matches the code on record.
 
     Sign convention is the solver's and is shared with `costtogo._pose_cost_kernel`: the veto
     rides in the sign, so a free pose is `+penalty` and a vetoed one `-1 - penalty`. This layer
