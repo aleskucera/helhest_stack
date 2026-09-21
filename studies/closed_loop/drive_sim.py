@@ -315,9 +315,12 @@ def drive(a: argparse.Namespace) -> dict:
         sim.set_wheel_command(cmd)
         sim.step()
         if f % a.report == 0:
-            # the only host reads in the loop, and they happen on report frames alone
+            # the only host reads in the loop, and they happen on report frames alone.
+            # Two masks, because the windows are different sizes: coverage is a property of the
+            # BELIEF, and blocked is a property of the routing crop.
             blk = ctg.blocked.numpy()
             seen = measured_d.numpy() != 0.0
+            rseen = m_r.numpy() != 0.0
             print(
                 f"  f{f:>4d}  at ({rx:6.2f},{ry:6.2f}) yaw {np.degrees(yaw):7.1f}d  "
                 f"goal {d:5.2f} m  cmd [{cmd[0]:5.2f} {cmd[1]:5.2f}]  "
@@ -327,8 +330,8 @@ def drive(a: argparse.Namespace) -> dict:
                 # is what a "blocked" map shows and is pessimistic by construction -- the
                 # settle straddles a thin obstacle, so a cell beside one is blocked for a
                 # minority of headings and still counts.
-                f"blocked {100*blk.max(2)[seen].mean():4.1f}% of cells / "
-                f"{100*blk[seen].mean():4.1f}% of poses"
+                f"blocked {100*blk.max(2)[rseen].mean():4.1f}% of cells / "
+                f"{100*blk[rseen].mean():4.1f}% of poses"
             )
     if a.out:
         # The belief and the routing window are different sizes now, so each array is dumped with
