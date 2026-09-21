@@ -193,7 +193,13 @@ def drive(a: argparse.Namespace) -> dict:
     coarse = None
     if a.coarsen > 0:
         coarse = CoarseRouter(
-            belief_grid, factor=a.coarsen, max_step_m=a.coarse_step, device=a.device
+            belief_grid,
+            factor=a.coarsen,
+            max_step_m=a.coarse_step,
+            min_pass_fraction=a.coarse_pass,
+            frontier_m=a.frontier,
+            void_penalty=a.void_penalty,
+            device=a.device,
         )
         # the coarse grid covers the whole belief window; express its origin in the ROUTING
         # window's frame, which is where the fine solve reads it
@@ -393,11 +399,18 @@ def main() -> None:
     p.add_argument("--frames", type=int, default=900)
     p.add_argument("--rate", type=float, default=14.5)  # the real sensor's rate
     p.add_argument("--settle", type=int, default=40)
-    p.add_argument("--window", type=float, default=30.0, help="[m] belief + coarse window")
+    # 20 m, not 30: the sensor's useful GROUND coverage falls off well before that (100% at 4 m,
+    # 74-85% at 6, 41-49% at 8, 12-14% at 12 on out_odin0), and on these worlds a 30 m window was
+    # also 5.6x the area of the world itself -- 83% of it void the coarse layer then routed
+    # through. 20 m is 2.25x cheaper and loses nothing that was ever measured.
+    p.add_argument("--window", type=float, default=20.0, help="[m] belief + coarse window")
     p.add_argument("--route", type=float, default=10.0, help="[m] settle-based routing window")
     p.add_argument("--fine", type=float, default=9.0, help="[m] MPPI window, a centred crop")
     p.add_argument("--coarsen", type=int, default=5, help="fine cells per coarse cell; 0 = OFF")
     p.add_argument("--coarse-step", type=float, default=0.25, help="[m] climbable step, coarse")
+    p.add_argument("--coarse-pass", type=float, default=0.5, help="climbable fraction to cross")
+    p.add_argument("--frontier", type=float, default=3.0, help="[m] unseen ground that stays free")
+    p.add_argument("--void-penalty", type=float, default=1.0, help="[m] per cell of unseen beyond")
     p.add_argument("--cell", type=float, default=0.2)
     p.add_argument("--carve", type=float, default=6.0, help="[m] 0 disables the visibility carve")
     p.add_argument("--k-sigma", type=float, default=2.0, help="veto below this many sigmas")

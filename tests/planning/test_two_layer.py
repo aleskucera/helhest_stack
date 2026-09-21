@@ -56,6 +56,22 @@ ROBOT = (7.0, 12.0)
 GOAL = (18.0, 12.0)  # due east of the robot, reachable only by going south
 
 
+def _gap_wall(opening: float = 1.8) -> tuple[np.ndarray, np.ndarray]:
+    """A wall right across the world at x = 12, with an `opening`-metre doorway at y = 12.
+
+    Modelled on the `gap` stress world, whose wall has a 1.8 m opening -- the case that showed
+    the first version of this layer sealing every passage narrower than about three coarse cells.
+    Everything is measured here: the question is what the pooling makes of geometry it CAN see.
+    """
+    h = np.zeros((WORLD, WORLD), np.float32)
+    c = int(12.0 / CELL)
+    h[:, c : c + 2] = WALL
+    lo = int((12.0 - opening / 2) / CELL)
+    hi = int((12.0 + opening / 2) / CELL)
+    h[lo:hi, c : c + 2] = 0.0
+    return h, np.ones_like(h)
+
+
 def _fine_window(cx: float, cy: float) -> GridParams:
     """A FINE-window GridParams centred on (cx, cy), in world coordinates."""
     return GridParams(
@@ -128,13 +144,11 @@ def test_the_coarse_layer_sees_a_wall_the_fine_window_cannot():
     h, m = _blocking_wall()
     coarse = CoarseRouter(_world_grid(), factor=5, max_step_m=0.25, device="cuda")
     coarse.solve(_dev(h), _dev(m), GOAL)
-    pooled = coarse.pooled.numpy()
     k = coarse.grid.cell_size
     col = int(12.0 / k)
-    assert pooled[int(5.0 / k) :, col] == pytest.approx(
-        WALL, abs=1e-5
-    ), "the MAX pool must carry the wall, not average it into the ground beside it"
-    assert pooled[0, col] == pytest.approx(0.0, abs=1e-5), "and must not invent one past its end"
+    frac = coarse.passable.numpy()
+    assert (frac[int(5.0 / k) :, col] < 0.5).all(), "no room to cross the solid part of the wall"
+    assert frac[0, col] >= 0.5, "and the ground past its southern end is still crossable"
 
 
 def test_the_coarse_layer_routes_around_the_wall_rather_than_through_it():
@@ -151,16 +165,79 @@ def test_the_coarse_layer_routes_around_the_wall_rather_than_through_it():
     assert at(*ROBOT) > 20.0, f"the detour must be priced, got {at(*ROBOT):.2f}"
 
 
-def test_unmeasured_ground_is_not_blocked_by_the_coarse_layer():
-    """The `certain=True` reading. Ignorance about ground the robot has not reached is the fine
-    layer's problem once it gets there, not a reason to route around it now."""
+def test_a_gap_narrower_than_a_coarse_cell_pair_still_reads_as_a_way_through():
+    """The regression this layer was rewritten for.
+
+    A 1.8 m doorway is under two 1.0 m coarse cells wide, so no coarse cell fits inside it at
+    most grid alignments. Pooling PASSABILITY with ANY does not need one to: a block holding any
+    climbable fine cell is a block with a way through it. Pooling height with MAX did need one,
+    and sealed the doorway.
+    """
+    h, m = _gap_wall(1.8)
+    coarse = CoarseRouter(_world_grid(), factor=5, max_step_m=0.25, device="cuda")
+    v = coarse.solve(_dev(h), _dev(m), (18.0, 12.0)).numpy()[:, :, 0]
+    k = coarse.grid.cell_size
+    at = lambda x, y: v[int(y / k), int(x / k)]  # noqa: E731
+    west = at(8.0, 12.0)
+    assert west < coarse.solver._inf, "the doorway must connect the two sides"
+    # straight through is ~10 m; anything near the 40 m way round the world is not the doorway
+    assert west < 16.0, f"it should route THROUGH the gap, not around the world: {west:.1f} m"
+    assert at(12.0, 3.0) >= coarse.solver._inf, "and the solid part of the wall stays blocked"
+
+
+def test_a_doorway_the_pooling_cannot_see_is_the_one_case_it_may_seal():
+    """The limit, stated rather than hidden. A doorway narrower than one FINE cell leaves no
+    climbable fine cell, so nothing survives to pool -- being wrong here is being wrong in the
+    permissive layer's safe direction only because the robot could not have fitted anyway."""
+    h, m = _gap_wall(0.2)
+    coarse = CoarseRouter(_world_grid(), factor=5, max_step_m=0.25, device="cuda")
+    v = coarse.solve(_dev(h), _dev(m), (18.0, 12.0)).numpy()[:, :, 0]
+    k = coarse.grid.cell_size
+    assert v[int(12.0 / k), int(8.0 / k)] > 16.0, "a 0.2 m slit is not a route"
+
+
+# ------------------------------------------------------------- unmeasured ground, and its price
+
+
+def test_unmeasured_ground_near_the_frontier_is_free():
     h = np.zeros((WORLD, WORLD), np.float32)
     m = np.ones_like(h)
     m[:, int(10.0 / CELL) :] = 0.0  # nothing east of 10 m has ever been measured
-    coarse = CoarseRouter(_world_grid(), factor=5, max_step_m=0.25, device="cuda")
-    v = coarse.solve(_dev(h), _dev(m), (18.0, 10.0)).numpy()[:, :, 0]
+    coarse = CoarseRouter(_world_grid(), factor=5, frontier_m=3.0, void_penalty=1.0, device="cuda")
+    coarse.solve(_dev(h), _dev(m), (18.0, 10.0))
+    cost = coarse._pose_cost.numpy()[:, :, 0]
     k = coarse.grid.cell_size
-    assert v[int(10.0 / k), int(2.0 / k)] < coarse.solver._inf, "unseen ground must stay routable"
+    assert cost[int(10.0 / k), int(11.5 / k)] == 0.0, "just past the frontier is still free"
+
+
+def test_unmeasured_ground_far_past_the_frontier_is_priced_but_never_blocked():
+    """What stops the layer routing around the outside of the world. On `gap` it costed an 18 m
+    detour through 483 cells that have no world in them and called it a route."""
+    h = np.zeros((WORLD, WORLD), np.float32)
+    m = np.ones_like(h)
+    m[:, int(10.0 / CELL) :] = 0.0
+    coarse = CoarseRouter(_world_grid(), factor=5, frontier_m=3.0, void_penalty=1.0, device="cuda")
+    v = coarse.solve(_dev(h), _dev(m), (18.0, 10.0)).numpy()[:, :, 0]
+    cost = coarse._pose_cost.numpy()[:, :, 0]
+    k = coarse.grid.cell_size
+    deep = cost[int(10.0 / k), int(17.0 / k)]
+    assert deep == pytest.approx(1.0), f"deep void should carry the penalty, got {deep}"
+    assert deep > 0.0, "priced, not vetoed -- the sign carries the veto"
+    assert v[int(10.0 / k), int(2.0 / k)] < coarse.solver._inf, "and the goal stays reachable"
+
+
+def test_the_void_penalty_makes_the_real_way_round_the_cheaper_one():
+    """A wall with a doorway, and nothing measured beyond the wall. Un-penalised, the layer would
+    rather leave the world than use the doorway, because empty space is free and shorter."""
+    h, m = _gap_wall(1.8)
+    m = m.copy()
+    m[: int(6.0 / CELL), :] = 0.0  # the whole southern strip is unseen: a tempting way round
+    free = CoarseRouter(_world_grid(), factor=5, void_penalty=0.0, device="cuda")
+    priced = CoarseRouter(_world_grid(), factor=5, void_penalty=2.0, device="cuda")
+    k = free.grid.cell_size
+    a = free.solve(_dev(h), _dev(m), (18.0, 12.0)).numpy()[int(12.0 / k), int(8.0 / k), 0]
+    b = priced.solve(_dev(h), _dev(m), (18.0, 12.0)).numpy()[int(12.0 / k), int(8.0 / k), 0]
+    assert b >= a, "pricing the void can only raise the cost of a route that uses it"
 
 
 # ------------------------------------------------------------------------------------ the pair

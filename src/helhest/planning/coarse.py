@@ -11,48 +11,46 @@ Pooled to 1.0 m the same map is 85% known at 10 m where the 0.2 m grid is 26%. S
 layer can see the shape of the world at a range where the fine layer cannot see anything -- which
 is the range at which "go left or go right" is decided.
 
-KNOWN DEFECT, measured 2026-09-21 and not yet fixed. This layer is NOT strictly more permissive
-than the fine one, which is the property the pairing needs, and the two paragraphs below are
-where it goes wrong. On the `gap` world -- a wall at x = 6 with a 1.8 m opening -- the coarse
-column through that opening reads SEALED in every frame from the sixteenth on, so the coarse
-field prices the far side at 3.4 m and the robot's own side at 18.5 m with no connection between
-them. Two causes, and the second is the larger:
+This layer must be STRICTLY more permissive than the fine one. That is the property that stops
+the two disagreeing in a loop: a route the coarse layer promises and the fine layer then refuses
+makes the robot oscillate between them. Everything below follows from it, and the first version
+of this file got each point backwards, so each carries the measurement that corrected it.
 
-  The reduction is wrong. MAX answers "how bad is the worst thing in this block", which is the
-  fine layer's question. This layer asks "is there a way through this block" -- an ANY question.
-  MAX makes it pessimistic about obstacles, and pessimistic about obstacles is the one thing a
-  coarse routing layer must never be.
+  It pools PASSABILITY, not height, and by FRACTION. The question here is "is there room to
+  cross this block", which neither extreme answers. Pooling height with MAX answers the fine
+  layer's question -- "how bad is the worst thing in this block" -- and seals every passage
+  narrower than a cell or two: measured on the `gap` world, whose wall has a 1.8 m opening, MAX
+  read that opening as sealed in every frame from the sixteenth on, priced the far side at 3.4 m
+  and the robot's own side at 18.5, and left the two unconnected. Pooling with ANY overshoots the
+  other way: a 0.4 m wall inside a 1.0 m block leaves climbable ground beside it, so the block
+  reads open and the layer routes straight through a wall spanning the world.
 
-  The step test blocks a cell for its NEIGHBOUR. A cell in the middle of a gap is vetoed for
-  sitting next to a wall, so at 1.0 m cells everything within a metre of an obstacle is blocked
-  and a corridor needs ~3 m of clearance before its centre survives. A 1.8 m gap cannot pass at
-  any grid alignment.
+  So a block is passable when at least `min_pass_fraction` of its measured cells are climbable.
+  That is a proxy for width, and it is the honest one available: a block is crossable when most
+  of it is drivable. On the measured cases it separates cleanly -- a 1.8 m doorway pools near
+  1.0, a block straddling a 0.4 m wall pools near 0.4. It is a heuristic, and the reason a
+  heuristic is needed is that a per-CELL cost cannot express "you may stand in this block but not
+  cross it"; saying that properly needs per-EDGE feasibility, which the solver does not take.
 
-The reason `gap` still reached is not reassuring: 748 of its 818 routable coarse cells had never
-been measured and 483 of those lie outside the world's 16 x 10 m extent, so the layer routed
-around the OUTSIDE of the world and the fine layer, which sees the real opening, drove through it
-regardless. The fix is to pool passability rather than height -- ANY fine cell in the block
-climbable -- drop the between-cell step test, and bound the optimism to a frontier around
-ever-measured ground.
-
-Two deliberate differences from the fine layer, INTENDED to make this layer strictly more
-permissive. That is the property that stops the two disagreeing in a loop: a route the coarse
-layer promises and the fine layer then refuses makes the robot oscillate between them.
+  Passability is a property of a cell and its own neighbours, never of the block next door. The
+  version that vetoed a block when a NEIGHBOURING block differed in height by more than a step
+  blocked everything within a metre of an obstacle, so a corridor needed about 3 m of clearance
+  before its centre survived. No 1.8 m gap passes that at any grid alignment.
 
   No settle. A 1.0 m cell is smaller than the robot, so placing a 1.5 m chassis on one and
-  solving its contacts says nothing the pooling has not already said. Feasibility here is a step
-  test: a cell is blocked when the height difference to a neighbour exceeds what the robot can
-  climb. It answers "is there a way through", not "can it stand there".
+  solving its contacts says nothing the pooling has not already said. A fine cell is climbable
+  when the step to its immediate neighbours is one a wheel could drive up. That is a smaller
+  effective footprint than the fine layer's, deliberately: this layer is allowed to promise a gap
+  the robot then turns out not to fit through, and not allowed to hide one it would have fitted.
 
-  Unmeasured is not blocked. Ignorance about ground the robot has not reached is not a reason to
-  route around it -- deciding whether that ignorance is a problem is the fine layer's job, once
-  the robot is close enough to have measured it. This is the `certain=True` reading in
-  `terrain_value_field.hierarchical`, in the one place it belongs.
-
-The pooling is a MAX over each block, so an obstacle is never averaged away by the ground around
-it. That was chosen to keep the layer from missing an obstacle, and it is the defect above: it
-makes the layer pessimistic about obstacles and optimistic about ignorance, which is the wrong
-way round for the first and only right for the second.
+  Unmeasured is not blocked, but past a frontier it is not free either. Ignorance about ground
+  the robot has not reached is no reason to route around it -- that is the fine layer's job once
+  it arrives. Taken without limit, though, it lets this layer route through terrain that does not
+  exist: on `gap`, 748 of 818 routable cells had never been measured and 483 of those lay outside
+  the world's own 16 x 10 m extent, so it costed an 18 m detour around the OUTSIDE of the world
+  and called it a route. Cells within `frontier_m` of measured ground stay free; past that each
+  costs `void_penalty`. Still reachable -- a goal in terrain nobody has seen must stay reachable
+  or the robot will never go and look at it -- but no longer cheaper than the real way round.
 """
 
 from __future__ import annotations
@@ -66,68 +64,109 @@ from ..engine import GridParams
 
 
 @wp.kernel
-def _pool_kernel(
+def _climb_kernel(
     elevation: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
     measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = observed
-    factor: wp.int32,
-    pooled: wp.array2d(dtype=wp.float32),  # coarse [cy, cx]
-    seen: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], 1 = any fine cell observed
+    max_step: wp.float32,  # [m] the largest rise a wheel can drive up
+    climbable: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = a wheel could cross it
 ):
-    """MAX-pool `factor` x `factor` blocks. Max, not mean: a mean lets a block of ground average
-    an obstacle away, and this layer is the one that decides which side of it to pass."""
+    """A fine cell is climbable when the step to its immediate neighbours is one the robot can
+    drive up.
+
+    Unmeasured cells, and unmeasured neighbours, are skipped rather than counted: the height
+    there is a fill, and treating a fill as ground manufactures a cliff at the edge of the map.
+    """
+    r, c = wp.tid()
+    if measured[r, c] < 0.5:
+        climbable[r, c] = 0.0
+        return
+    rows = elevation.shape[0]
+    cols = elevation.shape[1]
+    h = elevation[r, c]
+    ok = float(1.0)
+    for dr in range(-1, 2):
+        for dc in range(-1, 2):
+            rr = r + dr
+            cc = c + dc
+            if rr >= 0 and rr < rows and cc >= 0 and cc < cols:
+                if measured[rr, cc] > 0.5:
+                    if wp.abs(elevation[rr, cc] - h) > max_step:
+                        ok = 0.0
+    climbable[r, c] = ok
+
+
+@wp.kernel
+def _pool_kernel(
+    elevation: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
+    measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
+    climbable: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
+    factor: wp.int32,
+    passable: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], climbable FRACTION in 0..1
+    seen: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], 1 = some fine cell observed
+    floor: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], lowest measured ground in the block
+):
+    """What fraction of the block's MEASURED cells a wheel could drive over.
+
+    Over the measured ones, not all of them, so a half-observed block is not marked impassable
+    for the half nobody has looked at -- that half's price is the frontier's business.
+
+    `floor` is the MINIMUM measured height, and is for looking at rather than for deciding --
+    the decision is `passable`. Minimum because the question a floor answers is "what is the
+    ground under this block", and a block holding an obstacle still has ground beside it.
+    """
     r, c = wp.tid()
     ny = elevation.shape[0]
     nx = elevation.shape[1]
-    hi = float(-1.0e30)
-    any_seen = float(0.0)
+    lo = float(1.0e30)
+    n_seen = float(0.0)
+    n_climb = float(0.0)
     for dr in range(factor):
         for dc in range(factor):
             fr = r * factor + dr
             fc = c * factor + dc
             if fr < ny and fc < nx:
                 if measured[fr, fc] > 0.5:
-                    hi = wp.max(hi, elevation[fr, fc])
-                    any_seen = 1.0
-    pooled[r, c] = wp.where(any_seen > 0.5, hi, 0.0)
-    seen[r, c] = any_seen
+                    lo = wp.min(lo, elevation[fr, fc])
+                    n_seen += 1.0
+                    if climbable[fr, fc] > 0.5:
+                        n_climb += 1.0
+    passable[r, c] = wp.where(n_seen > 0.0, n_climb / n_seen, 0.0)
+    seen[r, c] = wp.where(n_seen > 0.0, 1.0, 0.0)
+    floor[r, c] = wp.where(n_seen > 0.0, lo, 0.0)
 
 
 @wp.kernel
-def _step_cost_kernel(
-    pooled: wp.array2d(dtype=wp.float32),  # coarse [cy, cx]
+def _cost_kernel(
+    passable: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], climbable fraction
     seen: wp.array2d(dtype=wp.float32),  # coarse [cy, cx]
-    max_step: wp.float32,  # [m] the largest rise the robot can climb
+    min_pass: wp.float32,  # climbable fraction a block needs to count as crossable
+    frontier: wp.int32,  # [cells] how far past measured ground stays free
+    void_penalty: wp.float32,  # [m] charged per cell beyond that
     pose_cost: wp.array3d(dtype=wp.float32),  # coarse [cy, cx, 1]
 ):
-    """Block a cell when the step to any 8-neighbour exceeds what the robot can climb.
+    """Pack passability into the one signed field the solver reads.
 
-    This vetoes a cell for its neighbour's height, which seals any corridor narrower than about
-    three cells -- see the module docstring's KNOWN DEFECT. Kept until the passability pooling
-    that replaces it lands, so the behaviour on record matches the code on record.
-
-    Sign convention is the solver's and is shared with `costtogo._pose_cost_kernel`: the veto
-    rides in the sign, so a free pose is `+penalty` and a vetoed one `-1 - penalty`. This layer
-    grades nothing, so the penalty is zero and the values are exactly 0.0 and -1.0.
-
-    A step is only counted between two MEASURED cells. Against an unmeasured neighbour there is
-    no step to measure -- the pooled height there is a fill, and treating a fill as ground would
-    manufacture a cliff at the edge of the map and wall the window off in a ring.
+    Sign convention is the solver's, shared with `costtogo._pose_cost_kernel`: the veto rides in
+    the sign, so a free cell is `+penalty` and a vetoed one `-1 - penalty`. Measured ground is
+    free or vetoed outright. Unmeasured ground is free near the frontier and priced beyond it,
+    never vetoed -- a goal in terrain nobody has seen has to stay reachable, or the robot will
+    not go and look at it.
     """
     r, c, _t = wp.tid()
-    rows = pooled.shape[0]
-    cols = pooled.shape[1]
-    blocked = float(0.0)
     if seen[r, c] > 0.5:
-        h = pooled[r, c]
-        for dr in range(-1, 2):
-            for dc in range(-1, 2):
-                rr = r + dr
-                cc = c + dc
-                if rr >= 0 and rr < rows and cc >= 0 and cc < cols:
-                    if seen[rr, cc] > 0.5:
-                        if wp.abs(pooled[rr, cc] - h) > max_step:
-                            blocked = 1.0
-    pose_cost[r, c, 0] = wp.where(blocked > 0.5, -1.0, 0.0)
+        pose_cost[r, c, 0] = wp.where(passable[r, c] >= min_pass, 0.0, -1.0)
+        return
+    rows = seen.shape[0]
+    cols = seen.shape[1]
+    near = float(0.0)
+    for dr in range(-frontier, frontier + 1):
+        for dc in range(-frontier, frontier + 1):
+            rr = r + dr
+            cc = c + dc
+            if rr >= 0 and rr < rows and cc >= 0 and cc < cols:
+                if seen[rr, cc] > 0.5:
+                    near = 1.0
+    pose_cost[r, c, 0] = wp.where(near > 0.5, 0.0, void_penalty)
 
 
 @wp.kernel
@@ -161,10 +200,11 @@ def _goal_cell_kernel(
 class CoarseRouter:
     """A heading-free cost-to-go over the whole window, at a cell size where coverage is good.
 
-    `factor` is how many fine cells go into one coarse cell. `max_step_m` is the rise the robot
-    can climb; the tip-over envelope is what makes a slope impassable in the fine layer, and this
-    is its blunt equivalent -- deliberately blunt, because this layer must never be the stricter
-    of the two.
+    `factor` is how many fine cells go into one coarse cell and `max_step_m` the rise a wheel can
+    drive up. `min_pass_fraction` is how much of a block must be climbable before it counts as
+    crossable. `frontier_m` is how far past measured ground stays free, and `void_penalty` what
+    each cell costs beyond it -- in metres, so 1.0 doubles the price of crossing a metre of
+    terrain nobody has looked at.
     """
 
     def __init__(
@@ -172,15 +212,24 @@ class CoarseRouter:
         fine_grid: GridParams,
         factor: int = 5,
         max_step_m: float = 0.25,
+        min_pass_fraction: float = 0.5,
+        frontier_m: float = 3.0,
+        void_penalty: float = 1.0,
         device: wp.Device | str | None = None,
     ) -> None:
         if factor < 1:
             raise ValueError(f"factor must be >= 1 fine cells per coarse cell, got {factor}")
         if max_step_m <= 0.0:
             raise ValueError(f"max_step_m must be > 0, got {max_step_m}")
+        if frontier_m < 0.0 or void_penalty < 0.0:
+            raise ValueError(
+                f"frontier_m and void_penalty must be >= 0, got {frontier_m}, {void_penalty}"
+            )
         self.device = wp.get_device(device)
         self.factor = int(factor)
         self.max_step_m = float(max_step_m)
+        self.min_pass_fraction = float(min_pass_fraction)
+        self.void_penalty = float(void_penalty)
         # ceil, so the coarse grid covers the fine one even when it does not divide evenly
         cy = (fine_grid.cells_y + self.factor - 1) // self.factor
         cx = (fine_grid.cells_x + self.factor - 1) // self.factor
@@ -191,9 +240,12 @@ class CoarseRouter:
             origin_x=fine_grid.origin_x,
             origin_y=fine_grid.origin_y,
         )
+        self.frontier = int(round(float(frontier_m) / self.grid.cell_size))
         with wp.ScopedDevice(self.device):
-            self.pooled = wp.zeros((cy, cx), dtype=wp.float32)
+            self._climb = wp.zeros((fine_grid.cells_y, fine_grid.cells_x), dtype=wp.float32)
+            self.passable = wp.zeros((cy, cx), dtype=wp.float32)
             self.seen = wp.zeros((cy, cx), dtype=wp.float32)
+            self.floor = wp.zeros((cy, cx), dtype=wp.float32)
             self._pose_cost = wp.zeros((cy, cx, 1), dtype=wp.float32)
             self._seeds = wp.zeros((cy, cx, 1), dtype=wp.float32)
             self._goal_rc = wp.zeros(2, dtype=wp.int32)
@@ -220,16 +272,29 @@ class CoarseRouter:
         """
         self._goal_xy.assign(np.asarray(goal_xy[:2], np.float32))
         wp.launch(
-            _pool_kernel,
-            dim=self.pooled.shape,
-            inputs=[elevation, measured, self.factor],
-            outputs=[self.pooled, self.seen],
+            _climb_kernel,
+            dim=self._climb.shape,
+            inputs=[elevation, measured, self.max_step_m],
+            outputs=[self._climb],
             device=self.device,
         )
         wp.launch(
-            _step_cost_kernel,
+            _pool_kernel,
+            dim=self.passable.shape,
+            inputs=[elevation, measured, self._climb, self.factor],
+            outputs=[self.passable, self.seen, self.floor],
+            device=self.device,
+        )
+        wp.launch(
+            _cost_kernel,
             dim=self._pose_cost.shape,
-            inputs=[self.pooled, self.seen, self.max_step_m],
+            inputs=[
+                self.passable,
+                self.seen,
+                self.min_pass_fraction,
+                self.frontier,
+                self.void_penalty,
+            ],
             outputs=[self._pose_cost],
             device=self.device,
         )
@@ -254,5 +319,7 @@ class CoarseRouter:
             outputs=[self._seeds],
             device=self.device,
         )
-        self.V = self.solver.value_iterate(self._pose_cost, self._seeds, 0.0)
+        # penalty_scale 1.0: the void penalty is already in metres, so it adds to the move's own
+        # length as itself rather than being weighted a second time
+        self.V = self.solver.value_iterate(self._pose_cost, self._seeds, 1.0)
         return self.V
