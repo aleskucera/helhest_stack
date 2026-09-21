@@ -40,6 +40,40 @@ HELHEST_MOUNT=/local /local/kuceral4/projects/helhest-singularity/exec.sh bash -
   'source <this dir>/env.sh && python3 <this dir>/drive_sim.py'
 ```
 
+### Every world at once
+
+`sweep.sh` drives all six stress worlds, two at a time (one per GPU), and writes one npz each:
+
+```bash
+cd /local/kuceral4/projects/ostrich-odinsim
+HELHEST_MOUNT=/local /local/kuceral4/projects/helhest-singularity/exec.sh bash -c \
+  'source <this dir>/env.sh && bash <this dir>/sweep.sh'
+```
+
+`WORLDS=`, `FRAMES=`, `OUT=` and `EXTRA=` override the defaults; `EXTRA=--coarsen 0` runs the
+same sweep with the coarse layer off, which is the A/B for it. Copy the npz back and draw them:
+
+```bash
+.venv/bin/python studies/closed_loop/sweep_figure.py --dir studies/closed_loop/out/sweep
+```
+
+Each world is drawn at its own extent. The belief is a rolling window and every run ends
+somewhere different, so a panel is the map the robot had in front of it when it stopped -- not a
+survey of the world. Ground it drove over earlier has scrolled out and is grey.
+
+## The three windows
+
+  belief + coarse   30 m, pooled to 1.0 m cells   -- which way round
+  routing           10 m at 0.2 m, settle-based   -- how to get there
+  MPPI               9 m                          -- where the rollouts live
+
+Each is a centred crop of the one above, so every offset between them is a constant and the
+captured replan graph stays valid. The routing window is small deliberately: a fine window larger
+than the sensor's reliable coverage is not planning over terrain but over whatever filled the
+unobserved cells, and a 14 m one was measured to produce no usable plan at all, its boundary ring
+sitting outside the 6 m horizon. `--coarsen 0` turns the coarse layer off and returns the
+single-layer behaviour.
+
 ## The self-filter, and why it is not optional
 
 `odin_sim` casts every ray against the robot's own wheels and chassis, deliberately -- "exactly
