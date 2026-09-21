@@ -198,10 +198,10 @@
   </div>
 
   <p class="note">
-    The view is a <b>chase camera on the belief window</b> — 30 m across, robot-centred, recentred
+    The view is a <b>chase camera on the belief window</b> — <span id="n-span">—</span> across, robot-centred, recentred
     in whole cells as it drives. Ground the robot mapped earlier scrolls out of it, which is why
     the driven path runs off into empty space. The <b>routing</b> and <b>blocked</b> layers cover
-    only the inner 10 m, because a fine window larger than the sensor's reliable coverage plans
+    only the inner <span id="n-route">—</span>, because a fine window larger than the sensor's reliable coverage plans
     over whatever filled the unobserved cells rather than over terrain. Each layer is scaled
     against <b>its own range in that frame</b>, printed under the map: a colour means a slightly
     different value from one frame to the next, which is what lets centimetres of relief stay
@@ -431,6 +431,9 @@
     frame = Math.min(last, Math.round(last * 0.62));
     $("scrub").value = String(frame);
     $("hdr").textContent = w.frames.length + " recorded frames · " + ORDER.length + " worlds";
+    // read the window sizes off the data rather than restating them: both have changed once
+    $("n-span").textContent = (w.n * w.cell).toFixed(0) + " m";
+    $("n-route").textContent = (w.nr * w.cell).toFixed(0) + " m";
     draw();
   }
 
