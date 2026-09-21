@@ -229,6 +229,9 @@ def drive(a: argparse.Namespace) -> dict:
     # contact buffers are deliberately NOT read -- touching one faults the CUDA context once
     # the step is replayed from a graph, which is why the viewer draws no contacts either.
     trail, closest, reached, body_z = [], 1.0e9, False, []
+    # Opt-in, strided history for the scrub page. Host reads, so it is off by default and never
+    # on the measured path -- with --history 0 the loop below is byte-identical to before.
+    hist: dict[str, list] = {k: [] for k in ("h", "seen", "blk", "v", "cv", "meta")}
     for f in range(a.frames):
         body = sim.current_state.body_q.numpy()[0]
         rx, ry, yaw, R = pose_of(body)
@@ -313,6 +316,19 @@ def drive(a: argparse.Namespace) -> dict:
             cmd = np.array([u[0, 0], u[0, 1], 0.5 * (u[0, 0] + u[0, 1])], np.float32)
 
         sim.set_wheel_command(cmd)
+        if a.history and f % a.history == 0:
+            hist["h"].append(height_d.numpy().copy())
+            hist["seen"].append((measured_d.numpy() > 0.5).astype(np.uint8))
+            hist["blk"].append(ctg.blocked.numpy().mean(2))
+            hist["v"].append(V.numpy().min(2))
+            hist["cv"].append(
+                np.zeros((1, 1), np.float32) if coarse is None else coarse.V.numpy()[:, :, 0]
+            )
+            # the belief window recenters in whole cells as the robot moves, so every frame
+            # carries the origin its own maps are expressed in
+            hist["meta"].append(
+                [f, rx, ry, yaw, float(cmd[0]), float(cmd[1]), d, belief.xmin, belief.ymin]
+            )
         sim.step()
         if f % a.report == 0:
             # the only host reads in the loop, and they happen on report frames alone.
@@ -353,6 +369,8 @@ def drive(a: argparse.Namespace) -> dict:
             ),
             coarse_V=(np.zeros((0, 0)) if coarse is None else coarse.V.numpy()[:, :, 0]),
             coarse_cell=(0.0 if coarse is None else coarse.grid.cell_size),
+            # the windows are robot-centred, so each recorded frame carries its own origin
+            **{f"hist_{k}": np.asarray(v) for k, v in hist.items() if v},
         )
         print(f"wrote {a.out}")
 
@@ -406,6 +424,12 @@ def main() -> None:
     )
     p.add_argument("--report", type=int, default=25)
     p.add_argument("--out", default=None, help="npz of the final map + trail, for the figure")
+    p.add_argument(
+        "--history",
+        type=int,
+        default=0,
+        help="also record every Nth frame into --out, for the scrub page; 0 = OFF",
+    )
     p.add_argument("--device", default="cuda")
     a = p.parse_args()
 
