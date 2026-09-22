@@ -124,7 +124,16 @@ def crop_kernel(
     out[i, j] = src[i + off, j + off]
 
 
-def carrot_command(path: np.ndarray, state: np.ndarray, robot, look: float, speed: float):
+def carrot_command(
+    path: np.ndarray,
+    state: np.ndarray,
+    robot,
+    look: float,
+    speed: float,
+    spin_deg: float,
+    spin_rate: float,
+    recover: float,
+) -> np.ndarray:
     """Pure pursuit along the lattice's OWN policy path -> (wL, wR, w_rear) rad/s.
 
     The point of this controller is what it CANNOT do. `trace_optimal` walks the policy, so the
@@ -135,23 +144,40 @@ def carrot_command(path: np.ndarray, state: np.ndarray, robot, look: float, spee
     feasibility actually binds, and so the arm that can tell us whether the veto set is
     survivable or merely strict.
 
-    It is a diagnostic, not a replacement. The lattice is kinematic -- no momentum, no motor lag,
-    no friction -- so this tracks a plan the robot can follow at low speed and knows nothing
-    about braking distance at the 1.5-2.5 m/s the stack is meant for.
+    Two things the first version got wrong, each of which froze a world:
+
+    Turning is DECOUPLED from driving. Scaling the pure-pursuit curvature by a forward speed that
+    itself falls with misalignment is a deadlock -- the robot slows down and loses the turn rate
+    that would fix its heading, so it stays misaligned. On `ridge` the commands decayed
+    1.88/2.18 -> 0.12/0.43 and it crept to a halt. A skid-steer turns on the spot for nothing, so
+    past `spin_deg` it does exactly that and drives only once it is pointing roughly the right
+    way.
+
+    And a plan that fails is not a reason to stop. When the policy walk returns nothing the first
+    version commanded zero, and since a stopped robot measures nothing new, the plan stayed
+    failed: `pillars` sat at one pose from frame 200 to 700. Now it turns on the spot, which
+    changes what it can see and costs nothing that the veto forbids.
+
+    A diagnostic, not a replacement. The lattice is kinematic -- no momentum, no motor lag, no
+    friction -- so this follows a plan at low speed and knows nothing about braking distance at
+    the 1.5-2.5 m/s the stack is meant for.
     """
     x, y, yaw = float(state[0]), float(state[1]), float(state[2])
-    if len(path) < 2:
-        return np.zeros(3, np.float32)
-    d = np.hypot(path[:, 0] - x, path[:, 1] - y)
-    far = np.flatnonzero(d >= look)
-    tx, ty = path[far[0]] if len(far) else path[-1]
-    reach = max(float(np.hypot(tx - x, ty - y)), 1e-3)
-    ang = np.arctan2(ty - y, tx - x) - yaw
-    ang = (ang + np.pi) % (2.0 * np.pi) - np.pi
-    # slow down when badly misaligned rather than cutting the corner: a skid-steer turns on the
-    # spot cheaply, and driving fast at a carrot behind you is how a forward-only plan orbits
-    v = speed * max(0.12, 1.0 - abs(ang) / (0.5 * np.pi))
-    omega = 2.0 * np.sin(ang) / reach * v  # pure-pursuit curvature, times speed
+    if len(path) >= 2:
+        d = np.hypot(path[:, 0] - x, path[:, 1] - y)
+        far = np.flatnonzero(d >= look)
+        tx, ty = path[far[0]] if len(far) else path[-1]
+        reach = max(float(np.hypot(tx - x, ty - y)), 1e-3)
+        ang = np.arctan2(ty - y, tx - x) - yaw
+        ang = float((ang + np.pi) % (2.0 * np.pi) - np.pi)
+    else:
+        ang, reach = recover, look  # no plan from here: turn and look
+
+    if abs(ang) > np.radians(spin_deg):
+        v, omega = 0.0, spin_rate * np.sign(ang)
+    else:
+        v = speed
+        omega = 2.0 * np.sin(ang) / reach * v  # pure-pursuit curvature, times speed
     wl = (v - omega * robot.half_track) / robot.wheel_radius
     wr = (v + omega * robot.half_track) / robot.wheel_radius
     return np.array([wl, wr, 0.5 * (wl + wr)], np.float32)
@@ -365,8 +391,15 @@ def drive(a: argparse.Namespace) -> dict:
             cmd = np.array([u[0, 0], u[0, 1], 0.5 * (u[0, 0] + u[0, 1])], np.float32)
         else:
             # the lattice's own policy, walked in the ROUTING window's frame, then followed
-            path = trace_optimal(ctg, (rx - r0, ry - s0, yaw), a.n_theta, nr, nr, 0.0, 0.0, a.cell)
-            cmd = carrot_command(path, (rx - r0, ry - s0, yaw), robot, a.look, a.carrot_speed)
+            local = (rx - r0, ry - s0, yaw)
+            path = trace_optimal(ctg, local, a.n_theta, nr, nr, 0.0, 0.0, a.cell)
+            # which way to turn when there is no plan: toward the goal, which is a direction the
+            # robot can always name even when the lattice cannot reach it
+            bearing = float(np.arctan2(goal[1] - ry, goal[0] - rx) - yaw)
+            bearing = (bearing + np.pi) % (2.0 * np.pi) - np.pi
+            cmd = carrot_command(
+                path, local, robot, a.look, a.carrot_speed, a.spin_deg, a.spin_rate, bearing
+            )
         cmd = np.clip(cmd, -a.wmax, a.wmax)
 
         sim.set_wheel_command(cmd)
@@ -494,6 +527,10 @@ def main() -> None:
     p.add_argument("--controller", choices=("mppi", "carrot"), default="mppi")
     p.add_argument("--look", type=float, default=1.2, help="[m] carrot lookahead along the plan")
     p.add_argument("--carrot-speed", type=float, default=0.8, help="[m/s] carrot cruise")
+    p.add_argument("--spin-deg", type=float, default=35.0, help="turn on the spot past this error")
+    p.add_argument(
+        "--spin-rate", type=float, default=0.9, help="[rad/s] body yaw rate when spinning"
+    )
     p.add_argument("--wmax", type=float, default=4.0, help="[rad/s] wheel-speed clamp")
     p.add_argument("--device", default="cuda")
     a = p.parse_args()
