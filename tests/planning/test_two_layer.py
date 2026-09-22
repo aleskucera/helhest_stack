@@ -169,9 +169,10 @@ def test_a_gap_narrower_than_a_coarse_cell_pair_still_reads_as_a_way_through():
     """The regression this layer was rewritten for.
 
     A 1.8 m doorway is under two 1.0 m coarse cells wide, so no coarse cell fits inside it at
-    most grid alignments. Pooling PASSABILITY with ANY does not need one to: a block holding any
-    climbable fine cell is a block with a way through it. Pooling height with MAX did need one,
-    and sealed the doorway.
+    most grid alignments, and pooling height with MAX needed one to -- which is why it sealed the
+    doorway. Pooling the climbable FRACTION does not: the blocks over the doorway are almost
+    entirely drivable and clear the threshold, while a block straddling the solid wall is not and
+    does not.
     """
     h, m = _gap_wall(1.8)
     coarse = CoarseRouter(_world_grid(), factor=5, max_step_m=0.25, device="cuda")
@@ -186,9 +187,10 @@ def test_a_gap_narrower_than_a_coarse_cell_pair_still_reads_as_a_way_through():
 
 
 def test_a_doorway_the_pooling_cannot_see_is_the_one_case_it_may_seal():
-    """The limit, stated rather than hidden. A doorway narrower than one FINE cell leaves no
-    climbable fine cell, so nothing survives to pool -- being wrong here is being wrong in the
-    permissive layer's safe direction only because the robot could not have fitted anyway."""
+    """The limit, stated rather than hidden. A 0.2 m slit is one fine cell wide, and that cell has
+    wall on both sides, so no cell in it is climbable and the block's fraction stays at zero. The
+    layer seals it -- and that is the one case where sealing is right anyway, since a 0.83 m robot
+    was never going through a 0.2 m slit."""
     h, m = _gap_wall(0.2)
     coarse = CoarseRouter(_world_grid(), factor=5, max_step_m=0.25, device="cuda")
     v = coarse.solve(_dev(h), _dev(m), (18.0, 12.0)).numpy()[:, :, 0]
