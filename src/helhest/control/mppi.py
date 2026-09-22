@@ -101,6 +101,17 @@ class CostWeights:
     tip: float
     # penalize occupying UNMEASURED map cells while reversing (no sensor coverage backward).
     unknown: float
+    # the cost-to-go's own per-pose VETO, sampled at the rollout pose and priced independently of
+    # V. The envelope terms above are computed from THIS rollout, whose settle is shallow and
+    # loose for speed; the cost-to-go's is a full static settle and is the more accurate of the
+    # two where they disagree. Measured on `bumpy`: at poses the robot actually held, the static
+    # settle predicted 15.3-17.8 deg of nose-down against a real 16.6-24.5, while 85% of sampled
+    # rollouts read clean. Independent of V because a vetoed pose is exactly a pose where V is
+    # capped, and a capped V arms `explore_fallback`, which replaces the lattice's verdict with
+    # straight-line distance to the goal -- so routing the veto through V alone deletes it in the
+    # one situation it is most needed. 71% of the frames where the robot left its envelope had V
+    # capped at its own cell, against 21% of the frames where it did not.
+    veto: float
     # mild per-meter preference against reverse motion (forward keeps the sensor looking ahead).
     reverse: float
     # (alpha - 1) -> grip recovery: total_grip = (alpha-1)*m*g/k_turn. 0 disables saturation.
@@ -138,6 +149,10 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # unmeasured-cell occupancy while REVERSING (forward motion into unknown stays allowed -- the
     # sensor sees it before arrival; backward there is no sensor, so unknown must hard-lose).
     unknown: float = 1e4
+    # the cost-to-go's veto, sampled per rollout pose. Same order as `infeasible`: a pose the
+    # static settle refuses is not a pose to buy with goal progress. 0 = OFF (the old behaviour,
+    # in which the veto reaches the controller only through V).
+    veto: float = 1e5
     # per-meter shaping against reverse -- sized so reverse is an ESCAPE, not a route. A pivot's
     # V-surcharge is small (the router blends turning into arcs) and a pi pivot eats most of the
     # horizon, so myopic backward progress outbids pivot-then-forward at low weights: measured, at
@@ -160,6 +175,7 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.saturation = self.saturation
         cw.tip = self.tip
         cw.unknown = self.unknown
+        cw.veto = self.veto
         cw.reverse = self.reverse
         cw.inv_k_turn = 0.0  # armed by MppiGpu from the sim's solver (0 = saturation off)
         cw.dt = 0.1  # overwritten by MppiGpu from the sim's solver
@@ -333,7 +349,9 @@ def _sample_target_wheel_omega_kernel(
     lo = wmin
     if b >= n_wide and b < n_wide + n_spin:
         lo = -wmax
-    target_wheel_omega[t, r] = wp.vec3(wp.clamp(wheel_l, lo, wmax), wp.clamp(wheel_r, lo, wmax), 0.0)
+    target_wheel_omega[t, r] = wp.vec3(
+        wp.clamp(wheel_l, lo, wmax), wp.clamp(wheel_r, lo, wmax), 0.0
+    )
 
 
 @wp.kernel
@@ -344,7 +362,9 @@ def _cost_kernel(
     residual: wp.array2d(dtype=float),
     target_wheel_omega: wp.array2d(dtype=wp.vec3),  # Ub in components [0], [1]
     current_wheel_omega: wp.array2d(dtype=wp.vec3),  # [T+1, B] realized omega; row t+1 drove step t
-    twist: wp.array2d(dtype=wp.vec3),  # [T+1, B] solved body twist (vx, vy, yaw_rate); row t+1 drove step t
+    twist: wp.array2d(
+        dtype=wp.vec3
+    ),  # [T+1, B] solved body twist (vx, vy, yaw_rate); row t+1 drove step t
     turning: wp.array2d(dtype=wp.vec2),  # [T, B] (alpha, x_icr) used at step t
     loads: wp.array2d(dtype=wp.vec3),  # [T, B] wheel normal loads at the post-step pose
     measured: wp.array2d(dtype=wp.float32),  # [ny, nx] 1 = real data (sim grid); gates reverse
@@ -354,6 +374,7 @@ def _cost_kernel(
     lattice_field: wp.array3d(
         dtype=float
     ),  # [ny, nx, n_theta] cost-to-go V(x,y,theta); the goal cost
+    veto_field: wp.array3d(dtype=float),  # [ny, nx, n_theta] 1 = the cost-to-go refuses this pose
     n_theta: int,
     cw: CostWeights,
     robot: Robot,  # envelope + feasibility thresholds (shared with the cost-to-go feasibility)
@@ -371,6 +392,7 @@ def _cost_kernel(
     penalty_sum = float(0.0)
     sat_sum = float(0.0)
     tip_sum = float(0.0)
+    veto_sum = float(0.0)
     unk_sum = float(0.0)
     rev_sum = float(0.0)
     edge = float(0.4)  # soft-wall margin inside the grid border
@@ -455,6 +477,11 @@ def _cost_kernel(
             sat_sum += early * wp.max(sat - 1.0, 0.0)
         # TIP-OVER margin: a negative wheel load = CoM outside the support triangle (and the settle
         # pose is no longer trustworthy from here on) -- penalize the deficit as a weight fraction.
+        if cw.veto > 0.0:
+            # sampled at the pose AND the heading the rollout holds there, the same way V is: a
+            # pose is refused per heading, and a cell that is fine facing one way is not fine
+            # facing another
+            veto_sum += early * sample_lattice(veto_field, grid, n_theta, pose[0], pose[1], yaw_eff)
         if cw.tip > 0.0:
             ld = loads[t, r]
             min_n = wp.min(wp.min(ld[0], ld[1]), ld[2])
@@ -477,6 +504,7 @@ def _cost_kernel(
         + cw.saturation * sat_sum
         + cw.tip * tip_sum
         + cw.unknown * unk_sum
+        + cw.veto * veto_sum
     )
     Jsafe[r] = safe
     Jout[r] = (
@@ -740,6 +768,9 @@ class MppiGpu:
             ny, nx = sim.elevation.shape
             self.n_theta = int(n_theta)
             self.lattice_field = wp.zeros((ny, nx, n_theta), dtype=wp.float32)  # V(x,y,theta)
+            # all-clear until armed by set_veto, so a caller that never calls it keeps the old
+            # behaviour exactly
+            self.veto_field = wp.zeros((ny, nx, n_theta), dtype=wp.float32)
             # observed-cell mask on the sim grid (1 = real data); all-measured by default so the
             # unknown-cell penalty is inert until a perception mask is supplied (set_measured)
             self.measured = wp.full((ny, nx), 1.0, dtype=wp.float32)
@@ -813,6 +844,20 @@ class MppiGpu:
         if grid is not None:
             self.lattice_grid = grid
 
+    def set_veto(self, blocked, grid=None):
+        """Copy the cost-to-go's per-pose veto `blocked[ny', nx', n_theta]` into the stable buffer
+        the cost kernel reads. Same shape and grid as `set_lattice`'s V, and subject to the same
+        rule: call before the first replan, and on re-solve call again with the SAME shape.
+
+        Priced independently of V on purpose -- see `CostWeights.veto`. Leave it unset and the
+        field stays zero, which is the behaviour before it existed.
+        """
+        if tuple(blocked.shape) != tuple(self.veto_field.shape):
+            self.veto_field = wp.zeros(blocked.shape, dtype=float, device=self.device)
+        wp.copy(self.veto_field, blocked)
+        if grid is not None:
+            self.lattice_grid = grid
+
     def _refine(self):
         """One MPPI iteration: sample -> rollout -> cost -> CEM reweight, all on device."""
         self._prof.mark(0)
@@ -859,6 +904,7 @@ class MppiGpu:
                 self.goal,
                 self.lattice_grid,
                 self.lattice_field,
+                self.veto_field,
                 self.n_theta,
                 self.cw,
                 self.robot,

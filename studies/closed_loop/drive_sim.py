@@ -92,6 +92,12 @@ def pose_of(body_q: np.ndarray) -> tuple[float, float, float, np.ndarray]:
     return float(body_q[0]), float(body_q[1]), float(np.arctan2(R[1, 0], R[0, 0])), R
 
 
+def roll_pitch(R: np.ndarray) -> tuple[float, float]:
+    """ZYX roll and pitch in the settle's own convention: climb = nose-up = NEGATIVE pitch, which
+    is what `_feasibility_kernel` and the MPPI's envelope terms both compare against."""
+    return float(np.arctan2(R[2, 1], R[2, 2])), float(np.arcsin(-np.clip(R[2, 0], -1.0, 1.0)))
+
+
 @wp.kernel
 def measured_kernel(
     valid: wp.array2d(dtype=wp.int32),
@@ -244,7 +250,7 @@ def drive(a: argparse.Namespace) -> dict:
     planner = None
     if mppi:
         plan_sim.set_uniform_friction(0.8)
-        planner = MppiGpu(plan_sim, CostParams(), n_theta=a.n_theta)
+        planner = MppiGpu(plan_sim, CostParams(veto=a.veto), n_theta=a.n_theta)
         planner.reset_nominal(1.0)
     ctg = CostToGo(
         route_grid,
@@ -307,6 +313,7 @@ def drive(a: argparse.Namespace) -> dict:
     # Opt-in, strided history for the scrub page. Host reads, so it is off by default and never
     # on the measured path -- with --history 0 the loop below is byte-identical to before.
     hist: dict[str, list] = {k: [] for k in ("h", "seen", "blk", "v", "cv", "meta")}
+    esc: list = []  # per recorded frame: [best rollout's worst violation, median, clean fraction]
     for f in range(a.frames):
         body = sim.current_state.body_q.numpy()[0]
         rx, ry, yaw, R = pose_of(body)
@@ -386,6 +393,14 @@ def drive(a: argparse.Namespace) -> dict:
         elif mppi:
             plan_sim.set_terrain(crop(height_d, off_w, fine_d))
             planner.set_lattice(V, sgrid)
+            if a.veto > 0.0:
+                # the router's own per-pose veto, priced independently of V. Where V is capped --
+                # which is exactly where a pose is vetoed -- `explore_fallback` swaps the lattice's
+                # verdict for straight-line distance to the goal, so a veto carried only by V
+                # vanishes in the one case it matters. Measured on `bumpy`: 71% of the frames where
+                # the robot left its stability envelope had V capped at its own cell, against 21%
+                # of the frames where it did not.
+                planner.set_veto(ctg.blocked, sgrid)
             planner.replan(state_l, goal_l, a.refine)
             u = planner.nominal()
             cmd = np.array([u[0, 0], u[0, 1], 0.5 * (u[0, 0] + u[0, 1])], np.float32)
@@ -403,6 +418,24 @@ def drive(a: argparse.Namespace) -> dict:
         cmd = np.clip(cmd, -a.wmax, a.wmax)
 
         sim.set_wheel_command(cmd)
+        if a.history and f % a.history == 0 and mppi and a.escape:
+            # Was there a way out? Per sampled rollout, the worst envelope violation over the
+            # horizon; then the BEST rollout's worst. Near zero means an escape existed and the
+            # weighting did not take it. Large for every rollout means the robot was already
+            # committed when it got here, which is a planner problem no cost weight can undo.
+            der = plan_sim.derived.numpy()  # [T+1, B] (z, pitch, roll)
+            pitch, roll = der[1:, :, 1], der[1:, :, 2]
+            viol = np.maximum(np.abs(roll) - robot.max_roll, 0.0)
+            viol += np.maximum(-pitch - robot.max_pitch_up, 0.0)
+            viol += np.maximum(pitch - robot.max_pitch_down, 0.0)
+            per_rollout = viol.max(axis=0)
+            esc.append(
+                [
+                    float(per_rollout.min()),
+                    float(np.median(per_rollout)),
+                    float((per_rollout <= 1e-6).mean()),
+                ]
+            )
         if a.history and f % a.history == 0:
             hist["h"].append(height_d.numpy().copy())
             hist["seen"].append((measured_d.numpy() > 0.5).astype(np.uint8))
@@ -414,7 +447,18 @@ def drive(a: argparse.Namespace) -> dict:
             # the belief window recenters in whole cells as the robot moves, so every frame
             # carries the origin its own maps are expressed in
             hist["meta"].append(
-                [f, rx, ry, yaw, float(cmd[0]), float(cmd[1]), d, belief.xmin, belief.ymin]
+                [
+                    f,
+                    rx,
+                    ry,
+                    yaw,
+                    float(cmd[0]),
+                    float(cmd[1]),
+                    d,
+                    belief.xmin,
+                    belief.ymin,
+                    *roll_pitch(R),
+                ]
             )
         sim.step()
         if f % a.report == 0:
@@ -458,6 +502,7 @@ def drive(a: argparse.Namespace) -> dict:
             coarse_cell=(0.0 if coarse is None else coarse.grid.cell_size),
             # the windows are robot-centred, so each recorded frame carries its own origin
             **{f"hist_{k}": np.asarray(v) for k, v in hist.items() if v},
+            **({"escape": np.asarray(esc)} if esc else {}),
         )
         print(f"wrote {a.out}")
 
@@ -527,6 +572,11 @@ def main() -> None:
     p.add_argument("--controller", choices=("mppi", "carrot"), default="mppi")
     p.add_argument("--look", type=float, default=1.2, help="[m] carrot lookahead along the plan")
     p.add_argument("--carrot-speed", type=float, default=0.8, help="[m/s] carrot cruise")
+    p.add_argument(
+        "--escape",
+        action="store_true",
+        help="record whether any sampled rollout avoided the envelope (MPPI only)",
+    )
     p.add_argument("--spin-deg", type=float, default=35.0, help="turn on the spot past this error")
     p.add_argument(
         "--spin-rate", type=float, default=0.9, help="[rad/s] body yaw rate when spinning"
