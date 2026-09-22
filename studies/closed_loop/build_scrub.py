@@ -78,7 +78,7 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
             # PNG's row 0 is its top, so storing them already flipped means the viewer can blit
             # a band straight to the canvas with no transform
             strips[k].append(planes[k].astype(np.uint8)[::-1])
-        f, rx, ry, yaw, cl, cr, dist, bx, by = (float(x) for x in meta[i])
+        f, rx, ry, yaw, cl, cr, dist, bx, by, roll, pitch = (float(x) for x in meta[i])
         frames.append(
             dict(
                 f=int(f),
@@ -94,6 +94,10 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
                 cv=[round(clo, 2), round(chi, 2)],
                 seen=round(float(sm.mean()), 4),
                 blk=round(float(blk[i].mean()), 4),
+                # [deg] the attitude the robot was actually at. Nose-up is NEGATIVE pitch, kept
+                # in the settle's sign convention rather than flipped for display, so this reads
+                # the same as everything else that talks about the envelope.
+                rp=[round(np.degrees(roll), 1), round(np.degrees(pitch), 1)],
             )
         )
     nbytes = 0
@@ -126,7 +130,20 @@ def main() -> None:
     src, out = pathlib.Path(a.dir), pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    manifest = {"layers": list(LAYERS), "worlds": {}}
+    # the envelope the settle vetoes against, so the page can mark an attitude that is past it
+    # without restating three numbers that were measured once and may move again
+    from helhest.engine.robot import RobotParams
+
+    rp = RobotParams()
+    manifest = {
+        "layers": list(LAYERS),
+        "limits": {
+            "roll": round(float(np.degrees(rp.max_roll)), 1),
+            "pitch_up": round(float(np.degrees(rp.max_pitch_up)), 1),
+            "pitch_down": round(float(np.degrees(rp.max_pitch_down)), 1),
+        },
+        "worlds": {},
+    }
     total = 0
     for w in ORDER:
         f = src / f"{w}.npz"

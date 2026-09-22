@@ -61,6 +61,22 @@ Each world is drawn at its own extent. The belief is a rolling window and every 
 somewhere different, so a panel is the map the robot had in front of it when it stopped -- not a
 survey of the world. Ground it drove over earlier has scrolled out and is grey.
 
+### The scrub page
+
+`sweep_figure.py` draws the last frame. To scrub every frame of every layer instead, the run has
+to have RECORDED them: `--history` defaults to 0 (off, because it reads back to the host) and
+`sweep.sh` does not pass it, so a sweep run without it produces npz with no `hist_*` and
+`build_scrub.py` refuses them. Ask for it explicitly:
+
+```bash
+EXTRA="--veto 1.0 --history 8" bash <this dir>/sweep.sh     # inside the container, as above
+.venv/bin/python studies/closed_loop/build_scrub.py --dir <the npz dir> --out out/scrub
+```
+
+That writes one PNG per world per layer, a `manifest.json`, and `index.html` (a copy of
+`scrub_page.html`, which is the source). Publish the whole `out/scrub` directory as one artifact:
+the page fetches `manifest.json` relative to itself.
+
 ## The three windows
 
   belief + coarse   30 m, pooled to 1.0 m cells   -- which way round

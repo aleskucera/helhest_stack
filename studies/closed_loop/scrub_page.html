@@ -146,6 +146,8 @@
     Six stress worlds, driven closed-loop: <b>ostrich</b> physics as the robot, the measured Odin
     dToF ray table as the sensor, a probabilistic belief map as the only thing the planner sees.
     Every frame is what the robot actually believed and decided. Recorded every 8th frame.
+    This run: the per-pose veto ON, feasibility judged in sigmas of headroom rather than a flat
+    metric floor, and the tip-over envelope set from the drive-onto-a-ramp measurement.
   </p>
 
   <div class="tabs" id="tabs" role="tablist"></div>
@@ -172,6 +174,7 @@
           <dt>position</dt><dd id="m-pos">—</dd>
           <dt>heading</dt><dd id="m-yaw">—</dd>
           <dt>wheels L / R</dt><dd id="m-cmd">—</dd>
+          <dt>roll / pitch</dt><dd id="m-rp">—</dd>
           <dt>map seen</dt><dd id="m-seen">—</dd>
           <dt>poses blocked</dt><dd id="m-blk">—</dd>
         </dl>
@@ -192,6 +195,7 @@
           <div><span class="sw" style="background:var(--goal)"></span> goal</div>
           <div><span class="sw" style="background:var(--ink-3)"></span> robot, facing</div>
           <div><span class="sw" style="background:var(--alarm)"></span> no route from here</div>
+          <div><span class="sw" style="background:var(--alarm)"></span> attitude past the envelope</div>
         </div>
       </div>
     </div>
@@ -343,6 +347,17 @@
     $("m-pos").textContent = fmt(meta.x, 1) + ", " + fmt(meta.y, 1);
     $("m-yaw").textContent = fmt((meta.yaw * 180) / Math.PI, 0) + "°";
     $("m-cmd").textContent = fmt(meta.cmd[0], 1) + " / " + fmt(meta.cmd[1], 1);
+    const rp = $("m-rp"), lim = M.limits;
+    if (meta.rp && lim) {
+      const [ro, pi] = meta.rp;
+      // nose-up is NEGATIVE pitch, so the two pitch limits are not symmetric about zero
+      const over = Math.abs(ro) > lim.roll || -pi > lim.pitch_up || pi > lim.pitch_down;
+      rp.textContent = ro.toFixed(0) + "° / " + pi.toFixed(0) + "°";
+      rp.style.color = over ? "var(--alarm)" : "";
+      rp.title = over ? "outside the envelope the settle vetoes against" : "";
+    } else {
+      rp.textContent = "—";
+    }
     $("m-seen").textContent = (meta.seen * 100).toFixed(1) + "%";
     $("m-blk").textContent = (meta.blk * 100).toFixed(1) + "%";
     const v = $("m-verdict");
