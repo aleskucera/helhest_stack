@@ -17,7 +17,7 @@ z   = min over i                     ← the binding constraint
 
 Dividing by each constraint's own σ is what makes the `min` meaningful. A tilt margin is in radians and a clearance margin in metres; a raw `min` over those compares nothing. In sigmas they are the same quantity, and the smallest genuinely is the one about to be violated.
 
-One knob follows — `k_sigma`, how many standard deviations of room the robot insists on — and the graded penalty comes off the same number, so *how pessimistic am I* and *how close is this to bad* are not two separately-tuned things that fight.
+One knob follows — `z_veto`, how many standard deviations of room the robot insists on — and the graded penalty comes off the same number, so *how pessimistic am I* and *how close is this to bad* are not two separately-tuned things that fight.
 
 `floor_i` is not optional. Without it a perfectly known map makes a state at 14.9° of roll against a 15° limit read as infinitely safe. The floor is the irreducible error — localisation, controller tracking, model mismatch — that no map improvement removes.
 
@@ -86,7 +86,7 @@ from terrain_value_field.producers import GeometricProducer
 
 grid  = build_grid(rows, cols, 0.1, origin_x, origin_y)
 field = TerrainValueField(rows, cols, 0.1, n_theta=1,
-                          k_sigma=2.0, control_set=omni_control_set(0.1))
+                          z_veto=2.0, control_set=omni_control_set(0.1))
 produce = GeometricProducer(rows, cols, 1, max_slope_rad=0.45, max_step_m=0.15)
 
 constraints = produce(height, height_sd, grid)    # both wp.array [rows, cols]
