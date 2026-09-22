@@ -12,7 +12,15 @@ import warp as wp
 
 @wp.struct
 class Grid:
-    """A regular 2-D grid. `origin` is the centre of cell (0, 0)."""
+    """A regular 2-D grid. `origin` is the centre of cell (0, 0).
+
+    Worth stating because a neighbour disagrees: `helhest.engine.terrain.Grid` carries these same
+    five fields and takes its origin to be the map's MIN CORNER, so the centre of cell i sits at
+    origin + (i + 0.5) * cell_size there and at origin + i * cell_size here -- half a cell apart.
+    The two are distinct warp types, so passing one where the other is expected is a type error;
+    passing loose FLOATS between them is not, and that is where the half cell would hide.
+    Converting from a corner-origin grid means adding cell_size / 2 to both origins.
+    """
 
     cells_x: wp.int32
     cells_y: wp.int32
