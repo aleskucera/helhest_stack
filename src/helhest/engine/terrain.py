@@ -8,8 +8,16 @@ class Grid:
     cells_x: wp.int32
     cells_y: wp.int32
     cell_size: wp.float32  # meters per cell
-    origin_x: wp.float32  # world x of the min corner
-    origin_y: wp.float32  # world y of the min corner
+    # The MIN CORNER of the map, so the centre of cell i sits at origin + (i + 0.5) * cell_size.
+    #
+    # `terrain_value_field.grid.Grid` carries these same five fields and means something ELSE by
+    # origin: the CENTRE of cell (0, 0), i.e. origin + i * cell_size. The two are half a cell
+    # apart. They are distinct warp types, so handing one to a kernel expecting the other is a
+    # type error and the easy mistake is caught -- but handing over loose FLOATS is not, and that
+    # shifts a whole map by half a cell with nothing to disagree about.
+    # `tests/planning/test_grid_conventions.py` pins both and writes the conversion down.
+    origin_x: wp.float32
+    origin_y: wp.float32
 
 
 @dataclass
