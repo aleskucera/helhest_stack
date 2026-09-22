@@ -28,7 +28,12 @@ def _grid() -> GridParams:
     )
 
 
-def _terrain(amplitude: float = 0.25) -> wp.array:
+# 0.55, not the 0.25 these were written with: the fixtures were shaped to graze a 15 deg
+# envelope, and the measured envelope is 30 / 25 / 45 (studies/envelope/). At the old amplitude
+# nothing on this scene comes within z_ref of a limit, so every test here passes vacuously --
+# blocked fraction flat at zero, no pose below z_ref, no doubt anywhere. Steeper ground is what
+# keeps them testing the mechanism rather than the terrain.
+def _terrain(amplitude: float = 0.55) -> wp.array:
     xs = np.linspace(-N * CELL / 2, N * CELL / 2, N)
     t = amplitude * np.sin(xs[None, :] * 0.8) + 0.8 * amplitude * np.cos(xs[:, None] * 0.6)
     return wp.array(t.astype(np.float32), dtype=wp.float32)
@@ -42,9 +47,14 @@ def _solve(k_sigma: float, sigma_m: float, **kw):
 
 
 def test_k_sigma_zero_is_exactly_the_old_behaviour():
-    """Opt-in: with the knob at zero the margin kernel does not run and nothing is added."""
-    ctg_off, _ = _solve(0.0, 0.05)
-    ctg_on, _ = _solve(0.0, 0.50)  # a wildly uncertain map must still change nothing
+    """Opt-in: with BOTH knobs at zero the margin kernel does not run and nothing is added.
+
+    Both, because the kernel is gated on `k_sigma > 0 or margin_weight > 0` and margin_weight now
+    defaults to 0.5 -- a graded cost with no veto is a perfectly sensible configuration, so
+    k_sigma = 0 alone no longer means "off".
+    """
+    ctg_off, _ = _solve(0.0, 0.05, margin_weight=0.0)
+    ctg_on, _ = _solve(0.0, 0.50, margin_weight=0.0)  # a wildly uncertain map changes nothing
     np.testing.assert_array_equal(ctg_off.blocked.numpy(), ctg_on.blocked.numpy())
     assert ctg_off.zmargin.numpy().max() == 0.0, "z is not even computed when the knob is off"
 

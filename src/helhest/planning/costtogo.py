@@ -478,9 +478,32 @@ class CostToGo:
         # sigma. Above 0 a pose must additionally hold k_sigma standard deviations of room on
         # every test, measured against the elevation belief's own per-cell MEASUREMENT sd.
         k_sigma: float = 0.0,
-        sigma_floor_m: float = 0.02,  # irreducible map error: localisation, tracking, model
-        z_ref: float = 4.0,  # start charging for proximity to a boundary below this many sigmas
-        margin_weight: float = 0.0,  # [m-equiv] per sigma of shortfall; 0 = veto only
+        # Irreducible MAP error, and only that. It was 0.02, which is above every fused sd in the
+        # window -- 0.45 cm at 2 m, 1.16 cm at 10 m after the ~20 returns a cell gets -- so
+        # `max(sigma, floor)` always took the floor and the per-cell sigma never entered the
+        # answer at all. The margin looked adaptive and was a flat 4.4 deg of roll everywhere,
+        # `doubt` came out identically zero, and the optimistic and pessimistic readings were the
+        # same number. At 0.005 the fused sd WINS at range, so the margin is small where the
+        # robot has looked and grows where it has not, which is what the design was for.
+        #
+        # The model error the old floor was silently carrying -- settle-vs-real tilt, off by 7 deg
+        # at the extremes on `bumpy` -- now lives in RobotParams' envelope instead, where it is
+        # one number against a measured table rather than three interacting ones.
+        sigma_floor_m: float = 0.005,
+        # Start charging for proximity to a boundary below this many sigmas. It is denominated in
+        # SIGMAS, so it does not survive a change of `sigma_floor_m` unless it is rescaled with
+        # it: dropping the floor 0.02 -> 0.005 shrinks sigma_roll from 2.22 deg to 0.55 and
+        # inflates every z fourfold, which left the penalty band 1.1 deg wide -- a ramp too narrow
+        # to steer by. 16 restores the same ANGULAR band the old pair had: the penalty starts
+        # 8.8 deg below the limit and the veto bites 1.1 deg below it.
+        z_ref: float = 16.0,
+        # [m-equiv] per sigma of shortfall below z_ref. 0 was "veto only", which makes the
+        # feasibility a CLIFF: a pose at 2.01 sigmas is free and one at 1.99 is impossible, with
+        # no gradient anywhere between. That is why enforcing the veto parked the robot at 8.0 m
+        # of 14 on `bumpy` -- sitting at the edge cost nothing, so nothing pushed it off. A
+        # penalty cannot make anything unreachable; it only makes roomy ground cheaper than
+        # marginal ground, and it is what finally gives `z_ref` something to do.
+        margin_weight: float = 0.5,
         profile: bool = False,  # opt-in per-stage CUDA-event timing (tiny event nodes + per-call sync)
         device: wp.Device | str | None = None,
     ) -> None:

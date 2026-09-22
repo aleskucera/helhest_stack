@@ -34,6 +34,11 @@ def _ctg(**kw) -> CostToGo:
 
 
 def _terrain() -> wp.array:
+    # Amplitude stays where it was. The envelope doubled to 30 / 25 / 45 (studies/envelope/) and
+    # the temptation is to steepen this to compensate -- but measured, the goal stops being
+    # reachable at all somewhere between 0.32 and 0.38, so a steeper scene tests nothing. These
+    # are tests about IGNORANCE, so what scales with the envelope is the SIGMA they feed, not the
+    # ground they stand on.
     xs = np.linspace(-N * CELL / 2, N * CELL / 2, N)
     t = 0.25 * np.sin(xs[None, :] * 0.8) + 0.2 * np.cos(xs[:, None] * 0.6)
     return wp.array(t.astype(np.float32), dtype=wp.float32)
@@ -43,7 +48,9 @@ def _sigma(value: float) -> wp.array:
     return wp.array(np.full((N, N), value, np.float32), dtype=wp.float32)
 
 
-def _frontier_sigma(near: float = 0.01, far: float = 0.06) -> wp.array:
+# `far` scales with the envelope: at 30 / 25 / 45 a 6 cm sigma no longer blocks anything on this
+# scene, so the frontier it describes would be invisible to the doubt field.
+def _frontier_sigma(near: float = 0.01, far: float = 0.14) -> wp.array:
     """Well known behind the robot, uncertain ahead -- the shape a forward sensor produces."""
     s = np.full((N, N), near, np.float32)
     s[:, N // 2 :] = far
@@ -53,7 +60,7 @@ def _frontier_sigma(near: float = 0.01, far: float = 0.06) -> wp.array:
 def test_doubt_separates_ignorance_from_bad_ground():
     """A pose that fails on ANY map is bad terrain; looking at it cannot help."""
     ctg = _ctg()
-    ctg.compute(_terrain(), GOAL, sigma=_sigma(0.06))
+    ctg.compute(_terrain(), GOAL, sigma=_sigma(0.12))
     doubt = ctg.doubt.numpy()
     blocked = ctg.blocked.numpy() > 0.5
     assert (doubt[~blocked] == 0.0).all(), "an accepted pose carries no doubt"
@@ -86,7 +93,7 @@ def test_gap_is_zero_when_the_map_is_good_enough():
 
 def test_gap_opens_as_the_map_gets_worse():
     gaps = []
-    for s in (FLOOR / 2, 0.03, 0.06):
+    for s in (FLOOR / 2, 0.06, 0.12):
         ctg = _ctg()
         ctg.solve_gap(_terrain(), GOAL, _sigma(s))
         gaps.append(ctg.gap_at(*START)["gap_m"])
@@ -101,7 +108,7 @@ def test_an_ignorance_blocked_goal_diagnoses_itself():
     not knowing, and the planner can say so rather than reporting no route.
     """
     ctg = _ctg()
-    ctg.solve_gap(_terrain(), GOAL, _sigma(0.08))
+    ctg.solve_gap(_terrain(), GOAL, _sigma(0.16))
     r = ctg.gap_at(*START)
     assert not r["reachable_pessimistic"]
     assert r["reachable_optimistic"]
