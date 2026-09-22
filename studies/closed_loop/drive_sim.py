@@ -573,6 +573,12 @@ def main() -> None:
     p.add_argument("--look", type=float, default=1.2, help="[m] carrot lookahead along the plan")
     p.add_argument("--carrot-speed", type=float, default=0.8, help="[m/s] carrot cruise")
     p.add_argument(
+        "--veto",
+        type=float,
+        default=1e5,
+        help="weight on the router's per-pose veto in the MPPI cost; 0 = OFF",
+    )
+    p.add_argument(
         "--escape",
         action="store_true",
         help="record whether any sampled rollout avoided the envelope (MPPI only)",
