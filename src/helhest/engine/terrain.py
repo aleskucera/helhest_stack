@@ -8,14 +8,9 @@ class Grid:
     cells_x: wp.int32
     cells_y: wp.int32
     cell_size: wp.float32  # meters per cell
-    # The MIN CORNER of the map, so the centre of cell i sits at origin + (i + 0.5) * cell_size.
-    #
-    # `terrain_value_field.grid.Grid` carries these same five fields and means something ELSE by
-    # origin: the CENTRE of cell (0, 0), i.e. origin + i * cell_size. The two are half a cell
-    # apart. They are distinct warp types, so handing one to a kernel expecting the other is a
-    # type error and the easy mistake is caught -- but handing over loose FLOATS is not, and that
-    # shifts a whole map by half a cell with nothing to disagree about.
-    # `tests/planning/test_grid_conventions.py` pins both and writes the conversion down.
+    # The CENTRE of cell (0, 0), matching `terrain_value_field.grid.Grid`, which this struct is
+    # on its way to being replaced by. `GridParams.build()` adds the half cell, so a caller still
+    # states the map's min corner and only the kernels see cell centres.
     origin_x: wp.float32
     origin_y: wp.float32
 
@@ -39,10 +34,26 @@ class GridParams:
         )
 
     def build(self) -> Grid:
+        """Host min-corner -> device CENTRE-of-cell-(0,0), which is the one convention the
+        kernels use.
+
+        The half cell is added HERE, once, rather than subtracted in every kernel that locates a
+        point. `GridParams.origin_x` keeps its public meaning -- the map's min corner, which is
+        what a caller measuring a window computes -- while the struct the kernels read carries
+        the cell centre, matching `terrain_value_field.grid.Grid`. Sampling is unchanged to the
+        bit: `(x - (o + c/2))/c` is exactly the `(x - o)/c - 0.5` this replaced.
+
+        Two half-cell defects came out of having the two conventions coexist: `_margin_kernel`
+        placed a pose at `origin + c*cell` and then sampled sigma through the min-corner
+        `_locate`, and the cost-to-go's boundary ring read the coarse field half a cell off (see
+        `tests/planning/test_grid_conventions.py`, and 518876a). One convention is what stops
+        that recurring.
+        """
         grid = Grid()
         grid.cells_x, grid.cells_y = int(self.cells_x), int(self.cells_y)
         grid.cell_size = float(self.cell_size)
-        grid.origin_x, grid.origin_y = float(self.origin_x), float(self.origin_y)
+        grid.origin_x = float(self.origin_x) + 0.5 * float(self.cell_size)
+        grid.origin_y = float(self.origin_y) + 0.5 * float(self.cell_size)
         return grid
 
 
@@ -50,13 +61,13 @@ class GridParams:
 def _locate(grid: Grid, x: wp.float32, y: wp.float32):
     """World (x, y) -> bilinear stencil, packed as vec4(x_idx, y_idx, frac_x, frac_y): the lower-left
     corner index (as a float -- cast back with int()) and the in-cell offset toward +1, in [0,1].
-    The ONE place the cell-center mapping `(x - origin)/cell_size - 0.5` lives -- shared by
+    The ONE place the cell-centre mapping `(x - origin)/cell_size` lives -- shared by
     sample_field, its analytic gradient, and the d/dH adjoint scatter so the convention can never
     drift. Packed in a PLAIN vec4, not a struct: an int-member struct round-trip zeroes the auto-grad
     of `frac` w.r.t. (x, y), which silently kills sample_field's POSITION gradient (e.g. friction
     sampled at a pose-dependent contact point -- a cross-step term that grows with the rollout)."""
-    fx = (x - grid.origin_x) / grid.cell_size - 0.5
-    fy = (y - grid.origin_y) / grid.cell_size - 0.5
+    fx = (x - grid.origin_x) / grid.cell_size
+    fy = (y - grid.origin_y) / grid.cell_size
     x_idx = wp.clamp(int(wp.floor(fx)), 0, grid.cells_x - 2)
     y_idx = wp.clamp(int(wp.floor(fy)), 0, grid.cells_y - 2)
     frac_x = wp.clamp(fx - float(x_idx), 0.0, 1.0)

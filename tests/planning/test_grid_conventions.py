@@ -1,18 +1,22 @@
-"""The two `Grid` structs carry the same five numbers and mean different things by `origin`.
+"""One grid convention, and the conversion that keeps the host-facing API where it was.
 
-`helhest.engine.terrain.Grid` and `terrain_value_field.grid.Grid` both hold cells_x, cells_y,
-cell_size, origin_x, origin_y. helhest's origin is the MIN CORNER of the map; tvf's is the CENTRE
-of cell (0, 0). They are half a cell apart.
+There used to be two. `helhest.engine.terrain.Grid` took `origin` to be the map's MIN CORNER and
+`terrain_value_field.grid.Grid` took it to be the CENTRE of cell (0, 0) -- the same five fields,
+half a cell apart, as distinct warp types. The type difference caught the easy mistake and hid
+the dangerous one: a kernel taking loose FLOATS shifts a whole map by half a cell with no shape
+or type to disagree about. Both defects that produced were real. `_margin_kernel` placed a pose
+at `origin + c*cell` and then sampled sigma through the min-corner `_locate`; and the cost-to-go's
+boundary ring read the coarse field half a cell off, which mattered because it feeds a
+NEAREST-cell lookup rather than an interpolation (518876a).
 
-They are distinct warp types, so passing one where the other is expected is a type error and the
-easy mistake is caught. The dangerous one is not: passing loose floats -- an origin read off a
-`GridParams` and handed to a kernel that does tvf's arithmetic -- shifts everything by half a
-cell, silently, with no shape or type to disagree about. `CostToGo.set_coarse` already hand-rolls
-its cell-centre arithmetic for exactly this reason rather than pass a struct across the boundary.
+So the kernels now share tvf's convention, and `GridParams.build()` adds the half cell once. That
+keeps `GridParams.origin_x` meaning what a caller measuring a window computes -- the min corner --
+while everything on the device sees cell centres.
 
-This file pins both conventions so neither can drift, and states the offset between them so the
-conversion is written down somewhere executable. The real fix is one struct and one convention;
-until that lands, this is what stops the two quietly diverging further.
+What these tests pin is that the conversion is exact. `(x - (o + c/2))/c` is algebraically the
+`(x - o)/c - 0.5` it replaced, so sampling through `GridParams` must be unchanged to the bit;
+anything else means a caller was reading the struct's origin directly and assuming the old
+meaning.
 """
 
 from __future__ import annotations
@@ -26,7 +30,8 @@ from helhest.engine.terrain import GridParams
 from terrain_value_field.grid import build_grid
 
 CELLS, CELL = 10, 1.0
-PROBE = 5.0  # mid-grid, away from the border clamp that hides the difference at (0, 0)
+# mid-grid: at world (0, 0) the border clamp pulls both to cell 0, which hides any disagreement
+PROBES = (2.5, 5.0, 7.25)
 
 
 @wp.kernel
@@ -43,53 +48,52 @@ def _probe_tvf(g: tg.Grid, x: wp.float32, out: wp.array(dtype=wp.float32)):
     out[1] = c[2]
 
 
-@wp.kernel
-def _probe_world_of(g: tg.Grid, row: wp.int32, col: wp.int32, out: wp.array(dtype=wp.float32)):
-    p = tg.world_of(g, row, col)
-    out[0] = p[0]
-    out[1] = p[1]
-
-
 def _run(kernel, *inputs) -> np.ndarray:
     out = wp.zeros(2, dtype=wp.float32)
     wp.launch(kernel, dim=1, inputs=list(inputs), outputs=[out])
     return out.numpy().copy()
 
 
-def test_helhest_origin_is_the_min_corner():
-    """`(x - origin)/cell - 0.5`: the centre of cell i sits at origin + (i + 0.5) * cell."""
-    g = GridParams(CELLS, CELLS, CELL, 0.0, 0.0).build()
-    cell, frac = _run(_probe_helhest, g, PROBE)
-    assert (cell, frac) == (4.0, 0.5), "world 5.0 should be halfway between cells 4 and 5"
+def _params() -> GridParams:
+    return GridParams(CELLS, CELLS, CELL, 0.0, 0.0)
 
 
-def test_tvf_origin_is_the_centre_of_cell_zero():
-    """`(x - origin)/cell`: the centre of cell i sits at origin + i * cell."""
-    g = build_grid(CELLS, CELLS, CELL, 0.0, 0.0)
-    cell, frac = _run(_probe_tvf, g, PROBE)
-    assert (cell, frac) == (5.0, 0.0), "world 5.0 should land exactly on cell 5"
-    wx, wy = _run(_probe_world_of, g, 0, 0)
-    assert (wx, wy) == (0.0, 0.0), "and cell (0,0)'s centre is the origin itself"
+def test_build_moves_the_origin_to_the_centre_of_cell_zero():
+    """The half cell is added once, here, and nowhere else."""
+    p = _params()
+    g = p.build()
+    assert g.origin_x == p.origin_x + CELL / 2
+    assert g.origin_y == p.origin_y + CELL / 2
 
 
-def test_the_two_are_exactly_half_a_cell_apart():
-    """The number a conversion has to carry. Stated here so it is executable rather than folklore.
-
-    Same five values into both: the index they report differs by 0.5 cells throughout, which is
-    what makes a loose-float hand-off between the two silently wrong rather than loudly wrong.
-    """
-    gp = GridParams(CELLS, CELLS, CELL, 0.0, 0.0)
-    for probe in (2.5, 5.0, 7.25):
-        h = _run(_probe_helhest, gp.build(), probe)
-        t = _run(_probe_tvf, build_grid(CELLS, CELLS, CELL, 0.0, 0.0), probe)
-        assert (h[0] + h[1]) + 0.5 == (t[0] + t[1]), f"at {probe}: {h} vs {t}"
+def test_sampling_through_grid_params_is_what_it_always_was():
+    """The regression guard for the whole change: a min-corner origin plus the old `-0.5` and a
+    centre origin plus no offset are the same arithmetic, so these are the values the old code
+    produced. If one moves, a caller read the struct's origin and assumed the old meaning."""
+    g = _params().build()
+    for probe, want_cell, want_frac in ((2.5, 2.0, 0.0), (5.0, 4.0, 0.5), (7.25, 6.0, 0.75)):
+        cell, frac = _run(_probe_helhest, g, probe)
+        assert (cell, frac) == (want_cell, want_frac), f"at {probe}"
 
 
-def test_the_conversion_that_makes_them_agree():
-    """Shifting the origin by half a cell aligns them, which is what a `from_corner` would do."""
-    gp = GridParams(CELLS, CELLS, CELL, 0.0, 0.0)
-    shifted = build_grid(CELLS, CELLS, CELL, gp.origin_x + CELL / 2, gp.origin_y + CELL / 2)
-    for probe in (2.5, 5.0, 7.25):
-        h = _run(_probe_helhest, gp.build(), probe)
-        t = _run(_probe_tvf, shifted, probe)
-        np.testing.assert_allclose(h, t, atol=1e-6, err_msg=f"at {probe}")
+def test_the_two_locates_now_agree_given_the_same_struct():
+    """The point of the merge. Hand both the identical grid and they place a point identically --
+    which is what makes it safe for one struct to serve both, and what was not true before."""
+    g_h = _params().build()
+    g_t = build_grid(CELLS, CELLS, CELL, g_h.origin_x, g_h.origin_y)
+    for probe in PROBES:
+        np.testing.assert_allclose(
+            _run(_probe_helhest, g_h, probe), _run(_probe_tvf, g_t, probe), atol=1e-6
+        )
+
+
+def test_a_raw_min_corner_origin_still_reads_half_a_cell_out():
+    """Why the conversion has to live in `build()` and not in the caller's head. Passing a
+    min-corner origin straight to the device -- the loose-float hand-off that caused both real
+    defects -- still lands half a cell from where `build()` would put it."""
+    p = _params()
+    raw = build_grid(CELLS, CELLS, CELL, p.origin_x, p.origin_y)  # forgot the half cell
+    for probe in PROBES:
+        good = _run(_probe_helhest, p.build(), probe)
+        bad = _run(_probe_tvf, raw, probe)
+        assert (good[0] + good[1]) + 0.5 == (bad[0] + bad[1]), f"at {probe}: {good} vs {bad}"
