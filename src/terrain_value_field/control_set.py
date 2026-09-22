@@ -109,6 +109,13 @@ def arc_control_set(
     will take it. `turn_weight` [m per rad of heading change] is charged on top of that length, so
     a straight is cheaper than an arc covering the same distance. 0 = distance only.
 
+    The step must also leave the lattice CONNECTED. The arcs turn by whole numbers of bins, so
+    repeated they reach only the headings those deltas generate; without the point turns -- the
+    only +-1 move -- a step whose turns share a factor with `n_theta` splits the heading ring
+    into that many rings that never meet. `closing_step(16, 0.5, bins=4)` turns by {2, 4} bins,
+    which generates the even headings and nothing else: half the states are unreachable with no
+    obstacle anywhere. That raises here rather than producing a table the solver will believe.
+
     Two POINT-TURN primitives (heading +-1 bin in place) are appended by default at
     `DEFAULT_PIVOT_ARCS` times the arc that turns as far -- the skid-steer can rotate on the spot,
     so `goal behind` routes
@@ -160,6 +167,26 @@ def arc_control_set(
             f"{closing_step(n_theta, turn_radius, bins):.4f} = "
             f"closing_step({n_theta}, {turn_radius}, bins={bins}).",
             stacklevel=2,
+        )
+    # A table can CLOSE and still be DISCONNECTED, which the check above cannot see. The arcs
+    # change the heading bin by the `turns` above; repeated, they reach only the subgroup of
+    # Z_n_theta those deltas generate, and that subgroup has index gcd(n_theta, *deltas). The
+    # point turns are the only +-1 move, so without them the array holds that many separate
+    # heading lattices and 1 - 1/g of every state is unreachable before any terrain is looked at.
+    # Derived from `turns` rather than from `bins` so it stays right if _TURN_FRACTIONS changes.
+    # This is not a tuning choice -- it is a malformed table -- so it raises rather than warns.
+    deltas = {abs(int(round(t / dth))) for t in turns} - {0}
+    components = math.gcd(n_theta, *deltas) if deltas else n_theta
+    if not pivots and components > 1:
+        raise ValueError(
+            f"arc_control_set: step={step:.4f} with turn_radius={turn_radius}, "
+            f"n_theta={n_theta} turns by {sorted(deltas)} bins, which reaches only 1 heading "
+            f"in {components} -- the lattice splits into {components} disconnected "
+            f"heading rings and {100.0 * (1.0 - 1.0 / components):.0f}% of states are "
+            f"unreachable by construction. Use a step whose turns are coprime with n_theta "
+            f"(e.g. closing_step({n_theta}, {turn_radius}, bins=2) = "
+            f"{closing_step(n_theta, turn_radius, 2):.4f}), lower n_theta, or allow the point "
+            f"turns by giving a finite pivot_cost."
         )
     n_arc = len(turns)
     n_prim = n_arc + (2 if pivots else 0)
