@@ -539,7 +539,7 @@ def main() -> None:
     p.add_argument("--void-penalty", type=float, default=1.0, help="[m] per cell of unseen beyond")
     p.add_argument("--cell", type=float, default=0.2)
     p.add_argument("--carve", type=float, default=6.0, help="[m] 0 disables the visibility carve")
-    p.add_argument("--k-sigma", type=float, default=2.0, help="veto below this many sigmas")
+    p.add_argument("--z-veto", type=float, default=2.0, help="veto below this many sigmas")
     p.add_argument("--n-theta", type=int, default=16)
     p.add_argument("--horizon", type=int, default=25)
     p.add_argument("--batch", type=int, default=4096)

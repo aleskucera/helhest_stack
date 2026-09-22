@@ -313,7 +313,7 @@ def main():
     ap.add_argument("--span", type=float, default=14.0, help="[m] rolling window width")
     ap.add_argument("--cell", type=float, default=0.2)
     ap.add_argument("--n-theta", type=int, default=12)
-    ap.add_argument("--k-sigma", type=float, default=2.0)
+    ap.add_argument("--z-veto", type=float, default=2.0)
     ap.add_argument("--shots", type=int, default=4)
     ap.add_argument("--max-frames", type=int, default=100000)
     ap.add_argument("--outdir", default="/tmp/pipeline_bag")

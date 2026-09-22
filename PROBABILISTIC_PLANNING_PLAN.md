@@ -126,7 +126,7 @@ uncertainty**:
 then
 
     blocked = z < k
-    tilt   += margin_weight * max(0, z_ref - z)      # hinged graded penalty
+    tilt   += charge_per_sigma * max(0, z_charge - z)      # hinged graded penalty
 
 `z` is a safety margin in sigmas: "this pose is 3.4 sigma from tipping."
 
