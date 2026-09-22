@@ -449,8 +449,14 @@ def _seed_goal_and_boundary_kernel(
         return
     v = inf
     if r < band or r >= rows - band or c < band or c >= cols - band:
-        x = origin_x + (float(c) + 0.5) * cell_size
-        y = origin_y + (float(r) + 0.5) * cell_size
+        # origin + c*cell, NOT + (c + 0.5)*cell: this file places a pose at `origin + c * cell`
+        # (see `_margin_kernel`) and resolves the goal the same way, so the half cell that the
+        # engine's `_locate` convention would add puts this lookup half a cell from where every
+        # other kernel here thinks cell c is. It feeds a NEAREST-cell read of the coarse field
+        # rather than a smooth interpolation, so at --coarsen 1 the 0.1 m offset flips the
+        # rounding for about half the ring and reads a neighbour's value.
+        x = origin_x + float(c) * cell_size
+        y = origin_y + float(r) * cell_size
         cc = int(wp.round((x - coarse_origin_x) / coarse_cell))
         cr = int(wp.round((y - coarse_origin_y) / coarse_cell))
         if cr >= 0 and cr < coarse_value.shape[0] and cc >= 0 and cc < coarse_value.shape[1]:
