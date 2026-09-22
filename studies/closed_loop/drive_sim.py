@@ -575,8 +575,8 @@ def main() -> None:
     p.add_argument(
         "--veto",
         type=float,
-        default=1e5,
-        help="weight on the router's per-pose veto in the MPPI cost; 0 = OFF",
+        default=0.0,
+        help="weight on the router's per-pose veto in the MPPI cost; 0 = OFF (measured: breaks ridge and bumpy)",
     )
     p.add_argument(
         "--escape",

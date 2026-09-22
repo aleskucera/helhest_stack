@@ -149,10 +149,20 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # unmeasured-cell occupancy while REVERSING (forward motion into unknown stays allowed -- the
     # sensor sees it before arrival; backward there is no sensor, so unknown must hard-lose).
     unknown: float = 1e4
-    # the cost-to-go's veto, sampled per rollout pose. Same order as `infeasible`: a pose the
-    # static settle refuses is not a pose to buy with goal progress. 0 = OFF (the old behaviour,
-    # in which the veto reaches the controller only through V).
-    veto: float = 1e5
+    # The cost-to-go's veto, sampled per rollout pose. OFF by default, and the reason is measured
+    # rather than cautious: at 1e5 across the six stress worlds it is free on the four flat ones
+    # (gap 182 -> 181 frames, slalom 423 -> 411, pillars 248 -> 248, pocket 572 -> 623) and breaks
+    # both worlds with relief outright (ridge and bumpy, reached -> not reached). On bumpy it
+    # stalled the robot at 8.0 m of 14, which shows up as MORE frames in violation, not fewer --
+    # 56% against 4.7% -- because it parks in one marginal pose rather than driving through
+    # several.
+    #
+    # The mechanism is sound; the veto set is not ready to be authoritative. Of 17 vetoed poses
+    # the robot actually held on bumpy, the real attitude was outside the envelope in 6. The rest
+    # are k_sigma: with a 2 cm map sd it demands 2.22 deg of roll and 1.87 deg of pitch per sigma,
+    # so k_sigma = 2 turns a 15 deg envelope into an 11 deg one, which is most of the passable set
+    # on terrain that genuinely sits at 10-15 deg. Tune k_sigma before turning this on.
+    veto: float = 0.0
     # per-meter shaping against reverse -- sized so reverse is an ESCAPE, not a route. A pivot's
     # V-surcharge is small (the router blends turning into arcs) and a pi pivot eats most of the
     # horizon, so myopic backward progress outbids pivot-then-forward at low weights: measured, at
