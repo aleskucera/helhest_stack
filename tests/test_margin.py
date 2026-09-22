@@ -78,7 +78,7 @@ def test_a_map_at_the_floor_has_nothing_left_to_learn():
     assert z == pytest.approx(zc, rel=1e-6)
 
 
-def _classify(z, zc, k=2.0, z_ref=4.0, w=1.0):
+def _classify(z, zc, k=2.0, z_charge=4.0, w=1.0):
     shape = (1, 1, 1)
     az = wp.array(np.full(shape, z, np.float32), dtype=wp.float32)
     azc = wp.array(np.full(shape, zc, np.float32), dtype=wp.float32)
@@ -86,7 +86,7 @@ def _classify(z, zc, k=2.0, z_ref=4.0, w=1.0):
     wp.launch(
         M.classify_kernel,
         dim=shape,
-        inputs=[az, azc, wp.array(np.array([k], np.float32), dtype=wp.float32), z_ref, w],
+        inputs=[az, azc, wp.array(np.array([k], np.float32), dtype=wp.float32), z_charge, w],
         outputs=out,
     )
     pose_cost, doubt = (float(o.numpy()[0, 0, 0]) for o in out)
@@ -100,12 +100,12 @@ def _decode(pose_cost):
 
 
 @pytest.mark.parametrize("z,expect", [(1.99, 1.0), (2.01, 0.0)])
-def test_the_veto_switches_at_k_sigma(z, expect):
+def test_the_veto_switches_at_z_veto(z, expect):
     blocked, _, _ = _classify(z, 99.0)
     assert blocked == expect
 
 
-def test_the_penalty_is_hinged_at_z_ref():
+def test_the_charge_is_hinged_at_z_charge():
     assert _classify(5.0, 99.0)[1] == pytest.approx(0.0)
     assert _classify(3.0, 99.0)[1] == pytest.approx(1.0, rel=1e-5)
 
@@ -132,14 +132,14 @@ def test_fusion_matches_the_split_pair():
     sig = wp.array(rng.uniform(0.0, 0.2, shape).astype(np.float32), dtype=wp.float32)
     flo = wp.array(rng.uniform(0.01, 0.05, shape[0]).astype(np.float32), dtype=wp.float32)
     k = wp.array(np.array([2.0], np.float32), dtype=wp.float32)
-    z_ref, w = 4.0, 1.5
+    z_charge, w = 4.0, 1.5
 
     split = [wp.zeros(out3, dtype=wp.float32) for _ in range(4)]
     wp.launch(M.margin_to_z_kernel, dim=out3, inputs=[mar, sig, flo], outputs=split[:2])
     wp.launch(
         M.classify_kernel,
         dim=out3,
-        inputs=[split[0], split[1], k, z_ref, w],
+        inputs=[split[0], split[1], k, z_charge, w],
         outputs=split[2:],
     )
 
@@ -147,7 +147,7 @@ def test_fusion_matches_the_split_pair():
     wp.launch(
         M.margin_to_fields_kernel,
         dim=out3,
-        inputs=[mar, sig, flo, k, z_ref, w],
+        inputs=[mar, sig, flo, k, z_charge, w],
         outputs=fused,
     )
 
@@ -165,9 +165,9 @@ def test_the_pose_cost_encoding_loses_nothing_at_a_vetoed_state():
     what lets `_free_seeds_kernel` un-block a seeded state by flipping the sign back instead of
     inventing a number for it.
     """
-    blocked, penalty, _ = _classify(1.0, 99.0)  # z=1 < k=2, so vetoed, and z < z_ref so graded
+    blocked, penalty, _ = _classify(1.0, 99.0)  # z=1 < k=2, so vetoed, and z < z_charge so graded
     assert blocked == 1.0
-    assert penalty == pytest.approx(3.0, rel=1e-5)  # w * (z_ref - z) = 1.0 * (4 - 1)
+    assert penalty == pytest.approx(3.0, rel=1e-5)  # w * (z_charge - z) = 1.0 * (4 - 1)
     # and the round trip is exact, not approximate
     encoded = -1.0 - penalty
     assert float(_decode(encoded)[1]) == pytest.approx(penalty, rel=0, abs=0)

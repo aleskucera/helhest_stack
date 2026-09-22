@@ -26,7 +26,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _field():
-    return TerrainValueField(N, N, CELL, n_theta=NT, k_sigma=2.0)
+    return TerrainValueField(N, N, CELL, n_theta=NT, z_veto=2.0)
 
 
 def _constraints(wall: tuple[int, int, int, int] | None):
@@ -150,7 +150,7 @@ def test_the_solver_checks_each_swept_cell_at_the_heading_it_is_crossed_at():
     blind = (*cs[:7], np.zeros_like(cs[7]), cs[8])  # the same set, heading offsets discarded
 
     def solve_with(control_set):
-        f = TerrainValueField(N, N, cell, n_theta=nt, k_sigma=2.0, control_set=control_set)
+        f = TerrainValueField(N, N, cell, n_theta=nt, z_veto=2.0, control_set=control_set)
         m = np.empty((1, N, N, nt), np.float32)
         for t in range(nt):
             m[0, :, :, t] = -1.0 if t % 2 else 1.0  # odd bins impassable, even bins clear

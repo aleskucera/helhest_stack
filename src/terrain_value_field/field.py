@@ -63,9 +63,9 @@ class TerrainValueField:
         resolution: float,
         n_theta: int = 16,
         *,
-        k_sigma: float = 2.0,
-        z_ref: float = 4.0,
-        penalty_weight: float = 0.5,
+        z_veto: float = 2.0,
+        z_charge: float = 4.0,
+        charge_per_sigma: float = 0.5,
         penalty_scale: float = 1.0,
         control_set: tuple | None = None,
         turn_radius: float = 0.6,
@@ -76,26 +76,26 @@ class TerrainValueField:
         free_blocked_seeds: bool = True,  # False when seeds come from a coarser layer
         device: wp.Device | str | None = None,
     ) -> None:
-        """`k_sigma` is the one knob: how many standard deviations of room a state must hold.
+        """`z_veto` is the one knob: how many standard deviations of room a state must hold.
 
         Two penalty knobs, and they act in different places -- read them together once:
 
-        `k_sigma` and `z_ref` are both denominated in SIGMAS, which means neither survives a
+        `z_veto` and `z_charge` are both denominated in SIGMAS, which means neither survives a
         change of `floor` unless it is rescaled with it. Halving a floor halves every sigma and
         doubles every z, so the same two numbers then describe a different band entirely -- a
         caller who dropped a floor from 2 cm to 0.5 cm found the penalty band go from 8.8 degrees
         of roll wide to 1.1, i.e. a ramp too narrow to steer by, with no error anywhere. If you
         move a floor, move these with it.
 
-        `penalty_weight` defaulted to 0 -- veto only -- which makes feasibility a CLIFF: a state
+        `charge_per_sigma` defaulted to 0 -- veto only -- which makes feasibility a CLIFF: a state
         at 2.01 sigmas is free and one at 1.99 is impossible, with no gradient in between, so
         nothing prefers five sigmas of room to two. Measured on a robot driving rough ground, the
         planner parked it AT the edge and stalled, because sitting there cost nothing. A penalty
         cannot make a state unreachable, only make roomy ground cheaper than marginal ground, and
-        it is what gives `z_ref` anything to do at all.
+        it is what gives `z_charge` anything to do at all.
 
-        `penalty_weight` is charged in the MARGIN kernel. It turns "how many sigmas of room is
-        left below `z_ref`" into a per-state cost, so it sets the units. `penalty_weight = 0`
+        `charge_per_sigma` is charged in the MARGIN kernel. It turns "how many sigmas of room is
+        left below `z_charge`" into a per-state cost, so it sets the units. `charge_per_sigma = 0`
         gives a pure veto and no gradient at all.
 
         `penalty_scale` is applied in the SOLVER. It multiplies the mean per-state cost along a
@@ -103,16 +103,16 @@ class TerrainValueField:
         the field a pure shortest path over the unvetoed states.
 
         Both must be >= 0. The solver's own parameter is also called `penalty_scale`; nothing
-        downstream of here is called `penalty_weight`.
+        downstream of here is called `charge_per_sigma`.
         """
-        # Both knobs must be non-negative, and not as a matter of taste. `penalty_weight` < 0
+        # Both knobs must be non-negative, and not as a matter of taste. `charge_per_sigma` < 0
         # makes the graded penalty negative, and `pose_cost` carries the veto in its sign -- so
         # every free state would read as vetoed and the whole map would go unreachable, silently.
         # `penalty_scale` < 0 can drive a move's cost below zero, which breaks min-plus outright.
-        if penalty_weight < 0.0:
+        if charge_per_sigma < 0.0:
             raise ValueError(
-                f"penalty_weight must be >= 0 (the veto rides in the sign of the "
-                f"graded cost; see margin.POSE COST), got {penalty_weight}"
+                f"charge_per_sigma must be >= 0 (the veto rides in the sign of the "
+                f"graded cost; see margin.POSE COST), got {charge_per_sigma}"
             )
         if penalty_scale < 0.0:
             raise ValueError(
@@ -122,9 +122,9 @@ class TerrainValueField:
         self.device = wp.get_device(device)
         self.rows, self.cols, self.n_theta = int(rows), int(cols), int(n_theta)
         self.resolution = float(resolution)
-        self.k_sigma = float(k_sigma)
-        self.z_ref = float(z_ref)
-        self.penalty_weight = float(penalty_weight)
+        self.z_veto = float(z_veto)
+        self.z_charge = float(z_charge)
+        self.charge_per_sigma = float(charge_per_sigma)
         self.penalty_scale = float(penalty_scale)
         self.solver_inf = 1.0e30  # the "unreachable"/"not a seed" sentinel
 
@@ -139,7 +139,7 @@ class TerrainValueField:
             self.V_certain = wp.zeros(shape, dtype=wp.float32)
             # +inf = not a seed. zeros would mean EVERY state is a free goal.
             self._seeds = wp.full(shape, float(self.solver_inf), dtype=wp.float32)
-            self._k = wp.array([self.k_sigma], dtype=wp.float32)
+            self._k = wp.array([self.z_veto], dtype=wp.float32)
 
         self.solver = ValueSolver(
             self.resolution,
@@ -243,7 +243,7 @@ class TerrainValueField:
         floors. That is not a cheaper approximation -- it is the second half of the pair that
         makes `doubt` meaningful, and on its own it is the optimistic reading.
         """
-        self._k.assign(np.array([self.k_sigma], np.float32))
+        self._k.assign(np.array([self.z_veto], np.float32))
         wp.launch(
             _margin.margin_to_fields_kernel,
             dim=(self.rows, self.cols, self.n_theta),
@@ -252,8 +252,8 @@ class TerrainValueField:
                 constraints.sigma,
                 constraints.floor,
                 self._k,
-                self.z_ref,
-                self.penalty_weight,
+                self.z_charge,
+                self.charge_per_sigma,
             ],
             outputs=[self.z, self.z_certain, self.pose_cost, self.doubt],
             device=self.device,
@@ -269,8 +269,8 @@ class TerrainValueField:
                     self.z_certain,
                     self.z_certain,
                     self._k,
-                    self.z_ref,
-                    self.penalty_weight,
+                    self.z_charge,
+                    self.charge_per_sigma,
                 ],
                 outputs=[self.pose_cost, self.doubt],
                 device=self.device,

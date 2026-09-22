@@ -21,13 +21,13 @@ grid = build_grid(N, N, CELL, -N * CELL / 2, -N * CELL / 2)
 height = (0.35 * np.sin(XS[None, :] * 1.1) + 0.25 * np.cos(XS[:, None] * 0.9)).astype(np.float32)
 height_sd = np.full((N, N), 0.02, np.float32)
 
-field = TerrainValueField(N, N, CELL, n_theta=1, k_sigma=2.0, control_set=omni_control_set(CELL))
+field = TerrainValueField(N, N, CELL, n_theta=1, z_veto=2.0, control_set=omni_control_set(CELL))
 producer = GeometricProducer(N, N, 1)
 
 
 def solve(sd: float = 0.02, k: float = 2.0, seed=(N // 2, N - 3)):
-    """Re-run the whole chain at a given map uncertainty and k_sigma. Returns the `at` dict."""
-    field.k_sigma = k
+    """Re-run the whole chain at a given map uncertainty and z_veto. Returns the `at` dict."""
+    field.z_veto = k
     cons = producer(
         wp.array(height, dtype=wp.float32),
         wp.array(np.full((N, N), sd, np.float32), dtype=wp.float32),

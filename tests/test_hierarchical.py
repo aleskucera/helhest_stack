@@ -29,7 +29,7 @@ WALL_Y_TOP = 6.0  # the wall runs from the south edge up to here; you must pass 
 
 
 def _constraints(blocked: np.ndarray, n_theta: int) -> Constraints:
-    """A free/blocked mask as margins: free states sit far above k_sigma, blocked ones below."""
+    """A free/blocked mask as margins: free states sit far above z_veto, blocked ones below."""
     n = blocked.shape[0]
     m = np.full((1, n, n, n_theta), 0.9, np.float32)
     m[0, blocked, :] = -1.0
@@ -59,7 +59,7 @@ def layers():
         COARSE_N,
         COARSE_CELL,
         n_theta=1,
-        k_sigma=2.0,
+        z_veto=2.0,
         control_set=omni_control_set(COARSE_CELL),
     )
     gr, gc = _coarse_cell(*GOAL_XY)
@@ -71,7 +71,7 @@ def layers():
         FINE_N,
         FINE_CELL,
         n_theta=16,
-        k_sigma=2.0,
+        z_veto=2.0,
         turn_radius=0.6,
         free_blocked_seeds=False,
     )

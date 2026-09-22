@@ -23,13 +23,13 @@ N, CELL = 40, 0.5
 ROBOT = (20, 3)
 GOAL = (20, 36)
 
-CERTAIN_GROUND = (0.9, 0.02)  # (margin, sigma) -> z = 45, far above k_sigma
+CERTAIN_GROUND = (0.9, 0.02)  # (margin, sigma) -> z = 45, far above z_veto
 UNCERTAIN = (0.9, 0.9)  # z = 1.0 believed (vetoed), 90 certain -> pure doubt
 WALL = (-1.0, 0.02)  # bad ground either way -> no doubt to resolve
 
 
 def _field() -> TerrainValueField:
-    return TerrainValueField(N, N, CELL, n_theta=1, k_sigma=2.0, control_set=omni_control_set(CELL))
+    return TerrainValueField(N, N, CELL, n_theta=1, z_veto=2.0, control_set=omni_control_set(CELL))
 
 
 def _constraints(patches) -> Constraints:

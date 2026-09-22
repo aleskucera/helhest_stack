@@ -25,7 +25,7 @@ def _grid():
 
 
 def _field(**kw):
-    kw.setdefault("k_sigma", 2.0)
+    kw.setdefault("z_veto", 2.0)
     return TerrainValueField(N, N, CELL, n_theta=1, control_set=omni_control_set(CELL), **kw)
 
 
@@ -178,11 +178,11 @@ def test_solve_pair_leaves_the_believed_reading_in_place():
     assert not np.allclose(f.V_certain.numpy(), f.V.numpy())
 
 
-def test_a_negative_penalty_weight_is_rejected():
+def test_a_negative_charge_per_sigma_is_rejected():
     """It would invert the sign encoding: every FREE state would read as vetoed and the whole
     map would go unreachable, with nothing to show for it. See margin.POSE COST."""
-    with pytest.raises(ValueError, match="penalty_weight"):
-        _field(penalty_weight=-1.0)
+    with pytest.raises(ValueError, match="charge_per_sigma"):
+        _field(charge_per_sigma=-1.0)
 
 
 def test_a_negative_penalty_scale_is_rejected():

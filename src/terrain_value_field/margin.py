@@ -10,7 +10,7 @@ Dividing by each constraint's own sigma is what makes the `min` meaningful. A ti
 radians and a clearance margin in metres; a raw `min` over those compares nothing. In sigmas
 they are the same quantity, and the smallest one is genuinely the one about to be violated.
 
-One knob follows: `k_sigma`, how many standard deviations of room the robot insists on. The
+One knob follows: `z_veto`, how many standard deviations of room the robot insists on. The
 graded penalty comes off the same number, so "how pessimistic am I" and "how close is this to
 bad" are not two separately-tuned things that fight.
 
@@ -25,7 +25,7 @@ localisation, controller tracking, model mismatch -- that no map improvement rem
 
 IGNORED IS NOT "UNMEASURED", AND CONFUSING THE TWO IS SILENT. A constraint set to `IGNORED`
 declines to speak about a state, and `min` then skips it. If EVERY constraint declines, `z` stays
-at IGNORED -- enormously above any `k_sigma`, and above `z_ref` too -- so the state is not vetoed,
+at IGNORED -- enormously above any `z_veto`, and above `z_charge` too -- so the state is not vetoed,
 carries no penalty, and produces NO DOUBT. An unmeasured cell becomes indistinguishable from
 perfect flat ground, and nothing anywhere says so. Measured on a goal placed past the horizon,
 with the 25 columns between the robot and the goal never observed:
@@ -73,9 +73,9 @@ def margin_to_fields_kernel(
     margin: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading]
     sigma: wp.array4d(dtype=wp.float32),  # [constraint, row, col, heading]
     floor: wp.array(dtype=wp.float32),  # [constraint]
-    k_sigma: wp.array(dtype=wp.float32),  # [1]
-    z_ref: wp.float32,
-    penalty_weight: wp.float32,
+    z_veto: wp.array(dtype=wp.float32),  # [1]
+    z_charge: wp.float32,
+    charge_per_sigma: wp.float32,
     z: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     pose_cost: wp.array3d(dtype=wp.float32),  # [row, col, heading]
@@ -92,7 +92,7 @@ def margin_to_fields_kernel(
     and straight back in for nothing. On 2.56 M states with two constraints that is 1.31 ms
     against 1.10 ms, a 1.20x saving (`dev/bench_margin.py`).
 
-    `k_sigma` is an array rather than a float so a captured CUDA graph can be retuned
+    `z_veto` is an array rather than a float so a captured CUDA graph can be retuned
     without re-recording it.
 
     There is nothing else to win here. The reduction runs at 82.6 GB/s against a measured peak
@@ -112,8 +112,8 @@ def margin_to_fields_kernel(
         best_certain = wp.min(best_certain, m / f)
     z[r, c, t] = best
     z_certain[r, c, t] = best_certain
-    k = k_sigma[0]
-    pen = wp.where(best < z_ref, penalty_weight * (z_ref - best), 0.0)
+    k = z_veto[0]
+    pen = wp.where(best < z_charge, charge_per_sigma * (z_charge - best), 0.0)
     # veto in the sign; see POSE COST above
     pose_cost[r, c, t] = wp.where(best < k, -1.0 - pen, pen)
     doubt[r, c, t] = wp.where(best < k and best_certain >= k, best_certain - best, 0.0)
@@ -156,9 +156,9 @@ def margin_to_z_kernel(
 def classify_kernel(
     z: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading]
-    k_sigma: wp.array(dtype=wp.float32),  # [1]
-    z_ref: wp.float32,
-    penalty_weight: wp.float32,
+    z_veto: wp.array(dtype=wp.float32),  # [1]
+    z_charge: wp.float32,
+    charge_per_sigma: wp.float32,
     pose_cost: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
 ):
@@ -174,9 +174,9 @@ def classify_kernel(
     this library's business.
     """
     r, c, t = wp.tid()
-    k = k_sigma[0]
+    k = z_veto[0]
     zz = z[r, c, t]
     zc = z_certain[r, c, t]
-    pen = wp.where(zz < z_ref, penalty_weight * (z_ref - zz), 0.0)
+    pen = wp.where(zz < z_charge, charge_per_sigma * (z_charge - zz), 0.0)
     pose_cost[r, c, t] = wp.where(zz < k, -1.0 - pen, pen)  # veto in the sign
     doubt[r, c, t] = wp.where(zz < k and zc >= k, zc - zz, 0.0)
