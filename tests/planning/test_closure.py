@@ -23,7 +23,8 @@ from helhest.engine import RobotParams
 from helhest.engine import SolverParams
 from helhest.planning.costtogo import CostToGo
 
-CONFIGS = [(12, 0.24), (16, 0.24), (24, 0.10), (24, 0.20), (24, 0.50), (32, 0.15)]
+# (24, 0.50) is NOT here: it has no connected lattice at all, which is its own test below.
+CONFIGS = [(12, 0.24), (16, 0.24), (24, 0.10), (24, 0.20), (32, 0.15)]
 
 
 def _ctg(n_theta: int, cell: float, n: int = 25) -> CostToGo:
@@ -86,3 +87,21 @@ def test_an_explicit_non_closing_step_still_warns():
     with pytest.warns(UserWarning, match="does not close"):
         grid = GridParams(cells_x=25, cells_y=25, cell_size=0.24, origin_x=-3.0, origin_y=-3.0)
         CostToGo(grid, RobotParams(), SolverParams(), n_theta=12, step=0.72)
+
+
+def test_a_config_with_no_connected_lattice_says_so():
+    """n_theta=24 on 0.50 m cells: closing and connected cannot both be had under a quarter turn.
+
+    bins=2 turns 30 deg over 0.2618 m, which is half a cell and snaps back onto its own state.
+    The next two closing steps reach the grid but not the whole heading ring -- bins=4 turns by
+    {2, 4} of 24 and bins=6 by {3, 6}, generating every 2nd and every 3rd heading. So there is
+    nothing to choose, and the honest answers are a coarser heading ring or the point turns the
+    skid-steer actually has.
+
+    This config used to be in CONFIGS and used to pass. It picked bins=6 and shipped a lattice in
+    THREE disconnected pieces, with two thirds of every cell's headings unreachable on open
+    ground -- and the suite was satisfied because closure was all anyone checked.
+    """
+    grid = GridParams(cells_x=25, cells_y=25, cell_size=0.50, origin_x=-6.25, origin_y=-6.25)
+    with pytest.raises(ValueError, match="no connected lattice"):
+        CostToGo(grid, RobotParams(), SolverParams(), n_theta=24)

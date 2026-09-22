@@ -537,20 +537,48 @@ class CostToGo:
         # never reaches -- up to half a bin of error on every move, compounding, with feasibility
         # then evaluated at a pose the robot will not occupy. It closes when the sharpest turn,
         # step / min_turn_radius, is a whole number of bins, and an EVEN number of them, because
-        # the half-rate arcs have to land on a bin too. The step at bins=2 can round to nothing on
-        # a coarse grid, and a lattice whose arcs go nowhere cannot propagate at all, so take the
-        # smallest closing step that still clears a couple of cells.
+        # the half-rate arcs have to land on a bin too.
+        #
+        # Closing is necessary and NOT sufficient: the arcs turn by {0, +-bins/2, +-bins} bins, so
+        # repeated they reach only the multiples of bins/2, which is every heading iff
+        # gcd(bins/2, n_theta) == 1. Point turns are the only +-1 move and this planner prices
+        # them out, so an escalation that lands on a bad `bins` silently splits the heading ring.
+        # That shipped: bins=4 at n_theta=16 reaches only the EVEN bins, leaving the odd half at
+        # the cap with `blocked` all zero -- half the states unreachable on open ground. It cost
+        # `pocket` the run, because the bearing to its goal fell on an odd bin, so the value field
+        # called the one heading that pointed at the goal a dead end.
+        #
+        # The step still has to go somewhere -- an arc that snaps back onto its own state is a
+        # self-loop and nothing propagates (tests/planning/test_closure.py pins |dr| + |dc| > 0).
+        # But the bound that guarantees THAT is the half-diagonal: a state sits at a cell centre,
+        # and the farthest a point can be from that centre and still be in the cell is
+        # cell * sqrt(2) / 2, in the diagonal directions. One whole cell is that with a margin,
+        # and it is what this takes. The old bound was TWO cells -- a round number, not a derived
+        # one -- and bins=2 here misses it by 2% (0.3927 against 0.40), which is the entire
+        # reason the search escalated into a split ring.
+        #
         # The search stops at a quarter turn: past 90 degrees in ONE primitive the arc is a large
         # committed manoeuvre to collision-check as a unit, and routing gets coarse enough that
         # the lattice stops being worth its cost.
         if step is None:
             bins, bins_max = 2, max(2, (n_theta // 4) // 2 * 2)
-            while (
-                closing_step(n_theta, robot_params.min_turn_radius, bins)
-                < 2.0 * self.grid.cell_size
-                and bins + 2 <= bins_max
-            ):
+            min_step = self.grid.cell_size
+            usable = lambda b: (
+                closing_step(n_theta, robot_params.min_turn_radius, b) >= min_step
+                and math.gcd(b // 2, n_theta) == 1
+            )
+            while not usable(bins) and bins + 2 <= bins_max:
                 bins += 2
+            if not usable(bins):
+                # Both ways out are real decisions, not fallbacks: a coarser heading ring, or
+                # admitting the point turns the skid-steer actually has.
+                raise ValueError(
+                    f"no connected lattice for n_theta={n_theta}, "
+                    f"min_turn_radius={robot_params.min_turn_radius}, "
+                    f"cell_size={self.grid.cell_size}: every closing step up to a quarter turn "
+                    f"either fails to clear one cell (< {min_step:.4f} m) or splits the heading "
+                    f"ring. Lower n_theta, or set pivot_cost > 0."
+                )
             step = closing_step(n_theta, robot_params.min_turn_radius, bins)
         self.step = float(step)
 
