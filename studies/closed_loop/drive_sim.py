@@ -57,6 +57,7 @@ from helhest.perception import ScanPreprocessor
 from helhest.perception import transform_points
 from helhest.planning.coarse import CoarseRouter
 from helhest.planning.costtogo import CostToGo
+from helhest.planning.lattice_solver import trace_optimal
 
 # The robot in its own base frame: origin at the front axle, rear wheel 0.75 m behind, wheels
 # 0.35 m in radius and half_track 0.365 wide. Widened a little, because a self-filter that is
@@ -123,6 +124,39 @@ def crop_kernel(
     out[i, j] = src[i + off, j + off]
 
 
+def carrot_command(path: np.ndarray, state: np.ndarray, robot, look: float, speed: float):
+    """Pure pursuit along the lattice's OWN policy path -> (wL, wR, w_rear) rad/s.
+
+    The point of this controller is what it CANNOT do. `trace_optimal` walks the policy, so the
+    path only ever crosses poses the lattice found feasible -- a carrot follower therefore cannot
+    drive through a vetoed pose, which the MPPI demonstrably can (measured on `bumpy`: 20% of
+    frames on a vetoed pose, and one 1.7 s stretch at up to 9.5 degrees past the nose-down limit
+    with the wheels at full commanded speed). That makes it the arm in which the router's
+    feasibility actually binds, and so the arm that can tell us whether the veto set is
+    survivable or merely strict.
+
+    It is a diagnostic, not a replacement. The lattice is kinematic -- no momentum, no motor lag,
+    no friction -- so this tracks a plan the robot can follow at low speed and knows nothing
+    about braking distance at the 1.5-2.5 m/s the stack is meant for.
+    """
+    x, y, yaw = float(state[0]), float(state[1]), float(state[2])
+    if len(path) < 2:
+        return np.zeros(3, np.float32)
+    d = np.hypot(path[:, 0] - x, path[:, 1] - y)
+    far = np.flatnonzero(d >= look)
+    tx, ty = path[far[0]] if len(far) else path[-1]
+    reach = max(float(np.hypot(tx - x, ty - y)), 1e-3)
+    ang = np.arctan2(ty - y, tx - x) - yaw
+    ang = (ang + np.pi) % (2.0 * np.pi) - np.pi
+    # slow down when badly misaligned rather than cutting the corner: a skid-steer turns on the
+    # spot cheaply, and driving fast at a carrot behind you is how a forward-only plan orbits
+    v = speed * max(0.12, 1.0 - abs(ang) / (0.5 * np.pi))
+    omega = 2.0 * np.sin(ang) / reach * v  # pure-pursuit curvature, times speed
+    wl = (v - omega * robot.half_track) / robot.wheel_radius
+    wr = (v + omega * robot.half_track) / robot.wheel_radius
+    return np.array([wl, wr, 0.5 * (wl + wr)], np.float32)
+
+
 def drive(a: argparse.Namespace) -> dict:
     dt = 1.0 / a.rate
     sim = build_sim(world=a.world, dt=dt, viewer=False)
@@ -165,28 +199,37 @@ def drive(a: argparse.Namespace) -> dict:
     win_grid = GridParams(nw, nw, a.cell, 0.0, 0.0)
     route_grid = GridParams(nr, nr, a.cell, 0.0, 0.0)
     belief_grid = GridParams(n, n, a.cell, 0.0, 0.0)
-    plan_sim = ForwardSimulator(
-        dynamics.robot_params(a.wheel_width),
-        # command_delay 0: nothing here feeds sim.command_history, and rolling out against an
-        # all-zero history is worse than not modelling the dead time at all
-        dynamics.planning_solver(dt=dt, command_delay=0.0),
-        win_grid,
-        a.batch,
-        a.horizon,
-        a.device,
+    mppi = a.controller == "mppi"
+    robot = dynamics.robot_params(a.wheel_width)
+    plan_sim = (
+        None
+        if not mppi
+        else ForwardSimulator(
+            robot,
+            # command_delay 0: nothing here feeds sim.command_history, and rolling out against an
+            # all-zero history is worse than not modelling the dead time at all
+            dynamics.planning_solver(dt=dt, command_delay=0.0),
+            win_grid,
+            a.batch,
+            a.horizon,
+            a.device,
+        )
     )
-    plan_sim.set_uniform_friction(0.8)
-    planner = MppiGpu(plan_sim, CostParams(), n_theta=a.n_theta)
-    planner.reset_nominal(1.0)
+    planner = None
+    if mppi:
+        plan_sim.set_uniform_friction(0.8)
+        planner = MppiGpu(plan_sim, CostParams(), n_theta=a.n_theta)
+        planner.reset_nominal(1.0)
     ctg = CostToGo(
         route_grid,
-        dynamics.robot_params(a.wheel_width),
+        robot,
         dynamics.planning_solver(dt=dt, command_delay=0.0),
         n_theta=a.n_theta,
         k_sigma=a.k_sigma,
         device=a.device,
     )
-    planner.cw.lattice_cap = ctg._vcap
+    if mppi:
+        planner.cw.lattice_cap = ctg._vcap
     # the routing field expressed in the MPPI window's frame: a constant cell offset apart
     sgrid = GridParams(nr, nr, a.cell, (off_r - off_w) * a.cell, (off_r - off_w) * a.cell).build()
 
@@ -227,7 +270,7 @@ def drive(a: argparse.Namespace) -> dict:
         return out
 
     pre = ScanPreprocessor(sensor.n_rays, device=a.device)
-    box = self_box(dynamics.robot_params(a.wheel_width)) if a.self_filter else None
+    box = self_box(robot) if a.self_filter else None
     base_T_sensor = np.eye(4)
     base_T_sensor[:3, 3] = ODIN_MOUNT_XYZ  # the mount is a translation; sensor axes are body axes
 
@@ -306,20 +349,25 @@ def drive(a: argparse.Namespace) -> dict:
             drift=crop(belief.drift(), off_r, drift_r),
             coarse_value=vc,
         )
-        planner.set_lattice(V, sgrid)
 
         # CONTROL -- fine window, cropped from the same belief
         wx0 = belief.xmin + off_w * a.cell
         wy0 = belief.ymin + off_w * a.cell
-        plan_sim.set_terrain(crop(height_d, off_w, fine_d))
         state_l = np.array([rx - wx0, ry - wy0, yaw], np.float32)
         goal_l = (goal[0] - wx0, goal[1] - wy0)
         if d < a.dock:
             cmd = dock_control(state_l, goal_l)
-        else:
+        elif mppi:
+            plan_sim.set_terrain(crop(height_d, off_w, fine_d))
+            planner.set_lattice(V, sgrid)
             planner.replan(state_l, goal_l, a.refine)
             u = planner.nominal()
             cmd = np.array([u[0, 0], u[0, 1], 0.5 * (u[0, 0] + u[0, 1])], np.float32)
+        else:
+            # the lattice's own policy, walked in the ROUTING window's frame, then followed
+            path = trace_optimal(ctg, (rx - r0, ry - s0, yaw), a.n_theta, nr, nr, 0.0, 0.0, a.cell)
+            cmd = carrot_command(path, (rx - r0, ry - s0, yaw), robot, a.look, a.carrot_speed)
+        cmd = np.clip(cmd, -a.wmax, a.wmax)
 
         sim.set_wheel_command(cmd)
         if a.history and f % a.history == 0:
@@ -443,6 +491,10 @@ def main() -> None:
         default=0,
         help="also record every Nth frame into --out, for the scrub page; 0 = OFF",
     )
+    p.add_argument("--controller", choices=("mppi", "carrot"), default="mppi")
+    p.add_argument("--look", type=float, default=1.2, help="[m] carrot lookahead along the plan")
+    p.add_argument("--carrot-speed", type=float, default=0.8, help="[m/s] carrot cruise")
+    p.add_argument("--wmax", type=float, default=4.0, help="[rad/s] wheel-speed clamp")
     p.add_argument("--device", default="cuda")
     a = p.parse_args()
 
