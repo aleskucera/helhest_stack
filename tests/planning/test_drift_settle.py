@@ -45,8 +45,8 @@ def _terrain(amplitude: float = 0.25) -> wp.array:
     return wp.array(t.astype(np.float32), dtype=wp.float32)
 
 
-def _solve(drift: np.ndarray | None, k_sigma: float = 2.0, sigma_m: float = 0.025):
-    ctg = CostToGo(_grid(), RobotParams(), SolverParams(), n_theta=12, k_sigma=k_sigma)
+def _solve(drift: np.ndarray | None, z_veto: float = 2.0, sigma_m: float = 0.025):
+    ctg = CostToGo(_grid(), RobotParams(), SolverParams(), n_theta=12, z_veto=z_veto)
     ctg.compute(
         _terrain(),
         GOAL,
@@ -98,7 +98,7 @@ def test_the_optimistic_reading_discounts_the_drift_too():
     as well -- otherwise the optimistic solve keeps a pessimism the pair never gives up."""
     seam = np.zeros((N, N), np.float32)
     seam[:, N // 2 :] = Q_Z * 120.0
-    ctg = CostToGo(_grid(), RobotParams(), SolverParams(), n_theta=12, k_sigma=2.0)
+    ctg = CostToGo(_grid(), RobotParams(), SolverParams(), n_theta=12, z_veto=2.0)
     sig = wp.array(np.full((N, N), 0.025, np.float32), dtype=wp.float32)
     d = wp.array(seam, dtype=wp.float32)
     ctg.compute(_terrain(), GOAL, sigma=sig, drift=d, sigma_scale=1.0)

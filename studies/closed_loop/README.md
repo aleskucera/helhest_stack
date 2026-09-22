@@ -5,7 +5,7 @@ The first loop in which the probabilistic stack changes what the robot does.
 Everything under `elevation_belief` and `terrain_value_field` has until now been computed, tested
 and consumed by nothing. The thing that drives is handed a height array and a measured mask; the
 per-cell measurement sd, the pose drift and the lattice's two readings of the map reach no
-decision, and `k_sigma` is never set. A quantity no decision depends on cannot be judged. So:
+decision, and `z_veto` is never set. A quantity no decision depends on cannot be judged. So:
 
 | | |
 |---|---|

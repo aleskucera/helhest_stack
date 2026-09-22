@@ -2,8 +2,8 @@
 
 `RobotParams` carries max_roll = 15 deg, max_pitch_up = 25 and max_pitch_down = 15, and those
 numbers were chosen rather than measured. Everything downstream rests on them: the settle vetoes
-a pose by comparing against them, and `k_sigma` then demands a margin in sigmas ON TOP of them --
-so tuning k_sigma against an envelope nobody measured is fitting a margin to a guess.
+a pose by comparing against them, and `z_veto` then demands a margin in sigmas ON TOP of them --
+so tuning z_veto against an envelope nobody measured is fitting a margin to a guess.
 
 Static geometry says they are about half. The support triangle is the two front wheels at
 (0, +/-0.365) and the rear at (-0.75, 0); the CoM sits 0.198 m behind the front axle, and tipping

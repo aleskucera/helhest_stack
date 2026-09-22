@@ -100,7 +100,7 @@ pivot primitives do not compose) is the one that still matters.
 # Part A built: the z-margin field (2026-09-18)
 
 `CostToGo` now optionally measures feasibility in **sigmas** rather than raw thresholds
-(`_margin_kernel`, `src/helhest/planning/costtogo.py`). `k_sigma = 0` is exactly the old
+(`_margin_kernel`, `src/helhest/planning/costtogo.py`). `z_veto = 0` is exactly the old
 behaviour, so nothing changes until a caller opts in.
 
 ## What it computes
@@ -112,8 +112,8 @@ z_desc  = (max_pitch_down - pitch)   / sigma_pitch
 z_clear = (clearance - clear_margin) / sigma_clear
 z       = min over tests             -- the binding constraint, in sigmas
 
-blocked |= z < k_sigma
-tilt    += margin_weight * max(0, z_ref - z)
+blocked |= z < z_veto
+tilt    += charge_per_sigma * max(0, z_charge - z)
 ```
 
 Dividing each test by its own sigma is what makes the `min` meaningful -- roll is in radians,
@@ -142,7 +142,7 @@ than a restatement of it.
 
 61x61 routing grid at 0.24 m, 12 headings, rolling terrain, uniform sigma:
 
-| `k_sigma` | per-cell sigma | blocked | window reachable | z p50 |
+| `z_veto` | per-cell sigma | blocked | window reachable | z p50 |
 |---|---|---|---|---|
 | 0.0 | 2.5 cm | 0.0% | 96.7% | — |
 | 2.0 | 0.5 cm | 9.8% | 84.7% | 4.0 |
@@ -151,7 +151,7 @@ than a restatement of it.
 | 3.0 | 2.5 cm | 44.8% | 7.8% | 3.2 |
 | 2.0 | 5.0 cm | 72.0% | 1.1% | 1.6 |
 
-At the measured map quality, `k_sigma = 2` costs about 17% of poses and leaves three quarters
+At the measured map quality, `z_veto = 2` costs about 17% of poses and leaves three quarters
 of the window reachable. The 0.5 and 1.0 cm rows are identical because `sigma_floor_m` (0.02 m)
 dominates both -- the floor doing its job.
 
@@ -216,7 +216,7 @@ robot.
 Below the floor the two solves coincide and the trigger stays silent — correct, since there is
 nothing to gain by looking. Past 4 cm the goal is unreachable on the believed map and reachable
 on a certain one, which is **the blind-cell failure diagnosing itself**: not bad terrain, not
-knowing, with a defined response (go look, or relax `k_sigma`) instead of a planner that
+knowing, with a defined response (go look, or relax `z_veto`) instead of a planner that
 reports no route.
 
 Worth noting that `gap` and `doubt` are complementary, not redundant. At 0.5 cm the gap is zero

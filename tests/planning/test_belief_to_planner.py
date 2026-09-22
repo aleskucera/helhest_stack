@@ -68,8 +68,8 @@ def _as_maps(b: ElevationBelief):
     )
 
 
-def _plan(h, sd, drift, k_sigma=2.0):
-    ctg = CostToGo(_grid(), RobotParams(), SolverParams(), n_theta=12, k_sigma=k_sigma)
+def _plan(h, sd, drift, z_veto=2.0):
+    ctg = CostToGo(_grid(), RobotParams(), SolverParams(), n_theta=12, z_veto=z_veto)
     ctg.compute(h, GOAL, sigma=sd, drift=drift)
     return ctg
 

@@ -67,7 +67,7 @@ def judge(npz, coarsen):
         dynamics.robot_params(0.10),
         dynamics.planning_solver(dt=DT, command_delay=0.0),
         n_theta=NT,
-        k_sigma=2.0,
+        z_veto=2.0,
         device="cuda",
     )
     coarse = None

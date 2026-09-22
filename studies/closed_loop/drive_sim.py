@@ -3,7 +3,7 @@
 This is the first loop in which everything the probabilistic stack has been given actually
 changes what the robot does. Until now the belief's measurement sd, its pose drift and the
 lattice's two readings of the map were computed, tested and consumed by nothing: the thing that
-drives was handed a height array and a measured mask, and `k_sigma` was never set. A quantity
+drives was handed a height array and a measured mask, and `z_veto` was never set. A quantity
 that no decision depends on cannot be judged, so this closes that.
 
   reality      ostrich `odin_sim` -- the measured 256x192 dToF ray table, contact physics, and
@@ -257,7 +257,7 @@ def drive(a: argparse.Namespace) -> dict:
         robot,
         dynamics.planning_solver(dt=dt, command_delay=0.0),
         n_theta=a.n_theta,
-        k_sigma=a.k_sigma,
+        z_veto=a.z_veto,
         device=a.device,
     )
     if mppi:
@@ -550,7 +550,7 @@ def main() -> None:
         default=3.0,
         # At 1.5 the forward-only MPPI orbits the goal instead of arriving: measured, it circles
         # from 2.56 m out and never closes. 3.0 reaches, and reaches with the sigma veto ON --
-        # k_sigma = 0 does NOT rescue 1.5, so the veto was never what was holding it off.
+        # z_veto = 0 does NOT rescue 1.5, so the veto was never what was holding it off.
         help="[m] hand over to the dock controller",
     )
     p.add_argument("--reach", type=float, default=0.4, help="[m] counts as arrived")

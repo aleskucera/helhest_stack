@@ -111,10 +111,10 @@ def _margin_kernel(
     robot: Robot,
     n_theta: wp.int32,
     sigma_floor_m: wp.float32,
-    k_sigma: wp.array(dtype=wp.float32),  # device scalar: settable between CUDA-graph replays
+    z_veto: wp.array(dtype=wp.float32),  # device scalar: settable between CUDA-graph replays
     sigma_scale: wp.array(dtype=wp.float32),  # 1 = believe the map, 0 = optimistic (floor only)
-    z_ref: wp.float32,
-    margin_weight: wp.float32,
+    z_charge: wp.float32,
+    charge_per_sigma: wp.float32,
     blocked: wp.array3d(dtype=wp.float32),
     tilt: wp.array3d(dtype=wp.float32),
     zmargin: wp.array3d(dtype=wp.float32),
@@ -131,7 +131,7 @@ def _margin_kernel(
         z       = min over tests                                  -- the binding constraint
 
     Dividing each by its own sigma is what makes the `min` meaningful: roll is in radians and
-    clearance in metres, and a raw `min` over those compares nothing. `blocked = z < k_sigma`
+    clearance in metres, and a raw `min` over those compares nothing. `blocked = z < z_veto`
     then has one interpretable knob -- how many sigmas of room the robot insists on -- and the
     same number drives the graded penalty, so pessimism and "how close is this to bad" are not
     two independently-tuned things.
@@ -220,7 +220,7 @@ def _margin_kernel(
     # The attitude sigmas are linear in the per-cell sd, so the optimistic ones follow from the
     # same rows with s1 = s2 = s3 = sb = floor. They are NOT simply the floor: a pose's roll
     # uncertainty is the floor propagated through the track width, not the floor itself.
-    k = k_sigma[0]
+    k = z_veto[0]
     f = sigma_floor_m
     o_roll = wp.sqrt(2.0 * f * f) / two_b
     o_pitch = wp.sqrt(f * f + 0.5 * f * f) / rl
@@ -247,8 +247,8 @@ def _margin_kernel(
 
     if z < k:
         blocked[r, c, t] = 1.0
-    if z < z_ref:  # graded: pay for being near a boundary, not only for crossing it
-        tilt[r, c, t] = tilt[r, c, t] + margin_weight * (z_ref - z)
+    if z < z_charge:  # graded: pay for being near a boundary, not only for crossing it
+        tilt[r, c, t] = tilt[r, c, t] + charge_per_sigma * (z_charge - z)
 
 
 @wp.func
@@ -479,11 +479,11 @@ class CostToGo:
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
         pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives so
         # a goal behind the robot routes as pivot-then-drive instead of a wide loop. 0 = OFF.
-        # --- probabilistic feasibility (z-margin). k_sigma = 0 is EXACTLY the old behaviour:
+        # --- probabilistic feasibility (z-margin). z_veto = 0 is EXACTLY the old behaviour:
         # the hard thresholds still veto, nothing is added, and `compute` need not be passed a
-        # sigma. Above 0 a pose must additionally hold k_sigma standard deviations of room on
+        # sigma. Above 0 a pose must additionally hold z_veto standard deviations of room on
         # every test, measured against the elevation belief's own per-cell MEASUREMENT sd.
-        k_sigma: float = 0.0,
+        z_veto: float = 0.0,
         # Irreducible MAP error, and only that. It was 0.02, which is above every fused sd in the
         # window -- 0.45 cm at 2 m, 1.16 cm at 10 m after the ~20 returns a cell gets -- so
         # `max(sigma, floor)` always took the floor and the per-cell sigma never entered the
@@ -502,24 +502,24 @@ class CostToGo:
         # inflates every z fourfold, which left the penalty band 1.1 deg wide -- a ramp too narrow
         # to steer by. 16 restores the same ANGULAR band the old pair had: the penalty starts
         # 8.8 deg below the limit and the veto bites 1.1 deg below it.
-        z_ref: float = 16.0,
-        # [m-equiv] per sigma of shortfall below z_ref. 0 was "veto only", which makes the
+        z_charge: float = 16.0,
+        # [m-equiv] per sigma of shortfall below z_charge. 0 was "veto only", which makes the
         # feasibility a CLIFF: a pose at 2.01 sigmas is free and one at 1.99 is impossible, with
         # no gradient anywhere between. That is why enforcing the veto parked the robot at 8.0 m
         # of 14 on `bumpy` -- sitting at the edge cost nothing, so nothing pushed it off. A
         # penalty cannot make anything unreachable; it only makes roomy ground cheaper than
-        # marginal ground, and it is what finally gives `z_ref` something to do.
-        margin_weight: float = 0.5,
+        # marginal ground, and it is what finally gives `z_charge` something to do.
+        charge_per_sigma: float = 0.5,
         profile: bool = False,  # opt-in per-stage CUDA-event timing (tiny event nodes + per-call sync)
         device: wp.Device | str | None = None,
     ) -> None:
 
         self.device = wp.get_device(device)
         self.flatness_weight = flatness_weight
-        self.k_sigma = float(k_sigma)
+        self.z_veto = float(z_veto)
         self.sigma_floor_m = float(sigma_floor_m)
-        self.z_ref = float(z_ref)
-        self.margin_weight = float(margin_weight)
+        self.z_charge = float(z_charge)
+        self.charge_per_sigma = float(charge_per_sigma)
         self.n_theta = int(n_theta)
         self.robot = robot_params.build(self.device)
         self.grid = grid_params.build()
@@ -648,7 +648,7 @@ class CostToGo:
         self._measured_in = wp.full((ny, nx), 1.0, dtype=wp.float32, device=self.device)
         # Device scalars so `compute` can retune them between CUDA-graph replays: a captured
         # graph freezes host floats at record time, and the two-solve gap needs to vary them.
-        self._k_sigma_d = wp.array([self.k_sigma], dtype=wp.float32, device=self.device)
+        self._z_veto_d = wp.array([self.z_veto], dtype=wp.float32, device=self.device)
         self._sigma_scale_d = wp.array([1.0], dtype=wp.float32, device=self.device)
         self._goal_xy = wp.zeros(2, dtype=wp.float32, device=self.device)
         self._goal_rc = wp.zeros(2, dtype=wp.int32, device=self.device)
@@ -703,7 +703,7 @@ class CostToGo:
           poses along it -- those are the cells whose resolution would unlock the better route.
         - a **safety net**: `unreachable_by_ignorance` is true when the goal is out of reach on
           the believed map but in reach on a certain one. That is the blind-cell failure
-          diagnosing itself, with a defined response (go look, or relax `k_sigma`) instead of a
+          diagnosing itself, with a defined response (go look, or relax `z_veto`) instead of a
           planner that simply reports no path.
 
         Call after `solve_gap`. Nearest-cell lookup: this is one scalar of control data, not a
@@ -825,7 +825,7 @@ class CostToGo:
             outputs=[self.blocked, self.graded_tilt],
             device=self.device,
         )
-        if self.k_sigma > 0.0 or self.margin_weight > 0.0:
+        if self.z_veto > 0.0 or self.charge_per_sigma > 0.0:
             footprint_drift_spread(self._drift_in, self._drift_r, out=self._spread)
             wp.launch(
                 _margin_kernel,
@@ -839,10 +839,10 @@ class CostToGo:
                     self.robot,
                     self.n_theta,
                     self.sigma_floor_m,
-                    self._k_sigma_d,
+                    self._z_veto_d,
                     self._sigma_scale_d,
-                    self.z_ref,
-                    self.margin_weight,
+                    self.z_charge,
+                    self.charge_per_sigma,
                 ],
                 outputs=[self.blocked, self.graded_tilt, self.zmargin, self.doubt],
                 device=self.device,
@@ -975,7 +975,7 @@ class CostToGo:
         measured: wp.array | None = None,
         sigma: wp.array | None = None,
         drift: wp.array | None = None,
-        k_sigma: float | None = None,
+        z_veto: float | None = None,
         sigma_scale: float | None = None,
         coarse_value: wp.array | None = None,
     ) -> wp.array:
@@ -995,7 +995,7 @@ class CostToGo:
 
         `sigma` [ny, nx] is the elevation belief's per-cell MEASUREMENT sd (its `meas_sd`, not
         its `sigma`: pose drift is common-mode and cancels in the attitude differences). It is
-        read only when `k_sigma` or `margin_weight` is non-zero; omitted, every cell falls back
+        read only when `z_veto` or `charge_per_sigma` is non-zero; omitted, every cell falls back
         to `sigma_floor_m`."""
         assert (
             elevation.device == self.device
@@ -1024,7 +1024,7 @@ class CostToGo:
                     measured.device == self.device
                 ), f"measured must be a wp.array on {self.device}, got {measured.device}"
                 wp.copy(self._measured_in, measured)
-        self._k_sigma_d.assign(np.array([self.k_sigma if k_sigma is None else k_sigma], np.float32))
+        self._z_veto_d.assign(np.array([self.z_veto if z_veto is None else z_veto], np.float32))
         self._sigma_scale_d.assign(
             np.array([1.0 if sigma_scale is None else sigma_scale], np.float32)
         )

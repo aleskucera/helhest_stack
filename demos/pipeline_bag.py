@@ -99,7 +99,7 @@ def despike(height, k=1):
 
 
 def replay(
-    bag, span, cell, n_theta, k_sigma, shots, max_frames, outdir, device, despike_k, carve_range
+    bag, span, cell, n_theta, z_veto, shots, max_frames, outdir, device, despike_k, carve_range
 ):
     import os
 
@@ -140,8 +140,8 @@ def replay(
         RobotParams(),
         SolverParams(),
         n_theta=n_theta,
-        k_sigma=k_sigma,
-        margin_weight=0.5,
+        z_veto=z_veto,
+        charge_per_sigma=0.5,
         device=device,
     )
 
@@ -337,7 +337,7 @@ def main():
         a.span,
         a.cell,
         a.n_theta,
-        a.k_sigma,
+        a.z_veto,
         a.shots,
         a.max_frames,
         a.outdir,

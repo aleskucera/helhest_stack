@@ -28,7 +28,7 @@ def _ctg(**kw) -> CostToGo:
     grid = GridParams(
         cells_x=N, cells_y=N, cell_size=CELL, origin_x=-N * CELL / 2, origin_y=-N * CELL / 2
     )
-    kw.setdefault("k_sigma", 2.0)
+    kw.setdefault("z_veto", 2.0)
     kw.setdefault("sigma_floor_m", FLOOR)
     return CostToGo(grid, RobotParams(), SolverParams(), n_theta=12, **kw)
 

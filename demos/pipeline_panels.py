@@ -93,8 +93,8 @@ def build(no_drift: bool, seam_age: float, device: str):
         RobotParams(),
         SolverParams(),
         n_theta=12,
-        k_sigma=2.0,
-        margin_weight=0.5,
+        z_veto=2.0,
+        charge_per_sigma=0.5,
         device=device,
     )
     goal = (HALF - 2 * CELL, 0.0)

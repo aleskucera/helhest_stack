@@ -159,9 +159,9 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     #
     # The mechanism is sound; the veto set is not ready to be authoritative. Of 17 vetoed poses
     # the robot actually held on bumpy, the real attitude was outside the envelope in 6. The rest
-    # are k_sigma: with a 2 cm map sd it demands 2.22 deg of roll and 1.87 deg of pitch per sigma,
-    # so k_sigma = 2 turns a 15 deg envelope into an 11 deg one, which is most of the passable set
-    # on terrain that genuinely sits at 10-15 deg. Tune k_sigma before turning this on.
+    # are z_veto: with a 2 cm map sd it demands 2.22 deg of roll and 1.87 deg of pitch per sigma,
+    # so z_veto = 2 turns a 15 deg envelope into an 11 deg one, which is most of the passable set
+    # on terrain that genuinely sits at 10-15 deg. Tune z_veto before turning this on.
     veto: float = 0.0
     # per-meter shaping against reverse -- sized so reverse is an ESCAPE, not a route. A pivot's
     # V-surcharge is small (the router blends turning into arcs) and a pi pivot eats most of the
