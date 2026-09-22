@@ -90,6 +90,26 @@ unobserved cells, and a 14 m one was measured to produce no usable plan at all, 
 sitting outside the 6 m horizon. `--coarsen 0` turns the coarse layer off and returns the
 single-layer behaviour.
 
+## What the connected lattice was worth
+
+`--veto 1.0`, 700-frame cap, same six worlds, before and after the arc step was made to reach
+every heading instead of every second one (4dae1be; the diagnosis is in that commit and in
+`tests/planning/test_heading_connectivity.py`):
+
+| world | split ring | connected ring |
+|---|---|---|
+| gap | 187 | 170 |
+| slalom | 376 | 322 |
+| pillars | 246 | 224 |
+| pocket | **did not reach**, 3.46 m short | **308** |
+| ridge | 262 | 199 |
+| bumpy | 313 | 257 |
+
+Frames to the goal, so lower is better; 5/6 to 6/6. Every world improved, which is the part
+worth keeping: the split ring was not a `pocket` problem that happened to show up there, it was
+costing every run 9-24% and only `pocket` failed outright, because only `pocket` needed a
+heading the orphaned half of the ring owned.
+
 ## Judging the planner without a controller
 
 A run's outcome mixes the planner and the controller, and every attribution made from
