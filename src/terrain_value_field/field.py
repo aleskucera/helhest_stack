@@ -65,7 +65,7 @@ class TerrainValueField:
         *,
         k_sigma: float = 2.0,
         z_ref: float = 4.0,
-        penalty_weight: float = 0.0,
+        penalty_weight: float = 0.5,
         penalty_scale: float = 1.0,
         control_set: tuple | None = None,
         turn_radius: float = 0.6,
@@ -79,6 +79,20 @@ class TerrainValueField:
         """`k_sigma` is the one knob: how many standard deviations of room a state must hold.
 
         Two penalty knobs, and they act in different places -- read them together once:
+
+        `k_sigma` and `z_ref` are both denominated in SIGMAS, which means neither survives a
+        change of `floor` unless it is rescaled with it. Halving a floor halves every sigma and
+        doubles every z, so the same two numbers then describe a different band entirely -- a
+        caller who dropped a floor from 2 cm to 0.5 cm found the penalty band go from 8.8 degrees
+        of roll wide to 1.1, i.e. a ramp too narrow to steer by, with no error anywhere. If you
+        move a floor, move these with it.
+
+        `penalty_weight` defaulted to 0 -- veto only -- which makes feasibility a CLIFF: a state
+        at 2.01 sigmas is free and one at 1.99 is impossible, with no gradient in between, so
+        nothing prefers five sigmas of room to two. Measured on a robot driving rough ground, the
+        planner parked it AT the edge and stalled, because sitting there cost nothing. A penalty
+        cannot make a state unreachable, only make roomy ground cheaper than marginal ground, and
+        it is what gives `z_ref` anything to do at all.
 
         `penalty_weight` is charged in the MARGIN kernel. It turns "how many sigmas of room is
         left below `z_ref`" into a per-state cost, so it sets the units. `penalty_weight = 0`
