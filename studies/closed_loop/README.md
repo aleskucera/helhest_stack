@@ -74,6 +74,42 @@ unobserved cells, and a 14 m one was measured to produce no usable plan at all, 
 sitting outside the 6 m horizon. `--coarsen 0` turns the coarse layer off and returns the
 single-layer behaviour.
 
+## Judging the planner without a controller
+
+A run's outcome mixes the planner and the controller, and every attribution made from
+reach/no-reach in this study turned out to be confounded. `plan_quality.py` replays the recorded
+maps, rebuilds the field, and walks the lattice's own policy from the pose the robot actually
+held. No simulator, no controller: "was there a plan from here" is the planner's question alone.
+
+```bash
+.venv/bin/python studies/closed_loop/plan_quality.py --a out/ab_A --c out/ab_C
+```
+
+| world | no routing layer | with it | what MPPI did |
+|---|---|---|---|
+| gap | 100% | 96% | reached both |
+| **slalom** | **32%** | **89%** | fail → reach |
+| **pillars** | **61%** | **94%** | fail → reach |
+| **pocket** | **67%** | **79%** | fail → reach |
+| ridge | 74% | 78% | reached both |
+| bumpy | 35% | 39% | reached both |
+
+The three worlds the routing layer flipped for MPPI are the three where plan usability jumps; the
+three MPPI reached either way are the three where it barely moves. The layer's benefit is a
+**planner** effect. And `bumpy` is the reverse case: no route 6 frames in 10 either way, yet MPPI
+reaches it comfortably -- there the controller carries the run, which is the same `bumpy` where
+it drives through vetoed poses 20% of the time.
+
+## The carrot follower, and what it is not
+
+`--controller carrot` follows the lattice's own policy by pure pursuit. It was built to isolate
+the planner and it does not: a simpler controller sits in the same place in the causal chain and
+brings its own failures. It measured its own bugs twice -- a turn rate coupled to a collapsing
+forward speed, zero commands when the policy walk returned nothing, and then pure pursuit cutting
+corners into a ridge. It works on `gap` and is kept for the one thing it alone can do: it
+physically cannot enter a vetoed pose, so it can say whether a veto set is survivable. It is not
+evidence about plan quality. `plan_quality.py` is.
+
 ## The self-filter, and why it is not optional
 
 `odin_sim` casts every ray against the robot's own wheels and chassis, deliberately -- "exactly
