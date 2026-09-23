@@ -28,7 +28,7 @@ import numpy as np
 from PIL import Image
 
 ORDER = ["gap", "slalom", "pillars", "pocket", "ridge", "bumpy"]
-LAYERS = ("h", "seen", "blk", "v", "cv")
+LAYERS = ("h", "seen", "blk", "v", "route", "cv")
 
 
 def _quant(a: np.ndarray, lo: float, hi: float) -> np.ndarray:
@@ -46,6 +46,9 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
     meta = d["hist_meta"]
     h, seen, blk, v = d["hist_h"], d["hist_seen"], d["hist_blk"], d["hist_v"]
     cv = d["hist_cv"]
+    # Runs recorded before the heading-route layer existed have no `hist_route`; fall back to an
+    # all-ones plane so the older npz still build rather than failing on a missing key.
+    route = d["hist_route"] if "hist_route" in d.files else np.ones_like(v)
     nf = len(meta)
     cap = float(v[np.isfinite(v)].max()) if np.isfinite(v).any() else 1.0
 
@@ -72,13 +75,16 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
             "blk": _quant(blk[i], 0.0, 1.0),
             "v": np.where(reach, _quant(vi, vlo, vhi), 0),  # 0 = no route
             "cv": np.where(creach, _quant(ci, clo, chi), 0),
+            "route": _quant(route[i], 0.0, 1.0),
         }
         for k in LAYERS:
             # flipped here, once, rather than in the page: grid row 0 is the LOW y edge and a
             # PNG's row 0 is its top, so storing them already flipped means the viewer can blit
             # a band straight to the canvas with no transform
             strips[k].append(planes[k].astype(np.uint8)[::-1])
-        f, rx, ry, yaw, cl, cr, dist, bx, by, roll, pitch = (float(x) for x in meta[i])
+        row = [float(x) for x in meta[i]]
+        f, rx, ry, yaw, cl, cr, dist, bx, by, roll, pitch = row[:11]
+        vh = row[11] if len(row) > 11 else float("nan")
         frames.append(
             dict(
                 f=int(f),
@@ -98,6 +104,11 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
                 # in the settle's sign convention rather than flipped for display, so this reads
                 # the same as everything else that talks about the envelope.
                 rp=[round(np.degrees(roll), 1), round(np.degrees(pitch), 1)],
+                # V at the robot's own cell AND own heading, against `v`'s best-over-headings.
+                # None where the pose left the routing window, or for runs recorded before it.
+                vh=(None if not np.isfinite(vh) else round(vh, 2)),
+                # what fraction of the routing window's headings have a route at all
+                route=round(float(route[i].mean()), 4),
             )
         )
     nbytes = 0

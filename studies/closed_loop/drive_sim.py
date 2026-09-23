@@ -98,6 +98,21 @@ def roll_pitch(R: np.ndarray) -> tuple[float, float]:
     return float(np.arctan2(R[2, 1], R[2, 2])), float(np.arcsin(-np.clip(R[2, 0], -1.0, 1.0)))
 
 
+def _v_here(v: np.ndarray, x: float, y: float, yaw: float, cell: float, n_theta: int) -> float:
+    """V at one pose's own cell and own heading bin, or nan outside the routing window.
+
+    The heading bin is `round(yaw / dth)`, NEAREST -- the same rule `lattice_solver.trace_optimal`
+    uses to enter the table. Anything else reads a neighbouring bin and the number stops meaning
+    what the policy saw.
+    """
+    nr = v.shape[0]
+    c, r = int(x / cell), int(y / cell)
+    if not (0 <= r < nr and 0 <= c < v.shape[1]):
+        return float("nan")
+    t = int(round((yaw % (2.0 * np.pi)) / (2.0 * np.pi / n_theta))) % n_theta
+    return float(v[r, c, t])
+
+
 @wp.kernel
 def measured_kernel(
     valid: wp.array2d(dtype=wp.int32),
@@ -312,7 +327,7 @@ def drive(a: argparse.Namespace) -> dict:
     trail, closest, reached, body_z = [], 1.0e9, False, []
     # Opt-in, strided history for the scrub page. Host reads, so it is off by default and never
     # on the measured path -- with --history 0 the loop below is byte-identical to before.
-    hist: dict[str, list] = {k: [] for k in ("h", "seen", "blk", "v", "cv", "meta")}
+    hist: dict[str, list] = {k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "meta")}
     esc: list = []  # per recorded frame: [best rollout's worst violation, median, clean fraction]
     for f in range(a.frames):
         body = sim.current_state.body_q.numpy()[0]
@@ -439,8 +454,16 @@ def drive(a: argparse.Namespace) -> dict:
         if a.history and f % a.history == 0:
             hist["h"].append(height_d.numpy().copy())
             hist["seen"].append((measured_d.numpy() > 0.5).astype(np.uint8))
+            vh = V.numpy()
             hist["blk"].append(ctg.blocked.numpy().mean(2))
-            hist["v"].append(V.numpy().min(2))
+            hist["v"].append(vh.min(2))
+            # Fraction of HEADINGS with a route, which is the one thing `v` above cannot show.
+            # `min` over headings calls a cell reachable when any single heading is, and `blk`
+            # is about feasibility, not reachability -- so a lattice that had lost half its
+            # heading ring read as perfectly healthy in both. It did, for months
+            # (incident_2026-09-22_lattice-heading-connectivity.md). On open ground this should
+            # be ~1; the split ring made it exactly 0.5.
+            hist["route"].append((vh < 0.9 * ctg._vcap).mean(2).astype(np.float32))
             hist["cv"].append(
                 np.zeros((1, 1), np.float32) if coarse is None else coarse.V.numpy()[:, :, 0]
             )
@@ -458,6 +481,11 @@ def drive(a: argparse.Namespace) -> dict:
                     belief.xmin,
                     belief.ymin,
                     *roll_pitch(R),
+                    # V at the robot's OWN cell and OWN heading -- what the controller is
+                    # actually offered, as against `v`'s best-over-all-headings. The two
+                    # disagreeing is the signature worth seeing: on `pocket` the minimum read
+                    # 5.2 m while the heading the robot held read the cap.
+                    _v_here(vh, rx - r0, ry - s0, yaw, a.cell, a.n_theta),
                 ]
             )
         sim.step()

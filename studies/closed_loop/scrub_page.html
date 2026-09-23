@@ -175,6 +175,8 @@
           <dt>position</dt><dd id="m-pos">—</dd>
           <dt>heading</dt><dd id="m-yaw">—</dd>
           <dt>wheels L / R</dt><dd id="m-cmd">—</dd>
+          <dt>cost-to-go here</dt><dd id="m-vh">—</dd>
+          <dt>headings w/ route</dt><dd id="m-route">—</dd>
           <dt>roll / pitch</dt><dd id="m-rp">—</dd>
           <dt>map seen</dt><dd id="m-seen">—</dd>
           <dt>poses blocked</dt><dd id="m-blk">—</dd>
@@ -223,6 +225,7 @@
     { k: "cv",   name: "coarse: which way", unit: "m", grid: "coarse" },
     { k: "blk",  name: "blocked",     unit: "",   grid: "route"  },
     { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
+    { k: "route", name: "headings with a route", unit: "", grid: "route" },
   ];
   const ORDER = ["gap", "slalom", "pillars", "pocket", "ridge", "bumpy"];
 
@@ -247,8 +250,9 @@
     blk: ramp([[0, [247, 246, 243]], [.5, [231, 160, 110]], [1, [150, 33, 12]]]),
     v: ramp([[0, [253, 231, 156]], [.45, [86, 180, 146]], [.8, [43, 96, 135]], [1, [37, 38, 84]]]),
     cv: ramp([[0, [252, 235, 205]], [.45, [226, 134, 92]], [.8, [151, 46, 90]], [1, [49, 18, 63]]]),
+    route: ramp([[0, [150, 33, 12]], [.5, [231, 160, 110]], [.85, [226, 232, 230]], [1, [15, 138, 126]]]),
   };
-  const NONE = { h: null, seen: null, blk: null, v: [194, 65, 12], cv: [194, 65, 12] };
+  const NONE = { h: null, seen: null, blk: null, v: [194, 65, 12], cv: [194, 65, 12], route: null };
 
   // --- state ----------------------------------------------------------------------------
   let M = null, world = null, imgs = null, frame = 0, layer = "h", timer = null;
@@ -284,7 +288,7 @@
     octx.putImageData(id, 0, 0);
     const W = cv.width, H = cv.height;
     ctx.imageSmoothingEnabled = false;
-    if (key === "blk" || key === "v") {
+    if (key === "blk" || key === "v" || key === "route") {
       const s = W / w.n, x = w.off_r * s, ww = w.nr * s;
       ctx.drawImage(off, x, H - x - ww, ww, ww);       // the routing crop sits inside the window
     } else {
@@ -348,6 +352,15 @@
     $("m-pos").textContent = fmt(meta.x, 1) + ", " + fmt(meta.y, 1);
     $("m-yaw").textContent = fmt((meta.yaw * 180) / Math.PI, 0) + "°";
     $("m-cmd").textContent = fmt(meta.cmd[0], 1) + " / " + fmt(meta.cmd[1], 1);
+    // `cost-to-go` the LAYER is the best over all headings; this is the one the robot is
+    // actually on. When the layer looks healthy and this reads the cap, the heading ring has
+    // holes in it -- which is invisible in every min-over-headings view.
+    $("m-vh").textContent = meta.vh == null ? "—" : fmt(meta.vh) + " m";
+    const rt = $("m-route");
+    if (meta.route == null) { rt.textContent = "—"; } else {
+      rt.textContent = (meta.route * 100).toFixed(0) + "%";
+      rt.style.color = meta.route < 0.75 ? "var(--alarm)" : "";
+    }
     const rp = $("m-rp"), lim = M.limits;
     if (meta.rp && lim) {
       const [ro, pi] = meta.rp;
@@ -375,6 +388,8 @@
       $("shi").textContent = fmt(meta[rangeKey][1]) + " " + L.unit;
     } else if (layer === "blk") {
       $("slo").textContent = "0 headings"; $("shi").textContent = "all headings";
+    } else if (layer === "route") {
+      $("slo").textContent = "no heading has a route"; $("shi").textContent = "every heading does";
     } else {
       $("slo").textContent = "never measured"; $("shi").textContent = "measured";
     }
