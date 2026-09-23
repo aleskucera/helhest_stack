@@ -355,12 +355,16 @@
     // `cost-to-go` the LAYER is the best over all headings; this is the one the robot is
     // actually on. When the layer looks healthy and this reads the cap, the heading ring has
     // holes in it -- which is invisible in every min-over-headings view.
-    $("m-vh").textContent = meta.vh == null ? "—" : fmt(meta.vh) + " m";
-    const rt = $("m-route");
-    if (meta.route == null) { rt.textContent = "—"; } else {
-      rt.textContent = (meta.route * 100).toFixed(0) + "%";
-      rt.style.color = meta.route < 0.75 ? "var(--alarm)" : "";
-    }
+    const vhEl = $("m-vh"), dead = meta.vh != null && w.cap && meta.vh >= 0.9 * w.cap;
+    vhEl.textContent = meta.vh == null ? "—" : dead ? "no route" : fmt(meta.vh) + " m";
+    // The one unambiguous alarm on this axis, and it needs no threshold: the heading the robot
+    // is ON has no route, while the layer beside it -- the best over all headings -- may look
+    // perfectly healthy. That disagreement is the whole reason these two are recorded.
+    vhEl.style.color = dead ? "var(--alarm)" : "";
+    // No colour on the fraction: its healthy level is a property of the MAP, not the lattice.
+    // Measured 59-76% across the six worlds with a fully connected ring, because a routing
+    // window legitimately contains blind cells, ground behind walls and edge states.
+    $("m-route").textContent = meta.route == null ? "—" : (meta.route * 100).toFixed(0) + "%";
     const rp = $("m-rp"), lim = M.limits;
     if (meta.rp && lim) {
       const [ro, pi] = meta.rp;

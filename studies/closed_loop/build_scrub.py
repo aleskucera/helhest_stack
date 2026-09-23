@@ -123,6 +123,9 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
         nr=int(v.shape[1]),
         nc=int(cv.shape[1]),
         cell=float(d["cell"]),
+        # the unreachable sentinel, so the page can say "the heading it is ON has no route"
+        # without inventing a threshold for it
+        cap=round(cap, 2),
         coarse_cell=float(d["coarse_cell"]),
         off_r=(int(h.shape[1]) // 2 - int(v.shape[1]) // 2),
         goal=[float(x) for x in d["goal"]],
