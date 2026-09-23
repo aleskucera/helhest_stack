@@ -121,20 +121,33 @@ held. No simulator, no controller: "was there a plan from here" is the planner's
 .venv/bin/python studies/closed_loop/plan_quality.py --a out/ab_A --c out/ab_C
 ```
 
-| world | no routing layer | with it | what MPPI did |
-|---|---|---|---|
-| gap | 100% | 96% | reached both |
-| **slalom** | **32%** | **89%** | fail → reach |
-| **pillars** | **61%** | **94%** | fail → reach |
-| **pocket** | **67%** | **79%** | fail → reach |
-| ridge | 74% | 78% | reached both |
-| bumpy | 35% | 39% | reached both |
+**These numbers were measured on the disconnected heading ring and are retained only as
+history.** Half of every cell's headings held the "no route" cap, and this table read that as a
+planner that could not find routes. See `incident_2026-09-22_lattice-heading-connectivity.md`.
 
-The three worlds the routing layer flipped for MPPI are the three where plan usability jumps; the
-three MPPI reached either way are the three where it barely moves. The layer's benefit is a
-**planner** effect. And `bumpy` is the reverse case: no route 6 frames in 10 either way, yet MPPI
-reaches it comfortably -- there the controller carries the run, which is the same `bumpy` where
-it drives through vetoed poses 20% of the time.
+| world | no routing layer | with it | what MPPI did | *re-measured, connected ring* |
+|---|---|---|---|---|
+| gap | 100% | 96% | reached both | 95% / 95% |
+| slalom | 32% | 89% | fail → reach | 90% / 95% |
+| pillars | 61% | 94% | fail → reach | 93% / 96% |
+| pocket | 67% | 79% | fail → reach | 87% / 95% |
+| ridge | 74% | 78% | reached both | 96% / 96% |
+| bumpy | 35% | 39% | reached both | 100% / 100% |
+
+The right-hand column is the same question asked of a connected lattice, and PAIRED -- one run's
+frames judged under both settings, which removes the trajectory confound this script's own
+docstring admits. Plan usability is 87-100% everywhere, and the routing layer's margin collapses
+from +57 pp on slalom to +5. Most of what the original table measured was the split ring, not the
+absence of a routing layer. The `bumpy` claim -- "no route 6 frames in 10, the controller carries
+the run" -- is simply dead: it is 10 frames in 10.
+
+The layer still earns its place, but for less. Driving all six worlds WITHOUT it (`--coarsen 0`)
+reaches 6/6 -- so it is not fail->reach on three worlds any more -- at +4.2% frames overall, and
+the cost is concentrated rather than spread: pillars 224 -> 258 (+15%) and ridge 199 -> 221
+(+11%), the rest within noise. Note that is MORE than the paired column suggests, exactly as its
+caveat warns: pairing judges a successful run's poses, so it cannot see that part of the layer's
+value is keeping the robot on ground where plans exist. The two measurements answer different
+questions; keep both.
 
 ## The carrot follower, and what it is not
 

@@ -576,7 +576,9 @@ def main() -> None:
         "--veto",
         type=float,
         default=0.0,
-        help="weight on the router's per-pose veto in the MPPI cost; 0 = OFF (measured: breaks ridge and bumpy)",
+        help="weight on the router's per-pose veto in the MPPI cost; 0 = OFF (measured on the "
+        "connected heading ring: DECISION-NEUTRAL, 6/6 either way and within 1% on frames. The "
+        "'breaks ridge and bumpy' this used to say was the split-ring artifact, not the veto)",
     )
     p.add_argument(
         "--escape",
