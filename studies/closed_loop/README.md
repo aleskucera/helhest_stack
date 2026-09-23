@@ -110,6 +110,32 @@ worth keeping: the split ring was not a `pocket` problem that happened to show u
 costing every run 9-24% and only `pocket` failed outright, because only `pocket` needed a
 heading the orphaned half of the ring owned.
 
+## The coarse layer, on trial
+
+Once the heading ring was connected, the layer's old justification (fail -> reach on three
+worlds) was gone, so it was re-measured against the case for deleting it.
+
+| arm | total frames | verdict |
+|---|---|---|
+| with it, `--coarsen 5` | 1480 | baseline |
+| **without it**, `--coarsen 0` | 1542 (+4.2%) | 6/6 anyway, but +15% `pillars`, +11% `ridge` |
+| no pooling, `--coarsen 1` | 1472 (-0.5%) | identical, and +2.0 ms a frame |
+| `--coarse-pass 0.1` | 1476 | within noise |
+| `--coarse-pass 0.9` | 1473 | within noise |
+
+**Keep the layer, keep the pooling, stop treating `min_pass_fraction` as a risk.** It earns ~4%
+overall and 11-15% exactly where "which way round" binds -- `ridge` needs its notch found and
+`pocket` is a C whose only opening is outside the routing window for most of the approach. The
+pooling is free performance: factor 1 matches factor 5 and costs 2 ms.
+
+And `min_pass_fraction`, carried since it was written as an untuned stand-in for per-edge
+feasibility, turns out to move everything except the answer. Swept 9x it takes blocked coarse
+cells from 1.5% to 13% and the coarse field by up to 48 m, and the loop moves under 2%,
+non-monotonically. A coarse "which way out" survives a wholesale change of opinion about which
+blocks are passable, so the stand-in does not need replacing -- which also means the walls
+looking inconsistent frame to frame in the viewer is cosmetic, not a defect that reaches the
+wheels. Caveat: measured on stress worlds, whose coverage is good.
+
 ## Judging the planner without a controller
 
 A run's outcome mixes the planner and the controller, and every attribution made from

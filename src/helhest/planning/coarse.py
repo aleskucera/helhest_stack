@@ -205,6 +205,24 @@ class CoarseRouter:
     crossable. `frontier_m` is how far past measured ground stays free, and `void_penalty` what
     each cell costs beyond it -- in metres, so 1.0 doubles the price of crossing a metre of
     terrain nobody has looked at.
+
+    DO NOT TUNE `min_pass_fraction`. It was carried as a heuristic standing in for per-edge
+    feasibility, i.e. as an untuned risk. Measured across the six stress worlds it is a knob that
+    moves everything except the answer: swept 0.1 -> 0.9 it takes blocked coarse cells from ~1.5%
+    to ~13% and shifts this field by up to 48 m on `pocket`, and the closed loop changes by under
+    2%, non-monotonically -- 1476 / 1504 / 1473 total frames at 0.1 / 0.5 / 0.9, all 6/6. What
+    this layer contributes is a coarse "which way out of the routing window", and that survives
+    a wholesale change of opinion about which blocks are passable. So the stand-in does not need
+    replacing with per-edge feasibility; it needs leaving alone.
+
+    The insensitivity is measured on stress worlds, whose coverage is good. On real maps -- far
+    patchier, much more of the window unmeasured -- it may bind, and `frontier_m`/`void_penalty`
+    (which decide what unseen ground costs) are the more likely levers there anyway.
+
+    The layer as a whole DOES earn its place: driving all six worlds with it off (`--coarsen 0`)
+    still reaches 6/6, but costs +4.2% frames overall and +15% on `pillars`, +11% on `ridge` --
+    the two worlds where "which way round" actually binds. Pooling at `factor` 1 rather than 5
+    buys nothing and costs 2.0 ms a frame (0.31 -> 2.32 ms), so the pooling stays too.
     """
 
     def __init__(

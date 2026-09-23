@@ -562,7 +562,13 @@ def main() -> None:
     p.add_argument("--fine", type=float, default=9.0, help="[m] MPPI window, a centred crop")
     p.add_argument("--coarsen", type=int, default=5, help="fine cells per coarse cell; 0 = OFF")
     p.add_argument("--coarse-step", type=float, default=0.25, help="[m] climbable step, coarse")
-    p.add_argument("--coarse-pass", type=float, default=0.5, help="climbable fraction to cross")
+    p.add_argument(
+        "--coarse-pass",
+        type=float,
+        default=0.5,
+        help="climbable fraction to cross (measured 0.1 vs 0.9: <2% on the loop, non-monotonic -- "
+        "this knob moves the coarse field hugely and the wheels not at all; see coarse.py)",
+    )
     p.add_argument("--frontier", type=float, default=3.0, help="[m] unseen ground that stays free")
     p.add_argument("--void-penalty", type=float, default=1.0, help="[m] per cell of unseen beyond")
     p.add_argument("--cell", type=float, default=0.2)
