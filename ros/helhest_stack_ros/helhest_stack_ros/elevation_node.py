@@ -571,7 +571,24 @@ class ElevationNode(Node):
         # maneuver doesn't jitter on open ground. 0 = off; ~0.3 cut cruise churn ~35% in sim. Too high
         # adds reaction lag to new obstacles/goals.
         d("plan_consistency", 0.3)
-        d("plan_n_theta", 24)  # cost-to-go heading bins
+        # Cost-to-go heading bins. 16, NOT 24, and the reason is connectivity rather than taste:
+        # the lattice arcs turn by {0, +-bins/2, +-bins} bins, so they reach every heading only
+        # when gcd(bins/2, n_theta) == 1, and with the point turns priced out (plan_pivot_cost 0)
+        # nothing else bridges it. At 24 bins on this window -- routing cell = resolution *
+        # plan_lat_coarsen = 0.08 * 4 = 0.32 m -- no closing step under a quarter turn is both
+        # connected and able to clear a cell, so the planner refuses to build. It used to pick
+        # bins=6 silently, gcd(3, 24) = 3, and this robot planned for months on a heading ring in
+        # THREE disconnected pieces: 8 of its 24 headings reachable from any pose, the other 16
+        # holding the "no route" cap with nothing blocked. See
+        # incident_2026-09-22_lattice-heading-connectivity.md.
+        #
+        # So this is not a loss of heading resolution -- the EFFECTIVE resolution was already 8
+        # bins (45 deg), and 16 connected ones halve that to 22.5. It is also the configuration
+        # that reaches 6/6 stress worlds in studies/closed_loop.
+        #
+        # If 15 deg bins are ever wanted back, plan_lat_coarsen 3 (cell 0.24) makes n_theta 24
+        # legal again -- at ~2.7x the lattice and a 9% margin on the cell bound.
+        d("plan_n_theta", 16)
         d("plan_lat_coarsen", 4)  # routing/cost-to-go grid coarsening vs the map cell
         d("plan_n_refine", 3)  # MPPI refine iterations per frame
         d("plan_friction", 0.8)  # uniform rollout friction
@@ -662,9 +679,11 @@ class ElevationNode(Node):
         d("plan_reverse_clear_m", 1.5)
         # POINT-TURN routing: cost-to-go pivot primitive cost [m-equivalent per heading bin]; > 0
         # lets the router plan pivot-then-drive for goals behind/beside the robot (a skid-steer can
-        # rotate in place; the forward-arc-only lattice pretended it can't). 0 = off. At n_theta 24,
-        # a half-turn costs 12*pivot_cost m-equivalent -- 0.3 makes pivots win whenever they save
+        # rotate in place; the forward-arc-only lattice pretended it can't). 0 = off. At n_theta 16,
+        # a half-turn costs 8*pivot_cost m-equivalent -- 0.45 makes pivots win whenever they save
         # ~4 m of looping. Pairs naturally with plan_wmin < 0 but is useful alone.
+        # It also reconnects a split heading ring, which is why plan_n_theta above has to be
+        # chosen as if this were 0: connectivity must not depend on a price.
         d("plan_pivot_cost", 0.0)
         # ROBUST-MU replicas: each MPPI candidate is rolled out under this many friction hypotheses
         # spanning the current uncertainty band and ranked by its WORST outcome, so the winner is a
