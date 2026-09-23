@@ -571,25 +571,21 @@ class ElevationNode(Node):
         # maneuver doesn't jitter on open ground. 0 = off; ~0.3 cut cruise churn ~35% in sim. Too high
         # adds reaction lag to new obstacles/goals.
         d("plan_consistency", 0.3)
-        # Cost-to-go heading bins. 16, NOT 24, and the reason is connectivity rather than taste:
-        # the lattice arcs turn by {0, +-bins/2, +-bins} bins, so they reach every heading only
-        # when gcd(bins/2, n_theta) == 1, and with the point turns priced out (plan_pivot_cost 0)
-        # nothing else bridges it. At 24 bins on this window -- routing cell = resolution *
-        # plan_lat_coarsen = 0.08 * 4 = 0.32 m -- no closing step under a quarter turn is both
-        # connected and able to clear a cell, so the planner refuses to build. It used to pick
-        # bins=6 silently, gcd(3, 24) = 3, and this robot planned for months on a heading ring in
-        # THREE disconnected pieces: 8 of its 24 headings reachable from any pose, the other 16
-        # holding the "no route" cap with nothing blocked. See
-        # incident_2026-09-22_lattice-heading-connectivity.md.
+        # Cost-to-go heading bins, and the routing grid they live on. These two are chosen
+        # TOGETHER, because the lattice arcs turn by {0, +-bins/2, +-bins} bins and reach every
+        # heading only when gcd(bins/2, n_theta) == 1, while the step also has to clear one
+        # routing cell (= resolution * plan_lat_coarsen). Get the pair wrong and the planner
+        # either refuses to build or, before 4dae1be, silently served a heading ring in pieces.
+        # See incident_2026-09-22_lattice-heading-connectivity.md.
         #
-        # So this is not a loss of heading resolution -- the EFFECTIVE resolution was already 8
-        # bins (45 deg), and 16 connected ones halve that to 22.5. It is also the configuration
-        # that reaches 6/6 stress worlds in studies/closed_loop.
-        #
-        # If 15 deg bins are ever wanted back, plan_lat_coarsen 3 (cell 0.24) makes n_theta 24
-        # legal again -- at ~2.7x the lattice and a 9% margin on the cell bound.
-        d("plan_n_theta", 16)
-        d("plan_lat_coarsen", 4)  # routing/cost-to-go grid coarsening vs the map cell
+        # 24 bins on a 0.24 m cell (coarsen 3) is connected at bins=2: closing_step = 0.2618 m
+        # clears the cell and gcd(1, 24) = 1. That is what ros/odin/odin_elevation.params.yaml
+        # has always run, so the DEPLOYED robot was never affected by the split ring -- the
+        # defaults here were, at coarsen 4 (0.32 m), which no closing step under a quarter turn
+        # both clears and keeps connected. The defaults now match the params file rather than
+        # disagreeing with it silently.
+        d("plan_n_theta", 24)
+        d("plan_lat_coarsen", 3)  # routing/cost-to-go grid coarsening vs the map cell
         d("plan_n_refine", 3)  # MPPI refine iterations per frame
         d("plan_friction", 0.8)  # uniform rollout friction
         # Wheel envelope half-width [m]. DEFAULT 0.10 = the measured tread, as a yaw-binned
@@ -682,8 +678,9 @@ class ElevationNode(Node):
         # rotate in place; the forward-arc-only lattice pretended it can't). 0 = off. At n_theta 16,
         # a half-turn costs 8*pivot_cost m-equivalent -- 0.45 makes pivots win whenever they save
         # ~4 m of looping. Pairs naturally with plan_wmin < 0 but is useful alone.
-        # It also reconnects a split heading ring, which is why plan_n_theta above has to be
-        # chosen as if this were 0: connectivity must not depend on a price.
+        # It also reconnects a split heading ring -- the +-1 bin move is the only odd-parity
+        # primitive -- which is why plan_n_theta above is chosen as if this were 0. Connectivity
+        # must not depend on a price someone may reasonably set to zero.
         d("plan_pivot_cost", 0.0)
         # ROBUST-MU replicas: each MPPI candidate is rolled out under this many friction hypotheses
         # spanning the current uncertainty band and ranked by its WORST outcome, so the winner is a
