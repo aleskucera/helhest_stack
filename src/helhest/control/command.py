@@ -57,6 +57,8 @@ def turn_first(
     min_scale: float = 0.1,
     prev_diff: float | None = None,
     commit_deg: float = 90.0,
+    speed: float | None = None,
+    stop_below: float = 0.3,
 ) -> tuple[float, float]:
     """Slow the FORWARD component when the way on is well off the robot's heading, so a large
     turn is made in place before driving rather than as an arc that also advances.
@@ -76,11 +78,19 @@ def turn_first(
     (corridor: four reversals in 60 frames). A spin here is not in place -- 0.16 m sideways per
     95 deg -- so each reversal walked the robot toward a wall until the last 50 deg would have
     swept a corner into it and everything was vetoed. One direction, decided once.
+
+    `speed` [m/s] is the robot's measured ground speed. At a full brake with the robot still
+    moving faster than `stop_below`, the command is a plain stop and the spin waits: a spin
+    begun at cruise carries the cruise momentum through the skid -- 0.9 m sideways per 120 deg
+    in the corridor -- where a spin from rest travels 0.2 m (measured in the same physics at
+    1.5-6 rad/s). Stop, then turn.
     """
     e = abs(math.degrees(heading_error))
     if e <= start_deg or full_deg <= start_deg:
         return wl, wr
     scale = max(min_scale, 1.0 - (e - start_deg) / (full_deg - start_deg) * (1.0 - min_scale))
+    if e >= full_deg and speed is not None and speed > stop_below:
+        return 0.0, 0.0
     mean = 0.5 * (wl + wr)
     half_diff = 0.5 * (wr - wl)
     if (

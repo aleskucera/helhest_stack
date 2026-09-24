@@ -48,3 +48,17 @@ def test_no_previous_spin_means_no_commitment():
     assert wr < wl
     wl, wr = turn_first(2.6, -2.6, math.radians(170.0), prev_diff=0.3)  # last frame drove straight
     assert wr < wl
+
+
+def test_a_full_brake_while_still_moving_is_a_stop_not_a_spin():
+    assert turn_first(0.0, 5.9, math.radians(170.0), speed=1.2) == (0.0, 0.0)
+
+
+def test_at_rest_the_spin_goes_ahead():
+    wl, wr = turn_first(0.0, 5.9, math.radians(170.0), speed=0.1)
+    assert wr - wl == pytest.approx(5.9) and 0.5 * (wl + wr) == pytest.approx(0.295)
+
+
+def test_below_a_full_brake_speed_does_not_stop_the_robot():
+    wl, wr = turn_first(4.0, 4.0, math.radians(70.0), speed=1.5)
+    assert 0.5 * (wl + wr) > 0.0

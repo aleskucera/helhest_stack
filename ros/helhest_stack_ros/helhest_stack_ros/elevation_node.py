@@ -2113,6 +2113,12 @@ class ElevationNode(Node):
                         start_deg=self.plan_turn_first_deg,
                         # last PUBLISHED differential, [L, rear, R] -> R - L
                         prev_diff=float(self._prev_cmd[2] - self._prev_cmd[0]),
+                        # measured ground speed from the odometry twist, when fresh
+                        speed=(
+                            float(np.hypot(self._twist_meas[0], self._twist_meas[1]))
+                            if self._twist_meas is not None and now_s - self._twist_meas_t < 0.3
+                            else None
+                        ),
                     )
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
         turn_boost = (

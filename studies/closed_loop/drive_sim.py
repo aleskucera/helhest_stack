@@ -398,10 +398,13 @@ def drive(a: argparse.Namespace) -> dict:
     fp = footprint(robot)
     clearance: list[float] = []
     prev_diff = None  # last frame's differential, for the turn-first brake's commitment
+    prev_xy = None  # last frame's position: the brake stops before it spins while still moving
     for f in range(a.frames):
         body = sim.current_state.body_q.numpy()[0]
         rx, ry, yaw, R = pose_of(body)
         trail.append((rx, ry))
+        speed = None if prev_xy is None else float(np.hypot(rx - prev_xy[0], ry - prev_xy[1]) / dt)
+        prev_xy = (rx, ry)
         body_z.append(float(body[2]))
         clearance.append(obstacle_clearance(a.world, rx, ry, yaw, fp))
         d = float(np.hypot(rx - goal[0], ry - goal[1]))
@@ -510,6 +513,7 @@ def drive(a: argparse.Namespace) -> dict:
                         start_deg=a.turn_first,
                         min_scale=a.turn_first_min,
                         prev_diff=prev_diff,
+                        speed=speed,
                     )
             cmd = np.array([wl, wr, 0.5 * (wl + wr)], np.float32)
         else:
