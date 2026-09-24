@@ -29,3 +29,22 @@ def test_the_brake_ramps_between_start_and_full():
 
 def test_the_sign_of_the_error_does_not_matter():
     assert turn_first(2.0, 6.0, math.radians(120.0)) == turn_first(2.0, 6.0, math.radians(-120.0))
+
+
+def test_a_spin_under_way_keeps_its_direction_while_the_way_is_behind():
+    # last frame spun left (wr > wl); the planner now proposes right, with the route at 170 deg
+    wl, wr = turn_first(2.6, -2.6, math.radians(170.0), prev_diff=5.0)
+    assert wr > wl, "the tie was re-decided; the spin must keep its direction"
+    assert wr - wl == pytest.approx(5.2)  # the planner's magnitude, the previous sign
+
+
+def test_the_commitment_lets_go_once_the_way_is_off_to_one_side():
+    wl, wr = turn_first(2.6, -2.6, math.radians(60.0), prev_diff=5.0)
+    assert wr < wl, "at 60 deg the planner's choice is unambiguous and wins"
+
+
+def test_no_previous_spin_means_no_commitment():
+    wl, wr = turn_first(2.6, -2.6, math.radians(170.0), prev_diff=None)
+    assert wr < wl
+    wl, wr = turn_first(2.6, -2.6, math.radians(170.0), prev_diff=0.3)  # last frame drove straight
+    assert wr < wl

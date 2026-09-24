@@ -2106,7 +2106,14 @@ class ElevationNode(Node):
                 )
                 if np.isfinite(bearing):
                     err = (bearing - eyaw + np.pi) % (2.0 * np.pi) - np.pi
-                    wl, wr = turn_first(wl, wr, err, start_deg=self.plan_turn_first_deg)
+                    wl, wr = turn_first(
+                        wl,
+                        wr,
+                        err,
+                        start_deg=self.plan_turn_first_deg,
+                        # last PUBLISHED differential, [L, rear, R] -> R - L
+                        prev_diff=float(self._prev_cmd[2] - self._prev_cmd[0]),
+                    )
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
         turn_boost = (
             self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost

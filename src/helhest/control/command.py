@@ -55,6 +55,8 @@ def turn_first(
     start_deg: float = 45.0,
     full_deg: float = 110.0,
     min_scale: float = 0.1,
+    prev_diff: float | None = None,
+    commit_deg: float = 90.0,
 ) -> tuple[float, float]:
     """Slow the FORWARD component when the way on is well off the robot's heading, so a large
     turn is made in place before driving rather than as an arc that also advances.
@@ -67,6 +69,13 @@ def turn_first(
     Why: forward-only, a minimum-radius arc that turns 52 deg advances 1.4 m (false_door, the
     anchored-map runs). Begun 1.9 m from a wall it ends 0.55 m from it, inside the robot's own
     turning clearance, where every forward and spinning rollout is vetoed and MPPI freezes.
+
+    `prev_diff` is last frame's published differential (wr - wl). While the error is past
+    `commit_deg` a spin already under way keeps its direction: with the way on straight behind,
+    left and right cost the same, and the planner's elite picked a different one every frame
+    (corridor: four reversals in 60 frames). A spin here is not in place -- 0.16 m sideways per
+    95 deg -- so each reversal walked the robot toward a wall until the last 50 deg would have
+    swept a corner into it and everything was vetoed. One direction, decided once.
     """
     e = abs(math.degrees(heading_error))
     if e <= start_deg or full_deg <= start_deg:
@@ -74,6 +83,13 @@ def turn_first(
     scale = max(min_scale, 1.0 - (e - start_deg) / (full_deg - start_deg) * (1.0 - min_scale))
     mean = 0.5 * (wl + wr)
     half_diff = 0.5 * (wr - wl)
+    if (
+        prev_diff is not None
+        and e > commit_deg
+        and abs(prev_diff) > 1.0
+        and half_diff * prev_diff < 0.0
+    ):
+        half_diff = -half_diff
     return mean * scale - half_diff, mean * scale + half_diff
 
 

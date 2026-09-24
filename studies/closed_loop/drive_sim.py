@@ -397,6 +397,7 @@ def drive(a: argparse.Namespace) -> dict:
     # happens -- so any change to it is judged by this, not by reaching alone.
     fp = footprint(robot)
     clearance: list[float] = []
+    prev_diff = None  # last frame's differential, for the turn-first brake's commitment
     for f in range(a.frames):
         body = sim.current_state.body_q.numpy()[0]
         rx, ry, yaw, R = pose_of(body)
@@ -502,7 +503,14 @@ def drive(a: argparse.Namespace) -> dict:
                 bearing = ctg.descent_bearing(rx - r0, ry - s0, a.turn_first_reach)
                 if np.isfinite(bearing):
                     err = (bearing - yaw + np.pi) % (2.0 * np.pi) - np.pi
-                    wl, wr = turn_first(wl, wr, err, start_deg=a.turn_first)
+                    wl, wr = turn_first(
+                        wl,
+                        wr,
+                        err,
+                        start_deg=a.turn_first,
+                        min_scale=a.turn_first_min,
+                        prev_diff=prev_diff,
+                    )
             cmd = np.array([wl, wr, 0.5 * (wl + wr)], np.float32)
         else:
             # the lattice's own policy, walked in the ROUTING window's frame, then followed
@@ -518,6 +526,7 @@ def drive(a: argparse.Namespace) -> dict:
         cmd = np.clip(cmd, -a.wmax, a.wmax)
 
         sim.set_wheel_command(cmd)
+        prev_diff = float(cmd[1] - cmd[0])  # what the brake commits a spin's direction to
         if a.history and f % a.history == 0 and mppi and a.escape:
             # Was there a way out? Per sampled rollout, the worst envelope violation over the
             # horizon; then the BEST rollout's worst. Near zero means an escape existed and the
@@ -696,6 +705,12 @@ def main() -> None:
         default=None,
         help="[deg] heading error past which the forward speed brakes for a turn in place; "
         "0 = off; default plan_turn_first_deg",
+    )
+    p.add_argument(
+        "--turn-first-min",
+        type=float,
+        default=0.1,
+        help="forward speed scale left at a full brake; 0 = a pure spin",
     )
     p.add_argument(
         "--turn-first-reach",
