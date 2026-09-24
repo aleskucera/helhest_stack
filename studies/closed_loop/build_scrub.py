@@ -28,7 +28,17 @@ import numpy as np
 from PIL import Image
 
 # `pocket_wall` is optional: a pocket run that touched a wall, kept beside a clean one to compare
-ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy"]
+ORDER = [
+    "gap",
+    "slalom",
+    "pillars",
+    "pocket",
+    "pocket_wall",
+    "ridge",
+    "bumpy",
+    "corridor",
+    "false_door",
+]
 LAYERS = ("h", "seen", "blk", "v", "route", "cv")
 
 

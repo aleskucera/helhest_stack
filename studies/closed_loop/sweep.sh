@@ -15,7 +15,7 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-WORLDS=${WORLDS:-"gap slalom pillars pocket ridge bumpy"}
+WORLDS=${WORLDS:-"gap slalom pillars pocket ridge bumpy corridor false_door"}
 OUT=${OUT:-/local/kuceral4/tmp/sweep}
 FRAMES=${FRAMES:-600}
 EXTRA=${EXTRA:-}

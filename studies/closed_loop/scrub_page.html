@@ -237,8 +237,8 @@
     { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
     { k: "route", name: "headings with a route", unit: "", grid: "route" },
   ];
-  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy"];
-  const LABEL = { pocket_wall: "pocket (wall hit)" };
+  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "corridor", "false_door"];
+  const LABEL = { pocket_wall: "pocket (wall hit)", false_door: "false door" };
 
   // --- colour ramps, one per layer role -------------------------------------------------
   function ramp(stops) {

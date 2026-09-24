@@ -26,6 +26,8 @@ LIMITS = {
     "pillars": ((-2.0, 16.0), (-5.0, 5.0)),
     "pocket": ((-2.0, 16.0), (-5.0, 5.0)),
     "ridge": ((-2.0, 14.0), (-5.0, 5.0)),
+    "corridor": ((-2.0, 24.0), (-9.0, 9.0)),
+    "false_door": ((-2.0, 24.0), (-9.0, 9.0)),
 }
 
 # ridge is the one approximation. Its notch is a vertical cut in x, while a box

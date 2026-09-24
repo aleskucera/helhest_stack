@@ -10,6 +10,10 @@ for the stress harness. They target different weaknesses:
            a greedy Euclidean planner drives into the closed side and stalls
   ridge    a diagonal barrier with one notch -> direction-dependent crossing
   bumpy    rough terrain, some bumps tall enough to high-center -> tilt / settle feasibility
+  corridor a mouth aimed at the goal into a corridor capped out of sight, and a side door ->
+           commit, discover the dead end, turn round in 2.8 m, back out, take the other way
+  false_door  a door aimed at the goal into a closed room, and a side gap -> the same recovery
+           with room to turn, so the backtrack is tested without the tight turn
 
 Render them:  python -m helhest.worlds [--out /tmp/worlds.png]
 """
@@ -115,6 +119,35 @@ def ridge_world(cell=0.06):
     return Heightmap(H, (xlim[0], ylim[0]), cell)
 
 
+# The two trap worlds. From the start, the opening aimed at the goal is the obvious way and its
+# dead end is 18 m out -- past the harness's 10 m sensing -- so the robot can only find it by
+# driving in. Both are 22 m to the goal and share an extent, so they are directly comparable.
+def corridor_world(cell=0.06):
+    xlim, ylim = (-2.0, 24.0), (-9.0, 9.0)
+    XX, YY = _grid(xlim, ylim, cell)
+    H = np.zeros_like(XX)
+    _box(H, XX, YY, 5.0, -5.2, 0.2, 3.8)  # front wall; mouth at |y| < 1.4 ...
+    _box(H, XX, YY, 5.0, 3.3, 0.2, 1.9)
+    _box(H, XX, YY, 5.0, 8.0, 0.2, 1.0)  # ... and a 1.8 m side door at y 5.2..7.0
+    _box(H, XX, YY, 11.5, 1.6, 6.7, 0.2)  # the corridor, 2.8 m clear
+    _box(H, XX, YY, 11.5, -1.6, 6.7, 0.2)
+    _box(H, XX, YY, 18.0, 0.0, 0.2, 1.8)  # capped 18 m out
+    return Heightmap(H, (xlim[0], ylim[0]), cell)
+
+
+def false_door_world(cell=0.06):
+    xlim, ylim = (-2.0, 24.0), (-9.0, 9.0)
+    XX, YY = _grid(xlim, ylim, cell)
+    H = np.zeros_like(XX)
+    _box(H, XX, YY, 5.0, -5.0, 0.2, 4.0)  # front wall; a 2.0 m door at |y| < 1.0 ...
+    _box(H, XX, YY, 5.0, 3.3, 0.2, 2.3)
+    _box(H, XX, YY, 5.0, 8.2, 0.2, 0.8)  # ... and a 1.8 m side gap at y 5.6..7.4
+    _box(H, XX, YY, 11.5, 5.0, 6.7, 0.2)  # a room behind the door, 12.6 x 9.6 m clear,
+    _box(H, XX, YY, 11.5, -5.0, 6.7, 0.2)
+    _box(H, XX, YY, 18.0, 0.0, 0.2, 5.2)  # closed at the back
+    return Heightmap(H, (xlim[0], ylim[0]), cell)
+
+
 def bumpy_world(cell=0.06, seed=0):
     xlim, ylim = (-2.0, 16.0), (-5.0, 5.0)
     XX, YY = _grid(xlim, ylim, cell)
@@ -188,6 +221,22 @@ OBSTACLES: dict[str, tuple[Box, ...]] = {
         ),
     ),
     "bumpy": (),
+    "corridor": (
+        Box(5.0, -5.2, 0.2, 3.8),
+        Box(5.0, 3.3, 0.2, 1.9),
+        Box(5.0, 8.0, 0.2, 1.0),
+        Box(11.5, 1.6, 6.7, 0.2),
+        Box(11.5, -1.6, 6.7, 0.2),
+        Box(18.0, 0.0, 0.2, 1.8),
+    ),
+    "false_door": (
+        Box(5.0, -5.0, 0.2, 4.0),
+        Box(5.0, 3.3, 0.2, 2.3),
+        Box(5.0, 8.2, 0.2, 0.8),
+        Box(11.5, 5.0, 6.7, 0.2),
+        Box(11.5, -5.0, 6.7, 0.2),
+        Box(18.0, 0.0, 0.2, 5.2),
+    ),
 }
 
 
@@ -279,6 +328,8 @@ WORLDS = {
     "pocket": (pocket_world, (0.0, 0.0, 0.0), (9.0, 0.0)),
     "ridge": (ridge_world, (0.0, -4.0, 0.0), (9.0, 2.5)),
     "bumpy": (bumpy_world, (0.0, 0.0, 0.0), (14.0, 0.0)),
+    "corridor": (corridor_world, (0.0, 0.0, 0.0), (22.0, 0.0)),
+    "false_door": (false_door_world, (0.0, 0.0, 0.0), (22.0, 0.0)),
 }
 
 
@@ -293,7 +344,7 @@ def _plot_all(out):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(2, 3, figsize=(16, 8))
+    fig, axes = plt.subplots(2, 4, figsize=(21, 8))
     for ax, (name, (builder, start, goal)) in zip(axes.ravel(), WORLDS.items()):
         hm = builder()
         ext = [hm.x0, hm.x0 + hm.nx * hm.cell, hm.y0, hm.y0 + hm.ny * hm.cell]
