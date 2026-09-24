@@ -79,7 +79,7 @@ def _feasibility_kernel(
     robot: Robot,
     blocked: wp.array3d(dtype=wp.float32),
     hazard: wp.array3d(dtype=wp.float32),
-    tilt_excess: wp.array3d(dtype=wp.float32),
+    violation: wp.array3d(dtype=wp.float32),
     tilt: wp.array3d(dtype=wp.float32),
 ):
     """The per-pose feasibility OR + graded tilt cost, one thread per (y, x, theta), no readback.
@@ -87,9 +87,10 @@ def _feasibility_kernel(
     +pitch. Pose b = (r*nx + c)*n_theta + t is the C-order flatten matching start_pose in __init__.
 
     `blocked` is the union; the causes are also kept apart because the robust tube treats them
-    differently. `hazard` is the body meeting something -- the settle not resolving (residual) or
-    the belly touching (clearance). `tilt_excess` [rad] is how far past the envelope the attitude
-    is, 0 inside it.
+    differently. `hazard` here is only the settle failing to resolve (residual); walls join it in
+    `_step_hazard_kernel`. `violation` [rad] is how badly a SOFT test fails, 0 when none does:
+    the attitude's excess past the envelope, or the belly's shortfall below clear_margin divided
+    by the rear offset -- roughly the pitch that would lift it clear, so both are angles.
     """
     r, c, t = wp.tid()
     nx = blocked.shape[1]
@@ -101,16 +102,18 @@ def _feasibility_kernel(
     over_envelope = (
         wp.abs(roll) > robot.max_roll or pitch < -robot.max_pitch_up or pitch > robot.max_pitch_down
     )
-    hit = residual[0, b] > robot.resid_tol or clearance[0, b] < robot.clear_margin
-    if over_envelope or hit:
+    unresolved = residual[0, b] > robot.resid_tol
+    belly_short = robot.clear_margin - clearance[0, b]
+    if over_envelope or unresolved or belly_short > 0.0:
         blocked[r, c, t] = 1.0
     else:
         blocked[r, c, t] = 0.0
-    hazard[r, c, t] = wp.where(hit, 1.0, 0.0)
-    tilt_excess[r, c, t] = wp.max(
+    hazard[r, c, t] = wp.where(unresolved, 1.0, 0.0)
+    tilt_over = wp.max(
         wp.max(0.0, wp.abs(roll) - robot.max_roll),
         wp.max(-pitch - robot.max_pitch_up, pitch - robot.max_pitch_down),
     )
+    violation[r, c, t] = wp.max(tilt_over, belly_short / (-robot.wheel_pos[2][0]))
     tilt[r, c, t] = robot.roll_cost_weight * wp.abs(roll) + robot.pitch_cost_weight * wp.abs(pitch)
 
 
@@ -129,7 +132,6 @@ def _margin_kernel(
     z_charge: wp.float32,
     charge_per_sigma: wp.float32,
     blocked: wp.array3d(dtype=wp.float32),
-    hazard: wp.array3d(dtype=wp.float32),
     tilt: wp.array3d(dtype=wp.float32),
     zmargin: wp.array3d(dtype=wp.float32),
     doubt: wp.array3d(dtype=wp.float32),
@@ -261,8 +263,6 @@ def _margin_kernel(
 
     if z < k:
         blocked[r, c, t] = 1.0
-    if z_clear < k:  # the belly, not the attitude: a hazard, eroded hard like one
-        hazard[r, c, t] = 1.0
     if z < z_charge:  # graded: pay for being near a boundary, not only for crossing it
         tilt[r, c, t] = tilt[r, c, t] + charge_per_sigma * (z_charge - z)
 
@@ -387,14 +387,15 @@ def _step_hazard_kernel(
     blocked: wp.array3d(dtype=wp.float32),
     hazard: wp.array3d(dtype=wp.float32),
 ):
-    """Re-file a TILT block as a hazard when there is a face taller than the wheel radius under
-    the footprint.
+    """Re-file a SOFT block (tilt, belly) as a hazard when there is a face taller than the wheel
+    radius under the footprint.
 
     The settle has no notion of a vertical face: a wheel against a 1 m wall is lifted onto its
-    edge and reads as a tilt. Measured on the stress worlds, 11-15% of the poses whose body
-    overlaps a wall are blocked by tilt ALONE, so charging tilt instead of eroding it would have
-    let the tube run within millimetres of every wall. A step the wheel cannot mount is a
-    collision whatever the settle made of it. A smooth flank is still tilt: that is what the face
+    edge and reads as a tilt, and a wall under the body reads as a belly short of clearance.
+    Measured on the stress worlds, 11-15% of the poses whose body overlaps a wall are blocked by
+    tilt ALONE, so charging tilt instead of eroding it would have let the tube run within
+    millimetres of every wall. A step the wheel cannot mount is a collision whatever the settle
+    made of it. A smooth flank or a mound under the belly stays soft: that is what the face
     measure is for. Only already-blocked poses are re-filed, so this never blocks a pose that was
     free.
     """
@@ -436,27 +437,29 @@ def _step_hazard_kernel(
 def _robust_kernel(
     blocked: wp.array3d(dtype=wp.float32),
     hazard: wp.array3d(dtype=wp.float32),
-    tilt_excess: wp.array3d(dtype=wp.float32),
+    violation: wp.array3d(dtype=wp.float32),
     graded_tilt: wp.array3d(dtype=wp.float32),
     dr: int,
     dc: int,
     dt: int,
-    tilt_weight: wp.float32,
+    soft_weight: wp.float32,
     robust: wp.array3d(dtype=wp.float32),
     robust_tilt: wp.array3d(dtype=wp.float32),
 ):
     """Robust feasibility over the (y, x, theta) disturbance tube the closed loop cannot correct
     before the next replan -- split by what the tube is protecting against.
 
-    HAZARDS (the body meeting something) are eroded HARD: a pose is blocked if any pose in the tube
-    is. Driving into a wall is never a price worth paying, so no cost can buy it back.
+    HAZARDS -- a wall (a face the wheel cannot mount) or a settle that does not resolve -- are
+    eroded HARD: a pose is blocked if any pose in the tube is. Driving into a wall is never a price
+    worth paying, so no cost can buy it back.
 
-    TILT is only vetoed at the pose itself, and the tube CHARGES for it instead: tilt_weight times
-    the worst envelope excess [rad] anywhere in the tube, added to the graded tilt. Rough ground
-    speckles the envelope with isolated over-tilted poses, and a hard erosion of every one of them
-    by a 27-pose box closed `bumpy` outright although each speckle is a pose the robot is never
-    actually asked to hold. A charge proportional to HOW FAR over keeps a steep slope beside the
-    route expensive and a one-degree speckle nearly free. dr=dc=dt=0 is plain feasibility.
+    SOFT blocks -- tilt past the envelope, the belly short of clearance on smooth ground -- are
+    vetoed at the pose itself, and the tube CHARGES for them instead: soft_weight times the worst
+    violation [rad] anywhere in the tube, added to the graded tilt. Rough ground speckles both,
+    and a hard erosion by the 27-pose box took `bumpy` from 6/6 reached to 2/6; on its own the
+    erosion of belly-on-mound poses, 2.2% of the window, took it to 3/6. A charge proportional to
+    HOW FAR over keeps a steep slope beside the route expensive and a marginal speckle nearly free.
+    dr=dc=dt=0 is plain feasibility.
     """
     r, c, t = wp.tid()
     ny = blocked.shape[0]
@@ -471,9 +474,9 @@ def _robust_kernel(
             for k in range(-dt, dt + 1):
                 tt = (t + k + nth) % nth  # heading wraps
                 hit = wp.max(hit, hazard[rr, cc, tt])
-                excess = wp.max(excess, tilt_excess[rr, cc, tt])
+                excess = wp.max(excess, violation[rr, cc, tt])
     robust[r, c, t] = hit
-    robust_tilt[r, c, t] = graded_tilt[r, c, t] + tilt_weight * excess
+    robust_tilt[r, c, t] = graded_tilt[r, c, t] + soft_weight * excess
 
 
 @wp.kernel
@@ -598,9 +601,9 @@ class CostToGo:
         flatness_weight: float = 2.0,  # planner strength: how much detour to trade for flat ground
         robust_margin_m: float = 0.0,  # lateral disturbance tube -> erode the feasible set by this
         robust_margin_deg: float = 0.0,  # heading disturbance tube (orientation-aware erosion)
-        # [per rad] of the worst envelope excess inside the tube, as graded tilt. Tilt is charged,
-        # hazards are eroded hard -- see `_robust_kernel`.
-        robust_tilt_weight: float = 10.0,
+        # [per rad] of the worst soft violation inside the tube, as graded tilt. Tilt and belly
+        # clearance are charged, walls and unresolved settles are eroded hard -- `_robust_kernel`.
+        robust_soft_weight: float = 10.0,
         obstacle_step_m: float = 0.0,  # hard-block cells with a local step taller than this [m];
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
         pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives so
@@ -655,7 +658,7 @@ class CostToGo:
         self._mc = self._mr
         self._mt = int(round(robust_margin_deg / (360.0 / n_theta)))
         self._eroded = self._mr > 0 or self._mt > 0
-        self.robust_tilt_weight = float(robust_tilt_weight)
+        self.robust_soft_weight = float(robust_soft_weight)
         # tall-step obstacle gate: block cells within a robot footprint of a step > obstacle_step_m.
         self._step_gate = float(obstacle_step_m)
         self._foot_r = max(1, int(round(robot_params.half_track / self.grid.cell_size)))
@@ -775,8 +778,10 @@ class CostToGo:
         self.doubt_pessimistic = wp.zeros_like(self.V)
         self.robust_blocked = wp.zeros_like(self.V)  # blocked after the disturbance-tube erosion
         self.graded_tilt = wp.zeros_like(self.V)
-        self.hazard = wp.zeros_like(self.V)  # the blocked poses where the body meets something
-        self.tilt_excess = wp.zeros_like(self.V)  # [rad] past the envelope, 0 inside it
+        self.hazard = wp.zeros_like(
+            self.V
+        )  # blocked HARD: a wall, or a settle that did not resolve
+        self.violation = wp.zeros_like(self.V)  # [rad] how badly a soft test fails, 0 if none does
         self.robust_tilt = wp.zeros_like(self.V)  # graded_tilt + the tube's tilt charge
         # what the solver actually reads: veto in the sign, graded cost in the magnitude
         self._pose_cost = wp.zeros_like(self.V)
@@ -983,7 +988,7 @@ class CostToGo:
             _feasibility_kernel,
             dim=self.V.shape,
             inputs=[sim.derived, sim.residual, sim.clearance, self.robot],
-            outputs=[self.blocked, self.hazard, self.tilt_excess, self.graded_tilt],
+            outputs=[self.blocked, self.hazard, self.violation, self.graded_tilt],
             device=self.device,
         )
         if self.z_veto > 0.0 or self.charge_per_sigma > 0.0:
@@ -1005,7 +1010,7 @@ class CostToGo:
                     self.z_charge,
                     self.charge_per_sigma,
                 ],
-                outputs=[self.blocked, self.hazard, self.graded_tilt, self.zmargin, self.doubt],
+                outputs=[self.blocked, self.graded_tilt, self.zmargin, self.doubt],
                 device=self.device,
             )
         if self._eroded:  # a tilt over an unmountable face is a wall, not a slope
@@ -1039,19 +1044,19 @@ class CostToGo:
                 device=self.device,
             )
         self._prof.mark(2)  # feasibility done
-        if self._eroded:  # hazards eroded hard by the disturbance tube, tilt charged over it
+        if self._eroded:  # hazards eroded hard by the disturbance tube, soft blocks charged over it
             wp.launch(
                 _robust_kernel,
                 dim=self.V.shape,
                 inputs=[
                     self.blocked,
                     self.hazard,
-                    self.tilt_excess,
+                    self.violation,
                     self.graded_tilt,
                     self._mr,
                     self._mc,
                     self._mt,
-                    self.robust_tilt_weight,
+                    self.robust_soft_weight,
                 ],
                 outputs=[self.robust_blocked, self.robust_tilt],
                 device=self.device,

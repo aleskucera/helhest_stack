@@ -1,10 +1,12 @@
-"""The robust tube splits by cause: hazards are eroded HARD, tilt is CHARGED.
+"""The robust tube splits by cause: walls and unresolved settles are eroded HARD, tilt and belly
+clearance are CHARGED.
 
-Eroding every blocked pose by the (y, x, theta) box closed `bumpy` outright -- rough ground
-speckles the tilt envelope, and a 27-pose box around each speckle leaves no route. But the tube
-exists so the robot never drives into a wall, and walls are not only hazards to the settle: a
-wheel lifted onto a wall's edge reads as TILT. So a tilt over a step the wheel cannot mount is
-re-filed as a hazard, and the wall scene below must erode exactly as the old box did.
+Eroding every blocked pose by the (y, x, theta) box took `bumpy` from 6/6 reached to 2/6 --
+rough ground speckles the tilt envelope and puts mound tops under the belly, and a 27-pose box
+around each leaves little route. But the tube exists so the robot never drives into a wall, and
+to the settle a wall is not always a hazard: a wheel lifted onto its edge reads as TILT, a wall
+under the body as belly clearance. So a soft block over a face the wheel cannot mount is re-filed
+as a hazard, and the wall scene below must erode exactly as the old box did.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ def _solve(terrain: np.ndarray) -> CostToGo:
         n_theta=12,
         robust_margin_m=CELL,
         robust_margin_deg=30.0,
-        robust_tilt_weight=WEIGHT,
+        robust_soft_weight=WEIGHT,
     )
     ctg.compute(wp.array(terrain.astype(np.float32), dtype=wp.float32), GOAL)
     return ctg
@@ -72,25 +74,26 @@ def test_a_wall_erodes_exactly_as_the_old_box_did():
     blocked = ctg.blocked.numpy() > 0.5
     hazard = ctg.hazard.numpy() > 0.5
     assert blocked.any()
-    # the wheel on the wall's edge tilts the settle; the step re-files every one of those
-    assert np.array_equal(hazard, blocked), "a wall pose was left as tilt, and would be charged"
+    # the wheel on the wall's edge tilts the settle, the wall under the body reads as belly
+    # clearance; the face re-files every one of those
+    assert np.array_equal(hazard, blocked), "a wall pose was left soft, and would be charged"
     old = _box_max(blocked.astype(np.float32), ctg._mr, ctg._mt) > 0.5
     assert np.array_equal(ctg.robust_blocked.numpy() > 0.5, old)
 
 
-def test_tilt_is_charged_by_how_far_over_not_eroded():
+def test_soft_blocks_are_charged_by_how_far_over_not_eroded():
     ctg = _solve(_slopes())
     blocked = ctg.blocked.numpy() > 0.5
     hazard = ctg.hazard.numpy() > 0.5
-    tilt_only = blocked & ~hazard
-    assert tilt_only.any(), "the scene no longer grazes the envelope: the test would be vacuous"
+    soft = blocked & ~hazard
+    assert soft.any(), "the scene no longer grazes the envelope: the test would be vacuous"
 
     robust = ctg.robust_blocked.numpy() > 0.5
     want = blocked | (_box_max(hazard.astype(np.float32), ctg._mr, ctg._mt) > 0.5)
-    assert np.array_equal(robust, want), "only hazards may spread; tilt is vetoed at the pose"
+    assert np.array_equal(robust, want), "only hazards may spread; soft blocks veto the pose alone"
 
     charge = ctg.robust_tilt.numpy() - ctg.graded_tilt.numpy()
-    excess = _box_max(ctg.tilt_excess.numpy(), ctg._mr, ctg._mt)
+    excess = _box_max(ctg.violation.numpy(), ctg._mr, ctg._mt)
     np.testing.assert_allclose(charge, WEIGHT * excess, atol=1e-5)
     # the poses the old box would have closed are open, and pay instead
     spared = ~robust & (_box_max(blocked.astype(np.float32), ctg._mr, ctg._mt) > 0.5)
