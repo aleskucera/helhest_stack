@@ -565,6 +565,7 @@ def drive(a: argparse.Namespace) -> dict:
             a.out,
             # which controller produced this: the resolved plan_* values, as JSON
             plan_config=np.array(json.dumps(resolve(a.plan_params))),
+            dt=dt,  # [s] simulated time per frame, so a replay can run in real time
             trail=np.array(trail, np.float64),
             body_z=np.array(body_z, np.float64),
             clearance=np.array(clearance, np.float64),  # [m] per frame, < 0 = touching a wall

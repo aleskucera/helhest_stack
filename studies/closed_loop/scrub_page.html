@@ -113,6 +113,8 @@
     display: grid; place-items: center; font-size: 13px;
   }
   input[type="range"] { flex: 1 1 auto; accent-color: var(--accent); min-width: 0; }
+  .speeds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 12px 11px; }
+  .speeds .lbl { font-size: 12px; color: var(--ink-3); margin-right: 2px; }
   .fcount { font-family: var(--mono); font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
   .rail { display: flex; flex-direction: column; gap: 12px; }
@@ -166,6 +168,7 @@
         <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Frame">
         <span class="fcount" id="fc">—</span>
       </div>
+      <div class="speeds" id="speeds" role="group" aria-label="Playback speed"></div>
     </div>
 
     <div class="rail">
@@ -264,6 +267,10 @@
 
   // --- state ----------------------------------------------------------------------------
   let M = null, world = null, imgs = null, frame = 0, layer = "h", timer = null;
+  // Playback runs on SIMULATED time, not on recorded frames: a run recorded every 8th frame and
+  // one recorded every frame then play at the same pace, and 1x is the robot's own speed.
+  const SPEEDS = [1, 2, 4, 8];
+  let speed = 1, clock = null;
   const show = { trail: true, goal: true };
   const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
   const off = document.createElement("canvas"), octx = off.getContext("2d");
@@ -408,7 +415,7 @@
     const wl = $("m-wall");
     wl.textContent = !w.wall ? "no walls" : fmt(w.wall.min, 2) + " m · " + w.wall.touching + " frames touching";
     wl.style.color = w.wall && w.wall.touching ? "var(--alarm)" : "";
-    $("fc").textContent = "frame " + meta.f;
+    $("fc").textContent = "frame " + meta.f + " · " + (meta.f * w.dt).toFixed(1) + " s";
     const L = LAYERS.find((l) => l.k === layer);
     const rangeKey = { h: "h", v: "v", cv: "cv" }[layer];
     if (rangeKey) {
@@ -502,8 +509,50 @@
     $("scrub").value = String(frame);
     draw();
   }
-  function play() { if (timer) return stop(); timer = setInterval(step, 110); $("play").textContent = "❚❚"; }
-  function stop() { if (timer) clearInterval(timer); timer = null; $("play").textContent = "▶"; }
+  const simTime = (w, i) => w.frames[i].f * w.dt;
+  function tick(now) {
+    const w = M.worlds[world], last = w.frames.length - 1;
+    const t = clock.t0 + ((now - clock.wall0) / 1000) * speed;
+    let i = frame;
+    while (i < last && simTime(w, i + 1) <= t) i++;
+    if (i !== frame) { frame = i; $("scrub").value = String(frame); draw(); }
+    if (frame === last && t >= simTime(w, last)) {
+      // hold the final frame a moment, then loop from the start
+      if (now - clock.wall0 > ((simTime(w, last) - clock.t0) / speed) * 1000 + 800) restart(now, 0);
+    }
+    timer = requestAnimationFrame(tick);
+  }
+  function restart(now, i) {
+    frame = i; $("scrub").value = String(frame); draw();
+    clock = { t0: simTime(M.worlds[world], i), wall0: now };
+  }
+  function play() {
+    if (timer) return stop();
+    const w = M.worlds[world];
+    restart(performance.now(), frame === w.frames.length - 1 ? 0 : frame);
+    timer = requestAnimationFrame(tick);
+    $("play").textContent = "❚❚";
+  }
+  function stop() { if (timer) cancelAnimationFrame(timer); timer = null; $("play").textContent = "▶"; }
+  function buildSpeeds() {
+    const g = $("speeds"); g.innerHTML = '<span class="lbl">speed</span>';
+    for (const s of SPEEDS) {
+      const b = document.createElement("button");
+      b.className = "chip"; b.id = "sp-" + s; b.textContent = s + "×";
+      b.title = s === 1 ? "real time" : s + "× real time";
+      b.onclick = () => {
+        speed = s;
+        // re-anchor so the change of speed does not jump the playhead
+        if (timer) clock = { t0: simTime(M.worlds[world], frame), wall0: performance.now() };
+        syncSpeeds();
+      };
+      g.appendChild(b);
+    }
+    syncSpeeds();
+  }
+  function syncSpeeds() {
+    for (const s of SPEEDS) $("sp-" + s).setAttribute("aria-pressed", String(s === speed));
+  }
 
   $("play").onclick = play;
   $("scrub").oninput = (e) => { stop(); frame = +e.target.value; draw(); };
@@ -519,7 +568,7 @@
     .then((r) => r.json())
     .then((m) => {
       M = m;
-      buildTabs(); buildLayers();
+      buildTabs(); buildLayers(); buildSpeeds();
       const first = ORDER.find((n) => M.worlds[n]);
       if (first) selectWorld(first);
     })

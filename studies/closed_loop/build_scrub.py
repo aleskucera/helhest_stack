@@ -40,7 +40,7 @@ def _quant(a: np.ndarray, lo: float, hi: float) -> np.ndarray:
     return (1 + q * 254).astype(np.uint8)
 
 
-def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
+def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path, rate: float) -> dict:
     d = np.load(npz)
     if "hist_meta" not in d:
         raise SystemExit(f"{npz} has no frame history -- rerun with --history N")
@@ -133,6 +133,8 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
         nr=int(v.shape[1]),
         nc=int(cv.shape[1]),
         cell=float(d["cell"]),
+        # [s] simulated time per frame; runs saved before it was recorded ran at `--rate`
+        dt=float(d["dt"]) if "dt" in d.files else 1.0 / rate,
         # the unreachable sentinel, so the page can say "the heading it is ON has no route"
         # without inventing a threshold for it
         cap=round(cap, 2),
@@ -158,6 +160,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dir", default="studies/closed_loop/out/sweep2")
     p.add_argument("--out", default="studies/closed_loop/out/scrub")
+    p.add_argument("--rate", type=float, default=14.5, help="[Hz] frame rate of runs without `dt`")
     a = p.parse_args()
     src, out = pathlib.Path(a.dir), pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -182,7 +185,7 @@ def main() -> None:
         if not f.exists():
             print(f"  {w:<8s} missing, skipped")
             continue
-        manifest["worlds"][w] = build(w, f, out)
+        manifest["worlds"][w] = build(w, f, out, a.rate)
         size = manifest["worlds"][w]["bytes"]
         total += size
         print(f"  {w:<8s} {len(manifest['worlds'][w]['frames']):>4d} frames  {size/1e6:>6.2f} MB")
