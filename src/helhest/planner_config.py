@@ -40,6 +40,12 @@ PLAN_DEFAULTS: dict[str, Any] = {
     # sampler -> SamplingConfig
     "plan_wmax": 4.0,
     "plan_wmin": 0.0,
+    # Reverse, when plan_wmin < 0. The shaping is per metre reversed: 75 (the library default)
+    # let the robot back 6-7 m out of a room it could have turned in (false_door 2/3), 200
+    # left it unable to back 3 m out of a 2.2 m dead end (narrow_corridor 1/3); 120 does both
+    # (3/3 each, corridor 3/3). The pivot prior that used to come on with reverse is OFF: it
+    # took pocket from 3/3 to 0/3 (the robot froze in a 92%-blocked pose beside a corner).
+    "plan_reverse_cost": 120.0,
     "plan_straight_frac": 0.2,
     "plan_spin_frac": 0.12,
     "plan_spin_min": 2.0,
@@ -109,6 +115,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             smoothness=float(p["plan_smooth"]),
             saturation=float(p["plan_saturation"]),
             veto=float(p["plan_wall_veto"]),
+            reverse=float(p["plan_reverse_cost"]),
         ),
         sampling=SamplingConfig(
             wmax=float(p["plan_wmax"]),
@@ -119,7 +126,8 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             # not conditioned on wmin: the spin band is exempt from the wmin clamp on purpose
             spin_frac=float(p["plan_spin_frac"]),
             spin_min=float(p["plan_spin_min"]),
-            pivot_frac=0.05 if wmin < 0.0 else 0.0,
+            # no pivot prior with reverse: measured to freeze pocket (see plan_reverse_cost)
+            pivot_frac=0.0,
             elite_frac=float(p["plan_elite_frac"]),
             n_mu=n_mu,
         ),
