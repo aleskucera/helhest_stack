@@ -68,16 +68,19 @@ from ..engine import GridParams
 
 @wp.kernel
 def _floor_kernel(
-    elevation: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
+    elevation: wp.array2d(dtype=wp.float32),  # fine [ny, nx], the window
     measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = observed
     factor: wp.int32,
+    off_r: wp.int32,  # the window's origin, in fine cells of the coarse grid's own lattice
+    off_c: wp.int32,
     floor: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], lowest measured height, else 1e30
 ):
     """The lowest measured height in the block: the ground under it.
 
     Minimum because a block holding an obstacle still has ground beside it. Unseen blocks carry
     a sentinel rather than 0.0, so that a neighbour looking for ground never mistakes a fill for
-    it.
+    it. A block with no measured cell in the window this frame is left as it was: remembered,
+    or never seen.
     """
     r, c = wp.tid()
     ny = elevation.shape[0]
@@ -85,12 +88,13 @@ def _floor_kernel(
     lo = float(1.0e30)
     for dr in range(factor):
         for dc in range(factor):
-            fr = r * factor + dr
-            fc = c * factor + dc
-            if fr < ny and fc < nx:
+            fr = r * factor + dr - off_r
+            fc = c * factor + dc - off_c
+            if fr >= 0 and fr < ny and fc >= 0 and fc < nx:
                 if measured[fr, fc] > 0.5:
                     lo = wp.min(lo, elevation[fr, fc])
-    floor[r, c] = lo
+    if lo < 1.0e29:
+        floor[r, c] = wp.min(floor[r, c], lo)  # the lowest ground ever seen under the block
 
 
 @wp.kernel
@@ -99,6 +103,8 @@ def _climb_kernel(
     measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = observed
     floor: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], from _floor_kernel
     factor: wp.int32,
+    off_r: wp.int32,  # the window's origin, in fine cells of the coarse grid's own lattice
+    off_c: wp.int32,
     max_step: wp.float32,  # [m] the largest rise a wheel can drive up
     elevated: wp.float32,  # [m] above the ground around it, a cell is a top and not terrain
     climbable: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = a wheel could cross it
@@ -125,8 +131,8 @@ def _climb_kernel(
     cols = elevation.shape[1]
     h = elevation[r, c]
     ground = float(1.0e30)
-    br = r / factor
-    bc = c / factor
+    br = (r + off_r) / factor
+    bc = (c + off_c) / factor
     for dr in range(-1, 2):
         for dc in range(-1, 2):
             rr = br + dr
@@ -153,6 +159,9 @@ def _pool_kernel(
     measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
     climbable: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
     factor: wp.int32,
+    off_r: wp.int32,  # the window's origin, in fine cells of the coarse grid's own lattice
+    off_c: wp.int32,
+    coverage: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], measured cells behind `passable`
     passable: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], climbable FRACTION in 0..1
     seen: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], 1 = some fine cell observed
 ):
@@ -160,6 +169,13 @@ def _pool_kernel(
 
     Over the measured ones, not all of them, so a half-observed block is not marked impassable
     for the half nobody has looked at -- that half's price is the frontier's business.
+
+    A view of FEWER cells than the one the block holds does not replace it. The belief window
+    drops what scrolls out of it, and when a wall comes back into view the ground before it is
+    measured first and its top last: re-pooled from those cells alone the block read open, the
+    remembered wall was gone, and the robot drove back to it (false_door: the back wall's sealed
+    blocks went 20 -> 6 -> 20 -> 5 -> 20 over the run). Equal coverage does replace it, so a
+    world that has changed is still seen to change.
     """
     r, c = wp.tid()
     ny = measured.shape[0]
@@ -168,15 +184,17 @@ def _pool_kernel(
     n_climb = float(0.0)
     for dr in range(factor):
         for dc in range(factor):
-            fr = r * factor + dr
-            fc = c * factor + dc
-            if fr < ny and fc < nx:
+            fr = r * factor + dr - off_r
+            fc = c * factor + dc - off_c
+            if fr >= 0 and fr < ny and fc >= 0 and fc < nx:
                 if measured[fr, fc] > 0.5:
                     n_seen += 1.0
                     if climbable[fr, fc] > 0.5:
                         n_climb += 1.0
-    passable[r, c] = wp.where(n_seen > 0.0, n_climb / n_seen, 0.0)
-    seen[r, c] = wp.where(n_seen > 0.0, 1.0, 0.0)
+    if n_seen > 0.0 and n_seen >= coverage[r, c]:
+        coverage[r, c] = n_seen
+        passable[r, c] = n_climb / n_seen
+        seen[r, c] = 1.0
 
 
 @wp.kernel
@@ -306,6 +324,7 @@ class CoarseRouter:
         min_pass_fraction: float = 0.5,
         frontier_m: float = 3.0,
         void_penalty: float = 1.0,
+        memory_grid: GridParams | None = None,
         device: wp.Device | str | None = None,
     ) -> None:
         if factor < 1:
@@ -327,22 +346,34 @@ class CoarseRouter:
         self.elevated_m = float(elevated_m)
         self.min_pass_fraction = float(min_pass_fraction)
         self.void_penalty = float(void_penalty)
+        # The lattice the blocks are pooled on: the window's own, or the memory's. Both are at
+        # the fine cell size, and a memory is only useful if the window's origin lands on its
+        # lattice -- `solve` rounds the offset to whole cells and a belief that recenters in
+        # whole cells satisfies that by construction.
+        self.persistent = memory_grid is not None
+        base = memory_grid if memory_grid is not None else fine_grid
+        if abs(base.cell_size - fine_grid.cell_size) > 1e-9:
+            raise ValueError(
+                f"memory_grid must be at the fine cell size, got {base.cell_size} vs "
+                f"{fine_grid.cell_size}"
+            )
         # ceil, so the coarse grid covers the fine one even when it does not divide evenly
-        cy = (fine_grid.cells_y + self.factor - 1) // self.factor
-        cx = (fine_grid.cells_x + self.factor - 1) // self.factor
+        cy = (base.cells_y + self.factor - 1) // self.factor
+        cx = (base.cells_x + self.factor - 1) // self.factor
         self.grid = GridParams(
             cells_x=cx,
             cells_y=cy,
             cell_size=fine_grid.cell_size * self.factor,
-            origin_x=fine_grid.origin_x,
-            origin_y=fine_grid.origin_y,
+            origin_x=base.origin_x,
+            origin_y=base.origin_y,
         )
         self.frontier = int(round(float(frontier_m) / self.grid.cell_size))
         with wp.ScopedDevice(self.device):
             self._climb = wp.zeros((fine_grid.cells_y, fine_grid.cells_x), dtype=wp.float32)
             self.passable = wp.zeros((cy, cx), dtype=wp.float32)
             self.seen = wp.zeros((cy, cx), dtype=wp.float32)
-            self.floor = wp.zeros((cy, cx), dtype=wp.float32)
+            self.coverage = wp.zeros((cy, cx), dtype=wp.float32)
+            self.floor = wp.full((cy, cx), 1.0e30, dtype=wp.float32)
             self._pose_cost = wp.zeros((cy, cx, 1), dtype=wp.float32)
             self._seeds = wp.zeros((cy, cx, 1), dtype=wp.float32)
             self._goal_rc = wp.zeros(2, dtype=wp.int32)
@@ -362,31 +393,54 @@ class CoarseRouter:
         elevation: wp.array,
         measured: wp.array,
         goal_xy: tuple[float, float],
+        window_xy: tuple[float, float] = (0.0, 0.0),
     ) -> wp.array:
         """Fine `elevation` and `measured` [ny, nx] -> coarse V [cy, cx, 1], device-resident.
 
-        `goal_xy` is in the fine grid's frame, which this layer shares by construction.
+        `goal_xy` and `window_xy` -- where the window's origin sits -- are in the frame this
+        layer's grid was built in, i.e. positions that `self.grid.origin_x/y` is a point of: the
+        fine grid's own frame for a window-bound layer (then `window_xy` is that grid's origin),
+        the memory grid's for an anchored one. Blocks the window covers are re-pooled from what
+        it measured; with a memory the rest keep what they hold, without one they are reset,
+        since the grid moved with the window and its blocks are somewhere else now.
         """
         self._goal_xy.assign(np.asarray(goal_xy[:2], np.float32))
+        cell = self.grid.cell_size / self.factor
+        off_c = int(round((float(window_xy[0]) - self.grid.origin_x) / cell))
+        off_r = int(round((float(window_xy[1]) - self.grid.origin_y) / cell))
+        if not self.persistent:
+            self.passable.zero_()
+            self.seen.zero_()
+            self.coverage.zero_()
+            self.floor.fill_(1.0e30)
         wp.launch(
             _floor_kernel,
             dim=self.floor.shape,
-            inputs=[elevation, measured, self.factor],
+            inputs=[elevation, measured, self.factor, off_r, off_c],
             outputs=[self.floor],
             device=self.device,
         )
         wp.launch(
             _climb_kernel,
             dim=self._climb.shape,
-            inputs=[elevation, measured, self.floor, self.factor, self.max_step_m, self.elevated_m],
+            inputs=[
+                elevation,
+                measured,
+                self.floor,
+                self.factor,
+                off_r,
+                off_c,
+                self.max_step_m,
+                self.elevated_m,
+            ],
             outputs=[self._climb],
             device=self.device,
         )
         wp.launch(
             _pool_kernel,
             dim=self.passable.shape,
-            inputs=[measured, self._climb, self.factor],
-            outputs=[self.passable, self.seen],
+            inputs=[measured, self._climb, self.factor, off_r, off_c],
+            outputs=[self.coverage, self.passable, self.seen],
             device=self.device,
         )
         wp.launch(

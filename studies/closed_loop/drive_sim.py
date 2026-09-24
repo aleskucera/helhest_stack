@@ -321,6 +321,16 @@ def drive(a: argparse.Namespace) -> dict:
 
     coarse = None
     if a.coarsen > 0:
+        memory = None
+        if a.memory > 0.0:
+            # A coarse map anchored to the WORLD, which the belief window slides across, so a
+            # wall the robot drove away from is still there when it matters. On the belief's own
+            # lattice: it recenters in whole cells, so the window's offset in the map is always
+            # whole cells and its blocks pool into the map's blocks exactly. Centred on the start.
+            k = int(round((a.memory - span) / 2.0 / a.cell))
+            memory = GridParams(
+                n + 2 * k, n + 2 * k, a.cell, belief.xmin - k * a.cell, belief.ymin - k * a.cell
+            )
         coarse = CoarseRouter(
             belief_grid,
             factor=a.coarsen,
@@ -328,18 +338,13 @@ def drive(a: argparse.Namespace) -> dict:
             min_pass_fraction=a.coarse_pass,
             frontier_m=a.frontier,
             void_penalty=a.void_penalty,
+            memory_grid=memory,
             device=a.device,
         )
-        # the coarse grid covers the whole belief window; express its origin in the ROUTING
-        # window's frame, which is where the fine solve reads it
+        # the coarse grid's shape is fixed; where it sits in the ROUTING window's frame, which is
+        # where the fine solve reads it, is passed per frame (it moves when the map is anchored)
         ctg.set_coarse(
-            GridParams(
-                coarse.grid.cells_x,
-                coarse.grid.cells_y,
-                coarse.grid.cell_size,
-                -off_r * a.cell,
-                -off_r * a.cell,
-            )
+            GridParams(coarse.grid.cells_x, coarse.grid.cells_y, coarse.grid.cell_size, 0.0, 0.0)
         )
 
     # Preallocated so the per-frame path allocates nothing and touches no host memory. `scratch`
@@ -427,13 +432,20 @@ def drive(a: argparse.Namespace) -> dict:
         # WHICH WAY -- the coarse layer over the whole belief window, which is the only layer
         # that can see far enough to choose a side. Its value prices the routing window's border.
         vc = None
+        r0 = belief.xmin + off_r * a.cell
+        s0 = belief.ymin + off_r * a.cell
         if coarse is not None:
-            vc = coarse.solve(height_d, measured_d, (goal[0] - belief.xmin, goal[1] - belief.ymin))
+            # the coarse grid's origin in the WORLD: fixed when anchored, the window's otherwise.
+            # An anchored grid works in world coordinates, a window-bound one in the window's.
+            if coarse.persistent:
+                cx0, cy0 = coarse.grid.origin_x, coarse.grid.origin_y
+                vc = coarse.solve(height_d, measured_d, goal, (belief.xmin, belief.ymin))
+            else:
+                cx0, cy0 = belief.xmin, belief.ymin
+                vc = coarse.solve(height_d, measured_d, (goal[0] - cx0, goal[1] - cy0))
 
         # HOW -- the settle-based routing window, a crop, where the belief's uncertainty reaches
         # the planner and nowhere before
-        r0 = belief.xmin + off_r * a.cell
-        s0 = belief.ymin + off_r * a.cell
         V = ctg.compute(
             crop(height_d, off_r, h_r),
             (goal[0] - r0, goal[1] - s0),
@@ -441,6 +453,7 @@ def drive(a: argparse.Namespace) -> dict:
             sigma=crop(sd_d, off_r, sd_r),
             drift=crop(belief.drift(), off_r, drift_r),
             coarse_value=vc,
+            coarse_origin=None if coarse is None else (cx0 - r0, cy0 - s0),
         )
 
         # CONTROL -- fine window, cropped from the same belief
@@ -582,6 +595,10 @@ def drive(a: argparse.Namespace) -> dict:
             ),
             coarse_V=(np.zeros((0, 0)) if coarse is None else coarse.V.numpy()[:, :, 0]),
             coarse_cell=(0.0 if coarse is None else coarse.grid.cell_size),
+            # an anchored coarse map has one origin for the whole run; a window-bound one sits at
+            # each frame's belief origin (hist_meta[:, 7:9])
+            coarse_memory=(coarse is not None and coarse.persistent),
+            coarse_bounds=np.array([cx0, cy0] if coarse is not None else [0.0, 0.0], np.float64),
             # the windows are robot-centred, so each recorded frame carries its own origin
             **{f"hist_{k}": np.asarray(v) for k, v in hist.items() if v},
             **({"escape": np.asarray(esc)} if esc else {}),
@@ -616,6 +633,13 @@ def main() -> None:
     p.add_argument("--route", type=float, default=10.0, help="[m] settle-based routing window")
     p.add_argument("--fine", type=float, default=9.0, help="[m] MPPI window, a centred crop")
     p.add_argument("--coarsen", type=int, default=5, help="fine cells per coarse cell; 0 = OFF")
+    p.add_argument(
+        "--memory",
+        type=float,
+        default=60.0,
+        help="[m] side of the world-anchored coarse map, centred on the start; 0 = bound to the "
+        "belief window, which forgets what scrolls out of it",
+    )
     p.add_argument("--coarse-step", type=float, default=0.25, help="[m] climbable step, coarse")
     p.add_argument(
         "--coarse-pass",

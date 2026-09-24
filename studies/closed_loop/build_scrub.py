@@ -39,6 +39,8 @@ ORDER = [
     "corridor",
     "corridor_stuck",
     "false_door",
+    "false_door_mem",
+    "false_door_mem_stuck",
 ]
 LAYERS = ("h", "seen", "blk", "v", "route", "cv")
 
@@ -58,6 +60,13 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path, rate: float) -> 
     meta = d["hist_meta"]
     h, seen, blk, v = d["hist_h"], d["hist_seen"], d["hist_blk"], d["hist_v"]
     cv = d["hist_cv"]
+    # An anchored coarse map (drive_sim --memory) is one world-fixed array per frame; the page
+    # draws every layer over the belief window, so it is cropped to the window here. The window
+    # sits on the fine lattice, not the coarse one, so the crop can be up to one block off.
+    anchored = "coarse_memory" in d.files and bool(d["coarse_memory"])
+    ccell = float(d["coarse_cell"])
+    cfac = max(int(round(ccell / float(d["cell"]))), 1)
+    ncw = (int(h.shape[1]) + cfac - 1) // cfac
     # Runs recorded before the heading-route layer existed have no `hist_route`; fall back to an
     # all-ones plane so the older npz still build rather than failing on a missing key.
     route = d["hist_route"] if "hist_route" in d.files else np.ones_like(v)
@@ -77,6 +86,14 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path, rate: float) -> 
         vlo = float(vi[reach].min()) if reach.any() else 0.0
         vhi = float(vi[reach].max()) if reach.any() else 1.0
         ci = cv[i]
+        if anchored:
+            cr0 = int(round((meta[i, 8] - d["coarse_bounds"][1]) / ccell))
+            cc0 = int(round((meta[i, 7] - d["coarse_bounds"][0]) / ccell))
+            win = np.full((ncw, ncw), 1.0e30, np.float32)
+            r_lo, c_lo = max(cr0, 0), max(cc0, 0)
+            r_hi, c_hi = min(cr0 + ncw, ci.shape[0]), min(cc0 + ncw, ci.shape[1])
+            win[r_lo - cr0 : r_hi - cr0, c_lo - cc0 : c_hi - cc0] = ci[r_lo:r_hi, c_lo:c_hi]
+            ci = win
         creach = ci < 1.0e29
         clo = float(ci[creach].min()) if creach.any() else 0.0
         chi = float(ci[creach].max()) if creach.any() else 1.0
@@ -150,7 +167,7 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path, rate: float) -> 
     return dict(
         n=int(h.shape[1]),
         nr=int(v.shape[1]),
-        nc=int(cv.shape[1]),
+        nc=ncw,
         cols=cols,  # atlas columns: frame i is tile (i // cols, i % cols)
         cell=float(d["cell"]),
         # [s] simulated time per frame; runs saved before it was recorded ran at `--rate`

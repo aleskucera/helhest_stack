@@ -152,8 +152,12 @@
     cause: walls eroded hard, tilt and belly clearance charged. The six stress worlds: 6/6 reach, none
     touching a wall. The two <b>trap worlds</b> (corridor, false door) put a dead end 18 m out behind
     the opening aimed at the goal. Corridor reached 3/4, two of them scraping a wall on the way out;
-    the <b>stuck turning</b> run never completed its 180&deg;. False door 0/4: once the dead end
-    scrolls out of the 20 m window it is forgotten and the robot drives back in. The robot turns
+    the <b>stuck turning</b> run never completed its 180&deg;. False door, window-bound: 0/4, once
+    the dead end scrolls out of the 20 m window it is forgotten and the robot drives back in. With
+    the coarse map <b>anchored to the world</b> (walls sealed from either side, a remembered wall
+    never overwritten by a poorer view, the ring kept while the goal is walled off): 2/3 reach,
+    in and back out through the false door, round by the real one, no wall contact; the third is
+    trapped forward-only inside its own turning clearance after a late correction. The robot turns
     red while it touches a wall.
   </p>
 
@@ -240,8 +244,8 @@
     { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
     { k: "route", name: "headings with a route", unit: "", grid: "route" },
   ];
-  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "corridor", "corridor_stuck", "false_door"];
-  const LABEL = { pocket_wall: "pocket (wall hit)", corridor_stuck: "corridor (stuck turning)", false_door: "false door" };
+  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "corridor", "corridor_stuck", "false_door", "false_door_mem", "false_door_mem_stuck"];
+  const LABEL = { pocket_wall: "pocket (wall hit)", corridor_stuck: "corridor (stuck turning)", false_door: "false door (window-bound)", false_door_mem: "false door (anchored map, reached)", false_door_mem_stuck: "false door (anchored map, wall-trapped)" };
 
   // --- colour ramps, one per layer role -------------------------------------------------
   function ramp(stops) {

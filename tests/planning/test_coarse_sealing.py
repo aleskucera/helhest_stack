@@ -92,3 +92,97 @@ def test_a_doorway_one_cell_wide_is_still_crossed():
     # 2 across to the doorway, 1 more straight -- leaving it, the diagonal along the wall would
     # cut the corner of the wall cell beside it -- then a diagonal and a last straight step
     np.testing.assert_allclose(v[2, 0], 4.0 + np.sqrt(2.0), rtol=1e-5)
+
+
+# ------------------------------------------------------------------------------------- memory
+
+
+def _two_frames(memory: bool) -> CoarseRouter:
+    """A wall seen in one frame, then the window moves 8 m east and the wall leaves it."""
+    fine = GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    mem = GridParams(cells_x=150, cells_y=150, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    r = CoarseRouter(
+        fine, factor=FACTOR, max_step_m=0.25, memory_grid=mem if memory else None, device="cuda"
+    )
+    h = np.zeros((N, N), np.float32)
+    m = np.ones((N, N), np.float32)
+    h[:, 30:32] = 1.0  # a wall at x = 6 m across the whole window
+    goal = (25.0, 6.0) if memory else (11.0, 6.0)
+    r.solve(_dev(h), _dev(m), goal, (0.0, 0.0))
+    r.solve(_dev(np.zeros((N, N), np.float32)), _dev(m), goal, (8.0, 0.0) if memory else (0.0, 0.0))
+    return r
+
+
+def test_an_anchored_map_remembers_a_wall_the_window_left():
+    r = _two_frames(memory=True)
+    seen, frac = r.seen.numpy(), r.passable.numpy()
+    col = 30 // FACTOR  # the wall's block column, in the memory's own lattice
+    rows = slice(0, N // FACTOR)
+    assert (seen[rows, col] > 0.5).all() and (frac[rows, col] < 0.5).all(), "the wall was forgotten"
+    v = r.V.numpy()[:, :, 0]
+    inf = r.solver._inf
+    assert (v[rows, col] >= inf).all(), "the remembered wall must still be impassable"
+    # the ground west of it routes round the wall's ends, never through: 19 m as the crow flies
+    assert v[N // FACTOR // 2, col - 2] > 19.0 + 4.0
+    # and the blocks the window now covers were re-pooled from flat ground
+    assert (frac[rows, 40 // FACTOR : (40 + N) // FACTOR] >= 0.5).all()
+
+
+def test_a_window_bound_layer_forgets_what_scrolls_out():
+    r = _two_frames(memory=False)
+    frac = r.passable.numpy()
+    assert (frac[: N // FACTOR, : N // FACTOR] >= 0.5).all(), "a moved window holds new ground"
+
+
+def test_the_window_offset_pools_into_the_memory_blocks_it_covers():
+    fine = GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    mem = GridParams(cells_x=150, cells_y=150, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    r = CoarseRouter(fine, factor=FACTOR, max_step_m=0.25, memory_grid=mem, device="cuda")
+    h = np.zeros((N, N), np.float32)
+    m = np.ones((N, N), np.float32)
+    h[:, 30:32] = 1.0
+    r.solve(_dev(h), _dev(m), (25.0, 20.0), (6.0, 12.0))  # the window at (30, 60) fine cells
+    seen, frac = r.seen.numpy(), r.passable.numpy()
+    rows = slice(60 // FACTOR, (60 + N) // FACTOR)
+    assert (frac[rows, (30 + 30) // FACTOR] < 0.5).all(), "the wall landed in the wrong blocks"
+    assert seen[: 60 // FACTOR].sum() == 0 and seen[:, : 30 // FACTOR].sum() == 0, "nothing else"
+
+
+def test_an_anchored_grid_with_its_own_origin_seeds_the_goal_where_it_is():
+    """The first anchored run reached its goal for the wrong reason: the goal and the window
+    were passed already offset by the grid's origin, the goal kernel subtracted it again, and
+    the seed landed clamped in the grid's far corner. Coordinates are the grid's own."""
+    fine = GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    mem = GridParams(cells_x=150, cells_y=150, cell_size=CELL, origin_x=-9.0, origin_y=-15.0)
+    r = CoarseRouter(fine, factor=FACTOR, max_step_m=0.25, memory_grid=mem, device="cuda")
+    h = np.zeros((N, N), np.float32)
+    m = np.ones((N, N), np.float32)
+    h[:, 30:32] = 1.0  # a wall at x = 6 m in the window, the window's origin at (0, 0) world
+    # off a block edge, where float32 and Python would round the cell index differently
+    v = r.solve(_dev(h), _dev(m), (3.1, 3.1), (0.0, 0.0)).numpy()[:, :, 0]
+    rr, cc = np.unravel_index(np.argmin(v), v.shape)
+    assert (rr, cc) == (int((3.1 + 15.0) / 0.6), int((3.1 + 9.0) / 0.6)), "the goal seed moved"
+    assert v[rr, cc] == 0.0
+    # and the wall is where the window put it: x = 6 world -> column (6 + 9) / 0.6
+    assert (r.passable.numpy()[int(15.0 / 0.6) : int(27.0 / 0.6), int(15.0 / 0.6)] < 0.5).all()
+
+
+def test_a_poorer_view_does_not_overwrite_a_remembered_wall():
+    """Seen whole, a block holding a wall is sealed. Seen again from the ground side only -- the
+    cells the belief re-measures first when the wall comes back into view -- it stays sealed.
+    Seen whole again, and flat this time, it opens: the world may have changed."""
+    fine = GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    mem = GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    r = CoarseRouter(fine, factor=FACTOR, max_step_m=0.25, memory_grid=mem, device="cuda")
+    goal = (11.0, 6.0)
+    wall = np.zeros((N, N), np.float32)
+    wall[:, 31:33] = 1.0  # inside block column 10 (cells 30..32), with ground in cell 30
+    full = np.ones((N, N), np.float32)
+    r.solve(_dev(wall), _dev(full), goal, (0.0, 0.0))
+    assert (r.passable.numpy()[:, 10] < 0.5).all()
+    part = full.copy()
+    part[:, 31:] = 0.0  # only the ground before the wall is measured now, and it is flat
+    r.solve(_dev(np.zeros((N, N), np.float32)), _dev(part), goal, (0.0, 0.0))
+    assert (r.passable.numpy()[:, 10] < 0.5).all(), "three flat cells overrode nine"
+    r.solve(_dev(np.zeros((N, N), np.float32)), _dev(full), goal, (0.0, 0.0))
+    assert (r.passable.numpy()[:, 10] >= 0.5).all(), "a whole view of flat ground must open it"

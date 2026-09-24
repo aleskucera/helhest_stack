@@ -617,8 +617,7 @@ def _seed_goal_kernel(
 def _seed_goal_and_boundary_kernel(
     goal_xy: wp.array(dtype=wp.float32),  # [2], this window's frame -- UNCLAMPED on purpose
     coarse_value: wp.array3d(dtype=wp.float32),  # [cy, cx, 1], the coarse layer's cost-to-go
-    coarse_origin_x: wp.float32,  # the coarse grid, expressed in THIS window's frame
-    coarse_origin_y: wp.float32,
+    coarse_origin: wp.array(dtype=wp.float32),  # [2], the coarse grid in THIS window's frame
     coarse_cell: wp.float32,
     origin_x: wp.float32,  # this window's own origin, same frame
     origin_y: wp.float32,
@@ -645,6 +644,7 @@ def _seed_goal_and_boundary_kernel(
     The coarse value is read from the NEAREST coarse cell, never interpolated: unreachable cells
     hold +inf, and blending that with a finite neighbour yields a large finite number -- a cell
     that reads as reachable at an invented price, which is worse than either truth.
+
     """
     r, c, t = wp.tid()
     rows = seeds.shape[0]
@@ -656,7 +656,9 @@ def _seed_goal_and_boundary_kernel(
         # seeded at all. It would not merely be redundant: the coarse layer is omnidirectional and
         # pays no turn cost, so it UNDERSTATES distance in the fine layer's own metric, and a ring
         # priced that way reads as a shortcut. The fine solve would route the robot out of the
-        # window and back to reach a goal sitting a few metres in front of it.
+        # window and back to reach a goal sitting a few metres in front of it. Seeding the ring
+        # at a 5 m margin instead was tried: no better on false_door (2/3 either way), and it
+        # took pocket from 3/3 to 2/3 with a run three times slower.
         seeds[r, c, t] = wp.where(r == gr and c == gc, 0.0, inf)
         return
     v = inf
@@ -669,8 +671,8 @@ def _seed_goal_and_boundary_kernel(
         # rounding for about half the ring and reads a neighbour's value.
         x = origin_x + float(c) * cell_size
         y = origin_y + float(r) * cell_size
-        cc = int(wp.round((x - coarse_origin_x) / coarse_cell))
-        cr = int(wp.round((y - coarse_origin_y) / coarse_cell))
+        cc = int(wp.round((x - coarse_origin[0]) / coarse_cell))
+        cr = int(wp.round((y - coarse_origin[1]) / coarse_cell))
         if cr >= 0 and cr < coarse_value.shape[0] and cc >= 0 and cc < coarse_value.shape[1]:
             v = coarse_value[cr, cc, 0]
     seeds[r, c, t] = v
@@ -843,10 +845,12 @@ class CostToGo:
         self.settle_sim.set_friction(self._mu)
 
         # Two-layer routing is opt-in and is armed by `set_coarse`, not by the constructor: the
-        # coarse grid's geometry is CONSTANT (both windows recenter together, so their offset is),
-        # and only the values change per frame -- which is what keeps the captured graph valid.
+        # coarse grid's SHAPE and cell size are constant, and its origin and values live in device
+        # arrays the captured graph reads -- so a coarse layer anchored to the world, which the
+        # window slides across, moves under the graph without invalidating it.
         self._coarse_in: wp.array | None = None
-        self._coarse_geom = (0.0, 0.0, 0.0)  # origin_x, origin_y, cell_size, in this window's frame
+        self._coarse_origin: wp.array | None = None  # [2], in this window's frame
+        self._coarse_cell = 0.0
         self._band = 0
 
         self.solver = ValueSolver(
@@ -1194,16 +1198,14 @@ class CostToGo:
                 device=self.device,
             )
         else:
-            cox, coy, cocell = self._coarse_geom
             wp.launch(
                 _seed_goal_and_boundary_kernel,
                 dim=self.V.shape,
                 inputs=[
                     self._goal_xy,
                     self._coarse_in,
-                    cox,
-                    coy,
-                    cocell,
+                    self._coarse_origin,
+                    self._coarse_cell,
                     self.bounds[0],
                     self.bounds[2],
                     self.grid.cell_size,
@@ -1258,9 +1260,9 @@ class CostToGo:
     ) -> None:
         """Arm two-layer routing: this window's border is seeded from a coarser layer's V.
 
-        `coarse_grid` is the coarse layer's geometry expressed in THIS window's frame. Both
-        windows are robot-centred and recenter in whole cells together, so that offset is a
-        constant and is safe to bake into the captured graph -- only the values move.
+        `coarse_grid` is the coarse layer's geometry expressed in THIS window's frame. Its origin
+        is the initial one: a layer bound to a window that recenters with this one keeps it, a
+        layer anchored to the world passes each frame's through `compute(coarse_origin=...)`.
 
         `band` is the ring thickness in FINE cells and defaults to the furthest a single
         primitive reaches. A thinner ring can be stepped clean over by one arc, which seeds
@@ -1273,11 +1275,12 @@ class CostToGo:
             raise RuntimeError("set_coarse must be called before the first compute()")
         cy, cx = int(coarse_grid.cells_y), int(coarse_grid.cells_x)
         self._coarse_in = wp.zeros((cy, cx, 1), dtype=wp.float32, device=self.device)
-        self._coarse_geom = (
-            float(coarse_grid.origin_x),
-            float(coarse_grid.origin_y),
-            float(coarse_grid.cell_size),
+        self._coarse_origin = wp.array(
+            [float(coarse_grid.origin_x), float(coarse_grid.origin_y)],
+            dtype=wp.float32,
+            device=self.device,
         )
+        self._coarse_cell = float(coarse_grid.cell_size)
         self._band = int(self.solver.reach_cells if band is None else band)
         if self._band < 1:
             raise ValueError(f"band must be >= 1 fine cell, got {self._band}")
@@ -1292,6 +1295,7 @@ class CostToGo:
         z_veto: float | None = None,
         sigma_scale: float | None = None,
         coarse_value: wp.array | None = None,
+        coarse_origin: tuple[float, float] | None = None,
     ) -> wp.array:
         """elevation [ny, nx] device wp.array + goal -> clamped V[ny, nx, n_theta]. The entire solve
         (settle + value iteration) is captured ONCE as a CUDA graph and replayed each call with the
@@ -1346,6 +1350,10 @@ class CostToGo:
             if self._coarse_in is None:
                 raise RuntimeError("pass coarse_value only after set_coarse()")
             wp.copy(self._coarse_in, coarse_value)
+        if coarse_origin is not None:
+            if self._coarse_origin is None:
+                raise RuntimeError("pass coarse_origin only after set_coarse()")
+            self._coarse_origin.assign(np.asarray(coarse_origin[:2], np.float32))
         self._goal_xy.assign(np.asarray(goal_xy[:2], np.float32))
 
         if self.device.is_cuda:
