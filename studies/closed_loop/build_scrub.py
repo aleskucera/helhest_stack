@@ -27,7 +27,8 @@ import shutil
 import numpy as np
 from PIL import Image
 
-ORDER = ["gap", "slalom", "pillars", "pocket", "ridge", "bumpy"]
+# `pocket_wall` is optional: a pocket run that touched a wall, kept beside a clean one to compare
+ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy"]
 LAYERS = ("h", "seen", "blk", "v", "route", "cv")
 
 
@@ -50,6 +51,9 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
     # all-ones plane so the older npz still build rather than failing on a missing key.
     route = d["hist_route"] if "hist_route" in d.files else np.ones_like(v)
     nf = len(meta)
+    # [m] per SIMULATED frame, indexed by frame number (not by recorded frame); inf in a world
+    # without solids. Older runs have none.
+    clear = d["clearance"] if "clearance" in d.files else None
     cap = float(v[np.isfinite(v)].max()) if np.isfinite(v).any() else 1.0
 
     strips = {k: [] for k in LAYERS}
@@ -109,6 +113,12 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
                 vh=(None if not np.isfinite(vh) else round(vh, 2)),
                 # what fraction of the routing window's headings have a route at all
                 route=round(float(route[i].mean()), 4),
+                # [m] bare-footprint distance to the nearest wall, < 0 = touching; None = no walls
+                cl=(
+                    None
+                    if clear is None or int(f) >= len(clear) or not np.isfinite(clear[int(f)])
+                    else round(float(clear[int(f)]), 3)
+                ),
             )
         )
     nbytes = 0
@@ -133,6 +143,11 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
         off_r=(int(h.shape[1]) // 2 - int(v.shape[1]) // 2),
         goal=[float(x) for x in d["goal"]],
         reached=bool(d["reached"]),
+        wall=(
+            None
+            if clear is None or not np.isfinite(clear).any()
+            else dict(min=round(float(clear.min()), 3), touching=int((clear < 0).sum()))
+        ),
         trail=[[round(float(x), 2), round(float(y), 2)] for x, y in d["trail"]],
         bytes=nbytes,
         frames=frames,

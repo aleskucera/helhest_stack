@@ -145,10 +145,11 @@
   <p class="sub">
     Six stress worlds, driven closed-loop: <b>ostrich</b> physics as the robot, the measured Odin
     dToF ray table as the sensor, a probabilistic belief map as the only thing the planner sees.
-    Every frame is what the robot actually believed and decided. Recorded every 8th frame.
-    This run uses the <b>robot's own controller</b>, read from its params file -- the first sweep
-    that does. Every earlier one ran library defaults, which the robot never did. 5/6: bumpy fails.
-    The controller card on the right shows which values produced the run you are looking at.
+    Every frame is what the robot actually believed and decided, every frame recorded. The
+    <b>robot's own controller</b>, read from its params file, with the robust margin split by
+    cause: walls eroded hard, tilt and belly clearance charged. 6/6 reach, none touching a wall. Not
+    shown: pocket still touches its back wall in about 1 run in 15, old code and new alike -- the
+    controller's doing, not the margin's. The robot turns red while it touches a wall.
   </p>
 
   <div class="tabs" id="tabs" role="tablist"></div>
@@ -180,6 +181,7 @@
           <dt>roll / pitch</dt><dd id="m-rp">—</dd>
           <dt>map seen</dt><dd id="m-seen">—</dd>
           <dt>poses blocked</dt><dd id="m-blk">—</dd>
+          <dt>wall clearance</dt><dd id="m-cl">—</dd>
         </dl>
       </div>
       <div class="card">
@@ -188,7 +190,8 @@
           <dt>outcome</dt><dd><span class="verdict" id="m-verdict">—</span></dd>
           <dt>goal</dt><dd id="m-goal">—</dd>
           <dt>belief window</dt><dd id="m-win">—</dd>
-          <dt>routing window</dt><dd id="m-route">—</dd>
+          <dt>routing window</dt><dd id="m-rwin">—</dd>
+          <dt>closest to a wall</dt><dd id="m-wall">—</dd>
         </dl>
       </div>
       <div class="card">
@@ -231,7 +234,8 @@
     { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
     { k: "route", name: "headings with a route", unit: "", grid: "route" },
   ];
-  const ORDER = ["gap", "slalom", "pillars", "pocket", "ridge", "bumpy"];
+  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy"];
+  const LABEL = { pocket_wall: "pocket (wall hit)" };
 
   // --- colour ramps, one per layer role -------------------------------------------------
   function ramp(stops) {
@@ -333,7 +337,8 @@
     // robot: a wedge pointing where it faces
     const rx = px(meta.x), ry = py(meta.y), a = -meta.yaw;
     ctx.save(); ctx.translate(rx, ry); ctx.rotate(a);
-    ctx.fillStyle = cssVar("--ink-3"); ctx.strokeStyle = cssVar("--panel"); ctx.lineWidth = 2.5;
+    ctx.fillStyle = meta.cl != null && meta.cl < 0 ? cssVar("--alarm") : cssVar("--ink-3");
+    ctx.strokeStyle = cssVar("--panel"); ctx.lineWidth = 2.5;
     ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(-9, 9); ctx.lineTo(-9, -9); ctx.closePath();
     ctx.fill(); ctx.stroke(); ctx.restore();
 
@@ -396,7 +401,13 @@
     v.className = "verdict " + (w.reached ? "ok" : "miss");
     $("m-goal").textContent = fmt(w.goal[0], 1) + ", " + fmt(w.goal[1], 1);
     $("m-win").textContent = (w.n * w.cell).toFixed(0) + " m @ " + w.cell.toFixed(2) + " m";
-    $("m-route").textContent = (w.nr * w.cell).toFixed(0) + " m @ " + w.cell.toFixed(2) + " m";
+    $("m-rwin").textContent = (w.nr * w.cell).toFixed(0) + " m @ " + w.cell.toFixed(2) + " m";
+    const cl = $("m-cl"), touching = meta.cl != null && meta.cl < 0;
+    cl.textContent = meta.cl == null ? "no walls" : touching ? "TOUCHING " + fmt(-meta.cl, 2) + " m in" : fmt(meta.cl, 2) + " m";
+    cl.style.color = touching ? "var(--alarm)" : "";
+    const wl = $("m-wall");
+    wl.textContent = !w.wall ? "no walls" : fmt(w.wall.min, 2) + " m · " + w.wall.touching + " frames touching";
+    wl.style.color = w.wall && w.wall.touching ? "var(--alarm)" : "";
     $("fc").textContent = "frame " + meta.f;
     const L = LAYERS.find((l) => l.k === layer);
     const rangeKey = { h: "h", v: "v", cv: "cv" }[layer];
@@ -426,7 +437,7 @@
       const w = M.worlds[name]; if (!w) continue;
       const b = document.createElement("button");
       b.className = "tab"; b.setAttribute("role", "tab"); b.id = "tab-" + name;
-      b.innerHTML = '<span class="dot' + (w.reached ? "" : " miss") + '"></span>' + name;
+      b.innerHTML = '<span class="dot' + (w.reached ? "" : " miss") + '"></span>' + (LABEL[name] || name);
       b.onclick = () => selectWorld(name);
       t.appendChild(b);
     }
@@ -478,7 +489,7 @@
     // open on a frame where the run is underway, not on an empty first map
     frame = Math.min(last, Math.round(last * 0.62));
     $("scrub").value = String(frame);
-    $("hdr").textContent = w.frames.length + " recorded frames · " + ORDER.length + " worlds";
+    $("hdr").textContent = w.frames.length + " recorded frames · " + Object.keys(M.worlds).length + " runs";
     // read the window sizes off the data rather than restating them: both have changed once
     $("n-span").textContent = (w.n * w.cell).toFixed(0) + " m";
     $("n-route").textContent = (w.nr * w.cell).toFixed(0) + " m";
