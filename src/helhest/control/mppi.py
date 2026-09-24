@@ -73,6 +73,13 @@ class SamplingConfig:
     # elite mean only mixes candidates on the best candidate's side (obstacle dead ahead ->
     # commit early instead of averaging left- and right-passers into a straight-at-it mean).
     turn_mode_th: float = 0.5
+    # spin-mode deadband [rad/s per step] on the MEAN wheel speed. A spin has wl = -wr, so its
+    # mean speed is exactly zero -- and a two-way direction key (`s < 0 -> reverse else forward`)
+    # therefore files every spin under FORWARD, next to the forward arcs. The elite mean then
+    # averages a spin with an arc and commits neither: a shallow turn, with the spin's magnitude
+    # pulled below `spin_min`, which is the one speed floor that exists because the wheels will
+    # not break loose under it. Three-way -- reverse / SPIN / forward -- keeps them apart.
+    spin_mode_th: float = 0.25
 
 
 @wp.struct
@@ -622,12 +629,15 @@ def _cand_dir_kernel(
     target_wheel_omega: wp.array2d(dtype=wp.vec3),
     horizon: int,
     turn_th: float,  # net-differential deadband; below it a candidate is "straight" (neutral)
-    dir_out: wp.array(dtype=float),  # [n_cand] net direction: +1 forward-ish, -1 reverse-ish
+    spin_th: float,  # mean-speed deadband; below it a candidate goes nowhere, i.e. it SPINS
+    dir_out: wp.array(dtype=float),  # [n_cand] net direction: +1 forward, 0 spin, -1 reverse
     turn_out: wp.array(dtype=float),  # [n_cand] net turn mode: -1 right / 0 neutral / +1 left
 ):
     """Per-candidate maneuver mode keys. The elite is MULTIMODAL in two ways and a plain mean
     averages the modes into the worst of both worlds:
-      - direction (reverse enabled): back-up vs pivot-and-drive -> mean is ~zero velocity;
+      - direction: back-up vs pivot-and-drive -> mean is ~zero velocity; and a SPIN is its own
+        mode, not a slow forward one -- its mean wheel speed is exactly zero, so a two-way key
+        would file it as forward and let the elite average it with a forward arc;
       - turn side (obstacle dead ahead): pass-left vs pass-right -> mean aims AT the obstacle,
         and under slew-limited (smooth) actuation the robot then cannot dodge late.
     dir = sign of the summed mean wheel speed; turn = sign of the summed differential with a
@@ -640,7 +650,15 @@ def _cand_dir_kernel(
         w = target_wheel_omega[t, b]
         s += w[0] + w[1]
         dsum += w[1] - w[0]
-    dir_out[b] = wp.where(s < 0.0, -1.0, 1.0)
+    # s is the summed (wl + wr); halved it is the summed MEAN wheel speed, which is what the
+    # per-step spin_th is scaled against by the caller.
+    spd = s * 0.5
+    dk = float(0.0)  # inside the deadband: goes nowhere on average -> a spin
+    if spd > spin_th:
+        dk = 1.0
+    elif spd < -spin_th:
+        dk = -1.0
+    dir_out[b] = dk
     tk = float(0.0)
     if dsum > turn_th:
         tk = 1.0
@@ -686,15 +704,20 @@ def _elite_u_kernel(
 ):
     t, wheel = wp.tid()  # (timestep, wheel: 0=L, 1=R)
     # MODE-COHERENT elite mean: average only elites compatible with the best candidate's
-    # maneuver mode -- same direction, and same turn side (a NEUTRAL/straight candidate is
+    # maneuver mode -- same direction key (forward / spin / reverse), and same turn side
+    # (a NEUTRAL/straight candidate is
     # compatible with either side; if the best is neutral, sided candidates are excluded so a
     # left/right split can't pull the mean off the straight line). Forward-only cruising makes
     # every key (+1, 0), which reduces to the plain elite mean.
     elite_sum = float(0.0)
     elite_n = float(0.0)
+    # When the best candidate is a SPIN (best_dir == 0) a turn-neutral candidate at the same
+    # direction key is not "compatible", it is a STOP -- averaging it in is what drags the spin
+    # under `spin_min` and leaves the robot creeping. Require the turn side exactly there.
+    strict = best_dir[0] == 0.0
     for b in range(n_cand):
         if J[b] <= tau[0] and dirs[b] == best_dir[0]:
-            if turns[b] == best_turn[0] or turns[b] == 0.0:
+            if turns[b] == best_turn[0] or (turns[b] == 0.0 and not strict):
                 elite_sum += target_wheel_omega[t, b][wheel]
                 elite_n += 1.0
     U[t, wheel] = wp.clamp(elite_sum / wp.max(elite_n, 1.0), wlo[0], wmax)
@@ -985,6 +1008,7 @@ class MppiGpu:
                 self.sim.target_wheel_omega,
                 self.horizon,
                 self.sampling.turn_mode_th * float(self.horizon),
+                self.sampling.spin_mode_th * float(self.horizon),
             ],
             outputs=[self.dirs, self.turns],
             device=self.device,
