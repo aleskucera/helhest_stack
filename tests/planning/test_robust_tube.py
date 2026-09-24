@@ -12,6 +12,7 @@ as a hazard, and the wall scene below must erode exactly as the old box did.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import warp as wp
 
 from helhest.engine import GridParams
@@ -98,3 +99,54 @@ def test_soft_blocks_are_charged_by_how_far_over_not_eroded():
     # the poses the old box would have closed are open, and pay instead
     spared = ~robust & (_box_max(blocked.astype(np.float32), ctg._mr, ctg._mt) > 0.5)
     assert spared.any() and (charge[spared] > 0.0).all()
+
+
+def test_the_wall_field_is_the_hazard_erosion_alone():
+    """What MPPI vetoes hard: walls spread by the tube, and no soft block ever."""
+    for terrain in (_wall(), _slopes()):
+        ctg = _solve(terrain)
+        hazard = ctg.hazard.numpy()
+        want = _box_max(hazard, ctg._mr, ctg._mt) > 0.5
+        assert np.array_equal(ctg.wall.numpy() > 0.5, want)
+    # on the slopes every block is soft, so there is nothing to veto
+    assert not (ctg.wall.numpy() > 0.5).any() and (ctg.blocked.numpy() > 0.5).any()
+
+
+def test_a_no_route_pose_escapes_to_the_cheapest_routable_one_nearby():
+    ctg = _solve(_wall())
+    V, E = ctg.V.numpy(), ctg.V_escape.numpy()
+    cap = ctg._vcap
+    lim = 0.9 * cap
+    routable = V < lim
+    assert routable.any() and (~routable).any()
+    np.testing.assert_array_equal(E[routable], V[routable])  # a pose with a route is untouched
+
+    # brute force over the no-route poses, against the kernel
+    ny, nx, nth = V.shape
+    K, cell = ctg._escape_reach, ctg.grid.cell_size
+    rng = np.random.default_rng(0)
+    capped = np.argwhere(~routable)
+    for r, c, t in capped[rng.choice(len(capped), size=min(300, len(capped)), replace=False)]:
+        best = cap
+        for i in range(-K, K + 1):
+            for j in range(-K, K + 1):
+                rr, cc = r + i, c + j
+                if not (0 <= rr < ny and 0 <= cc < nx) or i * i + j * j > K * K:
+                    continue
+                for k in range(nth):
+                    if V[rr, cc, k] < lim:
+                        dk = abs(k - t)
+                        turn = min(dk, nth - dk)
+                        cand = (
+                            V[rr, cc, k]
+                            + ctg.ESCAPE_PER_M * cell * np.sqrt(i * i + j * j)
+                            + ctg._escape_per_bin * turn
+                        )
+                        best = min(best, cand)
+        assert E[r, c, t] == pytest.approx(min(best, cap), rel=1e-5, abs=1e-4)
+
+    # Both outcomes occur: poses in the wall's margin on the goal's side find a way out, and the
+    # far side -- cut off entirely, the wall spans the window -- keeps the cap, so the straight-line
+    # exploration fallback still arms where there is genuinely no route.
+    escaped = ~routable & (E < lim)
+    assert escaped.any() and (~routable & (E >= lim)).any()

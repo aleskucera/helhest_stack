@@ -445,6 +445,7 @@ def _robust_kernel(
     soft_weight: wp.float32,
     robust: wp.array3d(dtype=wp.float32),
     robust_tilt: wp.array3d(dtype=wp.float32),
+    wall: wp.array3d(dtype=wp.float32),
 ):
     """Robust feasibility over the (y, x, theta) disturbance tube the closed loop cannot correct
     before the next replan -- split by what the tube is protecting against.
@@ -460,12 +461,15 @@ def _robust_kernel(
     erosion of belly-on-mound poses, 2.2% of the window, took it to 3/6. A charge proportional to
     HOW FAR over keeps a steep slope beside the route expensive and a marginal speckle nearly free.
     dr=dc=dt=0 is plain feasibility.
+
+    `wall` is the hazard erosion alone, without the soft blocks: the field MPPI vetoes hard, so
+    the controller refuses exactly what the router refuses to route through, and nothing more.
     """
     r, c, t = wp.tid()
     ny = blocked.shape[0]
     nx = blocked.shape[1]
     nth = blocked.shape[2]
-    hit = blocked[r, c, t]
+    near_wall = float(0.0)
     excess = float(0.0)
     for i in range(-dr, dr + 1):
         rr = wp.clamp(r + i, 0, ny - 1)
@@ -473,10 +477,64 @@ def _robust_kernel(
             cc = wp.clamp(c + j, 0, nx - 1)
             for k in range(-dt, dt + 1):
                 tt = (t + k + nth) % nth  # heading wraps
-                hit = wp.max(hit, hazard[rr, cc, tt])
+                near_wall = wp.max(near_wall, hazard[rr, cc, tt])
                 excess = wp.max(excess, violation[rr, cc, tt])
-    robust[r, c, t] = hit
+    robust[r, c, t] = wp.max(blocked[r, c, t], near_wall)
     robust_tilt[r, c, t] = graded_tilt[r, c, t] + soft_weight * excess
+    wall[r, c, t] = near_wall
+
+
+@wp.kernel
+def _escape_kernel(
+    V: wp.array3d(dtype=wp.float32),  # the clamped cost-to-go
+    vcap: wp.float32,
+    reach: int,  # [cells] how far a no-route pose looks for a routable one
+    cell: wp.float32,
+    per_m: wp.float32,  # [m-equiv per m] price of getting there
+    per_bin: wp.float32,  # [m-equiv per heading bin] price of turning to it
+    V_escape: wp.array3d(dtype=wp.float32),
+):
+    """V, with every no-route pose given the cheapest way back to a routable one nearby.
+
+    MPPI reads V at each rollout pose, and where V is capped it had nothing to follow but a straight
+    line to the goal. That line is exactly wrong in the two failures it caused: pressed against a
+    wall with the goal on the far side (`false_door`: 93% of the stuck frames had no route at the
+    robot's own pose), and half-way through turning round in a corridor, where the sideways
+    headings have no route and the line points back into the dead end. Here a capped pose instead
+    costs the routable pose within `reach` that is cheapest to get to -- its V, plus `per_m` per
+    metre and `per_bin` per heading bin to reach it -- so the gradient leads out, not into the wall.
+    Poses with a route are untouched, and a pose with nothing routable within `reach` keeps the cap,
+    so the straight-line exploration fallback still arms where the goal genuinely has no route.
+    """
+    r, c, t = wp.tid()
+    v = V[r, c, t]
+    lim = 0.9 * vcap  # the same "no route" test MPPI applies
+    if v < lim:
+        V_escape[r, c, t] = v
+        return
+    ny = V.shape[0]
+    nx = V.shape[1]
+    nth = V.shape[2]
+    best = vcap
+    for i in range(-reach, reach + 1):
+        rr = r + i
+        if rr < 0 or rr >= ny:
+            continue
+        for j in range(-reach, reach + 1):
+            cc = c + j
+            if cc < 0 or cc >= nx:
+                continue
+            d2 = float(i * i + j * j)
+            if d2 > float(reach * reach):
+                continue
+            move = per_m * cell * wp.sqrt(d2)
+            for k in range(nth):
+                vn = V[rr, cc, k]
+                if vn < lim:
+                    dk = wp.abs(k - t)
+                    turn = float(wp.min(dk, nth - dk))
+                    best = wp.min(best, vn + move + per_bin * turn)
+    V_escape[r, c, t] = wp.min(best, vcap)
 
 
 @wp.kernel
@@ -591,6 +649,13 @@ def _seed_goal_and_boundary_kernel(
 
 
 class CostToGo:
+    # The escape field's prices. Getting back to routable ground runs through ground the router
+    # refused, so it is dearer than the 1 per metre of an ordinary route -- dear enough that no
+    # escape reads cheaper than a real route beside it, cheap enough to stay far under the cap.
+    ESCAPE_REACH_M = 1.0  # [m] the robot's own length: far enough to leave a wall's margin
+    ESCAPE_PER_M = 3.0  # [m-equiv per m]
+    ESCAPE_PER_BIN = 0.3  # [m-equiv per heading bin], the deployed plan_pivot_cost
+
     def __init__(
         self,
         grid_params: GridParams,
@@ -659,6 +724,10 @@ class CostToGo:
         self._mt = int(round(robust_margin_deg / (360.0 / n_theta)))
         self._eroded = self._mr > 0 or self._mt > 0
         self.robust_soft_weight = float(robust_soft_weight)
+        self._escape_reach = max(1, int(round(self.ESCAPE_REACH_M / self.grid.cell_size)))
+        # a turn costs what the lattice charges for one when it has point turns; the deployed
+        # value otherwise, so an escape that is mostly turning still reads cheaper than the cap
+        self._escape_per_bin = float(pivot_cost) if pivot_cost > 0.0 else self.ESCAPE_PER_BIN
         # tall-step obstacle gate: block cells within a robot footprint of a step > obstacle_step_m.
         self._step_gate = float(obstacle_step_m)
         self._foot_r = max(1, int(round(robot_params.half_track / self.grid.cell_size)))
@@ -783,6 +852,10 @@ class CostToGo:
         )  # blocked HARD: a wall, or a settle that did not resolve
         self.violation = wp.zeros_like(self.V)  # [rad] how badly a soft test fails, 0 if none does
         self.robust_tilt = wp.zeros_like(self.V)  # graded_tilt + the tube's tilt charge
+        # the hazard erosion alone: what MPPI vetoes hard (plain hazards when there is no tube)
+        self.wall = wp.zeros_like(self.V)
+        # V with a way back out of every no-route pose: what MPPI follows (see _escape_kernel)
+        self.V_escape = wp.zeros_like(self.V)
         # what the solver actually reads: veto in the sign, graded cost in the magnitude
         self._pose_cost = wp.zeros_like(self.V)
         self._seeds = wp.zeros_like(self.V)
@@ -1058,9 +1131,11 @@ class CostToGo:
                     self._mt,
                     self.robust_soft_weight,
                 ],
-                outputs=[self.robust_blocked, self.robust_tilt],
+                outputs=[self.robust_blocked, self.robust_tilt, self.wall],
                 device=self.device,
             )
+        else:
+            wp.copy(self.wall, self.hazard)
         feas = self.robust_blocked if self._eroded else self.blocked
         tilt = self.robust_tilt if self._eroded else self.graded_tilt
         wp.launch(
@@ -1126,7 +1201,21 @@ class CostToGo:
             outputs=[self.V],
             device=self.device,
         )
-        self._prof.mark(4)  # clamp done
+        wp.launch(
+            _escape_kernel,
+            dim=self.V.shape,
+            inputs=[
+                self.V,
+                self._vcap,
+                self._escape_reach,
+                self.grid.cell_size,
+                self.ESCAPE_PER_M,
+                self._escape_per_bin,
+                self.V_escape,
+            ],
+            device=self.device,
+        )
+        self._prof.mark(4)  # clamp + escape done
 
     def set_coarse(
         self,

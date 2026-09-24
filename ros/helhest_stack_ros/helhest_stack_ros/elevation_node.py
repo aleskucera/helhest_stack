@@ -177,6 +177,7 @@ _PLAN_BUILD = frozenset(
         "plan_mu_span",
         "plan_mu_tau",
         "plan_saturation",
+        "plan_wall_veto",
         "plan_pivot_cost",
         "plan_turn_boost_adapt",
         "plan_turn_boost_tau",
@@ -741,6 +742,11 @@ class ElevationNode(Node):
         # "drive slow where grip is short, fast where it isn't" term -- the model alone gets MORE
         # optimistic as mu drops, so without it low-grip terrain reads as easy.
         d("plan_saturation", PLAN_DEFAULTS["plan_saturation"])
+        # HARD wall veto on MPPI's rollouts, over the cost-to-go's wall field (walls eroded by the
+        # robust tube; tilt is never in it). Without it MPPI relied on the rollout-infeasibility
+        # charge, which cannot help once every candidate already touches: the robot pressed
+        # into walls toward the goal. 0 = off.
+        d("plan_wall_veto", PLAN_DEFAULTS["plan_wall_veto"])
         # STRAIGHT sampling prior: fraction of MPPI candidates drawn as zero-differential (straight
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
@@ -967,6 +973,7 @@ class ElevationNode(Node):
         self.plan_mu_adapt: bool = g("plan_mu_adapt")
         self.plan_mu_tau: float = g("plan_mu_tau")
         self.plan_saturation: float = g("plan_saturation")
+        self.plan_wall_veto: float = g("plan_wall_veto")
         self.plan_actuate: bool = g("plan_actuate")
         self.plan_max_omega: float = g("plan_max_omega")
         self.plan_max_slew: float = g("plan_max_slew")
@@ -1916,7 +1923,11 @@ class ElevationNode(Node):
                     self.get_logger().info("plan dump -> /tmp/plan_dump.npz")
                 except Exception as e:  # a diagnostic must never take the planner down
                     self.get_logger().warn(f"plan dump failed: {e}")
-            self.planner.set_lattice(V, self.sgrid)
+            # V with a way out of every no-route pose (CostToGo._escape_kernel): where V is capped
+            # MPPI otherwise follows a straight line to the goal, into walls and dead ends
+            self.planner.set_lattice(self.ctg.V_escape, self.sgrid)
+            if self.planner.cw.veto > 0.0:  # walls are a hard no for the controller too
+                self.planner.set_veto(self.ctg.wall, self.sgrid)
             self._load_command_history()
             self.planner.replan(state_l, goal_l, int(self.plan_n_refine))
             self._ck("plan:replan")

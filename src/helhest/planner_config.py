@@ -34,6 +34,9 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_turn": 0.03,
     "plan_smooth": 0.04,
     "plan_saturation": 300.0,
+    # MPPI's hard veto on the cost-to-go's WALL field (hazards eroded by the tube; tilt is never
+    # in it). 1e6 is ten times the rollout-infeasibility weight: nothing outbids it. 0 = off.
+    "plan_wall_veto": 1e6,
     # sampler -> SamplingConfig
     "plan_wmax": 4.0,
     "plan_wmin": 0.0,
@@ -95,6 +98,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             turn=float(p["plan_turn"]),
             smoothness=float(p["plan_smooth"]),
             saturation=float(p["plan_saturation"]),
+            veto=float(p["plan_wall_veto"]),
         ),
         sampling=SamplingConfig(
             wmax=float(p["plan_wmax"]),

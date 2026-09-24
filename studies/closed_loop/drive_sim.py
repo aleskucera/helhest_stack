@@ -36,7 +36,6 @@ Runs on dasenka, which is where the simulator lives -- see this directory's READ
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import json
 import pathlib
 
@@ -115,6 +114,7 @@ def _plan_params(a: argparse.Namespace) -> dict:
         ("batch", "plan_batch"),
         ("wmax", "plan_wmax"),
         ("wheel_width", "plan_wheel_width"),
+        ("veto", "plan_wall_veto"),
     ):
         if getattr(a, flag) is not None:
             params[key] = getattr(a, flag)
@@ -298,7 +298,7 @@ def drive(a: argparse.Namespace) -> dict:
         # replicas and cost-to-go settings, through the one function the node uses too.
         planner = MppiGpu(
             plan_sim,
-            dataclasses.replace(a.cfg.cost, veto=a.veto),
+            a.cfg.cost,
             sampling=a.cfg.sampling,
             n_theta=a.n_theta,
         )
@@ -452,15 +452,15 @@ def drive(a: argparse.Namespace) -> dict:
             cmd = dock_control(state_l, goal_l)
         elif mppi:
             plan_sim.set_terrain(crop(height_d, off_w, fine_d))
-            planner.set_lattice(V, sgrid)
-            if a.veto > 0.0:
-                # the router's own per-pose veto, priced independently of V. Where V is capped --
-                # which is exactly where a pose is vetoed -- `explore_fallback` swaps the lattice's
-                # verdict for straight-line distance to the goal, so a veto carried only by V
-                # vanishes in the one case it matters. Measured on `bumpy`: 71% of the frames where
-                # the robot left its stability envelope had V capped at its own cell, against 21%
-                # of the frames where it did not.
-                planner.set_veto(ctg.blocked, sgrid)
+            # V with a way out of every no-route pose, not V itself: where V is capped MPPI used to
+            # follow a straight line to the goal, which pressed the robot into false_door's back
+            # wall and turned it back into corridor's dead end mid-turn (CostToGo._escape_kernel)
+            planner.set_lattice(ctg.V_escape, sgrid)
+            if a.cfg.cost.veto > 0.0:
+                # the WALL field, priced independently of V and hard. Where V is capped --
+                # which is exactly where a pose is vetoed -- the goal term cannot carry a veto, so
+                # it has to be its own term. Walls only: tilt stays the cost-to-go's soft charge.
+                planner.set_veto(ctg.wall, sgrid)
             planner.replan(state_l, goal_l, a.refine)
             u = planner.nominal()
             cmd = np.array([u[0, 0], u[0, 1], 0.5 * (u[0, 0] + u[0, 1])], np.float32)
@@ -664,10 +664,8 @@ def main() -> None:
     p.add_argument(
         "--veto",
         type=float,
-        default=0.0,
-        help="weight on the router's per-pose veto in the MPPI cost; 0 = OFF (measured on the "
-        "connected heading ring: DECISION-NEUTRAL, 6/6 either way and within 1% on frames. The "
-        "'breaks ridge and bumpy' this used to say was the split-ring artifact, not the veto)",
+        default=None,
+        help="override plan_wall_veto, MPPI's hard veto on the cost-to-go's wall field; 0 = OFF",
     )
     p.add_argument(
         "--escape",
