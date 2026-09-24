@@ -1905,8 +1905,18 @@ class ElevationNode(Node):
                         measured=np.asarray(Mc, np.float32),
                         V=V.numpy(),
                         goal_r=np.asarray(goal_r, np.float32),
+                        # MPPI's own frame: the rollouts start at state_l and chase goal_l, and V
+                        # is placed into this frame through sgrid's origin. Without all three an
+                        # offline probe cannot line the value field up with the robot.
                         state_l=np.asarray(state_l, np.float32),
+                        goal_l=np.asarray(goal_l, np.float32),
+                        sgrid_origin=np.asarray(
+                            [self.sgrid.origin_x, self.sgrid.origin_y], np.float32
+                        ),
                         cell=np.float32(self.resolution * max(1, int(self.plan_lat_coarsen))),
+                        # the fine terrain the ROLLOUTS drive on, at the map resolution
+                        elev_local=np.asarray(mf.elev_local, np.float32),
+                        fine_cell=np.float32(self.resolution),
                     )
                     self.get_logger().info("plan dump -> /tmp/plan_dump.npz")
                 except Exception as e:  # a diagnostic must never take the planner down
