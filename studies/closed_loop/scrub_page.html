@@ -157,8 +157,10 @@
     the coarse map <b>anchored to the world</b> (walls sealed from either side, a remembered wall
     never overwritten by a poorer view, the ring kept while the goal is walled off): 2/3 reach,
     in and back out through the false door, round by the real one, no wall contact; the third is
-    trapped forward-only inside its own turning clearance after a late correction. The robot turns
-    red while it touches a wall.
+    trapped forward-only inside its own turning clearance after a late correction. With the
+    <b>turn-first brake</b> (forward speed cut while the route lies more than 45&deg; off the
+    heading, so a big turn is a spin, not an arc that advances): 3/3, turning back at x&nbsp;=&nbsp;9&ndash;13
+    the moment the map seals the back wall. The robot turns red while it touches a wall.
   </p>
 
   <div class="tabs" id="tabs" role="tablist"></div>
@@ -244,8 +246,8 @@
     { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
     { k: "route", name: "headings with a route", unit: "", grid: "route" },
   ];
-  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "corridor", "corridor_stuck", "false_door", "false_door_mem", "false_door_mem_stuck"];
-  const LABEL = { pocket_wall: "pocket (wall hit)", corridor_stuck: "corridor (stuck turning)", false_door: "false door (window-bound)", false_door_mem: "false door (anchored map, reached)", false_door_mem_stuck: "false door (anchored map, wall-trapped)" };
+  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "corridor", "corridor_stuck", "false_door", "false_door_mem", "false_door_mem_stuck", "false_door_turn"];
+  const LABEL = { pocket_wall: "pocket (wall hit)", corridor_stuck: "corridor (stuck turning)", false_door: "false door (window-bound)", false_door_mem: "false door (anchored map, reached)", false_door_mem_stuck: "false door (anchored map, wall-trapped)", false_door_turn: "false door (anchored map + turn-first)" };
 
   // --- colour ramps, one per layer role -------------------------------------------------
   function ramp(stops) {

@@ -678,6 +678,39 @@ def _seed_goal_and_boundary_kernel(
     seeds[r, c, t] = v
 
 
+@wp.kernel
+def _descent_kernel(
+    V: wp.array3d(dtype=wp.float32),  # [rows, cols, headings], the field the controller follows
+    row: wp.int32,
+    col: wp.int32,
+    radius: wp.int32,  # [cells]
+    vcap: wp.float32,
+    out: wp.array(dtype=wp.float32),  # [2]: the bearing [rad] to the cheapest cell, its value
+):
+    """Where the field falls away from a cell: the bearing to the cheapest routable cell within
+    `radius`, best over headings, the cell itself excluded. One thread; the disc is small."""
+    rows = V.shape[0]
+    cols = V.shape[1]
+    best = vcap
+    br = float(0.0)
+    bc = float(0.0)
+    for dr in range(-radius, radius + 1):
+        for dc in range(-radius, radius + 1):
+            if dr * dr + dc * dc > radius * radius or (dr == 0 and dc == 0):
+                continue
+            rr = row + dr
+            cc = col + dc
+            if rr < 0 or rr >= rows or cc < 0 or cc >= cols:
+                continue
+            for t in range(V.shape[2]):
+                if V[rr, cc, t] < best:
+                    best = V[rr, cc, t]
+                    br = float(dr)
+                    bc = float(dc)
+    out[0] = wp.atan2(br, bc)
+    out[1] = best
+
+
 class CostToGo:
     # The escape field's prices. Getting back to routable ground runs through ground the router
     # refused, so it is dearer than the 1 per metre of an ordinary route -- dear enough that no
@@ -887,6 +920,7 @@ class CostToGo:
         self.robust_tilt = wp.zeros_like(self.V)  # graded_tilt + the tube's tilt charge
         # V with a way back out of every no-route pose: what MPPI follows (see _escape_kernel)
         self.V_escape = wp.zeros_like(self.V)
+        self._descent_out = wp.zeros(2, dtype=wp.float32, device=self.device)
         self._solid = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)  # inside a wall
         # what the solver actually reads: veto in the sign, graded cost in the magnitude
         self._pose_cost = wp.zeros_like(self.V)
@@ -1058,6 +1092,25 @@ class CostToGo:
             r, c, t = best_next
         hits.sort(key=lambda h: -h["doubt"])
         return hits[:top_k]
+
+    def descent_bearing(self, x: float, y: float, radius_m: float) -> float:
+        """The bearing [rad, this window's frame] from (x, y) to the cheapest routable cell of
+        `V_escape` within `radius_m`, or nan when nothing in reach has a route.
+
+        Where the way on lies relative to the robot -- the one number the turn-first brake needs,
+        so it is reduced on device and read back as two floats rather than as the field.
+        """
+        r, c, _ = self._pose_index(x, y, 0.0)
+        radius = max(int(round(radius_m / self.grid.cell_size)), 1)
+        wp.launch(
+            _descent_kernel,
+            dim=1,
+            inputs=[self.V_escape, r, c, radius, 0.9 * self._vcap],
+            outputs=[self._descent_out],
+            device=self.device,
+        )
+        bearing, best = self._descent_out.numpy()
+        return float(bearing) if best < 0.9 * self._vcap else float("nan")
 
     def _pose_index(self, x: float, y: float, yaw: float) -> tuple[int, int, int]:
         """World pose -> (row, col, heading bin), clamped into the window."""

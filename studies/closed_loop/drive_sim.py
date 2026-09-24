@@ -58,6 +58,7 @@ from helhest.perception import ScanPreprocessor
 from helhest.perception import transform_points
 from helhest.planner_config import planner_config
 from helhest.planner_config import resolve
+from helhest.control.command import turn_first
 from helhest.planning.coarse import CoarseRouter
 from helhest.planning.costtogo import CostToGo
 from helhest.planning.lattice_solver import trace_optimal
@@ -476,7 +477,15 @@ def drive(a: argparse.Namespace) -> dict:
                 planner.set_veto(ctg.hazard, sgrid)
             planner.replan(state_l, goal_l, a.refine)
             u = planner.nominal()
-            cmd = np.array([u[0, 0], u[0, 1], 0.5 * (u[0, 0] + u[0, 1])], np.float32)
+            wl, wr = float(u[0, 0]), float(u[0, 1])
+            if a.turn_first > 0.0:
+                # spin first when the route lies well behind: an arc that turns while advancing
+                # ends inside the robot's own turning clearance of a wall (control/command.py)
+                bearing = ctg.descent_bearing(rx - r0, ry - s0, a.turn_first_reach)
+                if np.isfinite(bearing):
+                    err = (bearing - yaw + np.pi) % (2.0 * np.pi) - np.pi
+                    wl, wr = turn_first(wl, wr, err, start_deg=a.turn_first)
+            cmd = np.array([wl, wr, 0.5 * (wl + wr)], np.float32)
         else:
             # the lattice's own policy, walked in the ROUTING window's frame, then followed
             local = (rx - r0, ry - s0, yaw)
@@ -651,6 +660,15 @@ def main() -> None:
     p.add_argument("--frontier", type=float, default=3.0, help="[m] unseen ground that stays free")
     p.add_argument("--void-penalty", type=float, default=1.0, help="[m] per cell of unseen beyond")
     p.add_argument("--cell", type=float, default=0.2)
+    p.add_argument(
+        "--turn-first",
+        type=float,
+        default=45.0,
+        help="[deg] heading error past which the forward speed brakes for a turn in place; 0 = off",
+    )
+    p.add_argument(
+        "--turn-first-reach", type=float, default=1.5, help="[m] how far to look for the way on"
+    )
     p.add_argument("--carve", type=float, default=6.0, help="[m] 0 disables the visibility carve")
     p.add_argument("--z-veto", type=float, default=2.0, help="veto below this many sigmas")
     p.add_argument("--n-theta", type=int, default=None)

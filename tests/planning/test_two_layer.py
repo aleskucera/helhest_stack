@@ -310,3 +310,24 @@ def test_passing_coarse_values_without_arming_is_refused():
     stray = wp.zeros((4, 4, 1), dtype=wp.float32)
     with pytest.raises(RuntimeError, match="set_coarse"):
         ctg.compute(_dev(_crop(h, _fine_window(*ROBOT))), (3.0, 3.0), coarse_value=stray)
+
+
+def test_the_descent_bearing_points_the_way_the_field_falls():
+    """Flat ground, goal due east of a robot in the window's centre: the way on is east. And a
+    goal in a walled-off window has no way on within reach, which reads as nan, not a guess."""
+    h = np.zeros((WORLD, WORLD), np.float32)
+    local = GridParams(cells_x=FINE, cells_y=FINE, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    ctg = CostToGo(local, RobotParams(), SolverParams(), n_theta=16, device="cuda")
+    mid = FINE * CELL / 2
+    ctg.compute(_dev(_crop(h, _fine_window(*ROBOT))), (mid + 2.5, mid))
+    assert abs(ctg.descent_bearing(mid, mid, 1.5)) < np.radians(20.0)
+    ctg.compute(_dev(_crop(h, _fine_window(*ROBOT))), (mid, mid + 2.5))
+    assert abs(ctg.descent_bearing(mid, mid, 1.5) - np.pi / 2) < np.radians(20.0)
+    # a wall right across the window between robot and goal: nothing routable within reach
+    hw, _ = _blocking_wall()
+    hw[:, :] = 0.0
+    hw[:, int((ROBOT[0] + 1.0) / CELL) : int((ROBOT[0] + 1.4) / CELL)] = WALL
+    ctg2 = CostToGo(local, RobotParams(), SolverParams(), n_theta=16, device="cuda")
+    ctg2.compute(_dev(_crop(hw, _fine_window(*ROBOT))), (mid + 2.5, mid))
+    b = ctg2.descent_bearing(mid, mid, 0.6)
+    assert np.isnan(b) or abs(abs(b) - np.pi) < np.radians(100.0), "must not point into the wall"

@@ -47,6 +47,36 @@ def joint_states_to_model(names: list[str], velocities: list[float]) -> np.ndarr
         return None
 
 
+def turn_first(
+    wl: float,
+    wr: float,
+    heading_error: float,
+    *,
+    start_deg: float = 45.0,
+    full_deg: float = 110.0,
+    min_scale: float = 0.1,
+) -> tuple[float, float]:
+    """Slow the FORWARD component when the way on is well off the robot's heading, so a large
+    turn is made in place before driving rather than as an arc that also advances.
+
+    `heading_error` [rad] is the angle from the heading to where the route falls away. Below
+    `start_deg` nothing changes; from there the mean speed scales linearly down to `min_scale`
+    at `full_deg` and beyond. The differential is kept, so at a full brake the command is the
+    spin the planner asked for without the advance.
+
+    Why: forward-only, a minimum-radius arc that turns 52 deg advances 1.4 m (false_door, the
+    anchored-map runs). Begun 1.9 m from a wall it ends 0.55 m from it, inside the robot's own
+    turning clearance, where every forward and spinning rollout is vetoed and MPPI freezes.
+    """
+    e = abs(math.degrees(heading_error))
+    if e <= start_deg or full_deg <= start_deg:
+        return wl, wr
+    scale = max(min_scale, 1.0 - (e - start_deg) / (full_deg - start_deg) * (1.0 - min_scale))
+    mean = 0.5 * (wl + wr)
+    half_diff = 0.5 * (wr - wl)
+    return mean * scale - half_diff, mean * scale + half_diff
+
+
 def condition_command(
     wl: float,
     wr: float,
