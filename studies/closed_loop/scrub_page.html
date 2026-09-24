@@ -146,9 +146,9 @@
     Six stress worlds, driven closed-loop: <b>ostrich</b> physics as the robot, the measured Odin
     dToF ray table as the sensor, a probabilistic belief map as the only thing the planner sees.
     Every frame is what the robot actually believed and decided. Recorded every 8th frame.
-    This run: the per-pose veto ON, feasibility judged in sigmas of headroom rather than a flat
-    metric floor, the tip-over envelope set from the drive-onto-a-ramp measurement, and the arc
-    step chosen so the lattice reaches every heading instead of every second one. 6/6.
+    This run uses the <b>robot's own controller</b>, read from its params file -- the first sweep
+    that does. Every earlier one ran library defaults, which the robot never did. 5/6: bumpy fails.
+    The controller card on the right shows which values produced the run you are looking at.
   </p>
 
   <div class="tabs" id="tabs" role="tablist"></div>
@@ -190,6 +190,10 @@
           <dt>belief window</dt><dd id="m-win">—</dd>
           <dt>routing window</dt><dd id="m-route">—</dd>
         </dl>
+      </div>
+      <div class="card">
+        <h2>Controller</h2>
+        <dl id="ctl"></dl>
       </div>
       <div class="card">
         <h2>Overlay</h2>
@@ -365,6 +369,15 @@
     // Measured 59-76% across the six worlds with a fully connected ring, because a routing
     // window legitimately contains blind cells, ground behind walls and edge states.
     $("m-route").textContent = meta.route == null ? "—" : (meta.route * 100).toFixed(0) + "%";
+    // Which controller produced this run. Before runs saved their config, a sim result could not
+    // say what it had tested -- and for a week the answer was "not the robot's controller".
+    const ctl = $("ctl"), c = w.controller;
+    const shown = [["turn", "plan_turn"], ["wmax", "plan_wmax"], ["friction replicas", "plan_n_mu"],
+                   ["spin prior", "plan_spin_frac"], ["pivot cost", "plan_pivot_cost"],
+                   ["headings", "plan_n_theta"]];
+    ctl.innerHTML = c
+      ? shown.map(([n, k]) => "<dt>" + n + "</dt><dd>" + (c[k] ?? "—") + "</dd>").join("")
+      : "<dt>not recorded</dt><dd>run predates it</dd>";
     const rp = $("m-rp"), lim = M.limits;
     if (meta.rp && lim) {
       const [ro, pi] = meta.rp;

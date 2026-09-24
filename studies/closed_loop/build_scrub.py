@@ -126,6 +126,9 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
         # the unreachable sentinel, so the page can say "the heading it is ON has no route"
         # without inventing a threshold for it
         cap=round(cap, 2),
+        # which controller produced this run (drive_sim saves the resolved plan_* values since
+        # 1f9a71d). None for older runs -- the page then says it does not know rather than guess.
+        controller=(json.loads(str(d["plan_config"])) if "plan_config" in d.files else None),
         coarse_cell=float(d["coarse_cell"]),
         off_r=(int(h.shape[1]) // 2 - int(v.shape[1]) // 2),
         goal=[float(x) for x in d["goal"]],
