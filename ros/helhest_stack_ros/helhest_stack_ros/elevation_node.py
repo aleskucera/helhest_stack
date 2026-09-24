@@ -1927,7 +1927,7 @@ class ElevationNode(Node):
             # MPPI otherwise follows a straight line to the goal, into walls and dead ends
             self.planner.set_lattice(self.ctg.V_escape, self.sgrid)
             if self.planner.cw.veto > 0.0:  # walls are a hard no for the controller too
-                self.planner.set_veto(self.ctg.wall, self.sgrid)
+                self.planner.set_veto(self.ctg.hazard, self.sgrid)
             self._load_command_history()
             self.planner.replan(state_l, goal_l, int(self.plan_n_refine))
             self._ck("plan:replan")

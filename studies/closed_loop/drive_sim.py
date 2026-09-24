@@ -457,10 +457,10 @@ def drive(a: argparse.Namespace) -> dict:
             # wall and turned it back into corridor's dead end mid-turn (CostToGo._escape_kernel)
             planner.set_lattice(ctg.V_escape, sgrid)
             if a.cfg.cost.veto > 0.0:
-                # the WALL field, priced independently of V and hard. Where V is capped --
-                # which is exactly where a pose is vetoed -- the goal term cannot carry a veto, so
-                # it has to be its own term. Walls only: tilt stays the cost-to-go's soft charge.
-                planner.set_veto(ctg.wall, sgrid)
+                # actual CONTACT, priced independently of V and hard. Where V is capped -- which
+                # is exactly where a pose is vetoed -- the goal term cannot carry a veto, so it has
+                # to be its own term. Walls only, and without the router's margin (CostToGo.hazard)
+                planner.set_veto(ctg.hazard, sgrid)
             planner.replan(state_l, goal_l, a.refine)
             u = planner.nominal()
             cmd = np.array([u[0, 0], u[0, 1], 0.5 * (u[0, 0] + u[0, 1])], np.float32)

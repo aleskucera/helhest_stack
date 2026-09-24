@@ -18,6 +18,7 @@ import warp as wp
 from helhest.engine import GridParams
 from helhest.engine import RobotParams
 from helhest.engine import SolverParams
+from helhest.planning.costtogo import _escape_kernel
 from helhest.planning.costtogo import CostToGo
 
 N = 41
@@ -101,15 +102,35 @@ def test_soft_blocks_are_charged_by_how_far_over_not_eroded():
     assert spared.any() and (charge[spared] > 0.0).all()
 
 
-def test_the_wall_field_is_the_hazard_erosion_alone():
-    """What MPPI vetoes hard: walls spread by the tube, and no soft block ever."""
-    for terrain in (_wall(), _slopes()):
-        ctg = _solve(terrain)
-        hazard = ctg.hazard.numpy()
-        want = _box_max(hazard, ctg._mr, ctg._mt) > 0.5
-        assert np.array_equal(ctg.wall.numpy() > 0.5, want)
-    # on the slopes every block is soft, so there is nothing to veto
-    assert not (ctg.wall.numpy() > 0.5).any() and (ctg.blocked.numpy() > 0.5).any()
+def test_the_vetoed_field_holds_no_soft_block():
+    """What MPPI vetoes hard is `hazard`: on ground where every block is soft, nothing at all."""
+    ctg = _solve(_slopes())
+    assert not (ctg.hazard.numpy() > 0.5).any() and (ctg.blocked.numpy() > 0.5).any()
+
+
+def test_an_escape_never_runs_through_a_wall():
+    """A routable pose one wall away is no way out; the same pose through a gap in the wall is.
+
+    Straight on the kernel, with the field built by hand: in any settled scene at this resolution
+    the routable ground behind a wall lies beyond the escape reach, and the test would pass with
+    the line-of-sight check deleted (it did)."""
+    ny, nx, nth, cap = 9, 9, 4, 100.0
+    V = np.full((ny, nx, nth), cap, np.float32)
+    V[:, 6:, :] = 10.0  # routable beyond the wall ...
+    solid = np.zeros((ny, nx), np.float32)
+    solid[:, 5] = 1.0  # ... a wall one cell thick ...
+    solid[4, 5] = 0.0  # ... with a gap in row 4
+    out = wp.zeros((ny, nx, nth), dtype=wp.float32)
+    wp.launch(
+        _escape_kernel,
+        dim=(ny, nx, nth),
+        inputs=[wp.array(V), wp.array(solid), cap, 3, 1.0, 1.0, 0.0],
+        outputs=[out],
+    )
+    E = out.numpy()
+    assert (E[0, 3, :] >= 0.9 * cap).all(), "escaped through the wall"
+    # through the gap: 2 cells straight along row 4 to column 6, at 1 per cell
+    np.testing.assert_allclose(E[4, 4, :], 10.0 + 2.0)
 
 
 def test_a_no_route_pose_escapes_to_the_cheapest_routable_one_nearby():

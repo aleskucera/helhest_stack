@@ -445,7 +445,6 @@ def _robust_kernel(
     soft_weight: wp.float32,
     robust: wp.array3d(dtype=wp.float32),
     robust_tilt: wp.array3d(dtype=wp.float32),
-    wall: wp.array3d(dtype=wp.float32),
 ):
     """Robust feasibility over the (y, x, theta) disturbance tube the closed loop cannot correct
     before the next replan -- split by what the tube is protecting against.
@@ -461,9 +460,6 @@ def _robust_kernel(
     erosion of belly-on-mound poses, 2.2% of the window, took it to 3/6. A charge proportional to
     HOW FAR over keeps a steep slope beside the route expensive and a marginal speckle nearly free.
     dr=dc=dt=0 is plain feasibility.
-
-    `wall` is the hazard erosion alone, without the soft blocks: the field MPPI vetoes hard, so
-    the controller refuses exactly what the router refuses to route through, and nothing more.
     """
     r, c, t = wp.tid()
     ny = blocked.shape[0]
@@ -481,12 +477,38 @@ def _robust_kernel(
                 excess = wp.max(excess, violation[rr, cc, tt])
     robust[r, c, t] = wp.max(blocked[r, c, t], near_wall)
     robust_tilt[r, c, t] = graded_tilt[r, c, t] + soft_weight * excess
-    wall[r, c, t] = near_wall
+
+
+@wp.kernel
+def _solid_kernel(
+    hazard: wp.array3d(dtype=wp.float32),
+    solid: wp.array2d(dtype=wp.float32),
+):
+    """A cell no pose can stand on at ANY heading: inside a wall, as far as the robot can tell."""
+    r, c = wp.tid()
+    s = float(1.0)
+    for t in range(hazard.shape[2]):
+        s = wp.min(s, hazard[r, c, t])
+    solid[r, c] = s
+
+
+@wp.func
+def _clear_line(solid: wp.array2d(dtype=wp.float32), r0: int, c0: int, r1: int, c1: int) -> bool:
+    """No solid cell between two cells, sampled every half cell along the straight line."""
+    n = 2 * wp.max(wp.abs(r1 - r0), wp.abs(c1 - c0))
+    for s in range(1, n + 1):
+        f = float(s) / float(n)
+        rr = int(wp.round(float(r0) + f * float(r1 - r0)))
+        cc = int(wp.round(float(c0) + f * float(c1 - c0)))
+        if solid[rr, cc] > 0.5:
+            return False
+    return True
 
 
 @wp.kernel
 def _escape_kernel(
     V: wp.array3d(dtype=wp.float32),  # the clamped cost-to-go
+    solid: wp.array2d(dtype=wp.float32),
     vcap: wp.float32,
     reach: int,  # [cells] how far a no-route pose looks for a routable one
     cell: wp.float32,
@@ -505,6 +527,10 @@ def _escape_kernel(
     metre and `per_bin` per heading bin to reach it -- so the gradient leads out, not into the wall.
     Poses with a route are untouched, and a pose with nothing routable within `reach` keeps the cap,
     so the straight-line exploration fallback still arms where the goal genuinely has no route.
+
+    Only along a CLEAR line: a routable pose on the far side of a wall is not a way out. Without
+    this check a pose inside `corridor`, near its dead end, escaped through the 0.4 m corridor
+    wall to the open ground outside, and the pull went straight into the wall.
     """
     r, c, t = wp.tid()
     v = V[r, c, t]
@@ -526,6 +552,8 @@ def _escape_kernel(
                 continue
             d2 = float(i * i + j * j)
             if d2 > float(reach * reach):
+                continue
+            if not _clear_line(solid, r, c, rr, cc):
                 continue
             move = per_m * cell * wp.sqrt(d2)
             for k in range(nth):
@@ -847,15 +875,15 @@ class CostToGo:
         self.doubt_pessimistic = wp.zeros_like(self.V)
         self.robust_blocked = wp.zeros_like(self.V)  # blocked after the disturbance-tube erosion
         self.graded_tilt = wp.zeros_like(self.V)
-        self.hazard = wp.zeros_like(
-            self.V
-        )  # blocked HARD: a wall, or a settle that did not resolve
+        # blocked HARD: a wall, or a settle that did not resolve. Also what MPPI vetoes hard --
+        # WITHOUT the tube: the tube is the router's margin, and vetoing it in the controller froze
+        # the robot beside every wall (each move, even a turn in place, clipped it)
+        self.hazard = wp.zeros_like(self.V)
         self.violation = wp.zeros_like(self.V)  # [rad] how badly a soft test fails, 0 if none does
         self.robust_tilt = wp.zeros_like(self.V)  # graded_tilt + the tube's tilt charge
-        # the hazard erosion alone: what MPPI vetoes hard (plain hazards when there is no tube)
-        self.wall = wp.zeros_like(self.V)
         # V with a way back out of every no-route pose: what MPPI follows (see _escape_kernel)
         self.V_escape = wp.zeros_like(self.V)
+        self._solid = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)  # inside a wall
         # what the solver actually reads: veto in the sign, graded cost in the magnitude
         self._pose_cost = wp.zeros_like(self.V)
         self._seeds = wp.zeros_like(self.V)
@@ -1131,11 +1159,9 @@ class CostToGo:
                     self._mt,
                     self.robust_soft_weight,
                 ],
-                outputs=[self.robust_blocked, self.robust_tilt, self.wall],
+                outputs=[self.robust_blocked, self.robust_tilt],
                 device=self.device,
             )
-        else:
-            wp.copy(self.wall, self.hazard)
         feas = self.robust_blocked if self._eroded else self.blocked
         tilt = self.robust_tilt if self._eroded else self.graded_tilt
         wp.launch(
@@ -1202,10 +1228,18 @@ class CostToGo:
             device=self.device,
         )
         wp.launch(
+            _solid_kernel,
+            dim=(self.grid.cells_y, self.grid.cells_x),
+            inputs=[self.hazard],
+            outputs=[self._solid],
+            device=self.device,
+        )
+        wp.launch(
             _escape_kernel,
             dim=self.V.shape,
             inputs=[
                 self.V,
+                self._solid,
                 self._vcap,
                 self._escape_reach,
                 self.grid.cell_size,

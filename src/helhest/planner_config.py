@@ -34,8 +34,8 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_turn": 0.03,
     "plan_smooth": 0.04,
     "plan_saturation": 300.0,
-    # MPPI's hard veto on the cost-to-go's WALL field (hazards eroded by the tube; tilt is never
-    # in it). 1e6 is ten times the rollout-infeasibility weight: nothing outbids it. 0 = off.
+    # MPPI's hard veto on the cost-to-go's HAZARD field: actual wall contact, without the router's
+    # margin, and never tilt. 1e6 is ten times the rollout-infeasibility weight. 0 = off.
     "plan_wall_veto": 1e6,
     # sampler -> SamplingConfig
     "plan_wmax": 4.0,

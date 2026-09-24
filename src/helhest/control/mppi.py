@@ -183,7 +183,7 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # are z_veto: with a 2 cm map sd it demands 2.22 deg of roll and 1.87 deg of pitch per sigma,
     # so z_veto = 2 turns a 15 deg envelope into an 11 deg one, which is most of the passable set
     # on terrain that genuinely sits at 10-15 deg. That was a veto on EVERY cause. The node and
-    # drive_sim now feed it the cost-to-go's WALL field only (`CostToGo.wall`: hazards, no tilt)
+    # drive_sim now feed it the cost-to-go's HAZARD field only (`CostToGo.hazard`: contact, no tilt)
     # at `plan_wall_veto`, which is what makes it safe to enforce hard.
     veto: float = 0.0
     # per-meter shaping against reverse -- sized so reverse is an ESCAPE, not a route. A pivot's
