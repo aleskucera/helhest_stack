@@ -198,9 +198,62 @@ def _pool_kernel(
 
 
 @wp.kernel
+def _bridge_kernel(
+    passable: wp.array2d(dtype=wp.float32),  # coarse [cy, cx]
+    seen: wp.array2d(dtype=wp.float32),  # coarse [cy, cx]
+    min_pass: wp.float32,
+    reach: wp.int32,  # [cells] the longest unseen run a wall is carried across
+    bridged: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], 1 = unseen, and a wall continues
+):
+    """An unseen block in a short run between two sealed blocks along a row or a column is the
+    wall continuing through the sensor's shadow, not a door.
+
+    A wall seen from one side ends, in the map, where its shadow begins -- and "unseen within
+    the frontier is free" then draws a door there. On false_door the coarse layer's exit from
+    the room was two such blocks at the west end of each side wall, priced 6 m cheaper than the
+    real door; the fine layer, whose border under that wall is vetoed, could not take the route
+    and inherited its price through the east ring instead, so its field went flat and the robot
+    dithered. `reach` bounds the run: at two 0.6 m blocks no 1.8 m doorway -- the narrowest this
+    robot fits through -- is ever bridged. A measured block is never touched; a door, once seen,
+    opens.
+    """
+    r, c = wp.tid()
+    bridged[r, c] = 0.0
+    if seen[r, c] > 0.5:
+        return
+    rows = seen.shape[0]
+    cols = seen.shape[1]
+    for axis in range(2):
+        # walk each way to the first seen block, at most `reach` unseen blocks in the run
+        wall_a = float(0.0)
+        wall_b = float(0.0)
+        run = int(0)
+        for sgn in range(2):
+            step = 1 - 2 * sgn
+            hit = float(0.0)
+            for k in range(1, reach + 1):
+                rr = r + wp.where(axis == 0, 0, step * k)
+                cc = c + wp.where(axis == 0, step * k, 0)
+                if rr < 0 or rr >= rows or cc < 0 or cc >= cols:
+                    break
+                if seen[rr, cc] > 0.5:
+                    hit = wp.where(passable[rr, cc] < min_pass, 1.0, 0.0)
+                    run += k - 1
+                    break
+            if sgn == 0:
+                wall_a = hit
+            else:
+                wall_b = hit
+        if wall_a > 0.5 and wall_b > 0.5 and run + 1 <= reach:
+            bridged[r, c] = 1.0
+            return
+
+
+@wp.kernel
 def _cost_kernel(
     passable: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], climbable fraction
     seen: wp.array2d(dtype=wp.float32),  # coarse [cy, cx]
+    bridged: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], from _bridge_kernel
     min_pass: wp.float32,  # climbable fraction a block needs to count as crossable
     frontier: wp.int32,  # [cells] how far past measured ground stays free
     void_penalty: wp.float32,  # [m] charged per cell beyond that
@@ -212,11 +265,14 @@ def _cost_kernel(
     the sign, so a free cell is `+penalty` and a vetoed one `-1 - penalty`. Measured ground is
     free or vetoed outright. Unmeasured ground is free near the frontier and priced beyond it,
     never vetoed -- a goal in terrain nobody has seen has to stay reachable, or the robot will
-    not go and look at it.
+    not go and look at it -- except where a sealed wall continues through it (`_bridge_kernel`).
     """
     r, c, _t = wp.tid()
     if seen[r, c] > 0.5:
         pose_cost[r, c, 0] = wp.where(passable[r, c] >= min_pass, 0.0, -1.0)
+        return
+    if bridged[r, c] > 0.5:
+        pose_cost[r, c, 0] = -1.0
         return
     rows = seen.shape[0]
     cols = seen.shape[1]
@@ -324,6 +380,7 @@ class CoarseRouter:
         min_pass_fraction: float = 0.5,
         frontier_m: float = 3.0,
         void_penalty: float = 1.0,
+        bridge_m: float = 1.2,
         memory_grid: GridParams | None = None,
         device: wp.Device | str | None = None,
     ) -> None:
@@ -336,9 +393,10 @@ class CoarseRouter:
                 f"elevated_m must be >= max_step_m or the layer is stricter than the fine one, "
                 f"got {elevated_m} < {max_step_m}"
             )
-        if frontier_m < 0.0 or void_penalty < 0.0:
+        if frontier_m < 0.0 or void_penalty < 0.0 or bridge_m < 0.0:
             raise ValueError(
-                f"frontier_m and void_penalty must be >= 0, got {frontier_m}, {void_penalty}"
+                f"frontier_m, void_penalty and bridge_m must be >= 0, got {frontier_m}, "
+                f"{void_penalty}, {bridge_m}"
             )
         self.device = wp.get_device(device)
         self.factor = int(factor)
@@ -368,11 +426,13 @@ class CoarseRouter:
             origin_y=base.origin_y,
         )
         self.frontier = int(round(float(frontier_m) / self.grid.cell_size))
+        self.bridge = int(round(float(bridge_m) / self.grid.cell_size))
         with wp.ScopedDevice(self.device):
             self._climb = wp.zeros((fine_grid.cells_y, fine_grid.cells_x), dtype=wp.float32)
             self.passable = wp.zeros((cy, cx), dtype=wp.float32)
             self.seen = wp.zeros((cy, cx), dtype=wp.float32)
             self.coverage = wp.zeros((cy, cx), dtype=wp.float32)
+            self.bridged = wp.zeros((cy, cx), dtype=wp.float32)
             self.floor = wp.full((cy, cx), 1.0e30, dtype=wp.float32)
             self._pose_cost = wp.zeros((cy, cx, 1), dtype=wp.float32)
             self._seeds = wp.zeros((cy, cx, 1), dtype=wp.float32)
@@ -444,11 +504,19 @@ class CoarseRouter:
             device=self.device,
         )
         wp.launch(
+            _bridge_kernel,
+            dim=self.bridged.shape,
+            inputs=[self.passable, self.seen, self.min_pass_fraction, self.bridge],
+            outputs=[self.bridged],
+            device=self.device,
+        )
+        wp.launch(
             _cost_kernel,
             dim=self._pose_cost.shape,
             inputs=[
                 self.passable,
                 self.seen,
+                self.bridged,
                 self.min_pass_fraction,
                 self.frontier,
                 self.void_penalty,

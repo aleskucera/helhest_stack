@@ -186,3 +186,47 @@ def test_a_poorer_view_does_not_overwrite_a_remembered_wall():
     assert (r.passable.numpy()[:, 10] < 0.5).all(), "three flat cells overrode nine"
     r.solve(_dev(np.zeros((N, N), np.float32)), _dev(full), goal, (0.0, 0.0))
     assert (r.passable.numpy()[:, 10] >= 0.5).all(), "a whole view of flat ground must open it"
+
+
+# ------------------------------------------------------------------------------------- bridge
+
+
+def _wall_with_shadow(gap: int) -> CoarseRouter:
+    """A sealed wall across the window with `gap` UNSEEN blocks in it, bounded by sealed
+    blocks on both sides; the goal beyond the wall."""
+    fine = GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    r = CoarseRouter(fine, factor=FACTOR, max_step_m=0.25, bridge_m=1.2, device="cuda")
+    h = np.zeros((N, N), np.float32)
+    m = np.ones((N, N), np.float32)
+    h[:, 30:32] = 1.0  # the wall, in block column 10
+    r0 = 9 * FACTOR
+    m[r0 : r0 + gap * FACTOR, 27:36] = 0.0  # the shadow: block rows 9.., columns 9..11 unseen
+    r.solve(_dev(h), _dev(m), (11.0, 6.0), (0.0, 0.0))
+    return r
+
+
+def test_a_short_shadow_in_a_sealed_wall_is_the_wall():
+    r = _wall_with_shadow(2)
+    v = r.V.numpy()[:, :, 0]
+    assert (r.bridged.numpy()[9:11, 10] > 0.5).all(), "the shadow was not bridged"
+    assert (v[:, 10] >= r.solver._inf).all(), "the wall must be whole"
+    assert (r.bridged.numpy()[9:11, 9] < 0.5).all(), "unseen ground beside the wall is not wall"
+
+
+def test_a_shadow_wider_than_a_doorway_is_left_open():
+    r = _wall_with_shadow(3)
+    assert (r.bridged.numpy()[:, 10] < 0.5).all()
+    v = r.V.numpy()[:, :, 0]
+    assert (v[9:12, 10] < r.solver._inf).all(), "three blocks may be a door: it stays open"
+
+
+def test_a_shadow_at_a_walls_end_is_not_bridged():
+    """Sealed on one side only: the wall may genuinely end there."""
+    fine = GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    r = CoarseRouter(fine, factor=FACTOR, max_step_m=0.25, bridge_m=1.2, device="cuda")
+    h = np.zeros((N, N), np.float32)
+    m = np.ones((N, N), np.float32)
+    h[: 9 * FACTOR, 30:32] = 1.0  # the wall stops at block row 9 ...
+    m[9 * FACTOR : 11 * FACTOR, 27:36] = 0.0  # ... and rows 9-10 beside its end are unseen
+    r.solve(_dev(h), _dev(m), (11.0, 6.0), (0.0, 0.0))
+    assert (r.bridged.numpy() < 0.5).all()

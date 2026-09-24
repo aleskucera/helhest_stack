@@ -42,6 +42,7 @@ ORDER = [
     "false_door_mem",
     "false_door_mem_stuck",
     "false_door_turn",
+    "false_door_bridge",
 ]
 LAYERS = ("h", "seen", "blk", "v", "route", "cv")
 

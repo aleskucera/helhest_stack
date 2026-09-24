@@ -160,7 +160,10 @@
     trapped forward-only inside its own turning clearance after a late correction. With the
     <b>turn-first brake</b> (forward speed cut while the route lies more than 45&deg; off the
     heading, so a big turn is a spin, not an arc that advances): 3/3, turning back at x&nbsp;=&nbsp;9&ndash;13
-    the moment the map seals the back wall. The robot turns red while it touches a wall.
+    the moment the map seals the back wall. With the <b>shadow bridge</b> (an unseen run of at most
+    two blocks between two sealed wall blocks is the wall, so a wall seen ending in shadow no longer
+    reads as a door) and the sim's uncertainty terms at the robot's values: one stop, one turn, out,
+    514&ndash;538 frames. The robot turns red while it touches a wall.
   </p>
 
   <div class="tabs" id="tabs" role="tablist"></div>
@@ -246,8 +249,8 @@
     { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
     { k: "route", name: "headings with a route", unit: "", grid: "route" },
   ];
-  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "corridor", "corridor_stuck", "false_door", "false_door_mem", "false_door_mem_stuck", "false_door_turn"];
-  const LABEL = { pocket_wall: "pocket (wall hit)", corridor_stuck: "corridor (stuck turning)", false_door: "false door (window-bound)", false_door_mem: "false door (anchored map, reached)", false_door_mem_stuck: "false door (anchored map, wall-trapped)", false_door_turn: "false door (anchored map + turn-first)" };
+  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "corridor", "corridor_stuck", "false_door", "false_door_mem", "false_door_mem_stuck", "false_door_turn", "false_door_bridge"];
+  const LABEL = { pocket_wall: "pocket (wall hit)", corridor_stuck: "corridor (stuck turning)", false_door: "false door (window-bound)", false_door_mem: "false door (anchored map, reached)", false_door_mem_stuck: "false door (anchored map, wall-trapped)", false_door_turn: "false door (anchored map + turn-first)", false_door_bridge: "false door (+ shadow bridge)" };
 
   // --- colour ramps, one per layer role -------------------------------------------------
   function ramp(stops) {

@@ -313,6 +313,7 @@ def drive(a: argparse.Namespace) -> dict:
         # the z-margin is SIM-ONLY: the node passes no sigma and no z_veto, so on the robot this
         # whole feasibility test is off. Kept here, flagged rather than silently matched.
         z_veto=a.z_veto,
+        charge_per_sigma=a.charge_per_sigma,
         device=a.device,
     )
     if mppi:
@@ -337,6 +338,7 @@ def drive(a: argparse.Namespace) -> dict:
             factor=a.coarsen,
             max_step_m=a.coarse_step,
             min_pass_fraction=a.coarse_pass,
+            bridge_m=a.bridge,
             frontier_m=a.frontier,
             void_penalty=a.void_penalty,
             memory_grid=memory,
@@ -658,6 +660,12 @@ def main() -> None:
         "this knob moves the coarse field hugely and the wheels not at all; see coarse.py)",
     )
     p.add_argument("--frontier", type=float, default=3.0, help="[m] unseen ground that stays free")
+    p.add_argument(
+        "--bridge",
+        type=float,
+        default=1.2,
+        help="[m] an unseen run this short between two sealed wall blocks is the wall; 0 = off",
+    )
     p.add_argument("--void-penalty", type=float, default=1.0, help="[m] per cell of unseen beyond")
     p.add_argument("--cell", type=float, default=0.2)
     p.add_argument(
@@ -670,7 +678,16 @@ def main() -> None:
         "--turn-first-reach", type=float, default=1.5, help="[m] how far to look for the way on"
     )
     p.add_argument("--carve", type=float, default=6.0, help="[m] 0 disables the visibility carve")
-    p.add_argument("--z-veto", type=float, default=2.0, help="veto below this many sigmas")
+    # Both sigma terms default to the ROBOT's values, which is off: the node passes no sigma, so
+    # neither shapes its field. Left on here they painted 15-20 m of charge over the half of a
+    # room the robot had not driven through (false_door f240) -- a planner nobody deploys.
+    p.add_argument("--z-veto", type=float, default=0.0, help="veto below this many sigmas; 0 = off")
+    p.add_argument(
+        "--charge-per-sigma",
+        type=float,
+        default=0.0,
+        help="routing charge per sigma of pose/drift uncertainty under the footprint; 0 = off",
+    )
     p.add_argument("--n-theta", type=int, default=None)
     p.add_argument("--horizon", type=int, default=None)
     p.add_argument("--batch", type=int, default=None)
