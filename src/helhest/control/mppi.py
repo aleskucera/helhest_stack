@@ -162,7 +162,10 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # good candidate (66-137). The spin band fell from rank 0 to 588 of 1365 and the planner
     # committed (0, 0), because standing still genuinely did beat turning. A spin has no forward
     # progress to trade, so charging it per-differential compares it against the wrong baseline.
-    # 0 disables the exemption (charge everything -- the old behaviour).
+    # NOTE 0 does NOT restore the old behaviour: the test is |mean| > th, and an exact spin has
+    # mean EXACTLY zero, so it escapes the charge at any th >= 0. To charge everything again the
+    # condition has to go, not the threshold. What th does control is how much SLOW-but-moving
+    # manoeuvring also escapes, which is why it is small.
     turn_spin_th: float = 0.25
     # friction-saturation certificate weight (per unit demand/grip overshoot, early-weighted sum).
     # ~300 makes a sustained 20% overshoot compete with real routing differences and a 2x overshoot
