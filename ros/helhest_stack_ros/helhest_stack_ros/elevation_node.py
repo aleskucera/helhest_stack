@@ -1927,6 +1927,18 @@ class ElevationNode(Node):
         # corrected command makes reference and measurement both scale with the correction, so the
         # error has no fixed point and the loop inflates the turn even at zero model error
         # (measured: peak yaw 0.517 -> 0.575 rad/s on correctly-modelled ground).
+        # A sign change in the PLANNED differential means the manoeuvre reversed. The inner yaw
+        # loop is a fast integrator chasing that reference, so carrying its integral across the
+        # reversal makes it push the old way into the new one -- it amplifies the flip instead of
+        # tracking it. Measured before the mode hysteresis went in: MPPI asking for a differential
+        # of -0.04 came out of this loop at -1.23, and a 180 deg attempt spent 1100 deg of
+        # rotation to net 11. The deadband keeps cruise noise from resetting it constantly.
+        if self._yaw_track is not None and from_plan:
+            d_raw = wr_raw - wl_raw
+            prev = getattr(self, "_prev_d_raw", None)
+            if prev is not None and d_raw * prev < 0.0 and min(abs(d_raw), abs(prev)) > 0.3:
+                self._yaw_track.reset()
+            self._prev_d_raw = d_raw
         ref_cmd = None
         if self._yaw_track is not None and from_plan:
             ref_cmd = self._conditioned(wl, wr, d, turn_boost)

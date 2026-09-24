@@ -80,6 +80,13 @@ class SamplingConfig:
     # pulled below `spin_min`, which is the one speed floor that exists because the wheels will
     # not break loose under it. Three-way -- reverse / SPIN / forward -- keeps them apart.
     spin_mode_th: float = 0.25
+    # Mode HYSTERESIS: keep the manoeuvre mode we are already in unless the best alternative beats
+    # the best candidate in it by more than this fraction. Re-running a free competition every
+    # frame lets a spin win by a hair and lose by a hair a few frames later; the differential then
+    # changes sign, and a MEASURED 180 deg attempt spent 1100 deg of rotation to net 11 -- turning
+    # hard, alternating, arriving nowhere, with the inner yaw loop amplifying each reversal.
+    # Committing to a manoeuvre is the point of choosing one. 0 = off (free competition).
+    mode_hysteresis: float = 0.15
 
 
 @wp.struct
@@ -674,16 +681,42 @@ def _best_dir_kernel(
     dirs: wp.array(dtype=float),
     turns: wp.array(dtype=float),
     n_cand: int,
-    best_dir: wp.array(dtype=float),  # [1] direction of the lowest-cost candidate
-    best_turn: wp.array(dtype=float),  # [1] turn mode of the lowest-cost candidate
+    hyst: float,  # keep the current mode unless beaten by more than this FRACTION of the best
+    best_dir: wp.array(dtype=float),  # [1] mode in force; read as the PREVIOUS mode, then updated
+    best_turn: wp.array(dtype=float),  # [1] ditto
 ):
-    best_dir[0] = 1.0
-    best_turn[0] = 0.0
+    """The manoeuvre mode to commit, with hysteresis.
+
+    Without it the mode is a fresh argmin every frame, and near a tie -- which is exactly where a
+    spin and a sharp arc sit when the goal is behind -- it alternates. The elite mean then
+    commits a different manoeuvre class each frame and the robot rotates back and forth: measured
+    at 1100 deg of rotation for 11 deg of net heading change. So the mode already in force is
+    kept unless some other mode's best candidate beats it by more than `hyst`.
+
+    best_dir/best_turn carry the mode ACROSS calls (they are persistent device buffers), which is
+    what makes this work inside the captured graph with no host branching."""
+    gd = float(1.0)
+    gt = float(0.0)
+    taken = int(0)
     for b in range(n_cand):
-        if J[b] <= jmin[0]:
-            best_dir[0] = dirs[b]
-            best_turn[0] = turns[b]
-            return
+        if J[b] <= jmin[0] and taken == 0:
+            gd = dirs[b]
+            gt = turns[b]
+            taken = 1
+    # cheapest candidate that stays in the mode we are already committed to
+    pd = best_dir[0]
+    pt = best_turn[0]
+    jp = float(3.0e38)
+    for b in range(n_cand):
+        if dirs[b] == pd and turns[b] == pt:
+            if J[b] < jp:
+                jp = J[b]
+    if jp <= jmin[0] + hyst * wp.abs(jmin[0]):
+        best_dir[0] = pd  # good enough -- stay committed
+        best_turn[0] = pt
+    else:
+        best_dir[0] = gd
+        best_turn[0] = gt
 
 
 @wp.kernel
@@ -800,7 +833,11 @@ class MppiGpu:
             self.count = wp.zeros(1, dtype=wp.float32)
             self.dirs = wp.zeros(self.n_cand, dtype=wp.float32)  # per-candidate net direction
             self.turns = wp.zeros(self.n_cand, dtype=wp.float32)  # per-candidate net turn mode
-            self.best_dir = wp.zeros(1, dtype=wp.float32)  # best candidate's direction
+            # NOT zeros: this is read back as the previous mode, and 0 is the SPIN key -- the
+            # planner would start life committed to a spin. Forward/straight is the honest prior.
+            self.best_dir = wp.full(
+                1, 1.0, dtype=wp.float32
+            )  # mode in force: +1 fwd / 0 spin / -1 rev
             self.best_turn = wp.zeros(1, dtype=wp.float32)  # best candidate's turn mode
             self.seed = wp.array([int(seed)], dtype=wp.int32)
             self.goal = wp.zeros(2, dtype=wp.float32)
@@ -1025,7 +1062,14 @@ class MppiGpu:
         wp.launch(
             _best_dir_kernel,
             1,
-            inputs=[self.Jc, self.jmin, self.dirs, self.turns, self.n_cand],
+            inputs=[
+                self.Jc,
+                self.jmin,
+                self.dirs,
+                self.turns,
+                self.n_cand,
+                self.sampling.mode_hysteresis,
+            ],
             outputs=[self.best_dir, self.best_turn],
             device=self.device,
         )
