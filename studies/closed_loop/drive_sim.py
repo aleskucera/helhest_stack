@@ -238,7 +238,7 @@ def drive(a: argparse.Namespace) -> dict:
     sim = build_sim(world=a.world, dt=dt, viewer=False)
     sensor = OdinSensor(sim.model, 0, ODIN_MOUNT_XYZ, seed=0)
     for _ in range(a.settle):  # let the wheels find the terrain before anything is measured
-        sim.step()
+        sim.step_many(1)
 
     rx, ry, yaw, _ = pose_of(sim.current_state.body_q.numpy()[0])
     goal = np.asarray(a.goal if a.goal else sim.goal, np.float64)[:2]
@@ -533,7 +533,12 @@ def drive(a: argparse.Namespace) -> dict:
                     _v_here(vh, rx - r0, ry - s0, yaw, a.cell, a.n_theta),
                 ]
             )
-        sim.step()
+        # Replayed as a captured CUDA graph, not launched from Python: the solver is launch-bound
+        # (16 Newton x 26 PCR iterations of small kernels), and the eager step was 80% of the
+        # frame -- 81 ms of a 101 ms frame, against a 69 ms sensor period. Same physics: the step
+        # copies next_state back into current_state on device, and eager-vs-graph trajectories
+        # differ no more than two eager runs do (the contact solve is not bitwise repeatable).
+        sim.step_many(1)
         if f % a.report == 0:
             # the only host reads in the loop, and they happen on report frames alone.
             # Two masks, because the windows are different sizes: coverage is a property of the
