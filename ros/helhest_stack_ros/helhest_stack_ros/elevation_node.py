@@ -789,6 +789,8 @@ class ElevationNode(Node):
         d("plan_max_slew", 6.0)
         # Log the RAW MPPI command next to the conditioned one every Nth planned frame. 0 = off.
         d("plan_debug_cmd", 0)
+        # Set to 1 to dump the next planned frame's planner inputs to /tmp/plan_dump.npz. One-shot.
+        d("plan_debug_dump", 0)
         # deceleration cap [rad/s^2] -- separate from accel so stops can be firmer than the gentle
         # launch. 12.0 = ground ~4.2 m/s^2, stops from cruise in ~0.32s. None/<=0 would mean symmetric.
         d("plan_max_decel", 12.0)
@@ -940,6 +942,7 @@ class ElevationNode(Node):
         self.plan_smooth: float = g("plan_smooth")
         self.plan_straight_frac: float = g("plan_straight_frac")
         self.plan_debug_cmd: int = int(g("plan_debug_cmd"))
+        self.plan_debug_dump: int = int(g("plan_debug_dump"))
         self.plan_spin_frac: float = g("plan_spin_frac")
         self.plan_spin_min: float = g("plan_spin_min")
         self.plan_elite_frac: float = g("plan_elite_frac")
@@ -1873,6 +1876,27 @@ class ElevationNode(Node):
                 ),
             )
             self._ck("plan:ctg")
+            # ONE-SHOT PLANNER DUMP. Set plan_debug_dump to 1 and the next planned frame writes
+            # everything the planner was given -- routing elevation, the MEASURED mask, the goal
+            # and pose in the routing frame, and V -- so an offline probe can be run on exactly
+            # what the node saw. Every "why did it not move" question this session has come down
+            # to a difference between the live belief and a synthetic map, and there was no way
+            # to close that gap without this.
+            if self.plan_debug_dump:
+                self.plan_debug_dump = 0
+                try:
+                    np.savez_compressed(
+                        "/tmp/plan_dump.npz",
+                        elevation=Hc,
+                        measured=np.asarray(Mc, np.float32),
+                        V=V.numpy(),
+                        goal_r=np.asarray(goal_r, np.float32),
+                        state_l=np.asarray(state_l, np.float32),
+                        cell=np.float32(self.resolution * max(1, int(self.plan_lat_coarsen))),
+                    )
+                    self.get_logger().info("plan dump -> /tmp/plan_dump.npz")
+                except Exception as e:  # a diagnostic must never take the planner down
+                    self.get_logger().warn(f"plan dump failed: {e}")
             self.planner.set_lattice(V, self.sgrid)
             self._load_command_history()
             self.planner.replan(state_l, goal_l, int(self.plan_n_refine))
