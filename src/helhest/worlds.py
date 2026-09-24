@@ -148,6 +148,56 @@ def false_door_world(cell=0.06):
     return Heightmap(H, (xlim[0], ylim[0]), cell)
 
 
+def behind_world(cell=0.06):
+    """Open ground, the goal 6 m straight BEHIND the start. The ground behind is unmeasured at the
+    start -- the sensor looks ahead -- so a reverse that respects the map-knowledge gate must turn
+    and drive forward; one that does not backs blind."""
+    xlim, ylim = (-9.0, 5.0), (-5.0, 5.0)
+    XX, YY = _grid(xlim, ylim, cell)
+    return Heightmap(np.zeros_like(XX), (xlim[0], ylim[0]), cell)
+
+
+def blind_wall_world(cell=0.06):
+    """`behind`, with a wall 1.4 m behind the start that the robot has never seen (it is outside
+    the sensor's view until the robot turns). Backing blind hits it; turning finds it and goes
+    round its end."""
+    xlim, ylim = (-9.0, 5.0), (-5.0, 5.0)
+    XX, YY = _grid(xlim, ylim, cell)
+    H = np.zeros_like(XX)
+    _box(H, XX, YY, -1.4, 0.0, 0.2, 3.0)  # spans |y| < 3, open past either end
+    return Heightmap(H, (xlim[0], ylim[0]), cell)
+
+
+def cliff_corridor_world(cell=0.06):
+    """The 2.8 m corridor with its south wall replaced by a 1 m DROP. A turn or a reverse that
+    strays south goes over the edge; the settle sees it as a wheel with no ground under it."""
+    xlim, ylim = (-2.0, 24.0), (-9.0, 9.0)
+    XX, YY = _grid(xlim, ylim, cell)
+    H = np.zeros_like(XX)
+    _box(H, XX, YY, 11.5, -5.2, 6.7, 3.8, h=-1.0)  # the south wall is a cliff, y < -1.4 ...
+    _box(H, XX, YY, 5.0, -5.2, 0.2, 3.8)  # ... stamped first, so the walls keep their cells
+    _box(H, XX, YY, 5.0, 3.3, 0.2, 1.9)
+    _box(H, XX, YY, 5.0, 8.0, 0.2, 1.0)
+    _box(H, XX, YY, 11.5, 1.6, 6.7, 0.2)  # the north wall stays
+    _box(H, XX, YY, 18.0, 0.0, 0.2, 1.8)
+    return Heightmap(H, (xlim[0], ylim[0]), cell)
+
+
+def narrow_corridor_world(cell=0.06):
+    """A 2.2 m dead end, 6 m deep: narrower than the robot can spin in even from rest, so the only
+    way out is 6 m of reverse -- four times the gate's strip, over ground measured on the way in."""
+    xlim, ylim = (-2.0, 20.0), (-9.0, 9.0)
+    XX, YY = _grid(xlim, ylim, cell)
+    H = np.zeros_like(XX)
+    _box(H, XX, YY, 5.0, -5.05, 0.2, 3.95)  # front wall; mouth at |y| < 1.1 ...
+    _box(H, XX, YY, 5.0, 3.15, 0.2, 2.05)
+    _box(H, XX, YY, 5.0, 8.0, 0.2, 1.0)  # ... and the 1.8 m side door at y 5.2..7.0
+    _box(H, XX, YY, 8.0, 1.3, 3.2, 0.2)  # the dead end, 2.2 m clear, capped at x = 11
+    _box(H, XX, YY, 8.0, -1.3, 3.2, 0.2)
+    _box(H, XX, YY, 11.0, 0.0, 0.2, 1.5)
+    return Heightmap(H, (xlim[0], ylim[0]), cell)
+
+
 def bumpy_world(cell=0.06, seed=0):
     xlim, ylim = (-2.0, 16.0), (-5.0, 5.0)
     XX, YY = _grid(xlim, ylim, cell)
@@ -221,6 +271,24 @@ OBSTACLES: dict[str, tuple[Box, ...]] = {
         ),
     ),
     "bumpy": (),
+    "behind": (),
+    "blind_wall": (Box(-1.4, 0.0, 0.2, 3.0),),
+    # the cliff is terrain, not a solid: the heightfield carries it
+    "cliff_corridor": (
+        Box(5.0, -5.2, 0.2, 3.8),
+        Box(5.0, 3.3, 0.2, 1.9),
+        Box(5.0, 8.0, 0.2, 1.0),
+        Box(11.5, 1.6, 6.7, 0.2),
+        Box(18.0, 0.0, 0.2, 1.8),
+    ),
+    "narrow_corridor": (
+        Box(5.0, -5.05, 0.2, 3.95),
+        Box(5.0, 3.15, 0.2, 2.05),
+        Box(5.0, 8.0, 0.2, 1.0),
+        Box(8.0, 1.3, 3.2, 0.2),
+        Box(8.0, -1.3, 3.2, 0.2),
+        Box(11.0, 0.0, 0.2, 1.5),
+    ),
     "corridor": (
         Box(5.0, -5.2, 0.2, 3.8),
         Box(5.0, 3.3, 0.2, 1.9),
@@ -330,6 +398,12 @@ WORLDS = {
     "bumpy": (bumpy_world, (0.0, 0.0, 0.0), (14.0, 0.0)),
     "corridor": (corridor_world, (0.0, 0.0, 0.0), (22.0, 0.0)),
     "false_door": (false_door_world, (0.0, 0.0, 0.0), (22.0, 0.0)),
+    # reverse: the goal behind, a wall behind that was never seen, an edge beside the turn, and a
+    # dead end too narrow to spin in
+    "behind": (behind_world, (0.0, 0.0, 0.0), (-6.0, 0.0)),
+    "blind_wall": (blind_wall_world, (0.0, 0.0, 0.0), (-6.0, 0.0)),
+    "cliff_corridor": (cliff_corridor_world, (0.0, 0.0, 0.0), (22.0, 0.0)),
+    "narrow_corridor": (narrow_corridor_world, (0.0, 0.0, 0.0), (16.0, 0.0)),
 }
 
 

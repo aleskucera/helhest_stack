@@ -2105,7 +2105,10 @@ class ElevationNode(Node):
                     mf.ex - mf.rxmin, mf.ey - mf.rymin, self.plan_turn_first_reach_m
                 )
                 if np.isfinite(bearing):
-                    err = (bearing - eyaw + np.pi) % (2.0 * np.pi) - np.pi
+                    # against the direction of TRAVEL: with reverse unlocked a backward command
+                    # toward a route behind is on course, not 180 deg off it
+                    travel = eyaw + (np.pi if wl + wr < 0.0 else 0.0)
+                    err = (bearing - travel + np.pi) % (2.0 * np.pi) - np.pi
                     wl, wr = turn_first(
                         wl,
                         wr,

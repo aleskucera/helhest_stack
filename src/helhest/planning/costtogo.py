@@ -353,6 +353,79 @@ def _face_kernel(
 
 
 @wp.kernel
+def _drop_kernel(
+    elev: wp.array2d(dtype=wp.float32),
+    measured: wp.array2d(dtype=wp.float32),  # 1 = cell has real data, 0 = never observed
+    reach: wp.int32,  # [cells] how far across unmeasured cells to look for the ground beyond
+    elevated: wp.float32,  # [m] the edge cell may sit at most this far above the ground behind it
+    drop: wp.array2d(dtype=wp.float32),  # per measured cell: the deepest drop to measured ground
+    # found across a shadow in a 4-direction, else 0
+):
+    """The edge of a drop, seen across its own shadow.
+
+    A 1 m drop is invisible to the step and face tests: the cliff face and the ground at its
+    foot lie in the sensor's shadow, the inpaint fills that band with a ramp, and the settle
+    finds the ramp drivable -- cliff_corridor, 6 of 6 runs over the edge. What the map does
+    hold is measured ground on both sides of the band. So a measured cell whose nearest measured
+    cell in some direction, within `reach` cells and across unmeasured ones only, lies more than
+    a drop lower is an EDGE. The rule reads the high side, so a wall's foot, a pillar's ground,
+    a ridge approached from below are untouched; a crest whose far side is steep and hidden is
+    an edge too, which is what the envelope would say once it saw it.
+    """
+    r, c = wp.tid()
+    drop[r, c] = 0.0
+    if measured[r, c] < 0.5:
+        return
+    ny = elev.shape[0]
+    nx = elev.shape[1]
+    h = elev[r, c]
+    worst = float(0.0)
+    for k in range(4):
+        dr = int(0)
+        dc = int(0)
+        if k == 0:
+            dr = -1
+        elif k == 1:
+            dr = 1
+        elif k == 2:
+            dc = -1
+        else:
+            dc = 1
+        # Only a cell that is GROUND on the near side: the lowest measured cell in the half-disc
+        # behind it (radius `reach`, away from the drop) lies within `elevated` of it. A wall's
+        # top is higher than the ground beyond its shadow too, and read as an edge it sealed
+        # every doorway on every world (the body's reach blocked 1.1 m around each wall); a
+        # ridge's crest, and the arena wall's top, are 1 m above the ground beside them. A
+        # cliff edge has, behind it, the ground the robot drove up on. A cell with nothing
+        # measured behind it is not an edge either: its ground level is unknown.
+        near = float(1.0e30)
+        for i in range(-reach, reach + 1):
+            for j in range(-reach, reach + 1):
+                if i * i + j * j > reach * reach:
+                    continue
+                if i * dr + j * dc >= 0:  # not behind, away from the drop
+                    continue
+                rb = r + i
+                cb = c + j
+                if rb < 0 or rb >= ny or cb < 0 or cb >= nx:
+                    continue
+                if measured[rb, cb] > 0.5:
+                    near = wp.min(near, elev[rb, cb])
+        if near > 1.0e29 or h - near > elevated:
+            continue
+        for step in range(1, reach + 1):
+            rr = r + dr * step
+            cc = c + dc * step
+            if rr < 0 or rr >= ny or cc < 0 or cc >= nx:
+                break
+            if measured[rr, cc] > 0.5:
+                if step > 1:  # only ACROSS a shadow: adjacent cells are the face test's business
+                    worst = wp.max(worst, h - elev[rr, cc])
+                break
+    drop[r, c] = worst
+
+
+@wp.kernel
 def _step_gate_kernel(
     step: wp.array2d(dtype=wp.float32),
     foot_r: int,
@@ -732,6 +805,9 @@ class CostToGo:
         # [per rad] of the worst soft violation inside the tube, as graded tilt. Tilt and belly
         # clearance are charged, walls and unresolved settles are eroded hard -- `_robust_kernel`.
         robust_soft_weight: float = 10.0,
+        drop_m: float = 0.0,  # hard-block the body's reach around a drop this deep seen across a
+        # shadow [m]; 0 = off. See _drop_kernel.
+        drop_reach_m: float = 2.0,  # [m] how far across unmeasured cells the drop test looks
         obstacle_step_m: float = 0.0,  # hard-block cells with a local step taller than this [m];
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
         pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives so
@@ -794,6 +870,19 @@ class CostToGo:
         # tall-step obstacle gate: block cells within a robot footprint of a step > obstacle_step_m.
         self._step_gate = float(obstacle_step_m)
         self._foot_r = max(1, int(round(robot_params.half_track / self.grid.cell_size)))
+        # the drop gate keeps the WHOLE body off the edge: the tail reaches rear_offset plus a
+        # wheel behind the axle, and it is the tail that goes over first when reversing
+        self._drop_m = float(drop_m)
+        # [m] how far above the ground behind it an edge cell may sit: a wall or ridge top is
+        # a metre up and is not an edge, a bank a wheel could roll off is level with its approach
+        self._drop_elevated = 0.5
+        self._drop_reach = max(1, int(round(float(drop_reach_m) / self.grid.cell_size)))
+        self._drop_foot_r = max(
+            1,
+            int(
+                round((robot_params.rear_offset + robot_params.wheel_radius) / self.grid.cell_size)
+            ),
+        )
 
         # A lattice arc has to end on a heading BIN or the table records a heading the robot
         # never reaches -- up to half a bin of error on every move, compounding, with feasibility
@@ -929,6 +1018,9 @@ class CostToGo:
         self._face = wp.zeros(
             (ny, nx), dtype=wp.float32, device=self.device
         )  # per-cell face height
+        self._drop = wp.zeros(
+            (ny, nx), dtype=wp.float32, device=self.device
+        )  # drop across a shadow
 
         self._elev_in = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
         # Per-cell measurement sd. Defaults to zero, which the floor then lifts to
@@ -1186,6 +1278,21 @@ class CostToGo:
                 outputs=[self.hazard],
                 device=self.device,
             )
+        if self._drop_m > 0.0:  # the edge of a drop, seen across its shadow: no body over it
+            wp.launch(
+                _drop_kernel,
+                dim=(self.grid.cells_y, self.grid.cells_x),
+                inputs=[self._elev_in, self._measured_in, self._drop_reach, self._drop_elevated],
+                outputs=[self._drop],
+                device=self.device,
+            )
+            wp.launch(
+                _step_gate_kernel,
+                dim=self.V.shape,
+                inputs=[self._drop, self._drop_foot_r, self._drop_m],
+                outputs=[self.blocked, self.hazard],
+                device=self.device,
+            )
         if self._step_gate > 0.0:  # hard-block tall steps the settle straddles (thin poles/sticks)
             wp.launch(
                 _local_step_kernel,
@@ -1387,7 +1494,7 @@ class CostToGo:
                 drift.device == self.device
             ), f"drift must be a wp.array on {self.device}, got {drift.device}"
             wp.copy(self._drift_in, drift)
-        if self._step_gate > 0.0 or self._eroded:  # only the step field reads the mask
+        if self._step_gate > 0.0 or self._eroded or self._drop_m > 0.0:  # the mask's readers
             if measured is None:
                 self._measured_in.fill_(1.0)
             else:

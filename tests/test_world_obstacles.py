@@ -28,6 +28,10 @@ LIMITS = {
     "ridge": ((-2.0, 14.0), (-5.0, 5.0)),
     "corridor": ((-2.0, 24.0), (-9.0, 9.0)),
     "false_door": ((-2.0, 24.0), (-9.0, 9.0)),
+    "behind": ((-9.0, 5.0), (-5.0, 5.0)),
+    "blind_wall": ((-9.0, 5.0), (-5.0, 5.0)),
+    "cliff_corridor": ((-2.0, 24.0), (-9.0, 9.0)),
+    "narrow_corridor": ((-2.0, 20.0), (-9.0, 9.0)),
 }
 
 # ridge is the one approximation. Its notch is a vertical cut in x, while a box
@@ -52,6 +56,13 @@ def test_obstacles_match_heightmaps(name):
         f"{name}: {mismatched} of {wall_cells} wall cells differ "
         f"({100 * mismatched / wall_cells:.2f}%), allowed {100 * TOLERANCE.get(name, 0.0):.0f}%"
     )
+
+
+def test_a_cliff_is_terrain_not_a_solid():
+    """cliff_corridor's drop is a heightfield region below ground; no box can be it, and the
+    walls-vs-boxes check above ignores it because it is not a wall."""
+    H = WORLDS["cliff_corridor"][0]().H
+    assert H.min() <= -0.99 and (H >= 0.99).any()
 
 
 def test_bumpy_has_no_solid_obstacles():
