@@ -37,6 +37,7 @@ ORDER = [
     "ridge",
     "bumpy",
     "corridor",
+    "corridor_stuck",
     "false_door",
 ]
 LAYERS = ("h", "seen", "blk", "v", "route", "cv")

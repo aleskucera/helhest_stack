@@ -149,9 +149,12 @@
     dToF ray table as the sensor, a probabilistic belief map as the only thing the planner sees.
     Every frame is what the robot actually believed and decided, every frame recorded. The
     <b>robot's own controller</b>, read from its params file, with the robust margin split by
-    cause: walls eroded hard, tilt and belly clearance charged. 6/6 reach, none touching a wall. Not
-    shown: pocket still touches its back wall in about 1 run in 15, old code and new alike -- the
-    controller's doing, not the margin's. The robot turns red while it touches a wall.
+    cause: walls eroded hard, tilt and belly clearance charged. The six stress worlds: 6/6 reach, none
+    touching a wall. The two <b>trap worlds</b> (corridor, false door) put a dead end 18 m out behind
+    the opening aimed at the goal. Corridor reached 3/4, two of them scraping a wall on the way out;
+    the <b>stuck turning</b> run never completed its 180&deg;. False door 0/4: once the dead end
+    scrolls out of the 20 m window it is forgotten and the robot drives back in. The robot turns
+    red while it touches a wall.
   </p>
 
   <div class="tabs" id="tabs" role="tablist"></div>
@@ -237,8 +240,8 @@
     { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
     { k: "route", name: "headings with a route", unit: "", grid: "route" },
   ];
-  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "corridor", "false_door"];
-  const LABEL = { pocket_wall: "pocket (wall hit)", false_door: "false door" };
+  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "corridor", "corridor_stuck", "false_door"];
+  const LABEL = { pocket_wall: "pocket (wall hit)", corridor_stuck: "corridor (stuck turning)", false_door: "false door" };
 
   // --- colour ramps, one per layer role -------------------------------------------------
   function ramp(stops) {
