@@ -126,16 +126,12 @@ def corridor_world(cell=0.06):
     xlim, ylim = (-2.0, 24.0), (-9.0, 9.0)
     XX, YY = _grid(xlim, ylim, cell)
     H = np.zeros_like(XX)
-    _box(H, XX, YY, 5.0, -5.5, 0.2, 3.5)  # front wall; mouth at |y| < 2.0 ...
-    _box(H, XX, YY, 5.0, 3.6, 0.2, 1.6)
+    _box(H, XX, YY, 5.0, -5.2, 0.2, 3.8)  # front wall; mouth at |y| < 1.4 ...
+    _box(H, XX, YY, 5.0, 3.3, 0.2, 1.9)
     _box(H, XX, YY, 5.0, 8.0, 0.2, 1.0)  # ... and a 1.8 m side door at y 5.2..7.0
-    # The corridor, 4.0 m clear. It was 2.8 m, and that cannot be turned in forward-only: a
-    # spin is not in place for this robot (two drive wheels, a dragged rear wheel), measured
-    # 0.44-0.9 m of sideways travel per 120-150 deg, so from the centreline the body met the
-    # wall at ~120 deg every run. 4.0 m is the swing plus the body's reach plus the margins.
-    _box(H, XX, YY, 11.5, 2.2, 6.7, 0.2)
-    _box(H, XX, YY, 11.5, -2.2, 6.7, 0.2)
-    _box(H, XX, YY, 18.0, 0.0, 0.2, 2.4)  # capped 18 m out
+    _box(H, XX, YY, 11.5, 1.6, 6.7, 0.2)  # the corridor, 2.8 m clear
+    _box(H, XX, YY, 11.5, -1.6, 6.7, 0.2)
+    _box(H, XX, YY, 18.0, 0.0, 0.2, 1.8)  # capped 18 m out
     return Heightmap(H, (xlim[0], ylim[0]), cell)
 
 
@@ -226,12 +222,12 @@ OBSTACLES: dict[str, tuple[Box, ...]] = {
     ),
     "bumpy": (),
     "corridor": (
-        Box(5.0, -5.5, 0.2, 3.5),
-        Box(5.0, 3.6, 0.2, 1.6),
+        Box(5.0, -5.2, 0.2, 3.8),
+        Box(5.0, 3.3, 0.2, 1.9),
         Box(5.0, 8.0, 0.2, 1.0),
-        Box(11.5, 2.2, 6.7, 0.2),
-        Box(11.5, -2.2, 6.7, 0.2),
-        Box(18.0, 0.0, 0.2, 2.4),
+        Box(11.5, 1.6, 6.7, 0.2),
+        Box(11.5, -1.6, 6.7, 0.2),
+        Box(18.0, 0.0, 0.2, 1.8),
     ),
     "false_door": (
         Box(5.0, -5.0, 0.2, 4.0),
