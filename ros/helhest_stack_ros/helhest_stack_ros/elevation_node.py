@@ -69,8 +69,11 @@ from helhest.perception import StatisticalOutlierFilter
 from helhest.perception import TerrainMap
 from helhest.perception import transform_points
 from helhest.perception.dynamic.frontier import frontier_from_organized
+from helhest.planning.coarse import CoarseRouter
+from helhest.planning.coarse import mask_from_count
 from helhest import dynamics
 from helhest.control.command import condition_command
+from helhest.control.command import turn_first
 from helhest.control.command import in_flight_history
 from helhest.control.command import JOINT_NAMES
 from helhest.control.command import to_engine_order
@@ -179,6 +182,10 @@ _PLAN_BUILD = frozenset(
         "plan_saturation",
         "plan_wall_veto",
         "plan_pivot_cost",
+        "plan_coarse_block_m",
+        "plan_coarse_memory_m",
+        "plan_coarse_win_m",
+        "plan_bridge_m",
         "plan_turn_boost_adapt",
         "plan_turn_boost_tau",
         "plan_yaw_track",
@@ -350,6 +357,8 @@ class ElevationNode(Node):
 
         self.pub_local = self.create_publisher(PointCloud2, "elevation_local", 10)
         self.pub_global = self.create_publisher(PointCloud2, "elevation_global", 10)
+        # the coarse layer's cost-to-go [m], as a height grid: unreachable blocks are left out
+        self.pub_coarse = self.create_publisher(PointCloud2, "coarse_value", 10)
         self.pub_accum = self.create_publisher(PointCloud2, "accumulated_map", 1)
         self.pub_path = self.create_publisher(Path, "planned_path", 10)
         self.pub_path_marker = self.create_publisher(Marker, "planned_path_marker", 10)
@@ -747,6 +756,26 @@ class ElevationNode(Node):
         # charge, which cannot help once every candidate already touches: the robot pressed
         # into walls toward the goal. 0 = off.
         d("plan_wall_veto", PLAN_DEFAULTS["plan_wall_veto"])
+        # COARSE "which way" layer (planning/coarse.py). Each frame a plan_coarse_win_m raster of
+        # the accumulated map is pooled into plan_coarse_block_m blocks, kept in a map anchored to
+        # the WORLD (plan_coarse_memory_m across, centred on the map origin) so a dead end the
+        # robot drove away from is still there when it matters, and solved to the goal; that value
+        # prices the routing window's border. Measured on false_door (a room whose only door faces
+        # the goal): without it 0/3, the dead end forgotten once it scrolls out; with it 3/3.
+        # Block 0 = off; memory 0 = bound to the raster, forgetting what scrolls out (sim-only).
+        d("plan_coarse_block_m", PLAN_DEFAULTS["plan_coarse_block_m"])
+        d("plan_coarse_memory_m", PLAN_DEFAULTS["plan_coarse_memory_m"])
+        d("plan_coarse_win_m", 20.0)  # node-only: the simulator pools its own belief window
+        # A wall seen ending in the sensor's shadow is not a door: an unseen run this short
+        # between two sealed blocks is the wall continuing. Two 0.6 m blocks cannot hide a 1.8 m
+        # doorway, the narrowest this robot fits through. 0 = off.
+        d("plan_bridge_m", PLAN_DEFAULTS["plan_bridge_m"])
+        # TURN FIRST (control/command.turn_first): brake the forward speed while the route lies
+        # more than this far off the heading, so a big turn is a spin, not an arc that advances
+        # into a wall -- forward-only, an arc that turned 52 deg advanced 1.4 m into the robot's
+        # own turning clearance and MPPI froze there. 0 = off. Live-tunable.
+        d("plan_turn_first_deg", PLAN_DEFAULTS["plan_turn_first_deg"])
+        d("plan_turn_first_reach_m", PLAN_DEFAULTS["plan_turn_first_reach_m"])
         # STRAIGHT sampling prior: fraction of MPPI candidates drawn as zero-differential (straight
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
@@ -974,6 +1003,12 @@ class ElevationNode(Node):
         self.plan_mu_tau: float = g("plan_mu_tau")
         self.plan_saturation: float = g("plan_saturation")
         self.plan_wall_veto: float = g("plan_wall_veto")
+        self.plan_coarse_block_m: float = g("plan_coarse_block_m")
+        self.plan_coarse_memory_m: float = g("plan_coarse_memory_m")
+        self.plan_coarse_win_m: float = g("plan_coarse_win_m")
+        self.plan_bridge_m: float = g("plan_bridge_m")
+        self.plan_turn_first_deg: float = g("plan_turn_first_deg")
+        self.plan_turn_first_reach_m: float = g("plan_turn_first_reach_m")
         self.plan_actuate: bool = g("plan_actuate")
         self.plan_max_omega: float = g("plan_max_omega")
         self.plan_max_slew: float = g("plan_max_slew")
@@ -1183,6 +1218,45 @@ class ElevationNode(Node):
             device=self.device,
         )
         self.planner.cw.lattice_cap = self.ctg._vcap
+        self.coarse: CoarseRouter | None = None
+        if cfg.coarse["block_m"] > 0.0:
+            cw = int(round(self.plan_coarse_win_m / cell))
+            memory = None
+            if cfg.coarse["memory_m"] > 0.0:
+                # anchored on the MAP frame's origin -- the world, through localization -- so it
+                # never moves; the robot is near it when the map starts
+                nm = int(round(cfg.coarse["memory_m"] / cell))
+                memory = GridParams(nm, nm, cell, -0.5 * nm * cell, -0.5 * nm * cell)
+            self.coarse = CoarseRouter(
+                GridParams(cw, cw, cell, 0.0, 0.0),
+                factor=max(1, int(round(cfg.coarse["block_m"] / cell))),
+                bridge_m=cfg.coarse["bridge_m"],
+                memory_grid=memory,
+                device=self.device,
+            )
+            # the coarse grid's shape is fixed; where it sits in the routing window's frame is
+            # passed per frame, since an anchored grid moves under a robot-centred window
+            self.ctg.set_coarse(
+                GridParams(
+                    self.coarse.grid.cells_x,
+                    self.coarse.grid.cells_y,
+                    self.coarse.grid.cell_size,
+                    0.0,
+                    0.0,
+                )
+            )
+            self._coarse_cw = cw
+            self._coarse_mask = wp.zeros((cw, cw), dtype=wp.float32, device=self.device)
+            self.get_logger().info(
+                f"coarse layer ON: {self.coarse.grid.cell_size:.2f} m blocks from a "
+                f"{self.plan_coarse_win_m:.0f} m raster, "
+                + (
+                    f"anchored map {cfg.coarse['memory_m']:.0f} m across, "
+                    if memory is not None
+                    else "window-bound (forgets what scrolls out), "
+                )
+                + f"shadow bridge {cfg.coarse['bridge_m']:.1f} m"
+            )
         # Routing field expressed in the PLANNING window's frame: both windows are robot-centered,
         # so their origins differ by a constant cell offset.
         self.sgrid = GridParams(
@@ -1883,14 +1957,54 @@ class ElevationNode(Node):
             else:
                 Hc = relev
                 Mc = rmeas
+            # WHICH WAY -- the coarse layer, pooled from a wider raster of the accumulated map
+            # than the routing window and remembered across frames; its value prices the routing
+            # window's border. Device end to end: raster, mask, pool, solve.
+            vc = None
+            coarse_origin = None
+            if self.coarse is not None:
+                cw = self._coarse_cw
+                cell = mf.cell
+                if self.coarse.persistent:
+                    # the raster sits on the memory's lattice (whole cells), so its blocks pool
+                    # into the map's blocks exactly
+                    cx0, cy0 = self.coarse.grid.origin_x, self.coarse.grid.origin_y
+                    cxmin = cx0 + round((mf.ex - 0.5 * cw * cell - cx0) / cell) * cell
+                    cymin = cy0 + round((mf.ey - 0.5 * cw * cell - cy0) / cell) * cell
+                else:
+                    cxmin, cymin = mf.ex - 0.5 * cw * cell, mf.ey - 0.5 * cw * cell
+                    cx0, cy0 = cxmin, cymin
+                lay = HeightMapBuilder(
+                    cell, (cxmin, cxmin + cw * cell, cymin, cymin + cw * cell), device=self.device
+                ).build(self.map_wp)
+                mask_from_count(lay.count, self._coarse_mask)
+                if self.coarse.persistent:
+                    vc = self.coarse.solve(lay.max, self._coarse_mask, (gx, gy), (cxmin, cymin))
+                else:
+                    vc = self.coarse.solve(lay.max, self._coarse_mask, (gx - cxmin, gy - cymin))
+                coarse_origin = (cx0 - mf.rxmin, cy0 - mf.rymin)
+                self._ck("plan:coarse")
             V = self.ctg.compute(
                 wp.array(np.ascontiguousarray(Hc), dtype=wp.float32, device=self.device),
                 goal_r,
                 measured=wp.array(
                     np.ascontiguousarray(Mc, dtype=np.float32), dtype=wp.float32, device=self.device
                 ),
+                coarse_value=vc,
+                coarse_origin=coarse_origin,
             )
             self._ck("plan:ctg")
+            if vc is not None:
+                # for RViz: the coarse cost-to-go as a height grid, unreachable blocks left out
+                cvn = vc.numpy()[:, :, 0]
+                self._publish_grid(
+                    self.pub_coarse,
+                    np.where(cvn < 0.9 * self.coarse.solver._inf, cvn, np.nan).astype(np.float32),
+                    cx0,
+                    cy0,
+                    self.coarse.grid.cell_size,
+                    stamp,
+                )
             # ONE-SHOT PLANNER DUMP. Set plan_debug_dump to 1 and the next planned frame writes
             # everything the planner was given -- routing elevation, the MEASURED mask, the goal
             # and pose in the routing frame, and V -- so an offline probe can be run on exactly
@@ -1984,6 +2098,15 @@ class ElevationNode(Node):
             u0 = self.planner.nominal()[0]  # first committed step (wL, wR), model convention
             wl, wr = float(u0[0]), float(u0[1])
             wl_raw, wr_raw = wl, wr  # before the yaw loop and the conditioner touch them
+            if self.plan_turn_first_deg > 0.0:
+                # spin first when the route lies well behind (control/command.turn_first); the way
+                # on is read off the routing field around the robot, in the routing window's frame
+                bearing = self.ctg.descent_bearing(
+                    mf.ex - mf.rxmin, mf.ey - mf.rymin, self.plan_turn_first_reach_m
+                )
+                if np.isfinite(bearing):
+                    err = (bearing - eyaw + np.pi) % (2.0 * np.pi) - np.pi
+                    wl, wr = turn_first(wl, wr, err, start_deg=self.plan_turn_first_deg)
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
         turn_boost = (
             self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost

@@ -105,3 +105,13 @@ def test_the_batch_is_one_the_friction_replicas_divide():
     cfg = planner_config(_deployed())
     assert cfg.sampling.n_mu == 3 and cfg.batch % 3 == 0 and cfg.batch == 4095
     assert planner_config(PLAN_DEFAULTS).batch == 4096  # n_mu 1: untouched
+
+
+def test_the_coarse_layer_and_the_turn_first_brake_come_from_the_table():
+    """Both were built in the simulator first, as flags; the node reads them from the same table
+    the simulator now falls back to, so a false_door result in the sim is a result for the node."""
+    cfg = planner_config(PLAN_DEFAULTS)
+    assert cfg.coarse == dict(block_m=0.6, memory_m=60.0, bridge_m=1.2)
+    assert cfg.turn_first == dict(start_deg=45.0, reach_m=1.5)
+    off = planner_config({**PLAN_DEFAULTS, "plan_coarse_block_m": 0.0, "plan_turn_first_deg": 0.0})
+    assert off.coarse["block_m"] == 0.0 and off.turn_first["start_deg"] == 0.0

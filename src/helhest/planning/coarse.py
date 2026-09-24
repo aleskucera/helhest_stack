@@ -67,6 +67,22 @@ from ..engine import GridParams
 
 
 @wp.kernel
+def _mask_kernel(
+    count: wp.array2d(dtype=wp.int32),  # fine [ny, nx], points per cell
+    measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = at least one
+):
+    r, c = wp.tid()
+    measured[r, c] = wp.where(count[r, c] > 0, 1.0, 0.0)
+
+
+def mask_from_count(count: wp.array, out: wp.array) -> wp.array:
+    """A heightmap raster's point count -> the float measured mask `CoarseRouter.solve` takes,
+    on device; `out` is the caller's buffer so a per-frame call allocates nothing."""
+    wp.launch(_mask_kernel, dim=out.shape, inputs=[count], outputs=[out], device=out.device)
+    return out
+
+
+@wp.kernel
 def _floor_kernel(
     elevation: wp.array2d(dtype=wp.float32),  # fine [ny, nx], the window
     measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = observed

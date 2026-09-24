@@ -58,6 +58,14 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_pivot_cost": 0.0,
     # robot
     "plan_wheel_width": 0.10,
+    # the coarse "which way" layer (planning/coarse.py) and the turn-first brake
+    # (control/command.turn_first). Block size 0 = no coarse layer; memory 0 = a layer bound to the
+    # window it is pooled from, which forgets what scrolls out of it; turn-first 0 = off.
+    "plan_coarse_block_m": 0.6,
+    "plan_coarse_memory_m": 60.0,
+    "plan_bridge_m": 1.2,
+    "plan_turn_first_deg": 45.0,
+    "plan_turn_first_reach_m": 1.5,
 }
 
 
@@ -72,6 +80,8 @@ class PlannerConfig:
     nominal_reset: float
     mu_span: float  # the band MppiGpu.set_mu_band gets: 0 with a single friction replica
     wheel_width: float
+    coarse: dict[str, float]  # block_m, memory_m, bridge_m -- CoarseRouter, sized by the caller
+    turn_first: dict[str, float]  # start_deg, reach_m -- control.command.turn_first
 
 
 def resolve(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -126,4 +136,13 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
         nominal_reset=float(p["plan_nominal_reset"]),
         mu_span=float(p["plan_mu_span"]) if n_mu > 1 else 0.0,
         wheel_width=float(p["plan_wheel_width"]),
+        coarse=dict(
+            block_m=float(p["plan_coarse_block_m"]),
+            memory_m=float(p["plan_coarse_memory_m"]),
+            bridge_m=float(p["plan_bridge_m"]),
+        ),
+        turn_first=dict(
+            start_deg=float(p["plan_turn_first_deg"]),
+            reach_m=float(p["plan_turn_first_reach_m"]),
+        ),
     )

@@ -243,6 +243,22 @@ def drive(a: argparse.Namespace) -> dict:
 
     rx, ry, yaw, _ = pose_of(sim.current_state.body_q.numpy()[0])
     goal = np.asarray(a.goal if a.goal else sim.goal, np.float64)[:2]
+    # the coarse layer and the turn-first brake come from the robot's own table unless a flag
+    # says otherwise, so a run here tests what the node would do (helhest.planner_config)
+    if a.coarsen is None:
+        a.coarsen = (
+            max(1, int(round(a.cfg.coarse["block_m"] / a.cell)))
+            if a.cfg.coarse["block_m"] > 0
+            else 0
+        )
+    if a.memory is None:
+        a.memory = a.cfg.coarse["memory_m"]
+    if a.bridge is None:
+        a.bridge = a.cfg.coarse["bridge_m"]
+    if a.turn_first is None:
+        a.turn_first = a.cfg.turn_first["start_deg"]
+    if a.turn_first_reach is None:
+        a.turn_first_reach = a.cfg.turn_first["reach_m"]
     span = a.window
     n = int(round(span / a.cell))
     belief = ElevationBelief(
@@ -643,13 +659,18 @@ def main() -> None:
     p.add_argument("--window", type=float, default=20.0, help="[m] belief + coarse window")
     p.add_argument("--route", type=float, default=10.0, help="[m] settle-based routing window")
     p.add_argument("--fine", type=float, default=9.0, help="[m] MPPI window, a centred crop")
-    p.add_argument("--coarsen", type=int, default=5, help="fine cells per coarse cell; 0 = OFF")
+    p.add_argument(
+        "--coarsen",
+        type=int,
+        default=None,
+        help="fine cells per coarse cell; 0 = OFF; default from plan_coarse_block_m",
+    )
     p.add_argument(
         "--memory",
         type=float,
-        default=60.0,
+        default=None,
         help="[m] side of the world-anchored coarse map, centred on the start; 0 = bound to the "
-        "belief window, which forgets what scrolls out of it",
+        "belief window, which forgets what scrolls out of it; default plan_coarse_memory_m",
     )
     p.add_argument("--coarse-step", type=float, default=0.25, help="[m] climbable step, coarse")
     p.add_argument(
@@ -663,19 +684,24 @@ def main() -> None:
     p.add_argument(
         "--bridge",
         type=float,
-        default=1.2,
-        help="[m] an unseen run this short between two sealed wall blocks is the wall; 0 = off",
+        default=None,
+        help="[m] an unseen run this short between two sealed wall blocks is the wall; 0 = off; "
+        "default plan_bridge_m",
     )
     p.add_argument("--void-penalty", type=float, default=1.0, help="[m] per cell of unseen beyond")
     p.add_argument("--cell", type=float, default=0.2)
     p.add_argument(
         "--turn-first",
         type=float,
-        default=45.0,
-        help="[deg] heading error past which the forward speed brakes for a turn in place; 0 = off",
+        default=None,
+        help="[deg] heading error past which the forward speed brakes for a turn in place; "
+        "0 = off; default plan_turn_first_deg",
     )
     p.add_argument(
-        "--turn-first-reach", type=float, default=1.5, help="[m] how far to look for the way on"
+        "--turn-first-reach",
+        type=float,
+        default=None,
+        help="[m] how far to look for the way on; default plan_turn_first_reach_m",
     )
     p.add_argument("--carve", type=float, default=6.0, help="[m] 0 disables the visibility carve")
     # Both sigma terms default to the ROBOT's values, which is off: the node passes no sigma, so
