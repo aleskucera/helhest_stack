@@ -317,6 +317,42 @@ def _local_step_kernel(
 
 
 @wp.kernel
+def _face_kernel(
+    elev: wp.array2d(dtype=wp.float32),
+    measured: wp.array2d(dtype=wp.float32),  # 1 = cell has real data, 0 = never observed
+    face: wp.array2d(dtype=wp.float32),
+):
+    """Per-cell FACE height: the largest rise to a 4-neighbour, one cell away.
+
+    Not the 3x3 prominence above: that is taken across the diagonal too, so a steep but smooth
+    flank reads as a step -- `bumpy`'s mounds reach 0.44 m on it against 0.50 m at a wall. One
+    cell apart, a slope can only rise cell * tan(slope) while a wall rises its full height:
+    measured 0.29 m at most on the mounds, 0.50 m at least at the walls (0.2 m cells). Unobserved
+    cells are skipped for the same reason as in the prominence."""
+    r, c = wp.tid()
+    ny = elev.shape[0]
+    nx = elev.shape[1]
+    top = float(0.0)
+    if measured[r, c] > 0.5:
+        for k in range(4):
+            rr = r
+            cc = c
+            if k == 0:
+                rr = r - 1
+            elif k == 1:
+                rr = r + 1
+            elif k == 2:
+                cc = c - 1
+            else:
+                cc = c + 1
+            rr = wp.clamp(rr, 0, ny - 1)
+            cc = wp.clamp(cc, 0, nx - 1)
+            if measured[rr, cc] > 0.5:
+                top = wp.max(top, elev[r, c] - elev[rr, cc])
+    face[r, c] = top
+
+
+@wp.kernel
 def _step_gate_kernel(
     step: wp.array2d(dtype=wp.float32),
     foot_r: int,
@@ -345,28 +381,29 @@ def _step_gate_kernel(
 
 @wp.kernel
 def _step_hazard_kernel(
-    step: wp.array2d(dtype=wp.float32),  # per-cell prominence, from _local_step_kernel
+    face: wp.array2d(dtype=wp.float32),  # per-cell face height, from _face_kernel
     grid: Grid,
     robot: Robot,
     blocked: wp.array3d(dtype=wp.float32),
     hazard: wp.array3d(dtype=wp.float32),
 ):
-    """Re-file a TILT block as a hazard when there is a step taller than the wheel radius under
+    """Re-file a TILT block as a hazard when there is a face taller than the wheel radius under
     the footprint.
 
     The settle has no notion of a vertical face: a wheel against a 1 m wall is lifted onto its
     edge and reads as a tilt. Measured on the stress worlds, 11-15% of the poses whose body
     overlaps a wall are blocked by tilt ALONE, so charging tilt instead of eroding it would have
     let the tube run within millimetres of every wall. A step the wheel cannot mount is a
-    collision whatever the settle made of it. Only already-blocked poses are re-filed, so this
-    never blocks a pose that was free.
+    collision whatever the settle made of it. A smooth flank is still tilt: that is what the face
+    measure is for. Only already-blocked poses are re-filed, so this never blocks a pose that was
+    free.
     """
     r, c, t = wp.tid()
     if blocked[r, c, t] < 0.5 or hazard[r, c, t] > 0.5:
         return
     n_theta = blocked.shape[2]
-    ny = step.shape[0]
-    nx = step.shape[1]
+    ny = face.shape[0]
+    nx = face.shape[1]
     x = grid.origin_x + float(c) * grid.cell_size
     y = grid.origin_y + float(r) * grid.cell_size
     yaw = float(t) * 2.0 * 3.14159265 / float(n_theta)  # the settle's heading convention
@@ -390,7 +427,7 @@ def _step_hazard_kernel(
             rr = wp.clamp(
                 int(wp.round((y + sa * u + ca * v - grid.origin_y) / grid.cell_size)), 0, ny - 1
             )
-            tallest = wp.max(tallest, step[rr, cc])
+            tallest = wp.max(tallest, face[rr, cc])
     if tallest > robot.wheel_radius:
         hazard[r, c, t] = 1.0
 
@@ -745,6 +782,9 @@ class CostToGo:
         self._pose_cost = wp.zeros_like(self.V)
         self._seeds = wp.zeros_like(self.V)
         self._step = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)  # per-cell prominence
+        self._face = wp.zeros(
+            (ny, nx), dtype=wp.float32, device=self.device
+        )  # per-cell face height
 
         self._elev_in = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
         # Per-cell measurement sd. Defaults to zero, which the floor then lifts to
@@ -968,7 +1008,22 @@ class CostToGo:
                 outputs=[self.blocked, self.hazard, self.graded_tilt, self.zmargin, self.doubt],
                 device=self.device,
             )
-        if self._step_gate > 0.0 or self._eroded:
+        if self._eroded:  # a tilt over an unmountable face is a wall, not a slope
+            wp.launch(
+                _face_kernel,
+                dim=(self.grid.cells_y, self.grid.cells_x),
+                inputs=[self._elev_in, self._measured_in],
+                outputs=[self._face],
+                device=self.device,
+            )
+            wp.launch(
+                _step_hazard_kernel,
+                dim=self.V.shape,
+                inputs=[self._face, self.grid, self.robot, self.blocked],
+                outputs=[self.hazard],
+                device=self.device,
+            )
+        if self._step_gate > 0.0:  # hard-block tall steps the settle straddles (thin poles/sticks)
             wp.launch(
                 _local_step_kernel,
                 dim=(self.grid.cells_y, self.grid.cells_x),
@@ -976,15 +1031,6 @@ class CostToGo:
                 outputs=[self._step],
                 device=self.device,
             )
-        if self._eroded:  # a tilt over an unmountable step is a wall, not a slope
-            wp.launch(
-                _step_hazard_kernel,
-                dim=self.V.shape,
-                inputs=[self._step, self.grid, self.robot, self.blocked],
-                outputs=[self.hazard],
-                device=self.device,
-            )
-        if self._step_gate > 0.0:  # hard-block tall steps the settle straddles (thin poles/sticks)
             wp.launch(
                 _step_gate_kernel,
                 dim=self.V.shape,
