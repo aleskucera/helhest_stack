@@ -35,7 +35,10 @@ of this file got each point backwards, so each carries the measurement that corr
   Passability is a property of a cell and its own neighbours, never of the block next door. The
   version that vetoed a block when a NEIGHBOURING block differed in height by more than a step
   blocked everything within a metre of an obstacle, so a corridor needed about 3 m of clearance
-  before its centre survived. No 1.8 m gap passes that at any grid alignment.
+  before its centre survived. No 1.8 m gap passes that at any grid alignment. The one thing
+  read from the blocks around is the GROUND -- the lowest measured height nearby -- and only to
+  tell a cell 0.5 m or more above it that it is the top of something (`_climb_kernel`). That
+  fires on wall tops, which the step test alone passes, and on nothing a wheel could climb.
 
   No settle. A 1.0 m cell is smaller than the robot, so placing a 1.5 m chassis on one and
   solving its contacts says nothing the pooling has not already said. A fine cell is climbable
@@ -64,17 +67,55 @@ from ..engine import GridParams
 
 
 @wp.kernel
+def _floor_kernel(
+    elevation: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
+    measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = observed
+    factor: wp.int32,
+    floor: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], lowest measured height, else 1e30
+):
+    """The lowest measured height in the block: the ground under it.
+
+    Minimum because a block holding an obstacle still has ground beside it. Unseen blocks carry
+    a sentinel rather than 0.0, so that a neighbour looking for ground never mistakes a fill for
+    it.
+    """
+    r, c = wp.tid()
+    ny = elevation.shape[0]
+    nx = elevation.shape[1]
+    lo = float(1.0e30)
+    for dr in range(factor):
+        for dc in range(factor):
+            fr = r * factor + dr
+            fc = c * factor + dc
+            if fr < ny and fc < nx:
+                if measured[fr, fc] > 0.5:
+                    lo = wp.min(lo, elevation[fr, fc])
+    floor[r, c] = lo
+
+
+@wp.kernel
 def _climb_kernel(
     elevation: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
     measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = observed
+    floor: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], from _floor_kernel
+    factor: wp.int32,
     max_step: wp.float32,  # [m] the largest rise a wheel can drive up
+    elevated: wp.float32,  # [m] above the ground around it, a cell is a top and not terrain
     climbable: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = a wheel could cross it
 ):
     """A fine cell is climbable when the step to its immediate neighbours is one the robot can
-    drive up.
+    drive up, and it is not standing on top of something.
 
     Unmeasured cells, and unmeasured neighbours, are skipped rather than counted: the height
     there is a fill, and treating a fill as ground manufactures a cliff at the edge of the map.
+
+    The top of a wall passes the step test: its neighbours along the wall are level with it and
+    the ground at its foot lies in the sensor's shadow, so seen from one side a 1.0 m wall is a
+    flat strip of measured cells. Enough of them in one block -- the block that holds a wall's
+    far edge, or the corner where two walls meet -- and the block pools as crossable, and the
+    layer routes through the wall (false_door, the north wall and both far corners). So a cell
+    is also compared with the ground around it: the lowest measured height in its own block and
+    the eight beside it. More than `elevated` above that is a top, not terrain.
     """
     r, c = wp.tid()
     if measured[r, c] < 0.5:
@@ -83,6 +124,18 @@ def _climb_kernel(
     rows = elevation.shape[0]
     cols = elevation.shape[1]
     h = elevation[r, c]
+    ground = float(1.0e30)
+    br = r / factor
+    bc = c / factor
+    for dr in range(-1, 2):
+        for dc in range(-1, 2):
+            rr = br + dr
+            cc = bc + dc
+            if rr >= 0 and rr < floor.shape[0] and cc >= 0 and cc < floor.shape[1]:
+                ground = wp.min(ground, floor[rr, cc])
+    if h - ground > elevated:
+        climbable[r, c] = 0.0
+        return
     ok = float(1.0)
     for dr in range(-1, 2):
         for dc in range(-1, 2):
@@ -97,27 +150,20 @@ def _climb_kernel(
 
 @wp.kernel
 def _pool_kernel(
-    elevation: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
     measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
     climbable: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
     factor: wp.int32,
     passable: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], climbable FRACTION in 0..1
     seen: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], 1 = some fine cell observed
-    floor: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], lowest measured ground in the block
 ):
     """What fraction of the block's MEASURED cells a wheel could drive over.
 
     Over the measured ones, not all of them, so a half-observed block is not marked impassable
     for the half nobody has looked at -- that half's price is the frontier's business.
-
-    `floor` is the MINIMUM measured height, and is for looking at rather than for deciding --
-    the decision is `passable`. Minimum because the question a floor answers is "what is the
-    ground under this block", and a block holding an obstacle still has ground beside it.
     """
     r, c = wp.tid()
-    ny = elevation.shape[0]
-    nx = elevation.shape[1]
-    lo = float(1.0e30)
+    ny = measured.shape[0]
+    nx = measured.shape[1]
     n_seen = float(0.0)
     n_climb = float(0.0)
     for dr in range(factor):
@@ -126,13 +172,11 @@ def _pool_kernel(
             fc = c * factor + dc
             if fr < ny and fc < nx:
                 if measured[fr, fc] > 0.5:
-                    lo = wp.min(lo, elevation[fr, fc])
                     n_seen += 1.0
                     if climbable[fr, fc] > 0.5:
                         n_climb += 1.0
     passable[r, c] = wp.where(n_seen > 0.0, n_climb / n_seen, 0.0)
     seen[r, c] = wp.where(n_seen > 0.0, 1.0, 0.0)
-    floor[r, c] = wp.where(n_seen > 0.0, lo, 0.0)
 
 
 @wp.kernel
@@ -197,12 +241,40 @@ def _goal_cell_kernel(
     goal_rc[1] = wp.clamp(c, 0, cols - 1)
 
 
+def _omni_no_corner_cutting(resolution: float) -> tuple:
+    """`omni_control_set`, but a diagonal move also sweeps its two orthogonal cells.
+
+    A single-cell step cannot straddle a wall, and the stock set sweeps only the destination. A
+    diagonal step passes BETWEEN its two orthogonal neighbours, though, and when both are vetoed
+    that is the corner where two walls meet: on false_door the field crossed the room's far
+    corners this way with every wall block sealed. Requiring both orthogonals free is the usual
+    8-connected corner rule; a doorway one block wide is still crossed straight through.
+    """
+    n, prim_dr, prim_dc, prim_heading, prim_cost, _, _, _, _ = omni_control_set(resolution)
+    sweep_dr = np.zeros((1, n, 3), np.int32)
+    sweep_dc = np.zeros((1, n, 3), np.int32)
+    sweep_dt = np.zeros((1, n, 3), np.int32)  # one heading bin: nothing to offset
+    sweep_n = np.ones((1, n), np.int32)
+    for p in range(n):
+        dr, dc = int(prim_dr[0, p]), int(prim_dc[0, p])
+        sweep_dr[0, p, 0], sweep_dc[0, p, 0] = dr, dc
+        if dr != 0 and dc != 0:
+            sweep_dr[0, p, 1], sweep_dc[0, p, 1] = dr, 0
+            sweep_dr[0, p, 2], sweep_dc[0, p, 2] = 0, dc
+            sweep_n[0, p] = 3
+    return n, prim_dr, prim_dc, prim_heading, prim_cost, sweep_dr, sweep_dc, sweep_dt, sweep_n
+
+
 class CoarseRouter:
     """A heading-free cost-to-go over the whole window, at a cell size where coverage is good.
 
     `factor` is how many fine cells go into one coarse cell and `max_step_m` the rise a wheel can
-    drive up. `min_pass_fraction` is how much of a block must be climbable before it counts as
-    crossable. `frontier_m` is how far past measured ground stays free, and `void_penalty` what
+    drive up. `elevated_m` is how far above the ground around it a measured cell is the top of
+    something rather than terrain: looser than `max_step_m` on purpose, since this layer must
+    stay more permissive than the fine one -- 0.5 m over the 0.9 m to a neighbouring block's
+    floor is a 29 deg rise, past the tip-over envelope, and a 0.5 m face is already a hazard to
+    the fine layer. `min_pass_fraction` is how much of a block must be climbable before it counts
+    as crossable. `frontier_m` is how far past measured ground stays free, and `void_penalty` what
     each cell costs beyond it -- in metres, so 1.0 doubles the price of crossing a metre of
     terrain nobody has looked at.
 
@@ -230,6 +302,7 @@ class CoarseRouter:
         fine_grid: GridParams,
         factor: int = 5,
         max_step_m: float = 0.25,
+        elevated_m: float = 0.5,
         min_pass_fraction: float = 0.5,
         frontier_m: float = 3.0,
         void_penalty: float = 1.0,
@@ -239,6 +312,11 @@ class CoarseRouter:
             raise ValueError(f"factor must be >= 1 fine cells per coarse cell, got {factor}")
         if max_step_m <= 0.0:
             raise ValueError(f"max_step_m must be > 0, got {max_step_m}")
+        if elevated_m < max_step_m:
+            raise ValueError(
+                f"elevated_m must be >= max_step_m or the layer is stricter than the fine one, "
+                f"got {elevated_m} < {max_step_m}"
+            )
         if frontier_m < 0.0 or void_penalty < 0.0:
             raise ValueError(
                 f"frontier_m and void_penalty must be >= 0, got {frontier_m}, {void_penalty}"
@@ -246,6 +324,7 @@ class CoarseRouter:
         self.device = wp.get_device(device)
         self.factor = int(factor)
         self.max_step_m = float(max_step_m)
+        self.elevated_m = float(elevated_m)
         self.min_pass_fraction = float(min_pass_fraction)
         self.void_penalty = float(void_penalty)
         # ceil, so the coarse grid covers the fine one even when it does not divide evenly
@@ -273,7 +352,7 @@ class CoarseRouter:
             cy,
             cx,
             n_theta=1,
-            control_set=omni_control_set(self.grid.cell_size),
+            control_set=_omni_no_corner_cutting(self.grid.cell_size),
             device=self.device,
         )
         self.V = wp.zeros((cy, cx, 1), dtype=wp.float32, device=self.device)
@@ -290,17 +369,24 @@ class CoarseRouter:
         """
         self._goal_xy.assign(np.asarray(goal_xy[:2], np.float32))
         wp.launch(
+            _floor_kernel,
+            dim=self.floor.shape,
+            inputs=[elevation, measured, self.factor],
+            outputs=[self.floor],
+            device=self.device,
+        )
+        wp.launch(
             _climb_kernel,
             dim=self._climb.shape,
-            inputs=[elevation, measured, self.max_step_m],
+            inputs=[elevation, measured, self.floor, self.factor, self.max_step_m, self.elevated_m],
             outputs=[self._climb],
             device=self.device,
         )
         wp.launch(
             _pool_kernel,
             dim=self.passable.shape,
-            inputs=[elevation, measured, self._climb, self.factor],
-            outputs=[self.passable, self.seen, self.floor],
+            inputs=[measured, self._climb, self.factor],
+            outputs=[self.passable, self.seen],
             device=self.device,
         )
         wp.launch(
