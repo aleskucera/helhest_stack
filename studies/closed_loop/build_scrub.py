@@ -1,6 +1,6 @@
 """Turn the sweep's frame histories into the compact files the scrub page fetches.
 
-One grayscale PNG per world per layer -- every frame of that layer stacked into a vertical strip
+One grayscale PNG per world per layer -- every frame of that layer tiled into a square atlas
 -- plus one small `manifest.json`. Each layer is quantised to uint8 against its own per-frame
 range, which is what makes this fit at all: the raw float histories are ~6 MB a world.
 
@@ -133,16 +133,25 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path, rate: float) -> 
             )
         )
     nbytes = 0
+    # Frames tiled row-major into a square atlas, not stacked into one strip: a 1200-frame run
+    # at 100 px a frame is a 120000 px strip, past what browsers will decode, and the page
+    # showed no map layers at all on the trap worlds. Square keeps both sides near 3500 px.
+    cols = int(np.ceil(np.sqrt(nf)))
+    rows = int(np.ceil(nf / cols))
     for k in LAYERS:
-        # frames stacked top to bottom; the page slices row bands out of one decoded image
-        strip = np.concatenate(strips[k], axis=0)
+        side = strips[k][0].shape[0]
+        atlas = np.zeros((rows * side, cols * side), np.uint8)
+        for i, tile in enumerate(strips[k]):
+            r, c = divmod(i, cols)
+            atlas[r * side : (r + 1) * side, c * side : (c + 1) * side] = tile
         f = out_dir / f"{world}_{k}.png"
-        Image.fromarray(strip, mode="L").save(f, optimize=True)
+        Image.fromarray(atlas, mode="L").save(f, optimize=True)
         nbytes += f.stat().st_size
     return dict(
         n=int(h.shape[1]),
         nr=int(v.shape[1]),
         nc=int(cv.shape[1]),
+        cols=cols,  # atlas columns: frame i is tile (i // cols, i % cols)
         cell=float(d["cell"]),
         # [s] simulated time per frame; runs saved before it was recorded ran at `--rate`
         dt=float(d["dt"]) if "dt" in d.files else 1.0 / rate,

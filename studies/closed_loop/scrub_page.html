@@ -288,9 +288,10 @@
     const side = sideOf(w, key);
     off.width = side; off.height = side;
     octx.clearRect(0, 0, side, side);
-    // one frame's band out of the vertical strip; the strip is stored already flipped, so this
-    // lands the low-y edge at the bottom of the canvas with no transform
-    octx.drawImage(img, 0, frame * side, side, side, 0, 0, side, side);
+    // one frame's tile out of the atlas (row-major, `w.cols` across); tiles are stored already
+    // flipped, so this lands the low-y edge at the bottom of the canvas with no transform
+    const cols = w.cols || 1;
+    octx.drawImage(img, (frame % cols) * side, Math.floor(frame / cols) * side, side, side, 0, 0, side, side);
     const id = octx.getImageData(0, 0, side, side), d = id.data;
     const lut = RAMPS[key], none = NONE[key];
     for (let i = 0; i < d.length; i += 4) {
