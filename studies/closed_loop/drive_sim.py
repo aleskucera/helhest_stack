@@ -36,6 +36,9 @@ Runs on dasenka, which is where the simulator lives -- see this directory's READ
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import json
+import pathlib
 
 import numpy as np
 import warp as wp
@@ -47,7 +50,6 @@ from examples.helhest_junior.odin_sim.sim import build_sim
 from examples.helhest_junior.odin_sim.sim import ODIN_MOUNT_XYZ
 
 from helhest import dynamics
-from helhest.control.mppi import CostParams
 from helhest.control.mppi import MppiGpu
 from helhest.control.terminal import dock_control
 from helhest.engine import ForwardSimulator
@@ -55,6 +57,8 @@ from helhest.engine import GridParams
 from helhest.perception import multigrid_inpaint
 from helhest.perception import ScanPreprocessor
 from helhest.perception import transform_points
+from helhest.planner_config import planner_config
+from helhest.planner_config import resolve
 from helhest.planning.coarse import CoarseRouter
 from helhest.planning.costtogo import CostToGo
 from helhest.planning.lattice_solver import trace_optimal
@@ -90,6 +94,29 @@ def pose_of(body_q: np.ndarray) -> tuple[float, float, float, np.ndarray]:
     """(x, y, yaw, R) of the robot body. Ground truth: this demo tests planning, not ICP."""
     R = quat_mat(body_q[3:7])
     return float(body_q[0]), float(body_q[1]), float(np.arctan2(R[1, 0], R[0, 0])), R
+
+
+_ROBOT_PARAMS = pathlib.Path(__file__).resolve().parents[2] / "ros/odin/odin_elevation.params.yaml"
+
+
+def _plan_params(a: argparse.Namespace) -> dict:
+    """The robot's plan_* values from its params file, then any explicit flag on top."""
+    params: dict = {}
+    if a.params != "none":
+        import yaml  # present in the container via ROS; deliberately not a helhest dependency
+
+        doc = yaml.safe_load(pathlib.Path(a.params).read_text())
+        params = dict(next(v["ros__parameters"] for v in doc.values() if "ros__parameters" in v))
+    for flag, key in (
+        ("n_theta", "plan_n_theta"),
+        ("horizon", "plan_horizon"),
+        ("batch", "plan_batch"),
+        ("wmax", "plan_wmax"),
+        ("wheel_width", "plan_wheel_width"),
+    ):
+        if getattr(a, flag) is not None:
+            params[key] = getattr(a, flag)
+    return params
 
 
 def roll_pitch(R: np.ndarray) -> tuple[float, float]:
@@ -265,13 +292,23 @@ def drive(a: argparse.Namespace) -> dict:
     planner = None
     if mppi:
         plan_sim.set_uniform_friction(0.8)
-        planner = MppiGpu(plan_sim, CostParams(veto=a.veto), n_theta=a.n_theta)
-        planner.reset_nominal(1.0)
+        # The robot's controller, not library defaults: same cost weights, sampler priors, friction
+        # replicas and cost-to-go settings, through the one function the node uses too.
+        planner = MppiGpu(
+            plan_sim,
+            dataclasses.replace(a.cfg.cost, veto=a.veto),
+            sampling=a.cfg.sampling,
+            n_theta=a.n_theta,
+        )
+        planner.reset_nominal(a.cfg.nominal_reset)
+        planner.set_mu_band(1.0, a.cfg.mu_span)
     ctg = CostToGo(
         route_grid,
         robot,
         dynamics.planning_solver(dt=dt, command_delay=0.0),
-        n_theta=a.n_theta,
+        **a.cfg.costtogo,
+        # the z-margin is SIM-ONLY: the node passes no sigma and no z_veto, so on the robot this
+        # whole feasibility test is off. Kept here, flagged rather than silently matched.
         z_veto=a.z_veto,
         device=a.device,
     )
@@ -513,6 +550,8 @@ def drive(a: argparse.Namespace) -> dict:
         # the origin it is expressed in. Anything that reads this and assumes one grid is wrong.
         np.savez_compressed(
             a.out,
+            # which controller produced this: the resolved plan_* values, as JSON
+            plan_config=np.array(json.dumps(resolve(a.plan_params))),
             trail=np.array(trail, np.float64),
             body_z=np.array(body_z, np.float64),
             goal=goal,
@@ -574,9 +613,9 @@ def main() -> None:
     p.add_argument("--cell", type=float, default=0.2)
     p.add_argument("--carve", type=float, default=6.0, help="[m] 0 disables the visibility carve")
     p.add_argument("--z-veto", type=float, default=2.0, help="veto below this many sigmas")
-    p.add_argument("--n-theta", type=int, default=16)
-    p.add_argument("--horizon", type=int, default=25)
-    p.add_argument("--batch", type=int, default=4096)
+    p.add_argument("--n-theta", type=int, default=None)
+    p.add_argument("--horizon", type=int, default=None)
+    p.add_argument("--batch", type=int, default=None)
     p.add_argument("--refine", type=int, default=3)
     p.add_argument(
         "--dock",
@@ -588,7 +627,7 @@ def main() -> None:
         help="[m] hand over to the dock controller",
     )
     p.add_argument("--reach", type=float, default=0.4, help="[m] counts as arrived")
-    p.add_argument("--wheel-width", type=float, default=0.10)
+    p.add_argument("--wheel-width", type=float, default=None)
     p.add_argument(
         "--no-self-filter",
         dest="self_filter",
@@ -623,9 +662,20 @@ def main() -> None:
     p.add_argument(
         "--spin-rate", type=float, default=0.9, help="[rad/s] body yaw rate when spinning"
     )
-    p.add_argument("--wmax", type=float, default=4.0, help="[rad/s] wheel-speed clamp")
+    p.add_argument("--wmax", type=float, default=None, help="[rad/s] wheel-speed clamp")
     p.add_argument("--device", default="cuda")
+    p.add_argument(
+        "--params",
+        default=str(_ROBOT_PARAMS),
+        help="ROS params file whose plan_* values build the planner -- by default the ROBOT'S own, "
+        "so a result here is a result about the deployed controller. 'none' = table defaults. "
+        "--n-theta/--horizon/--batch/--wmax/--wheel-width override it.",
+    )
     a = p.parse_args()
+    a.plan_params = _plan_params(a)
+    a.cfg = planner_config(a.plan_params)
+    a.n_theta, a.horizon, a.batch = a.cfg.n_theta, a.cfg.horizon, a.cfg.batch
+    a.wmax, a.wheel_width = a.cfg.sampling.wmax, a.cfg.wheel_width
 
     r = drive(a)
     z = np.array(r["body_z"])

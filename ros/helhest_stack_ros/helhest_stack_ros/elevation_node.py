@@ -74,9 +74,7 @@ from helhest.control.command import condition_command
 from helhest.control.command import in_flight_history
 from helhest.control.command import JOINT_NAMES
 from helhest.control.command import to_engine_order
-from helhest.control.mppi import CostParams
 from helhest.control.mppi import MppiGpu
-from helhest.control.mppi import SamplingConfig
 from helhest.control.terminal import dock_control
 from helhest.control.turn_adapt import AdaptiveTurnBoost
 from helhest.control.turn_adapt import TurnGainEstimator
@@ -89,6 +87,8 @@ from helhest.localization import LocalizerConfig
 from helhest.localization import RegistrationOutcome
 from helhest.localization.pose_math import invert_pose
 from helhest.localization.pose_math import matrix_to_quaternion
+from helhest.planner_config import PLAN_DEFAULTS
+from helhest.planner_config import planner_config
 from tf2_geometry_msgs import do_transform_pose
 from tf2_ros import TransformBroadcaster
 from tf2_ros import TransformException
@@ -589,13 +589,13 @@ class ElevationNode(Node):
         # free space in front fixes that AND is a sane follow gap. 0 = target the tag exactly (walls
         # off on a person). Runtime-tunable via `ros2 param set`.
         d("follow_standoff", 1.5)
-        d("plan_batch", 4096)  # MPPI rollouts B
+        d("plan_batch", PLAN_DEFAULTS["plan_batch"])  # MPPI rollouts B
         # rollout steps T (planning_solver dt = 0.1 s). SHORT is better here: the cost-to-go lattice
         # does the global routing, so a short MPPI just follows it decisively -- sim-validated to reach
         # more (6/6 vs 2/6 stress worlds), cruise ~30% faster, brake cleanly, fit the 12 m local map,
         # and cost ~3.5x less than T=70. A long horizon instead defers braking into its (never-executed)
         # tail and orbits the goal. Raise toward 40-70 only if far-field lookahead is genuinely needed.
-        d("plan_horizon", 25)
+        d("plan_horizon", PLAN_DEFAULTS["plan_horizon"])
         # PLAN CONSISTENCY: EMA the nominal plan toward last frame's (shifted one step) so the committed
         # maneuver doesn't jitter on open ground. 0 = off; ~0.3 cut cruise churn ~35% in sim. Too high
         # adds reaction lag to new obstacles/goals.
@@ -613,7 +613,7 @@ class ElevationNode(Node):
         # defaults here were, at coarsen 4 (0.32 m), which no closing step under a quarter turn
         # both clears and keeps connected. The defaults now match the params file rather than
         # disagreeing with it silently.
-        d("plan_n_theta", 24)
+        d("plan_n_theta", PLAN_DEFAULTS["plan_n_theta"])
         d("plan_lat_coarsen", 3)  # routing/cost-to-go grid coarsening vs the map cell
         d("plan_n_refine", 3)  # MPPI refine iterations per frame
         d("plan_friction", 0.8)  # uniform rollout friction
@@ -622,17 +622,21 @@ class ElevationNode(Node):
         # robot can straddle. 0.0 = back to the sphere. Costs ~3.9 ms per perception frame to
         # dilate (64 yaw slices) against 0.06 for the sphere. Widen it (0.15, 0.20) to buy lateral
         # margin back without the sphere's fixed 0.35.
-        d("plan_wheel_width", 0.10)
+        d("plan_wheel_width", PLAN_DEFAULTS["plan_wheel_width"])
         # 'indoor' (K_TURN 0.4, alpha~1.33) or 'outdoor' (K_TURN 1.0, alpha~1.82 -- grass/dirt grips
         # harder so it understeers). ICP-calibrated per environment; see dynamics.k_turn_for.
         d("terrain", "outdoor")
         d(
             "k_turn", -1.0
         )  # explicit turn-gain override (e.g. from calibrate_turn.sh); <0 = use terrain
-        d("plan_robust_margin_m", 0.3)  # cost-to-go safety tube: lateral (m) ~ robot half-width;
+        d(
+            "plan_robust_margin_m", PLAN_DEFAULTS["plan_robust_margin_m"]
+        )  # cost-to-go safety tube: lateral (m) ~ robot half-width;
         # keeps the routed center a footprint-width off berms (validated in the Tier-C closed loop:
         # 0 belly contacts). Tighten in narrow spaces -- it erodes the feasible set both sides.
-        d("plan_robust_margin_deg", 0.0)  # cost-to-go safety tube: heading (deg)
+        d(
+            "plan_robust_margin_deg", PLAN_DEFAULTS["plan_robust_margin_deg"]
+        )  # cost-to-go safety tube: heading (deg)
         # HARD-block cells within a footprint of a local step taller than this [m]. Catches thin
         # vertical obstacles (sticks/poles) that the robot's settle STRADDLES between its wheel/belly
         # contacts -- those read traversable for most headings, so the router drives through them.
@@ -649,8 +653,10 @@ class ElevationNode(Node):
         # z = -1.5 m -- does not by itself trip it; only an absolute-height FILL does.
         # Set AT LAUNCH -- a runtime `param set` does NOT take: not in _PLAN_BUILD, and the gate is
         # baked into the CUDA graph.
-        d("plan_obstacle_step_m", 0.0)
-        d("plan_nominal_reset", 1.5)  # nominal wheel speed the planner seeds from
+        d("plan_obstacle_step_m", PLAN_DEFAULTS["plan_obstacle_step_m"])
+        d(
+            "plan_nominal_reset", PLAN_DEFAULTS["plan_nominal_reset"]
+        )  # nominal wheel speed the planner seeds from
         # MODELED ACTUATION LAG [s]: first-order wheel-speed lag inside the MPPI rollouts
         # (SolverParams.tau_motor). Smoothness belongs in the MODEL, not an output filter: an
         # external slew limiter executes something the planner never simulated, and the induced
@@ -669,14 +675,16 @@ class ElevationNode(Node):
         # balance prefers it. Raise goal_running (reward progress) and/or lower effort (penalty on
         # wheel-speed^2) to drive faster. plan_max_omega is only the output SAFETY clamp, not speed.
         d(
-            "plan_goal_running", 0.3
+            "plan_goal_running", PLAN_DEFAULTS["plan_goal_running"]
         )  # cost-to-go V^2 per step -> higher = faster (more progress pull)
-        d("plan_effort", 1e-3)  # penalize wheel-speed^2 -> lower = faster (less speed penalty)
+        d(
+            "plan_effort", PLAN_DEFAULTS["plan_effort"]
+        )  # penalize wheel-speed^2 -> lower = faster (less speed penalty)
         # TURN penalty: cost on the wheel differential (wr - wl)^2 -> a real gradient toward STRAIGHT
         # where the goal cost is flat w.r.t. heading (free-heading goal). Cut straight-line wander ~70%
         # (0.42 -> 0.12 m) AND, by killing the near-goal wobble, reached 6/6 stress worlds vs 4/6.
         # Small enough that a genuine need to turn still wins; >~0.1 starts refusing hard turns.
-        d("plan_turn", 0.03)
+        d("plan_turn", PLAN_DEFAULTS["plan_turn"])
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
         # NEVER commands above this regardless of the cost. This is the real top-speed knob.
         # ~1.4 m/s at 4.0; ~1.75 m/s at 5.0 (r=0.35). plan_wmax maps to the REAL wheel speed -- the
@@ -691,14 +699,16 @@ class ElevationNode(Node):
         # params file runs plan_wmax 6.0 on that basis. The Odin bags don't settle it -- they were
         # recorded at this 4.0 default and never commanded above 4.00. 4.0 is kept as the
         # conservative default; raise it per-robot via a params file once the ceiling is measured.
-        d("plan_wmax", 4.0)  # max per-wheel omega the planner may command [rad/s]
+        d(
+            "plan_wmax", PLAN_DEFAULTS["plan_wmax"]
+        )  # max per-wheel omega the planner may command [rad/s]
         # REVERSE / POINT-TURN: lower edge of the sampling box. 0.0 = forward-only (the shipped
         # behaviour). NEGATIVE (e.g. -2.5) lets MPPI command reverse arcs and point turns -- but
         # only while the map BEHIND the robot is measured (plan_reverse_clear_m below); with blind
         # ground behind, the effective floor snaps back to 0 for that frame. SAFETY: before enabling
         # on the real robot, verify the LLC drives a small NEGATIVE /cmd_joints backward -- only
         # all-positive-forward has been verified live (control/command.py header).
-        d("plan_wmin", 0.0)
+        d("plan_wmin", PLAN_DEFAULTS["plan_wmin"])
         # Reverse gate: this much ground straight behind base_link (m) must be MEASURED (accumulated
         # map) for reverse to unlock this frame. Checked over a robot-width strip each frame.
         d("plan_reverse_clear_m", 1.5)
@@ -710,16 +720,16 @@ class ElevationNode(Node):
         # It also reconnects a split heading ring -- the +-1 bin move is the only odd-parity
         # primitive -- which is why plan_n_theta above is chosen as if this were 0. Connectivity
         # must not depend on a price someone may reasonably set to zero.
-        d("plan_pivot_cost", 0.0)
+        d("plan_pivot_cost", PLAN_DEFAULTS["plan_pivot_cost"])
         # ROBUST-MU replicas: each MPPI candidate is rolled out under this many friction hypotheses
         # spanning the current uncertainty band and ranked by its WORST outcome, so the winner is a
         # plan that works whether the ground grips or slips (the over/understeer sim-to-real gap).
         # Must divide plan_batch. Cost: candidates = plan_batch / n_mu (the rollout wall-time is
         # latency-bound, so 3 replicas cost ~nothing at B=4096). 1 = off.
-        d("plan_n_mu", 1)
+        d("plan_n_mu", PLAN_DEFAULTS["plan_n_mu"])
         # Friction-uncertainty band half-width (as a FRACTION of plan_friction) the replicas cover
         # when the online estimator is off (or hasn't locked yet). Live-tunable.
-        d("plan_mu_span", 0.25)
+        d("plan_mu_span", PLAN_DEFAULTS["plan_mu_span"])
         # ONLINE mu estimation: invert the turn model on (commanded differential, measured gyro yaw)
         # each frame and slow-EMA the effective friction the planner should use -- fixes BOTH
         # understeer and oversteer (the turn-boost hotfix could only fix understeer), and its
@@ -730,7 +740,7 @@ class ElevationNode(Node):
         # slope-hold + centripetal + side-slope force exceeds the friction budget. This is the
         # "drive slow where grip is short, fast where it isn't" term -- the model alone gets MORE
         # optimistic as mu drops, so without it low-grip terrain reads as easy.
-        d("plan_saturation", 300.0)
+        d("plan_saturation", PLAN_DEFAULTS["plan_saturation"])
         # STRAIGHT sampling prior: fraction of MPPI candidates drawn as zero-differential (straight
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
@@ -740,8 +750,8 @@ class ElevationNode(Node):
         # your mind, which is what wobble is. Raised from the 2e-3 library default -- measured
         # closed-loop, it cuts turn-direction flips 0.60 -> 0.36 /s and lateral wander 0.09 ->
         # 0.05 m on a straight shot while leaving the 90 deg turn time unchanged.
-        d("plan_smooth", 0.04)
-        d("plan_straight_frac", 0.2)
+        d("plan_smooth", PLAN_DEFAULTS["plan_smooth"])
+        d("plan_straight_frac", PLAN_DEFAULTS["plan_straight_frac"])
         # SPIN prior: fraction of MPPI candidates drawn as a turn on the spot (wl = -wr). This is
         # the ONLY sampler band that is exempt from the wmin clamp -- see the clamp in
         # mppi._sample_target_wheel_omega_kernel -- so turning in place does NOT require enabling
@@ -758,17 +768,17 @@ class ElevationNode(Node):
         # observed as a robot wedged 0.22 m from the world edge, pointing at it, for 40 minutes
         # with a 26-pose plan it could not start. A spin does not translate into unseen ground, so
         # unlike reverse it is safe to leave always available.
-        d("plan_spin_frac", 0.12)
+        d("plan_spin_frac", PLAN_DEFAULTS["plan_spin_frac"])
         # [rad/s] floor on a spin candidate's wheel speed. MEASURED on the robot 2026-08-10: below
         # about 2 the wheels will not break loose on the spot and a smaller command only strains.
-        d("plan_spin_min", 2.0)
+        d("plan_spin_min", PLAN_DEFAULTS["plan_spin_min"])
         # CEM elite fraction: MPPI commits the MEAN of the top-k lowest-cost candidates. Because the
         # goal heading is free, small turns near the goal barely change cost -> the elite fills with
         # near-equal micro-turn candidates and their mean WOBBLES. A PEAKIER elite (smaller frac ->
         # average fewer, better candidates) drives markedly straighter: 0.02 -> 0.01 cut lateral wander
         # ~20%, 0.005 ~33%, with 0 contact regressions in sim (even fixed one stress world). Too small
         # (<~0.003) starves the mean. Batch size barely helps by comparison.
-        d("plan_elite_frac", 0.01)
+        d("plan_elite_frac", PLAN_DEFAULTS["plan_elite_frac"])
         # ACTUATION (drive the robot). plan_actuate publishes wheel commands to a real robot; set
         # it false to run planning as visualization only. All motor-safety conditioning (the
         # left-wheel sign flip, rear-follower, magnitude clamp, slew limit) is in control/command.py.
@@ -1071,12 +1081,16 @@ class ElevationNode(Node):
         plan_solver = dynamics.planning_solver(k_turn=kt, command_delay=self.plan_command_delay)
         if self.plan_tau_motor >= 0.0:  # -1 = keep dynamics.MOTOR_TAU (the measured default)
             plan_solver.tau_motor = self.plan_tau_motor
+        # The mapping plan_* -> planner objects lives in helhest.planner_config, shared with the
+        # simulator, so the two cannot build different controllers from the same parameters.
+        # Built BEFORE the rollout sim: it decides the batch (rounded to what n_mu divides).
+        cfg = planner_config({k: getattr(self, k) for k in PLAN_DEFAULTS})
         self.plan_sim = ForwardSimulator(
-            dynamics.robot_params(self.plan_wheel_width),
+            dynamics.robot_params(cfg.wheel_width),
             plan_solver,
             win_grid,
-            int(self.plan_batch),
-            int(self.plan_horizon),
+            cfg.batch,
+            cfg.horizon,
             self.device,
         )
         self.plan_sim.set_uniform_friction(self.plan_friction)
@@ -1084,32 +1098,9 @@ class ElevationNode(Node):
         self._cmd_in_flight = deque(
             self._cmd_in_flight, maxlen=max(self.plan_sim.command_delay_steps, 1)
         )
-        self.planner = MppiGpu(
-            self.plan_sim,
-            CostParams(
-                goal_running=self.plan_goal_running,
-                effort=self.plan_effort,
-                turn=self.plan_turn,
-                smoothness=self.plan_smooth,
-                saturation=self.plan_saturation,
-            ),
-            # wmin here is only the box the planner MAY use; the effective floor is gated per
-            # frame on map coverage behind the robot (see the reverse gate in _plan).
-            sampling=SamplingConfig(
-                wmax=self.plan_wmax,
-                wmin=min(0.0, self.plan_wmin),
-                straight_frac=self.plan_straight_frac,
-                # spin is NOT conditioned on wmin: its band is exempt from the clamp on purpose
-                spin_frac=self.plan_spin_frac,
-                spin_min=self.plan_spin_min,
-                pivot_frac=0.05 if self.plan_wmin < 0.0 else 0.0,
-                elite_frac=self.plan_elite_frac,
-                n_mu=max(1, int(self.plan_n_mu)),
-            ),
-            n_theta=int(self.plan_n_theta),
-        )
-        self.planner.reset_nominal(self.plan_nominal_reset)
-        self.planner.set_mu_band(1.0, self.plan_mu_span if self.plan_n_mu > 1 else 0.0)
+        self.planner = MppiGpu(self.plan_sim, cfg.cost, sampling=cfg.sampling, n_theta=cfg.n_theta)
+        self.planner.reset_nominal(cfg.nominal_reset)
+        self.planner.set_mu_band(1.0, cfg.mu_span)
         if self.plan_wmin < 0.0:
             self.planner.set_wmin(0.0)  # reverse stays locked until the gate in _plan opens it
         # ONLINE mu estimation: recenter the planner's friction on the realized turn gain (both
@@ -1181,11 +1172,7 @@ class ElevationNode(Node):
             dynamics.planning_solver(
                 k_turn=kt
             ),  # static settle ignores k_turn; passed for consistency
-            n_theta=int(self.plan_n_theta),
-            robust_margin_m=self.plan_robust_margin_m,
-            robust_margin_deg=self.plan_robust_margin_deg,
-            obstacle_step_m=self.plan_obstacle_step_m,
-            pivot_cost=self.plan_pivot_cost,
+            **cfg.costtogo,
             device=self.device,
         )
         self.planner.cw.lattice_cap = self.ctg._vcap
