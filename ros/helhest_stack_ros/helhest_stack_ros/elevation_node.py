@@ -361,7 +361,8 @@ class ElevationNode(Node):
         # one not reconstructible from a bag: /cmd_joints carries the CORRECTED differential,
         # so without this there is no way to tell what the loop did -- or whether it ran.
         self.pub_yaw_track = self.create_publisher(Vector3, "yaw_track", 10)
-        self.add_on_set_parameters_callback(self._on_parameters_changed)
+        self.add_on_set_parameters_callback(self._on_parameters_changed)  # validate (pre-set)
+        self.add_post_set_parameters_callback(self._on_parameters_applied)  # apply (post-set)
 
         self.get_logger().info(
             f"ElevationNode: cloud={self.lidar_topic} odom={self.odom_topic} imu={self.imu_topic} "
@@ -1253,6 +1254,19 @@ class ElevationNode(Node):
         self.goal_xy = (px, py)
 
     def _on_parameters_changed(self, params) -> SetParametersResult:
+        """VALIDATION only -- this runs BEFORE the values are committed.
+
+        `add_on_set_parameters_callback` is a pre-set hook: inside it `get_parameter` still
+        returns the OLD value. Everything that re-reads or rebuilds therefore has to happen in
+        the POST-set callback below, or a runtime `param set` lands one change late -- the
+        rebuild runs on the previous values and the new ones only appear when something else is
+        set. That is silent, and it wasted a measurement in this repo's own investigation: a live
+        `plan_turn 0.03` was read back as 0.2 and the arm was scored as if it had applied.
+        """
+        return SetParametersResult(successful=True)
+
+    def _on_parameters_applied(self, params) -> None:
+        """POST-set: the values are live now, so cache them and rebuild what depends on them."""
         names = {p.name for p in params}
         try:
             self._cache_params()
@@ -1274,9 +1288,9 @@ class ElevationNode(Node):
                 self._preproc = None  # buffers live on the old device
                 self._build_localizer()  # fresh pose state; re-bootstraps on the next scan
         except Exception as exc:  # a bad value must not kill the node
-            return SetParametersResult(successful=False, reason=str(exc))
+            self.get_logger().error(f"applying parameters failed: {exc}")
+            return
         self.localizer.config = self._localizer_config()
-        return SetParametersResult(successful=True)
 
     # ------------------------------------------------------------------
     # Callbacks
