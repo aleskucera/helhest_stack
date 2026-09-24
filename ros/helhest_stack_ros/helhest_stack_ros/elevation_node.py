@@ -169,6 +169,8 @@ _PLAN_BUILD = frozenset(
         "plan_wmax",
         "plan_wmin",
         "plan_straight_frac",
+        "plan_spin_frac",
+        "plan_spin_min",
         "plan_elite_frac",
         "plan_n_mu",
         "plan_mu_adapt",
@@ -358,17 +360,26 @@ class ElevationNode(Node):
 
     def _declare_parameters(self) -> None:
         d = self.declare_parameter
-        # ROS / sensors
-        d("lidar_topic", "/ouster/points")
-        d("odom_topic", "/odom_2d")
-        d("imu_topic", "/imu/data")
-        d("base_frame", "base_link")
+        # ROS / sensors. The defaults are the ODIN robot -- the deployed configuration -- so the
+        # node comes up right with no params file. The Ouster path is the same node driven the
+        # other way and must now be asked for explicitly (ros/elevation-demo.tmuxinator.yml does):
+        #   -p lidar_topic:=/ouster/points -p odom_topic:=/odom_2d -p imu_topic:=/imu/data
+        #   -p base_frame:=base_link -p icp_enable:=true -p deskew_enable:=true
+        #   -p imu_rotation_prior:=true
+        # Those three booleans below travel WITH the sensor choice: Odin publishes its own SLAM
+        # pose, so ICP, deskew and the gyro rotation prior are all off on that path and all on
+        # for Ouster. Getting the pair out of step is silent -- the node runs and maps nothing.
+        d("lidar_topic", "/odin1/cloud_raw")
+        d("odom_topic", "/odin1/odometry")
+        d("imu_topic", "/odin1/imu")
+        d("base_frame", "odin1_base_link")  # cloud already in this frame -> sensor TF = identity
         d("map_frame", "map")
         d("sync_slop_s", 0.05)
         d("sync_queue", 30)
         d("device", "auto")
-        # Scan deskew
-        d("deskew_enable", True)
+        # Scan deskew. OFF by default: Odin's per-point time is in seconds and the deskew assumes
+        # nanoseconds. Ouster needs it on.
+        d("deskew_enable", False)
         d("deskew_time_field", "t")
         # Height crop on the input scan, in base_frame (robot-relative). Drops ceiling /
         # sub-floor noise before it reaches ICP and both maps. Bounds are metres in z.
@@ -482,8 +493,9 @@ class ElevationNode(Node):
         # trail. Enable it if you need that trail removed and can accept eroding static cells.
         d("dynamic_recency_enable", False)
         d("dynamic_max_unseen_frames", 10)
-        # ICP
-        d("icp_enable", True)
+        # ICP. OFF by default: on the Odin path /odin1/odometry IS the on-device SLAM pose and the
+        # pipeline trusts it outright. Ouster has no such pose and needs this on.
+        d("icp_enable", False)
         d("icp_submap_radius_m", 15.0)
         # 30 was well past the plateau: measured on rotate_fast + out_experiment_goal_unreachable1,
         # the RMS residual is FLAT from 30 down to 8 iterations (outdoor 0.0200 vs 0.0201) with zero
@@ -529,7 +541,8 @@ class ElevationNode(Node):
         d("gravity_use_accel", False)  # force accel gravity even if orientation is present
         # Motion prior: take rotation from the IMU orientation (slip-immune), keeping only
         # translation from wheel odom — wheel odom yaw is wrong under skid (in-place rotation).
-        d("imu_rotation_prior", True)
+        # OFF by default: with Odin's identity IMU TF the gyro prior rolls the map ~40 deg.
+        d("imu_rotation_prior", False)
         # Reject single-sample gyro glitches before they reach the deskew / integrated rotation
         # prior: this robot's /imu/data spikes to >1000 deg/s for one sample (real motion peaks
         # ~300), and one such sample injects tens of degrees of phantom yaw. 0 disables.
@@ -713,6 +726,26 @@ class ElevationNode(Node):
         # 0.05 m on a straight shot while leaving the 90 deg turn time unchanged.
         d("plan_smooth", 0.04)
         d("plan_straight_frac", 0.2)
+        # SPIN prior: fraction of MPPI candidates drawn as a turn on the spot (wl = -wr). This is
+        # the ONLY sampler band that is exempt from the wmin clamp -- see the clamp in
+        # mppi._sample_target_wheel_omega_kernel -- so turning in place does NOT require enabling
+        # reverse, and the two capabilities are configured independently.
+        #
+        # It must be ON whenever plan_pivot_cost > 0, or the router plans pivot-then-drive that
+        # the controller cannot sample: MEASURED on sim-demo 2026-09-23, a goal 135 deg off the
+        # heading produced 0 deg of turn and 0.08 rad/s of wheel speed -- the robot simply sat
+        # there -- while 45 and 90 deg worked. A forward arc covers ~90 deg over 4 m of travel;
+        # past that the lattice wants a pivot and forward-only sampling has nothing to offer.
+        #
+        # It is also the ESCAPE HATCH that keeps the action space non-empty. Forward blocked by an
+        # obstacle and reverse locked by the gate below leaves a skid-steer with no legal action --
+        # observed as a robot wedged 0.22 m from the world edge, pointing at it, for 40 minutes
+        # with a 26-pose plan it could not start. A spin does not translate into unseen ground, so
+        # unlike reverse it is safe to leave always available.
+        d("plan_spin_frac", 0.12)
+        # [rad/s] floor on a spin candidate's wheel speed. MEASURED on the robot 2026-08-10: below
+        # about 2 the wheels will not break loose on the spot and a smaller command only strains.
+        d("plan_spin_min", 2.0)
         # CEM elite fraction: MPPI commits the MEAN of the top-k lowest-cost candidates. Because the
         # goal heading is free, small turns near the goal barely change cost -> the elite fills with
         # near-equal micro-turn candidates and their mean WOBBLES. A PEAKIER elite (smaller frac ->
@@ -889,6 +922,8 @@ class ElevationNode(Node):
         self.plan_turn: float = g("plan_turn")
         self.plan_smooth: float = g("plan_smooth")
         self.plan_straight_frac: float = g("plan_straight_frac")
+        self.plan_spin_frac: float = g("plan_spin_frac")
+        self.plan_spin_min: float = g("plan_spin_min")
         self.plan_elite_frac: float = g("plan_elite_frac")
         self.plan_wmax: float = g("plan_wmax")
         self.plan_wmin: float = g("plan_wmin")
@@ -1041,6 +1076,9 @@ class ElevationNode(Node):
                 wmax=self.plan_wmax,
                 wmin=min(0.0, self.plan_wmin),
                 straight_frac=self.plan_straight_frac,
+                # spin is NOT conditioned on wmin: its band is exempt from the clamp on purpose
+                spin_frac=self.plan_spin_frac,
+                spin_min=self.plan_spin_min,
                 pivot_frac=0.05 if self.plan_wmin < 0.0 else 0.0,
                 elite_frac=self.plan_elite_frac,
                 n_mu=max(1, int(self.plan_n_mu)),
