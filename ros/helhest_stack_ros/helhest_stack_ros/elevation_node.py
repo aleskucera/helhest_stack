@@ -217,6 +217,21 @@ def _dilate_bool(mask: np.ndarray, k: int) -> np.ndarray:
     return out
 
 
+def _same_manoeuvre(a: np.ndarray, b: np.ndarray, spin_th: float = 0.25) -> bool:
+    """Do two plans belong to the same manoeuvre class -- same turn side, and both spinning or
+    both not? Mirrors the keys MPPI's elite uses (mppi._cand_dir_kernel): a spin has wl = -wr so
+    its MEAN wheel speed is ~0, which is what separates it from a forward arc of the same
+    differential."""
+    for u in (a, b):
+        if u.ndim != 2 or u.shape[1] < 2:
+            return True  # unknown shape: fall back to smoothing, as before
+    sa, sb = float(np.mean(a[:, 0] + a[:, 1])) * 0.5, float(np.mean(b[:, 0] + b[:, 1])) * 0.5
+    da, db = float(np.mean(a[:, 1] - a[:, 0])), float(np.mean(b[:, 1] - b[:, 0]))
+    if (abs(sa) <= spin_th) != (abs(sb) <= spin_th):
+        return False  # one is a spin and the other is not
+    return not (da * db < 0.0 and min(abs(da), abs(db)) > 0.3)  # opposite turn sides
+
+
 class ElevationNode(Node):
     """Publish the single-scan (MPPI) and accumulated (planning) elevation maps."""
 
@@ -1870,8 +1885,15 @@ class ElevationNode(Node):
             if self._prev_plan_U is not None and self._prev_plan_U.shape == U.shape:
                 shifted = np.roll(self._prev_plan_U, -1, axis=0)
                 shifted[-1] = self._prev_plan_U[-1]
-                U = (1.0 - self.plan_consistency) * U + self.plan_consistency * shifted
-                self.planner.set_nominal(U)
+                # ...but never ACROSS a manoeuvre class. MPPI's elite mean is mode-coherent by
+                # construction (it will not average a spin with an arc, or a left-passer with a
+                # right-passer); this EMA sits OUTSIDE it and would undo that, blending a spin
+                # with last frame's forward arc into neither. Smoothing is for jitter within a
+                # manoeuvre, not for the decision to change manoeuvre -- so on a class change the
+                # new plan is taken whole and the history restarts from it.
+                if _same_manoeuvre(U, shifted):
+                    U = (1.0 - self.plan_consistency) * U + self.plan_consistency * shifted
+                    self.planner.set_nominal(U)
             self._prev_plan_U = U.copy()
         # candidate 0 is the committed nominal rollout; window-local -> map coords.
         # Rollout 0 ONLY -- it is the nominal (mppi.py: "candidate 0 keeps the nominal"), and the
