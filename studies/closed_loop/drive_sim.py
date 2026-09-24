@@ -62,6 +62,8 @@ from helhest.planner_config import resolve
 from helhest.planning.coarse import CoarseRouter
 from helhest.planning.costtogo import CostToGo
 from helhest.planning.lattice_solver import trace_optimal
+from helhest.worlds import footprint
+from helhest.worlds import obstacle_clearance
 
 # The robot in its own base frame: origin at the front axle, rear wheel 0.75 m behind, wheels
 # 0.35 m in radius and half_track 0.365 wide. Widened a little, because a self-filter that is
@@ -366,11 +368,17 @@ def drive(a: argparse.Namespace) -> dict:
     # on the measured path -- with --history 0 the loop below is byte-identical to before.
     hist: dict[str, list] = {k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "meta")}
     esc: list = []  # per recorded frame: [best rollout's worst violation, median, clean fraction]
+    # WALL CLEARANCE, every frame, against the world's exact solids. "Reached" cannot see a robot
+    # scraping a wall on its way through, and the robust margin exists precisely so that never
+    # happens -- so any change to it is judged by this, not by reaching alone.
+    fp = footprint(robot)
+    clearance: list[float] = []
     for f in range(a.frames):
         body = sim.current_state.body_q.numpy()[0]
         rx, ry, yaw, R = pose_of(body)
         trail.append((rx, ry))
         body_z.append(float(body[2]))
+        clearance.append(obstacle_clearance(a.world, rx, ry, yaw, fp))
         d = float(np.hypot(rx - goal[0], ry - goal[1]))
         closest = min(closest, d)
         if d < a.reach:
@@ -554,6 +562,7 @@ def drive(a: argparse.Namespace) -> dict:
             plan_config=np.array(json.dumps(resolve(a.plan_params))),
             trail=np.array(trail, np.float64),
             body_z=np.array(body_z, np.float64),
+            clearance=np.array(clearance, np.float64),  # [m] per frame, < 0 = touching a wall
             goal=goal,
             cell=a.cell,
             reached=reached,
@@ -577,6 +586,7 @@ def drive(a: argparse.Namespace) -> dict:
         reached=reached,
         frames=f + 1,
         closest=closest,
+        clearance=clearance,
         body_z=body_z,
         trail=trail,
         goal=goal,
@@ -687,6 +697,14 @@ def main() -> None:
         f"  drove {path:.1f} m of path   body z {z.min():.2f} to {z.max():.2f} m "
         f"(it should stay on the terrain)"
     )
+    cl = np.array(r["clearance"])
+    if np.isfinite(cl).any():
+        # the line a margin change is judged by: it must never go negative
+        print(
+            f"  WALL CLEARANCE min {cl.min():+.3f} m   frames touching a wall {int((cl < 0).sum())}"
+        )
+    else:
+        print("  WALL CLEARANCE n/a (no solid obstacles in this world)")
 
 
 if __name__ == "__main__":

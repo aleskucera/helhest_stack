@@ -129,7 +129,6 @@ def bumpy_world(cell=0.06, seed=0):
     return Heightmap(H, (xlim[0], ylim[0]), cell)
 
 
-
 # The same obstacles the builders above rasterise, as solids. Kept beside the
 # builders so the two are edited together; test_obstacles_match_heightmaps
 # rasterises these and diffs against the builder output.
@@ -144,32 +143,49 @@ OBSTACLES: dict[str, tuple[Box, ...]] = {
     ),
     # three partial-width slabs forcing an S-weave
     "slalom": (
-        Box(4.0, -2.15, 0.2, 3.35),    # open above y = 1.2
-        Box(9.0, 2.15, 0.2, 3.35),     # open below y = -1.2
-        Box(14.0, 3.35, 0.2, 2.15),    # open centre
+        Box(4.0, -2.15, 0.2, 3.35),  # open above y = 1.2
+        Box(9.0, 2.15, 0.2, 3.35),  # open below y = -1.2
+        Box(14.0, 3.35, 0.2, 2.15),  # open centre
         Box(14.0, -3.35, 0.2, 2.15),
     ),
     "pillars": tuple(
         Box(cx, cy, 0.45, 0.45)
         for cx, cy in (
-            (4.0, -2.0), (4.0, 2.0),
-            (7.0, 0.0), (7.0, -4.0), (7.0, 4.0),
-            (10.0, -2.0), (10.0, 2.0),
-            (13.0, -2.5), (13.0, 2.5),
+            (4.0, -2.0),
+            (4.0, 2.0),
+            (7.0, 0.0),
+            (7.0, -4.0),
+            (7.0, 4.0),
+            (10.0, -2.0),
+            (10.0, 2.0),
+            (13.0, -2.5),
+            (13.0, 2.5),
         )
     ),
     # U opening away from the start
     "pocket": (
-        Box(7.0, 0.0, 0.2, 2.5),       # closed side, faces the start
-        Box(9.0, 2.5, 2.0, 0.2),       # top
-        Box(9.0, -2.5, 2.0, 0.2),      # bottom
+        Box(7.0, 0.0, 0.2, 2.5),  # closed side, faces the start
+        Box(9.0, 2.5, 2.0, 0.2),  # top
+        Box(9.0, -2.5, 2.0, 0.2),  # bottom
     ),
     # diagonal band with a notch near x = 6, as two rotated slabs. The notch is a
     # vertical cut while a box ends perpendicular to its axis, so the two ends are
     # off by the ridge angle -- approximate here, unlike the others.
     "ridge": (
-        Box(1.5, 0.3 * (1.5 - 6.0), 3.5 / math.cos(0.2914567944778671), 0.2873478855663454, yaw=0.2914567944778671),
-        Box(10.5, 0.3 * (10.5 - 6.0), 3.5 / math.cos(0.2914567944778671), 0.2873478855663454, yaw=0.2914567944778671),
+        Box(
+            1.5,
+            0.3 * (1.5 - 6.0),
+            3.5 / math.cos(0.2914567944778671),
+            0.2873478855663454,
+            yaw=0.2914567944778671,
+        ),
+        Box(
+            10.5,
+            0.3 * (10.5 - 6.0),
+            3.5 / math.cos(0.2914567944778671),
+            0.2873478855663454,
+            yaw=0.2914567944778671,
+        ),
     ),
     "bumpy": (),
 }
@@ -190,6 +206,70 @@ def stamp(boxes, XX, YY):
 def rasterise(boxes, xlim, ylim, cell):
     """Stamp `boxes` into a fresh height grid over `xlim`/`ylim`."""
     return stamp(boxes, *_grid(xlim, ylim, cell))
+
+
+def footprint(r) -> tuple[float, float, float, float]:
+    """(x_min, x_max, y_min, y_max) of the robot's TRUE extent in its base frame, from RobotParams.
+
+    Base origin at the front axle; the rear wheel sits `rear_offset` behind it; wheels reach
+    `wheel_radius` fore and aft of their axles and `half_track + wheel_width / 2` to each side. No
+    margin: this is for asking whether the robot TOUCHED something, and padding it would turn a
+    graze into a pass.
+    """
+    side = r.half_track + 0.5 * r.wheel_width
+    return (-(r.rear_offset + r.wheel_radius), r.wheel_radius, -side, side)
+
+
+def _rect_sdf(p: np.ndarray, hx: float, hy: float) -> np.ndarray:
+    """Signed distance from points p [N, 2] to a centred axis-aligned rectangle; < 0 inside."""
+    q = np.abs(p) - np.array([hx, hy])
+    return np.linalg.norm(np.maximum(q, 0.0), axis=1) + np.minimum(np.max(q, axis=1), 0.0)
+
+
+def obstacle_clearance(
+    world: str, x: float, y: float, yaw: float, fp: tuple[float, float, float, float]
+) -> float:
+    """Signed distance [m] from the robot's footprint to the nearest solid obstacle; < 0 = overlap.
+
+    Exact geometry from OBSTACLES, not a height threshold on the raster, so it is the physical
+    question -- did the chassis reach a wall -- rather than a proxy for it. Inf for a world with no
+    solids (bumpy: continuous mounds, where the hazard is tilt, not contact).
+
+    Two convex rectangles: the robot's boundary is sampled against each box's SDF, and each box's
+    corners against the robot's -- the second catches a box corner poking into the robot's side,
+    which boundary samples alone can step over. Resolution is the boundary spacing, ~5 cm.
+    """
+    boxes = OBSTACLES.get(world, ())
+    if not boxes:
+        return float("inf")
+    x0, x1, y0, y1 = fp
+    n = 32
+    xs, ys = np.linspace(x0, x1, n), np.linspace(y0, y1, n)
+    edge = np.concatenate(
+        [
+            np.stack([xs, np.full(n, y0)], 1),
+            np.stack([xs, np.full(n, y1)], 1),
+            np.stack([np.full(n, x0), ys], 1),
+            np.stack([np.full(n, x1), ys], 1),
+        ]
+    )
+    c, s = np.cos(yaw), np.sin(yaw)
+    world_pts = edge @ np.array([[c, s], [-s, c]]) + np.array([x, y])  # base -> world
+    centre = np.array([0.5 * (x0 + x1), 0.5 * (y0 + y1)])
+    half = (0.5 * (x1 - x0), 0.5 * (y1 - y0))
+    best = float("inf")
+    for b in boxes:
+        cb, sb = np.cos(b.yaw), np.sin(b.yaw)
+        d = world_pts - np.array([b.cx, b.cy])
+        local = np.stack([d[:, 0] * cb + d[:, 1] * sb, -d[:, 0] * sb + d[:, 1] * cb], 1)
+        best = min(best, float(_rect_sdf(local, b.hx, b.hy).min()))
+        # the box's corners, into the robot's frame
+        corners = np.array([[sx * b.hx, sy * b.hy] for sx in (-1, 1) for sy in (-1, 1)])
+        cw = corners @ np.array([[cb, sb], [-sb, cb]]) + np.array([b.cx, b.cy])  # box -> world
+        dw = cw - np.array([x, y])
+        cr = np.stack([dw[:, 0] * c + dw[:, 1] * s, -dw[:, 0] * s + dw[:, 1] * c], 1) - centre
+        best = min(best, float(_rect_sdf(cr, *half).min()))
+    return best
 
 
 WORLDS = {
