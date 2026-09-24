@@ -38,6 +38,7 @@ ORDER = [
     "bumpy",
     "corridor",
     "corridor_stuck",
+    "corridor4",
     "false_door",
     "false_door_mem",
     "false_door_mem_stuck",
