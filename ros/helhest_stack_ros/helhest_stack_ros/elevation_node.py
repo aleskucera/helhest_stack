@@ -772,6 +772,8 @@ class ElevationNode(Node):
         # max_slew*0.1 per step; 50 let it jump 0->cruise in ONE step (harsh launch, ~5 m/s^2). 6.0
         # ramps 0->~1.3 m/s cruise over ~0.65s (ground ~2.1 m/s^2) -- softer start/stop, still responsive.
         d("plan_max_slew", 6.0)
+        # Log the RAW MPPI command next to the conditioned one every Nth planned frame. 0 = off.
+        d("plan_debug_cmd", 0)
         # deceleration cap [rad/s^2] -- separate from accel so stops can be firmer than the gentle
         # launch. 12.0 = ground ~4.2 m/s^2, stops from cruise in ~0.32s. None/<=0 would mean symmetric.
         d("plan_max_decel", 12.0)
@@ -922,6 +924,7 @@ class ElevationNode(Node):
         self.plan_turn: float = g("plan_turn")
         self.plan_smooth: float = g("plan_smooth")
         self.plan_straight_frac: float = g("plan_straight_frac")
+        self.plan_debug_cmd: int = int(g("plan_debug_cmd"))
         self.plan_spin_frac: float = g("plan_spin_frac")
         self.plan_spin_min: float = g("plan_spin_min")
         self.plan_elite_frac: float = g("plan_elite_frac")
@@ -1904,6 +1907,7 @@ class ElevationNode(Node):
             from_plan = True
             u0 = self.planner.nominal()[0]  # first committed step (wL, wR), model convention
             wl, wr = float(u0[0]), float(u0[1])
+            wl_raw, wr_raw = wl, wr  # before the yaw loop and the conditioner touch them
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
         turn_boost = (
             self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
@@ -1930,6 +1934,17 @@ class ElevationNode(Node):
             wl, wr = wl - half, wr + half
         elif self._yaw_track is not None:
             self._yaw_track.reset()  # stopping, docking or held: do not carry an integrator over
+        # RAW PLAN vs PUBLISHED. Everything between the two -- yaw loop, turn boost, goal brake,
+        # magnitude clamp, slew limit -- can only be told apart from outside by luck, and a turn
+        # that fails is exactly the case where you need to know which side lost it. Throttled, so
+        # it costs nothing on the straight-line cruise that dominates a run.
+        if from_plan and self.plan_debug_cmd:
+            self._dbg_n = getattr(self, "_dbg_n", 0) + 1
+            if self._dbg_n % max(1, int(self.plan_debug_cmd)) == 0:
+                self.get_logger().info(
+                    f"cmd: mppi ({wl_raw:+.2f},{wr_raw:+.2f}) d={wr_raw - wl_raw:+.2f}"
+                    f" -> yaw-loop ({wl:+.2f},{wr:+.2f}) -> goal {d:.2f} m"
+                )
         cmd = condition_command(
             wl,
             wr,
