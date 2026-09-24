@@ -790,7 +790,8 @@ class ElevationNode(Node):
         d("plan_max_slew", 6.0)
         # Log the RAW MPPI command next to the conditioned one every Nth planned frame. 0 = off.
         d("plan_debug_cmd", 0)
-        # Set to 1 to dump the next planned frame's planner inputs to /tmp/plan_dump.npz. One-shot.
+        # Planner-input dump to /tmp/plan_dump.npz, one-shot. 1 = the next planned frame;
+        # 2 = the first frame planned toward the NEXT goal (what you want for "why didn't it turn").
         d("plan_debug_dump", 0)
         # deceleration cap [rad/s^2] -- separate from accel so stops can be firmer than the gentle
         # launch. 12.0 = ground ~4.2 m/s^2, stops from cruise in ~0.32s. None/<=0 would mean symmetric.
@@ -1209,6 +1210,12 @@ class ElevationNode(Node):
         self.goal_xy = (msg.pose.position.x, msg.pose.position.y)
         self._prev_plan_U = None  # new goal -> don't smooth against the old goal's plan
         self._goal_reached = False  # new goal -> resume planning
+        # plan_debug_dump 2 = "dump the first frame that plans toward the NEXT goal". Arming it
+        # from outside and racing the goal in is unreliable: the node is usually still planning
+        # toward the previous goal, so "the next planned frame" is the old one.
+        if self.plan_debug_dump == 2:
+            self._dump_pending = True
+            self.plan_debug_dump = 0
         self.get_logger().info(f"goal set: ({self.goal_xy[0]:.2f}, {self.goal_xy[1]:.2f})")
 
     def _follow_callback(self, msg: PoseStamped) -> None:
@@ -1896,8 +1903,9 @@ class ElevationNode(Node):
             # what the node saw. Every "why did it not move" question this session has come down
             # to a difference between the live belief and a synthetic map, and there was no way
             # to close that gap without this.
-            if self.plan_debug_dump:
+            if self.plan_debug_dump == 1 or getattr(self, "_dump_pending", False):
                 self.plan_debug_dump = 0
+                self._dump_pending = False
                 try:
                     np.savez_compressed(
                         "/tmp/plan_dump.npz",
