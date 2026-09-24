@@ -720,7 +720,16 @@ def _elite_u_kernel(
             if turns[b] == best_turn[0] or (turns[b] == 0.0 and not strict):
                 elite_sum += target_wheel_omega[t, b][wheel]
                 elite_n += 1.0
-    U[t, wheel] = wp.clamp(elite_sum / wp.max(elite_n, 1.0), wlo[0], wmax)
+    # A SPIN elite must not be clamped to wlo. The sampler deliberately exempts the spin band
+    # from that clamp -- "clamping it to wmin would silently zero that wheel" -- and clamping it
+    # HERE does the same damage one step later, and worse: the candidate was SCORED with its true
+    # controls, so the robot would commit a manoeuvre that was never the one evaluated. With
+    # reverse locked that turns the winning spin into a half-spin arc every frame, and the
+    # consistency EMA averages the mismatch toward nothing.
+    lo = wlo[0]
+    if best_dir[0] == 0.0:
+        lo = -wmax
+    U[t, wheel] = wp.clamp(elite_sum / wp.max(elite_n, 1.0), lo, wmax)
 
 
 @wp.kernel
