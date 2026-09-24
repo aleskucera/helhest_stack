@@ -108,6 +108,7 @@ class CostWeights:
     # penalize the turn differential (wr - wl)^2 -> a gradient toward STRAIGHT where the goal cost is
     # flat w.r.t. heading (the free-heading goal). Distinct from effort (which penalizes total speed).
     turn: float
+    turn_spin_th: float
     # friction-saturation certificate: penalize demand/grip past 1 (dimensionless overshoot).
     # This is what slows the robot where grip is short: demand grows with v*wz and accel.
     saturation: float
@@ -153,6 +154,16 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # penalize turning (wr - wl)^2 -> prefer straight when the goal cost doesn't care about heading;
     # small enough that a real need to turn (obstacle/offset goal) still wins. 0 = off.
     turn: float = 0.0
+    # [rad/s] mean wheel speed below which `turn` is NOT charged. The turn penalty exists to prefer
+    # a straight line over a curved one WHILE MAKING PROGRESS, and it is quadratic in the wheel
+    # differential -- so a spin, pure differential with no progress, is the one manoeuvre it
+    # annihilates. Measured at the deployed turn weight of 0.2: a spin at 2.86 rad/s carries
+    # diff^2 = 32.7 per step, 818 over the horizon, 164 of cost -- more than the ENTIRE cost of a
+    # good candidate (66-137). The spin band fell from rank 0 to 588 of 1365 and the planner
+    # committed (0, 0), because standing still genuinely did beat turning. A spin has no forward
+    # progress to trade, so charging it per-differential compares it against the wrong baseline.
+    # 0 disables the exemption (charge everything -- the old behaviour).
+    turn_spin_th: float = 0.25
     # friction-saturation certificate weight (per unit demand/grip overshoot, early-weighted sum).
     # ~300 makes a sustained 20% overshoot compete with real routing differences and a 2x overshoot
     # dominate; the certificate is exact at tan(pitch) = mu for station-holding (see test).
@@ -196,6 +207,7 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.smoothness = self.smoothness
         cw.infeasible = self.infeasible
         cw.turn = self.turn
+        cw.turn_spin_th = self.turn_spin_th
         cw.saturation = self.saturation
         cw.tip = self.tip
         cw.unknown = self.unknown
@@ -458,7 +470,9 @@ def _cost_kernel(
         wheels = target_wheel_omega[t, r]  # (wL, wR) commanded
         effort_sum += wheels[0] * wheels[0] + wheels[1] * wheels[1]
         diff = wheels[1] - wheels[0]  # turn differential -> penalize (prefer straight)
-        turn_sum += diff * diff
+        # ...but only where there is forward progress to trade for it. See CostParams.turn_spin_th.
+        if wp.abs(0.5 * (wheels[0] + wheels[1])) > cw.turn_spin_th:
+            turn_sum += diff * diff
         if t > 0:
             dl = wheels[0] - prev_l
             dr = wheels[1] - prev_r
