@@ -213,6 +213,8 @@ def main() -> None:
     from helhest.engine.robot import RobotParams
 
     rp = RobotParams()
+    from helhest import dynamics
+    from helhest.worlds import footprint
     manifest = {
         "layers": list(LAYERS),
         "limits": {
@@ -221,6 +223,9 @@ def main() -> None:
             "pitch_down": round(float(np.degrees(rp.max_pitch_down)), 1),
         },
         "worlds": {},
+        # [m] the robot's true extent in its base frame (x_min, x_max, y_min, y_max), drive axle at
+        # the origin -- the same rectangle drive_sim's wall clearance is measured from
+        "footprint": [round(float(v), 3) for v in footprint(dynamics.robot_params(0.10))],
     }
     runs = a.runs if a.runs is not None else ORDER
     if a.runs is not None:

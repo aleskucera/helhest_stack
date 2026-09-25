@@ -275,7 +275,7 @@
   // one recorded every frame then play at the same pace, and 1x is the robot's own speed.
   const SPEEDS = [1, 2, 4, 8];
   let speed = 1, clock = null;
-  const show = { trail: true, goal: true };
+  const show = { trail: true, goal: true, footprint: true };
   const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
   const off = document.createElement("canvas"), octx = off.getContext("2d");
   const $ = (id) => document.getElementById(id);
@@ -347,10 +347,22 @@
       star(ctx, gx, gy, 13, 6);
       ctx.fill(); ctx.stroke();
     }
-    // robot: a wedge pointing where it faces
+    // robot: its true footprint (drive axle at the origin, tail 1.1 m behind, wheel to wheel wide)
+    // and a wedge at the axle pointing where it faces
     const rx = px(meta.x), ry = py(meta.y), a = -meta.yaw;
+    const touching = meta.cl != null && meta.cl < 0;
+    if (show.footprint && M.footprint) {
+      const [x0, x1, y0, y1] = M.footprint, s = W / span;
+      ctx.save(); ctx.translate(rx, ry); ctx.rotate(a);
+      ctx.fillStyle = touching ? "rgba(220, 60, 40, .28)" : "rgba(255, 255, 255, .18)";
+      ctx.strokeStyle = touching ? cssVar("--alarm") : cssVar("--ink");
+      ctx.lineWidth = 1.5;
+      // canvas y points down, the body frame's y left: mirror it (the rectangle is symmetric anyway)
+      ctx.beginPath(); ctx.rect(x0 * s, -y1 * s, (x1 - x0) * s, (y1 - y0) * s);
+      ctx.fill(); ctx.stroke(); ctx.restore();
+    }
     ctx.save(); ctx.translate(rx, ry); ctx.rotate(a);
-    ctx.fillStyle = meta.cl != null && meta.cl < 0 ? cssVar("--alarm") : cssVar("--ink-3");
+    ctx.fillStyle = touching ? cssVar("--alarm") : cssVar("--ink-3");
     ctx.strokeStyle = cssVar("--panel"); ctx.lineWidth = 2.5;
     ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(-9, 9); ctx.lineTo(-9, -9); ctx.closePath();
     ctx.fill(); ctx.stroke(); ctx.restore();
@@ -476,7 +488,7 @@
       h.appendChild(b);
     }
     const sp = document.createElement("span"); sp.className = "spacer"; h.appendChild(sp);
-    for (const [key, label] of [["trail", "path"], ["goal", "goal"]]) {
+    for (const [key, label] of [["trail", "path"], ["goal", "goal"], ["footprint", "footprint"]]) {
       const b = document.createElement("button");
       b.className = "chip"; b.id = "tg-" + key; b.textContent = label;
       b.onclick = () => { show[key] = !show[key]; syncLayers(); draw(); };
@@ -486,7 +498,7 @@
   }
   function syncLayers() {
     for (const L of LAYERS) $("lay-" + L.k).setAttribute("aria-pressed", String(L.k === layer));
-    for (const key of ["trail", "goal"]) $("tg-" + key).setAttribute("aria-pressed", String(show[key]));
+    for (const key of ["trail", "goal", "footprint"]) $("tg-" + key).setAttribute("aria-pressed", String(show[key]));
   }
 
   async function selectWorld(name) {
