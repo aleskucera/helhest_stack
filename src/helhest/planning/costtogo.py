@@ -635,6 +635,7 @@ def _time_cost_kernel(
     v_cruise: wp.float32,
     t_react: wp.float32,
     v_min: wp.float32,
+    c0: wp.float32,  # [m] the law's fixed margin
     inv_flatness: wp.float32,  # 1 / flatness_weight: the solver multiplies the penalty by it
     tilt: wp.array3d(dtype=wp.float32),  # the loose set's graded tilt, charged in place
 ):
@@ -666,7 +667,7 @@ def _time_cost_kernel(
     if best > reach:
         return
     # a pose d cells from a contact pose has between d-1 and d cells of room: take the middle
-    v = wp.min(v_cruise, wp.max(v_min, (float(best) - 0.5) * cell / t_react))
+    v = wp.min(v_cruise, wp.max(v_min, ((float(best) - 0.5) * cell - c0) / t_react))
     tilt[r, c, t] = tilt[r, c, t] + (v_cruise / v - 1.0) * inv_flatness
 
 
@@ -828,9 +829,9 @@ class CostToGo:
         # and MPPI slows down in narrow poses (see _narrow_kernel, CostWeights.narrow).
         narrow_cost: float | None = None,
         narrow_reach_m: float = 0.6,  # [m] how far from a wall the narrow route charge reaches
-        # (v_cruise [m/s], t_react [s], v_min [m/s]): price the route in TRAVEL TIME under the
+        # (v_cruise [m/s], t_react [s], v_min [m/s], c0 [m]): price the route in TRAVEL TIME under the
         # clearance speed law (control/governor.py) instead of vetoing the spatial tube. None = off.
-        time_cost: tuple[float, float, float] | None = None,
+        time_cost: tuple[float, ...] | None = None,
         obstacle_step_m: float = 0.0,  # hard-block cells with a local step taller than this [m];
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
         pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives so
@@ -895,9 +896,10 @@ class CostToGo:
                 raise ValueError("time_cost and narrow_cost are alternatives; set one")
             if flatness_weight <= 0.0:
                 raise ValueError("time_cost rides on the solver's penalty: flatness_weight > 0")
-            v_cruise, t_react, _ = time_cost
+            v_cruise, t_react = time_cost[0], time_cost[1]
+            c0 = time_cost[3] if len(time_cost) > 3 else 0.0
             self._time_reach = max(
-                1, int(math.ceil(v_cruise * t_react / self.grid.cell_size + 0.5))
+                1, int(math.ceil((v_cruise * t_react + c0) / self.grid.cell_size + 0.5))
             )
         self._escape_reach = max(1, int(round(self.ESCAPE_REACH_M / self.grid.cell_size)))
         # a turn costs what the lattice charges for one when it has point turns; the deployed
@@ -1386,7 +1388,8 @@ class CostToGo:
                 outputs=[self._loose_blocked, self._loose_tilt],
                 device=self.device,
             )
-            v_cruise, t_react, v_min = self._time
+            v_cruise, t_react, v_min = self._time[:3]
+            c0 = self._time[3] if len(self._time) > 3 else 0.0
             wp.launch(
                 _time_cost_kernel,
                 dim=self.V.shape,
@@ -1399,6 +1402,7 @@ class CostToGo:
                     float(v_cruise),
                     float(t_react),
                     float(v_min),
+                    float(c0),
                     1.0 / self.flatness_weight,
                 ],
                 outputs=[self._loose_tilt],

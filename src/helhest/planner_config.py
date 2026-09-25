@@ -76,9 +76,12 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_clear_v_min": 0.15,
     "plan_clear_lookahead_s": 1.0,
     "plan_clear_decel": 2.0,  # [m/s^2] braking the governor may count on to reach a tight step
-    # [cost per second] MPPI's price for the time the governor would add to a manoeuvre, so it
-    # picks one with room instead of one that has to be braked (CostWeights.clear_time)
-    "plan_clear_mppi_weight": 100.0,
+    # MPPI's price for the time the governor would add to a manoeuvre, in goal-cost units (1 =
+    # exact, CostParams.clear_time), so it picks one with room instead of one that must be braked
+    "plan_clear_mppi_weight": 1.0,
+    # [m] the law's fixed margin: error that does not shrink with speed (map cells, sparse wall
+    # edges, tracking when slow). v = max(v_min, (clearance - c0) / t_react)
+    "plan_clear_c0": 0.1,
     # robot
     "plan_wheel_width": 0.10,
     # the coarse "which way" layer (planning/coarse.py) and the turn-first brake
@@ -138,6 +141,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
                 float(p["plan_clear_v_cruise"]),
                 float(p["plan_clear_t_react"]),
                 float(p["plan_clear_v_min"]),
+                float(p["plan_clear_c0"]),
             )
         )
         if clear_on
@@ -161,6 +165,8 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             clear_time=float(p["plan_clear_mppi_weight"]),
             clear_t_react=float(p["plan_clear_t_react"]),
             clear_v_min=float(p["plan_clear_v_min"]),
+            clear_c0=float(p["plan_clear_c0"]),
+            clear_v_cruise=float(p["plan_clear_v_cruise"]),
         )
     return PlannerConfig(
         cost=CostParams(
@@ -215,6 +221,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
                 v_min=float(p["plan_clear_v_min"]),
                 lookahead_s=float(p["plan_clear_lookahead_s"]),
                 decel=float(p["plan_clear_decel"]),
+                c0=float(p["plan_clear_c0"]),
             )
             if clear_on
             else None

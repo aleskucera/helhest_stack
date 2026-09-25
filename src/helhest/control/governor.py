@@ -2,7 +2,12 @@
 
 The speed law, used in two places so the route and the robot agree:
 
-    v_allowed(clearance) = max(v_min, clearance / t_react)
+    v_allowed(clearance) = max(v_min, (clearance - c0) / t_react)
+
+`c0` [m] is the error that does NOT shrink with speed -- map cells (8 cm on the robot), sparse
+returns on a wall edge, tracking when slow. Without it, closeness was free down to ~0.2 m at
+t_react 0.125 (1.6 m/s allowed), so shortest-time routes hugged corners and the governor braked
+hard at the last moment: slalom's first wall, 1.8 -> 0.17 m/s in 0.6 s, 0.20 m from the corner.
 
 `t_react` [s] is SECONDS OF ERROR AT THE FASTEST POINT'S SPEED -- the part of the old spatial
 margin that scales with speed. It is not a reaction time: driving parallel to a wall does not eat
@@ -35,9 +40,10 @@ from ..engine.robot import RobotParams
 from ..engine.terrain import Grid
 
 
-def speed_law(clearance: float, t_react: float, v_min: float) -> float:
-    """[m/s] allowed speed of the body's fastest point at `clearance` [m]."""
-    return max(v_min, clearance / t_react)
+def speed_law(clearance: float, t_react: float, v_min: float, c0: float = 0.0) -> float:
+    """[m/s] allowed speed of the body's fastest point at `clearance` [m]: the room past the fixed
+    margin `c0`, divided by the seconds of error `t_react`."""
+    return max(v_min, (clearance - c0) / t_react)
 
 
 @wp.kernel
@@ -155,6 +161,7 @@ class ClearanceGovernor:
         plan_dt: float,
         t_react: float = 0.125,
         v_min: float = 0.15,
+        c0: float = 0.1,  # [m] fixed margin: error that does not shrink with speed
         lookahead_s: float = 1.0,
         decel: float = 2.0,  # [m/s^2] how fast the fastest body point can shed speed
         search_m: float = 1.5,
@@ -163,6 +170,7 @@ class ClearanceGovernor:
         self.device = wp.get_device(device)
         self.t_react = float(t_react)
         self.v_min = float(v_min)
+        self.c0 = float(c0)
         self.r = float(robot.wheel_radius)
         self.half_track = float(robot.half_track)
         self.tail = float(robot.rear_offset + robot.wheel_radius)
@@ -213,7 +221,7 @@ class ClearanceGovernor:
         # made a plan that is tight only at its far end brake to the floor NOW, every frame, and
         # stalled the robot 1-2.5 s at pocket's corner while MPPI kept proposing the same spin.
         t_i = np.arange(k) * self.plan_dt
-        allowed = np.maximum(self.v_min, np.maximum(per_step, 0.0) / self.t_react)
+        allowed = np.maximum(self.v_min, (per_step - self.c0) / self.t_react)
         self.v_cap = float(np.min(allowed + self.decel * t_i))
         v = self.r * 0.5 * abs(wl + wr)
         wz = self.r * abs(wr - wl) / (2.0 * self.half_track)  # alpha 1: over-estimates the swing

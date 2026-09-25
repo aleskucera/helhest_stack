@@ -61,7 +61,7 @@ def test_a_close_wall_scales_both_wheels_to_the_law():
     assert wl / 4.0 == pytest.approx(wr / 3.0)  # one factor: the curvature is kept
     r, b, tail = ROBOT.wheel_radius, ROBOT.half_track, ROBOT.rear_offset + ROBOT.wheel_radius
     fastest = r * 0.5 * abs(wl + wr) + tail * r * abs(wr - wl) / (2.0 * b)
-    assert fastest == pytest.approx(speed_law(gov.clearance, 0.5, 0.15), rel=1e-4)
+    assert fastest == pytest.approx(speed_law(gov.clearance, 0.5, 0.15, gov.c0), rel=1e-4)
 
 
 def test_a_pivot_is_slowed_by_its_tail_swing():

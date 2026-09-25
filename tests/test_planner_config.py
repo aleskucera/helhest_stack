@@ -40,6 +40,8 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
                 clear_time=p["plan_clear_mppi_weight"],
                 clear_t_react=p["plan_clear_t_react"],
                 clear_v_min=p["plan_clear_v_min"],
+                clear_c0=p["plan_clear_c0"],
+                clear_v_cruise=p["plan_clear_v_cruise"],
             )
             if p["plan_clear_t_react"] > 0.0
             else {}
@@ -67,6 +69,7 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
             p["plan_clear_v_cruise"],
             p["plan_clear_t_react"],
             p["plan_clear_v_min"],
+            p["plan_clear_c0"],
         )
     return cost, sampling, ctg
 

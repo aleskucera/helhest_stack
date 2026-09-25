@@ -133,9 +133,11 @@ class CostWeights:
     # would add, dt * (s / v_allowed - 1) per step where the fastest body point's speed s exceeds
     # v_allowed = max(clear_v_min, footprint clearance / clear_t_react). Lets MPPI choose a manoeuvre
     # with room over one the governor would have to brake, instead of learning it by stalling.
-    clear_time: float
+    clear_time: float  # dimensionless: 1 = a second lost costs exactly what it costs in goal terms
     clear_t_react: float
     clear_v_min: float
+    clear_c0: float  # [m] the law's fixed margin
+    clear_v_cruise: float  # [m/s] the route's time unit: V is metres at this speed
     # (alpha - 1) -> grip recovery: total_grip = (alpha-1)*m*g/k_turn. 0 disables saturation.
     inv_k_turn: float
     dt: float  # rollout timestep [s] for the accel term of the saturation demand
@@ -214,11 +216,17 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # cost-to-go built with narrow_cost and set_narrow() called, or the field stays zero.
     narrow: float = 0.0
     narrow_speed: float = 0.4  # [m/s]
-    # [cost per second lost] to the clearance law, see CostWeights.clear_time. 0 = off; it also needs
+    # The clearance law's time lost, priced in GOAL units: a second lost is worth
+    # (goal_terminal + goal_running) * 2 * V * v_cruise -- the goal cost V^2 of the route distance
+    # that second would have covered, at the V where it is lost. A fixed price per second made the
+    # trade depend on how far the goal was: early in a run a metre saved outweighed a lot of
+    # braking and MPPI cut corners (slalom's first wall). 1 = exact, 0 = off; needs
     # update_clearance() each frame, or the map reads "no wall" everywhere.
     clear_time: float = 0.0
     clear_t_react: float = 0.125  # [s]
     clear_v_min: float = 0.15  # [m/s]
+    clear_c0: float = 0.1  # [m]
+    clear_v_cruise: float = 1.5  # [m/s]
 
     def build(self) -> CostWeights:
         cw = CostWeights()
@@ -242,6 +250,8 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.clear_time = self.clear_time
         cw.clear_t_react = self.clear_t_react
         cw.clear_v_min = self.clear_v_min
+        cw.clear_c0 = self.clear_c0
+        cw.clear_v_cruise = self.clear_v_cruise
         cw.inv_k_turn = 0.0  # armed by MppiGpu from the sim's solver (0 = saturation off)
         cw.dt = 0.1  # overwritten by MppiGpu from the sim's solver
         return cw
@@ -592,9 +602,12 @@ def _cost_kernel(
                         ),
                     )
             fastest = wp.abs(v) + tail * wp.abs(wz)
-            allowed = wp.max(cw.clear_v_min, cmin / cw.clear_t_react)
+            allowed = wp.max(cw.clear_v_min, (cmin - cw.clear_c0) / cw.clear_t_react)
             if fastest > allowed:
-                time_sum += cw.dt * (fastest / allowed - 1.0)
+                # seconds lost, in goal units at this step's V (see CostParams.clear_time)
+                v_here = wp.min(vl, cw.lattice_cap)
+                worth = (cw.goal_terminal + cw.goal_running) * 2.0 * v_here * cw.clear_v_cruise
+                time_sum += worth * cw.dt * (fastest / allowed - 1.0)
         if cw.tip > 0.0:
             ld = loads[t, r]
             min_n = wp.min(wp.min(ld[0], ld[1]), ld[2])
