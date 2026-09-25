@@ -333,6 +333,7 @@ def drive(a: argparse.Namespace) -> dict:
             t_react=a.cfg.governor["t_react"],
             v_min=a.cfg.governor["v_min"],
             lookahead_s=a.cfg.governor["lookahead_s"],
+            decel=a.cfg.governor["decel"],
             device=a.device,
         )
     ctg = CostToGo(

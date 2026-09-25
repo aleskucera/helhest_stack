@@ -193,6 +193,7 @@ _PLAN_BUILD = frozenset(
         "plan_clear_v_min",
         "plan_clear_lookahead_s",
         "plan_clear_mppi_weight",
+        "plan_clear_decel",
         "plan_coarse_block_m",
         "plan_coarse_memory_m",
         "plan_coarse_win_m",
@@ -759,6 +760,7 @@ class ElevationNode(Node):
         d("plan_clear_v_min", PLAN_DEFAULTS["plan_clear_v_min"])
         d("plan_clear_lookahead_s", PLAN_DEFAULTS["plan_clear_lookahead_s"])
         d("plan_clear_mppi_weight", PLAN_DEFAULTS["plan_clear_mppi_weight"])
+        d("plan_clear_decel", PLAN_DEFAULTS["plan_clear_decel"])
         # ROBUST-MU replicas: each MPPI candidate is rolled out under this many friction hypotheses
         # spanning the current uncertainty band and ranked by its WORST outcome, so the winner is a
         # plan that works whether the ground grips or slips (the over/understeer sim-to-real gap).
@@ -1041,6 +1043,7 @@ class ElevationNode(Node):
         self.plan_clear_v_min: float = g("plan_clear_v_min")
         self.plan_clear_lookahead_s: float = g("plan_clear_lookahead_s")
         self.plan_clear_mppi_weight: float = g("plan_clear_mppi_weight")
+        self.plan_clear_decel: float = g("plan_clear_decel")
         self.plan_n_mu: int = g("plan_n_mu")
         self.plan_mu_span: float = g("plan_mu_span")
         self.plan_mu_adapt: bool = g("plan_mu_adapt")
@@ -1195,6 +1198,7 @@ class ElevationNode(Node):
                 t_react=cfg.governor["t_react"],
                 v_min=cfg.governor["v_min"],
                 lookahead_s=cfg.governor["lookahead_s"],
+                decel=cfg.governor["decel"],
                 device=self.device,
             )
         if self.plan_wmin < 0.0:

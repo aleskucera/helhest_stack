@@ -156,6 +156,7 @@ class ClearanceGovernor:
         t_react: float = 0.125,
         v_min: float = 0.15,
         lookahead_s: float = 1.0,
+        decel: float = 2.0,  # [m/s^2] how fast the fastest body point can shed speed
         search_m: float = 1.5,
         device: str | None = None,
     ) -> None:
@@ -170,6 +171,8 @@ class ClearanceGovernor:
         self.face_h = float(robot.wheel_radius)
         self.search_m = float(search_m)
         self.steps = max(1, int(math.ceil(lookahead_s / plan_dt)))
+        self.plan_dt = float(plan_dt)
+        self.decel = float(decel)
         self._out = wp.zeros(self.steps + 1, dtype=wp.float32, device=self.device)
         self.clearance = float("inf")  # last frame's, for logging
         self.v_cap = float("inf")
@@ -203,8 +206,15 @@ class ClearanceGovernor:
             outputs=[self._out],
             device=self.device,
         )
-        self.clearance = float(np.min(self._out.numpy()[:k]))
-        self.v_cap = speed_law(max(self.clearance, 0.0), self.t_react, self.v_min)
+        per_step = self._out.numpy()[:k]
+        self.clearance = float(np.min(per_step))
+        # Step i is reached i * plan_dt from now, and the robot can brake on the way: it only has
+        # to be at that step's allowed speed WHEN it gets there. Taking the plain minimum instead
+        # made a plan that is tight only at its far end brake to the floor NOW, every frame, and
+        # stalled the robot 1-2.5 s at pocket's corner while MPPI kept proposing the same spin.
+        t_i = np.arange(k) * self.plan_dt
+        allowed = np.maximum(self.v_min, np.maximum(per_step, 0.0) / self.t_react)
+        self.v_cap = float(np.min(allowed + self.decel * t_i))
         v = self.r * 0.5 * abs(wl + wr)
         wz = self.r * abs(wr - wl) / (2.0 * self.half_track)  # alpha 1: over-estimates the swing
         fastest = v + self.tail * wz

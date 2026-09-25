@@ -75,6 +75,7 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_clear_v_cruise": 1.5,
     "plan_clear_v_min": 0.15,
     "plan_clear_lookahead_s": 1.0,
+    "plan_clear_decel": 2.0,  # [m/s^2] braking the governor may count on to reach a tight step
     # [cost per second] MPPI's price for the time the governor would add to a manoeuvre, so it
     # picks one with room instead of one that has to be braked (CostWeights.clear_time)
     "plan_clear_mppi_weight": 100.0,
@@ -213,6 +214,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
                 t_react=float(p["plan_clear_t_react"]),
                 v_min=float(p["plan_clear_v_min"]),
                 lookahead_s=float(p["plan_clear_lookahead_s"]),
+                decel=float(p["plan_clear_decel"]),
             )
             if clear_on
             else None

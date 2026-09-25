@@ -83,3 +83,18 @@ def test_the_clearance_map_is_the_distance_to_the_wall_face():
         r = int(y / CELL)
         assert m[r, N // 2] == pytest.approx((face_row - r) * CELL, abs=1e-5)
     assert m[int(1.0 / CELL), N // 2] == pytest.approx(40 * CELL)  # past the reach
+
+
+def test_a_plan_tight_only_at_its_far_end_is_not_braked_now():
+    """The robot can brake on the way: a tight step a second out only limits the speed that
+    braking cannot shed by then. This is the pocket-corner stall."""
+    elev, meas, grid = _scene(wall_y=5.0)
+    steps = 11
+    p = np.zeros((steps, 2, 3), np.float32)
+    p[:, 0, 0] = 3.0
+    p[:, 0, 1] = np.linspace(3.0, 4.63, steps)  # nose (0.35 m ahead) ends ~0.05 m from the face
+    p[:, 0, 2] = np.pi / 2
+    gov = _gov()
+    wl, wr = gov.cap(4.0, 4.0, wp.array(p, dtype=wp.vec3f), elev, meas, grid)
+    assert gov.clearance < 0.1  # the far end really is tight
+    assert (wl, wr) == (4.0, 4.0)  # 1.4 m/s now; 1 s of braking at 2 m/s^2 sheds far more
