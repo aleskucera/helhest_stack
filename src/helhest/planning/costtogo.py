@@ -581,21 +581,48 @@ def _goal_cell_kernel(
 
 @wp.kernel
 def _narrow_kernel(
-    strict: wp.array3d(dtype=wp.float32),  # blocked under the full tube (spatial + heading)
+    hazard: wp.array3d(dtype=wp.float32),  # wall contact / unresolved settle, per pose
     loose: wp.array3d(dtype=wp.float32),  # blocked under the heading bin alone
+    dr: int,  # the spatial tube [cells]: a hazard this close makes a pose NARROW
+    reach: int,  # [cells] how far out the route charge grades down to zero
+    dt: int,  # the heading bin [bins], as in the tube
     narrow_cost: wp.float32,
     narrow: wp.array3d(dtype=wp.float32),
     tilt: wp.array3d(dtype=wp.float32),  # the loose set's graded tilt, charged in place
 ):
-    """A pose the loose set keeps and the full tube removes is NARROW: feasible, but only with no
-    room for the lateral tracking error the spatial tube stands for. That error grows with speed,
-    so instead of deleting the pose the router charges it (`narrow_cost` per unit of the solver's
-    penalty, i.e. `flatness_weight * narrow_cost` of extra cost per metre) and MPPI is told to
-    drive it slowly (`CostWeights.narrow`). A pose that is narrow is never vetoed by this."""
+    """How close a free pose is to losing its margin, as a route charge; and whether it already
+    has, as the NARROW mark MPPI slows down on.
+
+    `d` is the Chebyshev distance [cells] to the nearest hazard pose within the heading bin. A
+    pose with d <= dr is what the spatial tube would have removed: it is marked narrow. The charge
+    is `narrow_cost * (reach + 1 - d) / reach` for 1 <= d <= reach, full next to a wall and zero
+    past `reach`, so the route prefers the middle of a passage by how much room it leaves, and
+    plans a re-centring turn early instead of leaving MPPI to linger beside the narrow poses. A
+    yes/no charge on the narrow poses alone gave no such pull: an off-centre pose facing along a
+    corridor is not narrow, so the route never asked to leave it (measured, 2026-09-25).
+    `narrow_cost` is per unit of the solver's penalty, i.e. `flatness_weight * narrow_cost` of
+    extra cost per metre at full charge. Never vetoes."""
     r, c, t = wp.tid()
-    n = wp.where(strict[r, c, t] > 0.5 and loose[r, c, t] < 0.5, 1.0, 0.0)
-    narrow[r, c, t] = n
-    tilt[r, c, t] = tilt[r, c, t] + narrow_cost * n
+    narrow[r, c, t] = 0.0
+    if loose[r, c, t] > 0.5:
+        return
+    ny = hazard.shape[0]
+    nx = hazard.shape[1]
+    nth = hazard.shape[2]
+    best = reach + 1
+    for i in range(-reach, reach + 1):
+        rr = wp.clamp(r + i, 0, ny - 1)
+        for j in range(-reach, reach + 1):
+            d = wp.max(wp.abs(i), wp.abs(j))
+            if d < best:
+                cc = wp.clamp(c + j, 0, nx - 1)
+                for k in range(-dt, dt + 1):
+                    if hazard[rr, cc, (t + k + nth) % nth] > 0.5:
+                        best = d
+    if best <= dr:
+        narrow[r, c, t] = 1.0
+    if best <= reach:
+        tilt[r, c, t] = tilt[r, c, t] + narrow_cost * float(reach + 1 - best) / float(reach)
 
 
 @wp.kernel
@@ -755,6 +782,7 @@ class CostToGo:
         # marks poses NARROW and charges them this much; routing then uses the heading bin alone
         # and MPPI slows down in narrow poses (see _narrow_kernel, CostWeights.narrow).
         narrow_cost: float | None = None,
+        narrow_reach_m: float = 0.6,  # [m] how far from a wall the narrow route charge reaches
         obstacle_step_m: float = 0.0,  # hard-block cells with a local step taller than this [m];
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
         pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives so
@@ -812,6 +840,7 @@ class CostToGo:
         self.robust_soft_weight = float(robust_soft_weight)
         self._narrow = narrow_cost is not None and self._mr > 0
         self.narrow_cost = 0.0 if narrow_cost is None else float(narrow_cost)
+        self._narrow_reach = max(self._mr, int(round(narrow_reach_m / self.grid.cell_size)))
         self._escape_reach = max(1, int(round(self.ESCAPE_REACH_M / self.grid.cell_size)))
         # a turn costs what the lattice charges for one when it has point turns; the deployed
         # value otherwise, so an escape that is mostly turning still reads cheaper than the cap
@@ -1270,7 +1299,14 @@ class CostToGo:
             wp.launch(
                 _narrow_kernel,
                 dim=self.V.shape,
-                inputs=[self.robust_blocked, self._loose_blocked, self.narrow_cost],
+                inputs=[
+                    self.hazard,
+                    self._loose_blocked,
+                    self._mr,
+                    self._narrow_reach,
+                    self._mt,
+                    self.narrow_cost,
+                ],
                 outputs=[self.narrow, self._loose_tilt],
                 device=self.device,
             )

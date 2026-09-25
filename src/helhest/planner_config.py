@@ -63,6 +63,9 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_narrow_speed": 0.0,
     "plan_narrow_weight": 100.0,
     "plan_narrow_cost": 0.15,
+    # [m] how far from a wall the narrow route charge reaches, grading down to zero -- the pull
+    # toward the middle of a passage (CostToGo._narrow_kernel)
+    "plan_narrow_reach_m": 0.6,
     # robot
     "plan_wheel_width": 0.10,
     # the coarse "which way" layer (planning/coarse.py) and the turn-first brake
@@ -115,7 +118,14 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
         if narrow_on
         else {}
     )
-    narrow_ctg_kw = dict(narrow_cost=float(p["plan_narrow_cost"])) if narrow_on else {}
+    narrow_ctg_kw = (
+        dict(
+            narrow_cost=float(p["plan_narrow_cost"]),
+            narrow_reach_m=float(p["plan_narrow_reach_m"]),
+        )
+        if narrow_on
+        else {}
+    )
     return PlannerConfig(
         cost=CostParams(
             goal_running=float(p["plan_goal_running"]),

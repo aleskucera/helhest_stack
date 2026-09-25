@@ -186,6 +186,7 @@ _PLAN_BUILD = frozenset(
         "plan_narrow_speed",
         "plan_narrow_weight",
         "plan_narrow_cost",
+        "plan_narrow_reach_m",
         "plan_coarse_block_m",
         "plan_coarse_memory_m",
         "plan_coarse_win_m",
@@ -745,6 +746,7 @@ class ElevationNode(Node):
         d("plan_narrow_speed", PLAN_DEFAULTS["plan_narrow_speed"])
         d("plan_narrow_weight", PLAN_DEFAULTS["plan_narrow_weight"])
         d("plan_narrow_cost", PLAN_DEFAULTS["plan_narrow_cost"])
+        d("plan_narrow_reach_m", PLAN_DEFAULTS["plan_narrow_reach_m"])
         # ROBUST-MU replicas: each MPPI candidate is rolled out under this many friction hypotheses
         # spanning the current uncertainty band and ranked by its WORST outcome, so the winner is a
         # plan that works whether the ground grips or slips (the over/understeer sim-to-real gap).
@@ -1021,6 +1023,7 @@ class ElevationNode(Node):
         self.plan_narrow_speed: float = g("plan_narrow_speed")
         self.plan_narrow_weight: float = g("plan_narrow_weight")
         self.plan_narrow_cost: float = g("plan_narrow_cost")
+        self.plan_narrow_reach_m: float = g("plan_narrow_reach_m")
         self.plan_n_mu: int = g("plan_n_mu")
         self.plan_mu_span: float = g("plan_mu_span")
         self.plan_mu_adapt: bool = g("plan_mu_adapt")

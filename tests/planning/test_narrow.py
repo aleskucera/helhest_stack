@@ -66,4 +66,14 @@ def test_off_by_default_everywhere():
     assert cfg.cost.narrow == 0.0 and "narrow_cost" not in cfg.costtogo
     on = planner_config({"plan_narrow_speed": 0.4})
     assert on.cost.narrow > 0.0 and on.cost.narrow_speed == 0.4
-    assert on.costtogo["narrow_cost"] == 0.15
+    assert on.costtogo["narrow_cost"] == 0.15 and on.costtogo["narrow_reach_m"] == 0.6
+
+
+def test_the_route_charge_grades_toward_the_middle():
+    ctg = _solve(0.15)
+    free = ctg._loose_blocked.numpy() < 0.5
+    charge = ctg._loose_tilt.numpy()[:, N // 2, 0]  # heading along the corridor, one column
+    rows = [r for r in range(N // 2 - 4, N // 2 + 1) if free[r, N // 2, 0]]
+    # from the wall side toward the centre line the charge never rises, and it does fall
+    seq = [charge[r] for r in rows]
+    assert all(a >= b - 1e-6 for a, b in zip(seq, seq[1:])) and seq[0] > seq[-1]
