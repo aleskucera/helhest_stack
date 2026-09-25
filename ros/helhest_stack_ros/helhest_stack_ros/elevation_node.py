@@ -183,6 +183,9 @@ _PLAN_BUILD = frozenset(
         "plan_saturation",
         "plan_wall_veto",
         "plan_pivot_cost",
+        "plan_narrow_speed",
+        "plan_narrow_weight",
+        "plan_narrow_cost",
         "plan_coarse_block_m",
         "plan_coarse_memory_m",
         "plan_coarse_win_m",
@@ -738,6 +741,10 @@ class ElevationNode(Node):
         # primitive -- which is why plan_n_theta above is chosen as if this were 0. Connectivity
         # must not depend on a price someone may reasonably set to zero.
         d("plan_pivot_cost", PLAN_DEFAULTS["plan_pivot_cost"])
+        # Slow in narrow places instead of vetoing them: see planner_config. 0 = off.
+        d("plan_narrow_speed", PLAN_DEFAULTS["plan_narrow_speed"])
+        d("plan_narrow_weight", PLAN_DEFAULTS["plan_narrow_weight"])
+        d("plan_narrow_cost", PLAN_DEFAULTS["plan_narrow_cost"])
         # ROBUST-MU replicas: each MPPI candidate is rolled out under this many friction hypotheses
         # spanning the current uncertainty band and ranked by its WORST outcome, so the winner is a
         # plan that works whether the ground grips or slips (the over/understeer sim-to-real gap).
@@ -1011,6 +1018,9 @@ class ElevationNode(Node):
         self.plan_wmin: float = g("plan_wmin")
         self.plan_reverse_clear_m: float = g("plan_reverse_clear_m")
         self.plan_pivot_cost: float = g("plan_pivot_cost")
+        self.plan_narrow_speed: float = g("plan_narrow_speed")
+        self.plan_narrow_weight: float = g("plan_narrow_weight")
+        self.plan_narrow_cost: float = g("plan_narrow_cost")
         self.plan_n_mu: int = g("plan_n_mu")
         self.plan_mu_span: float = g("plan_mu_span")
         self.plan_mu_adapt: bool = g("plan_mu_adapt")
@@ -2185,6 +2195,8 @@ class ElevationNode(Node):
             self.planner.set_lattice(self.ctg.V_escape, self.sgrid)
             if self.planner.cw.veto > 0.0:  # walls are a hard no for the controller too
                 self.planner.set_veto(self.ctg.hazard, self.sgrid)
+            if self.planner.cw.narrow > 0.0:  # drive slowly where the router's tube is tight
+                self.planner.set_narrow(self.ctg.narrow, self.sgrid)
             self._load_command_history()
             self.planner.replan(state_l, goal_l, int(self.plan_n_refine))
             self._ck("plan:replan")

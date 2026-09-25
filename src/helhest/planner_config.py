@@ -56,6 +56,13 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_robust_margin_deg": 0.0,
     "plan_obstacle_step_m": 0.0,
     "plan_pivot_cost": 0.0,
+    # SLOW IN NARROW PLACES. 0 = the spatial tube vetoes (plan_robust_margin_m removes poses).
+    # > 0 = it only marks them narrow: the router charges plan_narrow_cost per unit penalty
+    # (x flatness_weight 2 = extra cost per metre) and MPPI charges plan_narrow_weight *
+    # (|v| - plan_narrow_speed)^2 per rollout step held there.
+    "plan_narrow_speed": 0.0,
+    "plan_narrow_weight": 100.0,
+    "plan_narrow_cost": 0.15,
     # robot
     "plan_wheel_width": 0.10,
     # the coarse "which way" layer (planning/coarse.py) and the turn-first brake
@@ -101,6 +108,14 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
     # it only changes configurations that could not start at all.
     batch = int(p["plan_batch"])
     batch -= batch % n_mu
+    # slow-in-narrow: absent entirely when off, so the off state IS the configuration before it
+    narrow_on = float(p["plan_narrow_speed"]) > 0.0
+    narrow_cost_kw = (
+        dict(narrow=float(p["plan_narrow_weight"]), narrow_speed=float(p["plan_narrow_speed"]))
+        if narrow_on
+        else {}
+    )
+    narrow_ctg_kw = dict(narrow_cost=float(p["plan_narrow_cost"])) if narrow_on else {}
     return PlannerConfig(
         cost=CostParams(
             goal_running=float(p["plan_goal_running"]),
@@ -109,6 +124,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             smoothness=float(p["plan_smooth"]),
             saturation=float(p["plan_saturation"]),
             veto=float(p["plan_wall_veto"]),
+            **narrow_cost_kw,
         ),
         sampling=SamplingConfig(
             wmax=float(p["plan_wmax"]),
@@ -129,6 +145,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             robust_margin_deg=float(p["plan_robust_margin_deg"]),
             obstacle_step_m=float(p["plan_obstacle_step_m"]),
             pivot_cost=float(p["plan_pivot_cost"]),
+            **narrow_ctg_kw,
         ),
         n_theta=int(p["plan_n_theta"]),
         horizon=int(p["plan_horizon"]),

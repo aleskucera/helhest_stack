@@ -122,6 +122,11 @@ class CostWeights:
     veto: float
     # mild per-meter preference against reverse motion (forward keeps the sensor looking ahead).
     reverse: float
+    # speed penalty in NARROW poses (CostToGo.narrow): (|v| + tail * |wz| - narrow_speed)^2 per
+    # step where the rollout holds a narrow pose -- the router's spatial tube, turned into "drive
+    # this slowly". Speed of the body's fastest point, so a pivot is limited as well as a drive.
+    narrow: float
+    narrow_speed: float  # [m/s]
     # (alpha - 1) -> grip recovery: total_grip = (alpha-1)*m*g/k_turn. 0 disables saturation.
     inv_k_turn: float
     dt: float  # rollout timestep [s] for the accel term of the saturation demand
@@ -193,6 +198,13 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # routes. ~75 makes any forward-capable route win while a genuinely stuck robot (forward
     # progress impossible, V flat ahead) still backs out over remembered ground.
     reverse: float = 75.0
+    # Speed limit where the cost-to-go marks a pose NARROW (feasible, but without room for the
+    # lateral tracking error its spatial tube stands for). Charged as narrow * (|v| + tail * |wz|
+    # - narrow_speed)^2 per rollout step, in the safety share: the speed of the body's fastest
+    # point, the tail 1.1 m behind the axle, so a pivot is slowed as well as a drive. 0 = off; it also needs the
+    # cost-to-go built with narrow_cost and set_narrow() called, or the field stays zero.
+    narrow: float = 0.0
+    narrow_speed: float = 0.4  # [m/s]
 
     def build(self) -> CostWeights:
         cw = CostWeights()
@@ -211,6 +223,8 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.unknown = self.unknown
         cw.veto = self.veto
         cw.reverse = self.reverse
+        cw.narrow = self.narrow
+        cw.narrow_speed = self.narrow_speed
         cw.inv_k_turn = 0.0  # armed by MppiGpu from the sim's solver (0 = saturation off)
         cw.dt = 0.1  # overwritten by MppiGpu from the sim's solver
         return cw
@@ -409,6 +423,7 @@ def _cost_kernel(
         dtype=float
     ),  # [ny, nx, n_theta] cost-to-go V(x,y,theta); the goal cost
     veto_field: wp.array3d(dtype=float),  # [ny, nx, n_theta] 1 = the cost-to-go refuses this pose
+    narrow_field: wp.array3d(dtype=float),  # [ny, nx, n_theta] 1 = narrow: drive it slowly
     n_theta: int,
     cw: CostWeights,
     robot: Robot,  # envelope + feasibility thresholds (shared with the cost-to-go feasibility)
@@ -427,6 +442,7 @@ def _cost_kernel(
     sat_sum = float(0.0)
     tip_sum = float(0.0)
     veto_sum = float(0.0)
+    narrow_sum = float(0.0)
     unk_sum = float(0.0)
     rev_sum = float(0.0)
     edge = float(0.4)  # soft-wall margin inside the grid border
@@ -518,6 +534,15 @@ def _cost_kernel(
             # pose is refused per heading, and a cell that is fine facing one way is not fine
             # facing another
             veto_sum += early * sample_lattice(veto_field, grid, n_theta, pose[0], pose[1], yaw_eff)
+        if cw.narrow > 0.0:
+            # the speed of the body's FASTEST point, not the axle's: the tail sits 1.1 m behind
+            # the drive axle, so a near-pivot at walking pace swings it sideways at over 1 m/s --
+            # measured, a 27 deg left turn at 0.1-0.4 m/s put it 0.02 m from a corridor wall
+            tail = -robot.wheel_pos[2][0] + robot.wheel_radius
+            over = wp.max(wp.abs(v) + tail * wp.abs(wz) - cw.narrow_speed, 0.0)
+            if over > 0.0:
+                nf = sample_lattice(narrow_field, grid, n_theta, pose[0], pose[1], yaw_eff)
+                narrow_sum += nf * over * over
         if cw.tip > 0.0:
             ld = loads[t, r]
             min_n = wp.min(wp.min(ld[0], ld[1]), ld[2])
@@ -541,6 +566,7 @@ def _cost_kernel(
         + cw.tip * tip_sum
         + cw.unknown * unk_sum
         + cw.veto * veto_sum
+        + cw.narrow * narrow_sum
     )
     Jsafe[r] = safe
     Jout[r] = (
@@ -832,6 +858,7 @@ class MppiGpu:
             # all-clear until armed by set_veto, so a caller that never calls it keeps the old
             # behaviour exactly
             self.veto_field = wp.zeros((ny, nx, n_theta), dtype=wp.float32)
+            self.narrow_field = wp.zeros((ny, nx, n_theta), dtype=wp.float32)  # set_narrow
             # observed-cell mask on the sim grid (1 = real data); all-measured by default so the
             # unknown-cell penalty is inert until a perception mask is supplied (set_measured)
             self.measured = wp.full((ny, nx), 1.0, dtype=wp.float32)
@@ -919,6 +946,16 @@ class MppiGpu:
         if grid is not None:
             self.lattice_grid = grid
 
+    def set_narrow(self, narrow, grid=None):
+        """Copy the cost-to-go's NARROW field (`CostToGo.narrow`) into the stable buffer the cost
+        kernel reads. Same shape, grid and call rule as `set_veto`; inert while
+        `CostWeights.narrow` is 0."""
+        if tuple(narrow.shape) != tuple(self.narrow_field.shape):
+            self.narrow_field = wp.zeros(narrow.shape, dtype=float, device=self.device)
+        wp.copy(self.narrow_field, narrow)
+        if grid is not None:
+            self.lattice_grid = grid
+
     def _refine(self):
         """One MPPI iteration: sample -> rollout -> cost -> CEM reweight, all on device."""
         self._prof.mark(0)
@@ -966,6 +1003,7 @@ class MppiGpu:
                 self.lattice_grid,
                 self.lattice_field,
                 self.veto_field,
+                self.narrow_field,
                 self.n_theta,
                 self.cw,
                 self.robot,

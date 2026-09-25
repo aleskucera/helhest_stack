@@ -580,6 +580,25 @@ def _goal_cell_kernel(
 
 
 @wp.kernel
+def _narrow_kernel(
+    strict: wp.array3d(dtype=wp.float32),  # blocked under the full tube (spatial + heading)
+    loose: wp.array3d(dtype=wp.float32),  # blocked under the heading bin alone
+    narrow_cost: wp.float32,
+    narrow: wp.array3d(dtype=wp.float32),
+    tilt: wp.array3d(dtype=wp.float32),  # the loose set's graded tilt, charged in place
+):
+    """A pose the loose set keeps and the full tube removes is NARROW: feasible, but only with no
+    room for the lateral tracking error the spatial tube stands for. That error grows with speed,
+    so instead of deleting the pose the router charges it (`narrow_cost` per unit of the solver's
+    penalty, i.e. `flatness_weight * narrow_cost` of extra cost per metre) and MPPI is told to
+    drive it slowly (`CostWeights.narrow`). A pose that is narrow is never vetoed by this."""
+    r, c, t = wp.tid()
+    n = wp.where(strict[r, c, t] > 0.5 and loose[r, c, t] < 0.5, 1.0, 0.0)
+    narrow[r, c, t] = n
+    tilt[r, c, t] = tilt[r, c, t] + narrow_cost * n
+
+
+@wp.kernel
 def _pose_cost_kernel(
     blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     graded_tilt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
@@ -732,6 +751,10 @@ class CostToGo:
         # [per rad] of the worst soft violation inside the tube, as graded tilt. Tilt and belly
         # clearance are charged, walls and unresolved settles are eroded hard -- `_robust_kernel`.
         robust_soft_weight: float = 10.0,
+        # None = the spatial tube VETOES (the old behaviour). A number = the spatial tube only
+        # marks poses NARROW and charges them this much; routing then uses the heading bin alone
+        # and MPPI slows down in narrow poses (see _narrow_kernel, CostWeights.narrow).
+        narrow_cost: float | None = None,
         obstacle_step_m: float = 0.0,  # hard-block cells with a local step taller than this [m];
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
         pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives so
@@ -787,6 +810,8 @@ class CostToGo:
         self._mt = int(round(robust_margin_deg / (360.0 / n_theta)))
         self._eroded = self._mr > 0 or self._mt > 0
         self.robust_soft_weight = float(robust_soft_weight)
+        self._narrow = narrow_cost is not None and self._mr > 0
+        self.narrow_cost = 0.0 if narrow_cost is None else float(narrow_cost)
         self._escape_reach = max(1, int(round(self.ESCAPE_REACH_M / self.grid.cell_size)))
         # a turn costs what the lattice charges for one when it has point turns; the deployed
         # value otherwise, so an escape that is mostly turning still reads cheaper than the cap
@@ -917,6 +942,11 @@ class CostToGo:
         self.hazard = wp.zeros_like(self.V)
         self.violation = wp.zeros_like(self.V)  # [rad] how badly a soft test fails, 0 if none does
         self.robust_tilt = wp.zeros_like(self.V)  # graded_tilt + the tube's tilt charge
+        # 1 where the spatial tube would have removed a pose the heading bin keeps; all zero unless
+        # narrow_cost is set
+        self.narrow = wp.zeros_like(self.V)
+        self._loose_blocked = wp.zeros_like(self.V)
+        self._loose_tilt = wp.zeros_like(self.V)
         # V with a way back out of every no-route pose: what MPPI follows (see _escape_kernel)
         self.V_escape = wp.zeros_like(self.V)
         self._descent_out = wp.zeros(2, dtype=wp.float32, device=self.device)
@@ -1220,6 +1250,31 @@ class CostToGo:
             )
         feas = self.robust_blocked if self._eroded else self.blocked
         tilt = self.robust_tilt if self._eroded else self.graded_tilt
+        if self._narrow:  # the spatial tube marks and charges instead of vetoing
+            wp.launch(
+                _robust_kernel,
+                dim=self.V.shape,
+                inputs=[
+                    self.blocked,
+                    self.hazard,
+                    self.violation,
+                    self.graded_tilt,
+                    0,
+                    0,
+                    self._mt,
+                    self.robust_soft_weight,
+                ],
+                outputs=[self._loose_blocked, self._loose_tilt],
+                device=self.device,
+            )
+            wp.launch(
+                _narrow_kernel,
+                dim=self.V.shape,
+                inputs=[self.robust_blocked, self._loose_blocked, self.narrow_cost],
+                outputs=[self.narrow, self._loose_tilt],
+                device=self.device,
+            )
+            feas, tilt = self._loose_blocked, self._loose_tilt
         wp.launch(
             _goal_cell_kernel,
             dim=1,
