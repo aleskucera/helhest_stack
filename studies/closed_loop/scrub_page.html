@@ -148,9 +148,12 @@
     Seven worlds, driven closed-loop by the <b>deployed stack</b> as it stands: <b>ostrich</b> physics as
     the robot, the measured Odin dToF ray table as the sensor, a probabilistic belief map as the only thing the
     planner sees, the robot's own controller read from its params file, the coarse map anchored to the world,
-    the turn-first brake and the shadow bridge. Every frame is what the robot believed and decided. One run per
-    world, all seven reached, none touching a wall; false door is the trap -- a room 18 m out behind a door aimed
-    at the goal -- taken in, turned round in, left through the door, and solved by the side gap. The robot turns red while it touches a wall.
+    the turn-first brake, the shadow bridge and the <b>clearance speed governor</b>: near walls the robot is not
+    kept out, it is slowed, by one law (speed = clearance / 0.125 s) that prices the route in time, steers MPPI's
+    choice and brakes the plan it drives. Every frame is what the robot believed and decided; the governor's
+    reading is under "This frame". One run per world, all seven reached, none touching a wall; false door is the
+    trap -- a room 18 m out behind a door aimed at the goal -- taken in, turned round in, left through the door,
+    and solved by the side gap. The robot turns red while it touches a wall.
   </p>
 
   <div class="tabs" id="tabs" role="tablist"></div>
@@ -184,6 +187,7 @@
           <dt>map seen</dt><dd id="m-seen">—</dd>
           <dt>poses blocked</dt><dd id="m-blk">—</dd>
           <dt>wall clearance</dt><dd id="m-cl">—</dd>
+          <dt>speed governor</dt><dd id="m-gov">—</dd>
         </dl>
       </div>
       <div class="card">
@@ -383,6 +387,18 @@
     // Measured 59-76% across the six worlds with a fully connected ring, because a routing
     // window legitimately contains blind cells, ground behind walls and edge states.
     $("m-route").textContent = meta.route == null ? "—" : (meta.route * 100).toFixed(0) + "%";
+    // The clearance speed governor: the room it measured along the next second of the plan, and
+    // whether that room was tight enough to slow the robot. Only runs recorded with it carry this.
+    const gv = $("m-gov");
+    if (meta.gv) {
+      const [gc, cap, sc] = meta.gv;
+      const room = gc >= 1.4 ? "open" : fmt(gc, 2) + " m";
+      gv.textContent = sc < 0.999 ? "braking to " + (sc * 100).toFixed(0) + "% · " + room : "full speed · " + room;
+      gv.style.color = sc < 0.999 ? "var(--alarm)" : "";
+      gv.title = "clearance along the next second of the plan; allowed " + fmt(cap, 2) + " m/s at the fastest body point";
+    } else {
+      gv.textContent = "—"; gv.style.color = ""; gv.title = "";
+    }
     // Which controller produced this run. Before runs saved their config, a sim result could not
     // say what it had tested -- and for a week the answer was "not the robot's controller".
     const ctl = $("ctl"), c = w.controller;

@@ -63,6 +63,10 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path, rate: float) -> 
     clear = d["clearance"] if "clearance" in d.files else None
     cap = float(v[np.isfinite(v)].max()) if np.isfinite(v).any() else 1.0
     goals = d["hist_goal"] if "hist_goal" in d.files else None
+    # the clearance speed governor, per simulated frame: [frame, clearance m, cap m/s, scale]
+    gov = (
+        {int(row[0]): row[1:] for row in d["governor"]} if "governor" in d.files else {}
+    )
 
     strips = {k: [] for k in LAYERS}
     frames = []
@@ -137,6 +141,13 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path, rate: float) -> 
                 ),
                 # the goal this frame planned toward, where it changed over the run (real bags)
                 **({} if goals is None else dict(g=[round(float(x), 2) for x in goals[i]])),
+                # what the governor saw and did this frame: clearance along the next second of the
+                # plan [m], the speed it allowed [m/s], and the factor it scaled the wheels by
+                **(
+                    dict(gv=[round(float(x), 3) for x in gov[int(f)]])
+                    if int(f) in gov
+                    else {}
+                ),
             )
         )
     nbytes = 0
