@@ -154,7 +154,9 @@
     the opening aimed at the goal. The 2.8 m corridor could not be turned in forward-only: a spin is not in place for this
     robot (two drive wheels, a dragged rear wheel -- 0.44&ndash;0.9 m sideways per 120&ndash;150&deg;), so the
     <b>stuck turning</b> run met the wall at ~120&deg;; at <b>4.0 m</b> the current stack turns and leaves
-    3/3, 626&ndash;701 frames, no contact. False door, window-bound: 0/4, once
+    3/3, 626&ndash;701 frames, no contact. With <b>reverse</b> (plan_wmin &minus;2.5, no pivot prior, 120 m<sup>&minus;1</sup>
+    shaping, the robot's command chain) the 2.8 m corridor and a 2.2 m dead end are left backwards, 3/3 each, and
+    a corridor with a cliff for one wall is left the same way 2/3 with no fall; see the reverse study. False door, window-bound: 0/4, once
     the dead end scrolls out of the 20 m window it is forgotten and the robot drives back in. With
     the coarse map <b>anchored to the world</b> (walls sealed from either side, a remembered wall
     never overwritten by a poorer view, the ring kept while the goal is walled off): 2/3 reach,
@@ -251,8 +253,8 @@
     { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
     { k: "route", name: "headings with a route", unit: "", grid: "route" },
   ];
-  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "corridor", "corridor_stuck", "corridor4", "false_door", "false_door_mem", "false_door_mem_stuck", "false_door_turn", "false_door_bridge"];
-  const LABEL = { pocket_wall: "pocket (wall hit)", corridor: "corridor 2.8 m (old stack)", corridor_stuck: "corridor 2.8 m (stuck turning)", corridor4: "corridor 4.0 m (current stack)", false_door: "false door (window-bound)", false_door_mem: "false door (anchored map, reached)", false_door_mem_stuck: "false door (anchored map, wall-trapped)", false_door_turn: "false door (anchored map + turn-first)", false_door_bridge: "false door (+ shadow bridge)" };
+  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "corridor", "corridor_stuck", "corridor4", "corridor_rev", "narrow_rev", "cliff_rev", "false_door", "false_door_mem", "false_door_mem_stuck", "false_door_turn", "false_door_bridge"];
+  const LABEL = { pocket_wall: "pocket (wall hit)", corridor: "corridor 2.8 m (old stack)", corridor_stuck: "corridor 2.8 m (stuck turning)", corridor4: "corridor 4.0 m (current stack)", corridor_rev: "corridor 2.8 m (reverse)", narrow_rev: "2.2 m dead end (reverse)", cliff_rev: "cliff corridor (reverse + drop rule)", false_door: "false door (window-bound)", false_door_mem: "false door (anchored map, reached)", false_door_mem_stuck: "false door (anchored map, wall-trapped)", false_door_turn: "false door (anchored map + turn-first)", false_door_bridge: "false door (+ shadow bridge)" };
 
   // --- colour ramps, one per layer role -------------------------------------------------
   function ramp(stops) {
