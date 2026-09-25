@@ -145,17 +145,12 @@
     <span class="fcount" id="hdr"></span>
   </header>
   <p class="sub">
-    Six stress worlds and one trap, driven closed-loop: <b>ostrich</b> physics as the robot, the measured Odin
-    dToF ray table as the sensor, a probabilistic belief map as the only thing the planner sees.
-    Every frame is what the robot actually believed and decided, every frame recorded. The
-    <b>robot's own controller</b>, read from its params file, with the robust margin split by
-    cause: walls eroded hard, tilt and belly clearance charged. The six stress worlds: 6/6 reach, none
-    touching a wall. The <b>false door</b> trap puts a room 18 m out behind a door aimed at the goal;
-    the only way on is a side gap. Window-bound: 0/4, the dead end forgotten once it scrolls out of the
-    20 m window. With the coarse map <b>anchored to the world</b>, the <b>turn-first brake</b> (a big turn
-    is a spin, not an arc that advances) and the <b>shadow bridge</b> (an unseen run of at most two blocks
-    between two sealed wall blocks is the wall, so a wall seen ending in shadow is not a door): 3/3, one
-    stop, one turn, out, 514&ndash;538 frames, no contact. The robot turns red while it touches a wall.
+    Seven worlds, driven closed-loop by the <b>deployed stack</b> as it stands: <b>ostrich</b> physics as
+    the robot, the measured Odin dToF ray table as the sensor, a probabilistic belief map as the only thing the
+    planner sees, the robot's own controller read from its params file, the coarse map anchored to the world,
+    the turn-first brake and the shadow bridge. Every frame is what the robot believed and decided. One run per
+    world, all seven reached, none touching a wall; false door is the trap -- a room 18 m out behind a door aimed
+    at the goal -- taken in, turned round in, left through the door, and solved by the side gap. The robot turns red while it touches a wall.
   </p>
 
   <div class="tabs" id="tabs" role="tablist"></div>
@@ -241,8 +236,8 @@
     { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
     { k: "route", name: "headings with a route", unit: "", grid: "route" },
   ];
-  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "false_door", "false_door_mem", "false_door_mem_stuck", "false_door_turn", "false_door_bridge"];
-  const LABEL = { pocket_wall: "pocket (wall hit)", false_door: "false door (window-bound)", false_door_mem: "false door (anchored map, reached)", false_door_mem_stuck: "false door (anchored map, wall-trapped)", false_door_turn: "false door (anchored map + turn-first)", false_door_bridge: "false door (+ shadow bridge)" };
+  const ORDER = ["gap", "slalom", "pillars", "pocket", "ridge", "bumpy", "false_door"];
+  const LABEL = { false_door: "false door" };
 
   // --- colour ramps, one per layer role -------------------------------------------------
   function ramp(stops) {
