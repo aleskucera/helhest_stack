@@ -181,7 +181,6 @@ _PLAN_BUILD = frozenset(
         "plan_mu_tau",
         "plan_saturation",
         "plan_wall_veto",
-        "plan_reverse_cost",
         "plan_pivot_cost",
         "plan_coarse_block_m",
         "plan_coarse_memory_m",
@@ -720,9 +719,6 @@ class ElevationNode(Node):
         # on the real robot, verify the LLC drives a small NEGATIVE /cmd_joints backward -- only
         # all-positive-forward has been verified live (control/command.py header).
         d("plan_wmin", PLAN_DEFAULTS["plan_wmin"])
-        # per metre reversed, with plan_wmin < 0: reverse is an escape, not a route. See the
-        # table for the measurements behind the value.
-        d("plan_reverse_cost", PLAN_DEFAULTS["plan_reverse_cost"])
         # Reverse gate: this much ground straight behind base_link (m) must be MEASURED (accumulated
         # map) for reverse to unlock this frame. Checked over a robot-width strip each frame.
         d("plan_reverse_clear_m", 1.5)
@@ -1007,7 +1003,6 @@ class ElevationNode(Node):
         self.plan_mu_tau: float = g("plan_mu_tau")
         self.plan_saturation: float = g("plan_saturation")
         self.plan_wall_veto: float = g("plan_wall_veto")
-        self.plan_reverse_cost: float = g("plan_reverse_cost")
         self.plan_coarse_block_m: float = g("plan_coarse_block_m")
         self.plan_coarse_memory_m: float = g("plan_coarse_memory_m")
         self.plan_coarse_win_m: float = g("plan_coarse_win_m")

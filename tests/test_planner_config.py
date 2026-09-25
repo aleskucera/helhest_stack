@@ -34,7 +34,6 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         saturation=p["plan_saturation"],
         # added after the move: the wall veto, which the node now sets from the table
         veto=p["plan_wall_veto"],
-        reverse=p["plan_reverse_cost"],
     )
     sampling = SamplingConfig(
         wmax=p["plan_wmax"],
@@ -42,7 +41,7 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         straight_frac=p["plan_straight_frac"],
         spin_frac=p["plan_spin_frac"],
         spin_min=p["plan_spin_min"],
-        pivot_frac=0.0,  # measured 2026-09-25: the prior froze pocket 0/3 with reverse on
+        pivot_frac=0.05 if p["plan_wmin"] < 0.0 else 0.0,
         elite_frac=p["plan_elite_frac"],
         n_mu=max(1, int(p["plan_n_mu"])),
     )
