@@ -123,9 +123,6 @@ def _climb_kernel(
     off_c: wp.int32,
     max_step: wp.float32,  # [m] the largest rise a wheel can drive up
     elevated: wp.float32,  # [m] above the ground around it, a cell is a top and not terrain
-    drop: wp.float32,  # [m] a measured cell this much lower, seen ACROSS unmeasured cells within
-    # `drop_reach`, makes this cell the edge of a drop; 0 = off
-    drop_reach: wp.int32,  # [cells]
     climbable: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = a wheel could cross it
 ):
     """A fine cell is climbable when the step to its immediate neighbours is one the robot can
@@ -161,45 +158,6 @@ def _climb_kernel(
     if h - ground > elevated:
         climbable[r, c] = 0.0
         return
-    # The edge of a drop, seen across its own shadow (costtogo._drop_kernel has the account): the
-    # nearest measured cell beyond a band of unmeasured ones, in a 4-direction, lies `drop` lower.
-    if drop > 0.0:
-        for k in range(4):
-            dr = int(0)
-            dc = int(0)
-            if k == 0:
-                dr = -1
-            elif k == 1:
-                dr = 1
-            elif k == 2:
-                dc = -1
-            else:
-                dc = 1
-            # ground on the near side only (costtogo._drop_kernel has the account): the lowest
-            # measured cell in the half-disc behind, away from the drop, within `elevated`
-            near = float(1.0e30)
-            for i in range(-drop_reach, drop_reach + 1):
-                for j in range(-drop_reach, drop_reach + 1):
-                    if i * i + j * j > drop_reach * drop_reach or i * dr + j * dc >= 0:
-                        continue
-                    rb = r + i
-                    cb = c + j
-                    if rb < 0 or rb >= rows or cb < 0 or cb >= cols:
-                        continue
-                    if measured[rb, cb] > 0.5:
-                        near = wp.min(near, elevation[rb, cb])
-            if near > 1.0e29 or h - near > elevated:
-                continue
-            for step in range(2, drop_reach + 1):
-                rr = r + dr * step
-                cc = c + dc * step
-                if rr < 0 or rr >= rows or cc < 0 or cc >= cols:
-                    break
-                if measured[rr, cc] > 0.5:
-                    if h - elevation[rr, cc] > drop:
-                        climbable[r, c] = 0.0
-                        return
-                    break
     ok = float(1.0)
     for dr in range(-1, 2):
         for dc in range(-1, 2):
@@ -435,8 +393,6 @@ class CoarseRouter:
         factor: int = 5,
         max_step_m: float = 0.25,
         elevated_m: float = 0.5,
-        drop_m: float = 0.0,
-        drop_reach_m: float = 2.0,
         min_pass_fraction: float = 0.5,
         frontier_m: float = 3.0,
         void_penalty: float = 1.0,
@@ -462,8 +418,6 @@ class CoarseRouter:
         self.factor = int(factor)
         self.max_step_m = float(max_step_m)
         self.elevated_m = float(elevated_m)
-        self.drop_m = float(drop_m)
-        self.drop_reach = max(2, int(round(float(drop_reach_m) / fine_grid.cell_size)))
         self.min_pass_fraction = float(min_pass_fraction)
         self.void_penalty = float(void_penalty)
         # The lattice the blocks are pooled on: the window's own, or the memory's. Both are at
@@ -554,8 +508,6 @@ class CoarseRouter:
                 off_c,
                 self.max_step_m,
                 self.elevated_m,
-                self.drop_m,
-                self.drop_reach,
             ],
             outputs=[self._climb],
             device=self.device,

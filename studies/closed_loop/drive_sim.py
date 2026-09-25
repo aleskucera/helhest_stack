@@ -61,7 +61,6 @@ from helhest.planner_config import resolve
 from helhest.control.command import condition_command
 from helhest.control.command import to_engine_order
 from helhest.control.command import turn_first
-from helhest.control.reverse_gate import ReverseGate
 from helhest.planning.coarse import CoarseRouter
 from helhest.planning.costtogo import CostToGo
 from helhest.planning.lattice_solver import trace_optimal
@@ -119,7 +118,6 @@ def _plan_params(a: argparse.Namespace) -> dict:
         ("wmax", "plan_wmax"),
         ("wheel_width", "plan_wheel_width"),
         ("veto", "plan_wall_veto"),
-        ("wmin", "plan_wmin"),
     ):
         if getattr(a, flag) is not None:
             params[key] = getattr(a, flag)
@@ -263,22 +261,6 @@ def drive(a: argparse.Namespace) -> dict:
         a.turn_first = a.cfg.turn_first["start_deg"]
     if a.turn_first_reach is None:
         a.turn_first_reach = a.cfg.turn_first["reach_m"]
-    # experiment knobs on the planner's own dataclasses (not plan_* keys): the reverse shaping
-    # weight and the pivot prior share
-    if a.reverse_cost is not None or a.pivot_frac is not None:
-        import dataclasses
-
-        cost = (
-            a.cfg.cost
-            if a.reverse_cost is None
-            else dataclasses.replace(a.cfg.cost, reverse=a.reverse_cost)
-        )
-        sampling = (
-            a.cfg.sampling
-            if a.pivot_frac is None
-            else dataclasses.replace(a.cfg.sampling, pivot_frac=a.pivot_frac)
-        )
-        a.cfg = dataclasses.replace(a.cfg, cost=cost, sampling=sampling)
     span = a.window
     n = int(round(span / a.cell))
     belief = ElevationBelief(
@@ -350,8 +332,6 @@ def drive(a: argparse.Namespace) -> dict:
         # whole feasibility test is off. Kept here, flagged rather than silently matched.
         z_veto=a.z_veto,
         charge_per_sigma=a.charge_per_sigma,
-        drop_m=a.drop,
-        drop_reach_m=a.drop_reach,
         device=a.device,
     )
     if mppi:
@@ -377,8 +357,6 @@ def drive(a: argparse.Namespace) -> dict:
             max_step_m=a.coarse_step,
             min_pass_fraction=a.coarse_pass,
             bridge_m=a.bridge,
-            drop_m=a.drop,
-            drop_reach_m=a.drop_reach,
             frontier_m=a.frontier,
             void_penalty=a.void_penalty,
             memory_grid=memory,
@@ -397,16 +375,6 @@ def drive(a: argparse.Namespace) -> dict:
     scratch, measured_d, sd_d = zeros2d(n), zeros2d(n), zeros2d(n)
     h_r, m_r, sd_r, drift_r = zeros2d(nr), zeros2d(nr), zeros2d(nr), zeros2d(nr)
     fine_d = zeros2d(nw)
-    # REVERSE, as the node does it: the box the planner MAY use is plan_wmin, and the effective
-    # floor is opened per frame only while a robot-width strip behind is measured -- no rear
-    # sensor, so reverse may only use REMEMBERED ground. Reversing over blind cells inside the
-    # MPPI window is priced by the cost kernel from the window's own measured mask.
-    reverse = a.cfg.sampling.wmin < 0.0
-    gate = ReverseGate(far_m=a.reverse_clear, device=a.device) if reverse else None
-    meas_w = zeros2d(nw)
-    rev_open = False
-    if mppi and reverse:
-        planner.set_wmin(0.0)  # locked until the gate opens it
     height_d = scratch  # so a run that arrives before its first frame can still dump
 
     def crop(src: wp.array, off: int, out: wp.array) -> wp.array:
@@ -435,7 +403,7 @@ def drive(a: argparse.Namespace) -> dict:
     # THE ROBOT'S COMMAND CHAIN (control/command.py), as the node runs it: rear follower, the
     # accel/decel slew limits and the magnitude clamp from the params file. Without it the sim
     # reversed the wheels from +5.5 to -2.2 rad/s in one frame and the tricycle stood on its
-    # nose for 180 frames (corridor, reverse enabled) -- a transition the robot cannot make.
+    # nose for 180 frames (a reverse study, since closed) -- a transition the robot cannot make.
     # `prev_lrr` is the last conditioned command in /cmd_joints order, which is also what the
     # rollouts are seeded from (the node seeds from the encoders when fresh, else from this).
     chain = not a.no_chain
@@ -532,7 +500,7 @@ def drive(a: argparse.Namespace) -> dict:
         state_l = np.array([rx - wx0, ry - wy0, yaw], np.float32)
         goal_l = (goal[0] - wx0, goal[1] - wy0)
         if d < a.dock:
-            cmd = dock_control(state_l, goal_l, wmin=a.cfg.sampling.wmin if rev_open else 0.0)
+            cmd = dock_control(state_l, goal_l)
         elif mppi:
             plan_sim.set_terrain(crop(height_d, off_w, fine_d))
             if chain:
@@ -548,10 +516,6 @@ def drive(a: argparse.Namespace) -> dict:
                         -(rx - prev_pose[0]) * np.sin(yaw) + (ry - prev_pose[1]) * np.cos(yaw)
                     ) / dt
                     plan_sim.set_initial_twist(np.array([vx, vy, dyaw / dt], np.float32))
-            if reverse:
-                planner.set_measured(crop(measured_d, off_w, meas_w))
-                rev_open = gate.clear(measured_d, (belief.xmin, belief.ymin), a.cell, (rx, ry, yaw))
-                planner.set_wmin(a.cfg.sampling.wmin if rev_open else 0.0)
             # V with a way out of every no-route pose, not V itself: where V is capped MPPI used to
             # follow a straight line to the goal, which pressed the robot into false_door's back
             # wall and turned it back into corridor's dead end mid-turn (CostToGo._escape_kernel)
@@ -569,10 +533,7 @@ def drive(a: argparse.Namespace) -> dict:
                 # ends inside the robot's own turning clearance of a wall (control/command.py)
                 bearing = ctg.descent_bearing(rx - r0, ry - s0, a.turn_first_reach)
                 if np.isfinite(bearing):
-                    # against the direction of TRAVEL: a reverse command with the route behind
-                    # is on course, not 180 deg off it
-                    travel = yaw + (np.pi if wl + wr < 0.0 else 0.0)
-                    err = (bearing - travel + np.pi) % (2.0 * np.pi) - np.pi
+                    err = (bearing - yaw + np.pi) % (2.0 * np.pi) - np.pi
                     wl, wr = turn_first(
                         wl,
                         wr,
@@ -665,8 +626,6 @@ def drive(a: argparse.Namespace) -> dict:
                     # disagreeing is the signature worth seeing: on `pocket` the minimum read
                     # 5.2 m while the heading the robot held read the cap.
                     _v_here(vh, rx - r0, ry - s0, yaw, a.cell, a.n_theta),
-                    # reverse gate: 1 = open this frame (the strip behind measured), else 0
-                    1.0 if rev_open else 0.0,
                 ]
             )
         # Replayed as a captured CUDA graph, not launched from Python: the solver is launch-bound
@@ -865,33 +824,10 @@ def main() -> None:
     )
     p.add_argument("--wmax", type=float, default=None, help="[rad/s] wheel-speed clamp")
     p.add_argument(
-        "--wmin",
-        type=float,
-        default=None,
-        help="[rad/s] lower wheel-speed bound; < 0 allows reverse, gated per frame on the ground "
-        "behind being measured (plan_wmin; the robot's file ships 0.0)",
-    )
-    p.add_argument("--reverse-cost", type=float, default=None, help="CostParams.reverse [per m]")
-    p.add_argument(
-        "--drop",
-        type=float,
-        default=0.0,
-        help="[m] a drop this deep seen across a shadow is an edge no part of the body may cover "
-        "(both layers); 0 = off",
-    )
-    p.add_argument("--drop-reach", type=float, default=2.0, help="[m] how far across a shadow")
-    p.add_argument(
         "--no-chain",
         action="store_true",
         help="skip the robot's command chain (slew/decel limits, rear follower) and the rollout "
-        "state seeding -- the old behaviour, which lets the wheels reverse in one frame",
-    )
-    p.add_argument("--pivot-frac", type=float, default=None, help="SamplingConfig.pivot_frac")
-    p.add_argument(
-        "--reverse-clear",
-        type=float,
-        default=1.5,
-        help="[m] the strip behind the robot that must be measured for reverse (plan_reverse_clear_m)",
+        "state seeding -- the old behaviour, which lets the wheels change speed in one frame",
     )
     p.add_argument("--device", default="cuda")
     p.add_argument(
