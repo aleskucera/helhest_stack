@@ -145,29 +145,17 @@
     <span class="fcount" id="hdr"></span>
   </header>
   <p class="sub">
-    Six stress worlds, driven closed-loop: <b>ostrich</b> physics as the robot, the measured Odin
+    Six stress worlds and one trap, driven closed-loop: <b>ostrich</b> physics as the robot, the measured Odin
     dToF ray table as the sensor, a probabilistic belief map as the only thing the planner sees.
     Every frame is what the robot actually believed and decided, every frame recorded. The
     <b>robot's own controller</b>, read from its params file, with the robust margin split by
     cause: walls eroded hard, tilt and belly clearance charged. The six stress worlds: 6/6 reach, none
-    touching a wall. The two <b>trap worlds</b> (corridor, false door) put a dead end 18 m out behind
-    the opening aimed at the goal. The 2.8 m corridor could not be turned in forward-only: a spin is not in place for this
-    robot (two drive wheels, a dragged rear wheel -- 0.44&ndash;0.9 m sideways per 120&ndash;150&deg;), so the
-    <b>stuck turning</b> run met the wall at ~120&deg;; at <b>4.0 m</b> the current stack turns and leaves
-    3/3, 626&ndash;701 frames, no contact. With <b>reverse</b> (plan_wmin &minus;2.5, no pivot prior, 120 m<sup>&minus;1</sup>
-    shaping, the robot's command chain) the 2.8 m corridor and a 2.2 m dead end are left backwards, 3/3 each, and
-    a corridor with a cliff for one wall is left the same way 2/3 with no fall; see the reverse study. False door, window-bound: 0/4, once
-    the dead end scrolls out of the 20 m window it is forgotten and the robot drives back in. With
-    the coarse map <b>anchored to the world</b> (walls sealed from either side, a remembered wall
-    never overwritten by a poorer view, the ring kept while the goal is walled off): 2/3 reach,
-    in and back out through the false door, round by the real one, no wall contact; the third is
-    trapped forward-only inside its own turning clearance after a late correction. With the
-    <b>turn-first brake</b> (forward speed cut while the route lies more than 45&deg; off the
-    heading, so a big turn is a spin, not an arc that advances): 3/3, turning back at x&nbsp;=&nbsp;9&ndash;13
-    the moment the map seals the back wall. With the <b>shadow bridge</b> (an unseen run of at most
-    two blocks between two sealed wall blocks is the wall, so a wall seen ending in shadow no longer
-    reads as a door) and the sim's uncertainty terms at the robot's values: one stop, one turn, out,
-    514&ndash;538 frames. The robot turns red while it touches a wall.
+    touching a wall. The <b>false door</b> trap puts a room 18 m out behind a door aimed at the goal;
+    the only way on is a side gap. Window-bound: 0/4, the dead end forgotten once it scrolls out of the
+    20 m window. With the coarse map <b>anchored to the world</b>, the <b>turn-first brake</b> (a big turn
+    is a spin, not an arc that advances) and the <b>shadow bridge</b> (an unseen run of at most two blocks
+    between two sealed wall blocks is the wall, so a wall seen ending in shadow is not a door): 3/3, one
+    stop, one turn, out, 514&ndash;538 frames, no contact. The robot turns red while it touches a wall.
   </p>
 
   <div class="tabs" id="tabs" role="tablist"></div>
@@ -253,8 +241,8 @@
     { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
     { k: "route", name: "headings with a route", unit: "", grid: "route" },
   ];
-  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "corridor", "corridor_stuck", "corridor4", "corridor_rev", "narrow_rev", "cliff_rev", "false_door", "false_door_mem", "false_door_mem_stuck", "false_door_turn", "false_door_bridge"];
-  const LABEL = { pocket_wall: "pocket (wall hit)", corridor: "corridor 2.8 m (old stack)", corridor_stuck: "corridor 2.8 m (stuck turning)", corridor4: "corridor 4.0 m (current stack)", corridor_rev: "corridor 2.8 m (reverse)", narrow_rev: "2.2 m dead end (reverse)", cliff_rev: "cliff corridor (reverse + drop rule)", false_door: "false door (window-bound)", false_door_mem: "false door (anchored map, reached)", false_door_mem_stuck: "false door (anchored map, wall-trapped)", false_door_turn: "false door (anchored map + turn-first)", false_door_bridge: "false door (+ shadow bridge)" };
+  const ORDER = ["gap", "slalom", "pillars", "pocket", "pocket_wall", "ridge", "bumpy", "false_door", "false_door_mem", "false_door_mem_stuck", "false_door_turn", "false_door_bridge"];
+  const LABEL = { pocket_wall: "pocket (wall hit)", false_door: "false door (window-bound)", false_door_mem: "false door (anchored map, reached)", false_door_mem_stuck: "false door (anchored map, wall-trapped)", false_door_turn: "false door (anchored map + turn-first)", false_door_bridge: "false door (+ shadow bridge)" };
 
   // --- colour ramps, one per layer role -------------------------------------------------
   function ramp(stops) {
