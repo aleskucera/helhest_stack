@@ -78,8 +78,9 @@ def audit(npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
     coarse_dead = cv_here >= 0.9 * 1.0e30 if hcv.max() > 1.0e29 else cv_here >= 0.9 * hcv.max()
     vcap = float(np.nanmax(d["hist_v"]))
     fine_dead = meta[:, 11] >= 0.9 * vcap
-    far = meta[:, 6] > REACH_M
-    stopped = far & (np.abs(meta[:, 4]) < 0.05) & (np.abs(meta[:, 5]) < 0.05)
+    # (a "commanded zero while far from the goal" count was tried here and dropped: on a replay
+    # the robot moves as recorded whatever the node commands, so the turn-first brake's
+    # stop-before-spin holds a zero for as long as the bag's robot keeps driving.)
 
     # goals: one segment per distinct goal, closest approach in each
     goals = d["hist_goal"]
@@ -125,7 +126,6 @@ def audit(npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
         no_route_frames=dict(
             coarse=int(coarse_dead.sum()),
             fine_own_heading=int(fine_dead.sum()),
-            stopped_short=int(stopped.sum()),
         ),
         goals=segs,
         reached=int(sum(s["reached"] for s in segs)),
@@ -206,7 +206,7 @@ def main() -> None:
     print(
         "| bag | bag s | path m | goals reached | blocks seen | sealed | bridged | "
         "tall cells in sealed | path samples in sealed / bridged / unseen | "
-        "frames no coarse route / no fine route / stopped short |"
+        "frames no coarse route at robot / no fine route at own heading |"
     )
     print("|---|---|---|---|---|---|---|---|---|---|")
     for s in rows:
@@ -215,7 +215,7 @@ def main() -> None:
             f"| {s['bag']} | {s['bag_time_s']} | {s['path_m']} | {s['reached']}/{len(s['goals'])} | "
             f"{b['seen']} | {b['sealed']} | {b['bridged']} | {s['tall_in_sealed_frac']} of {s['tall_cells']} | "
             f"{pa['in_sealed']} / {pa['in_bridged']} / {pa['in_unseen']} of {pa['samples']} | "
-            f"{nr['coarse']} / {nr['fine_own_heading']} / {nr['stopped_short']} of {s['frames_recorded']} |"
+            f"{nr['coarse']} / {nr['fine_own_heading']} of {s['frames_recorded']} |"
         )
 
 
