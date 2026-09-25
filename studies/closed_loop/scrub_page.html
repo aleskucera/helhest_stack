@@ -149,8 +149,8 @@
     the robot, the measured Odin dToF ray table as the sensor, a probabilistic belief map as the only thing the
     planner sees, the robot's own controller read from its params file, the coarse map anchored to the world,
     the turn-first brake, the shadow bridge and the <b>clearance speed governor</b>: near walls the robot is not
-    kept out, it is slowed, by one law (speed = clearance / 0.125 s) that prices the route in time, steers MPPI's
-    choice and brakes the plan it drives. Every frame is what the robot believed and decided; the governor's
+    kept out, it is slowed, by one law (speed = (clearance &minus; 0.1 m) / 0.125 s, for the body's fastest point) that
+    prices the route in time, steers MPPI's choice and brakes the plan it drives. Every frame is what the robot believed and decided; the governor's
     reading is under "This frame". One run per world, all seven reached, none touching a wall; false door is the
     trap -- a room 18 m out behind a door aimed at the goal -- taken in, turned round in, left through the door,
     and solved by the side gap. The robot turns red while it touches a wall.
