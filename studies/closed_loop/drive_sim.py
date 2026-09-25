@@ -61,6 +61,7 @@ from helhest.planner_config import resolve
 from helhest.control.command import condition_command
 from helhest.control.command import to_engine_order
 from helhest.control.command import turn_first
+from helhest.control.governor import ClearanceGovernor
 from helhest.planning.coarse import CoarseRouter
 from helhest.planning.costtogo import CostToGo
 from helhest.planning.lattice_solver import trace_optimal
@@ -323,6 +324,17 @@ def drive(a: argparse.Namespace) -> dict:
         )
         planner.reset_nominal(a.cfg.nominal_reset)
         planner.set_mu_band(1.0, a.cfg.mu_span)
+    # the clearance speed governor: drive only as fast as the room along the plan allows
+    governor = None
+    if mppi and a.cfg.governor is not None:
+        governor = ClearanceGovernor(
+            robot,
+            plan_dt=float(planner.cw.dt),
+            t_react=a.cfg.governor["t_react"],
+            v_min=a.cfg.governor["v_min"],
+            lookahead_s=a.cfg.governor["lookahead_s"],
+            device=a.device,
+        )
     ctg = CostToGo(
         route_grid,
         robot,
@@ -393,6 +405,7 @@ def drive(a: argparse.Namespace) -> dict:
     # Opt-in, strided history for the scrub page. Host reads, so it is off by default and never
     # on the measured path -- with --history 0 the loop below is byte-identical to before.
     hist: dict[str, list] = {k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "meta")}
+    gov_log: list = []  # per frame with the governor: [frame, clearance m, cap m/s, scale]
     narrow_here: list = []  # per recorded frame: 1 = the robot's own pose is marked narrow
     esc: list = []  # per recorded frame: [best rollout's worst violation, median, clean fraction]
     # WALL CLEARANCE, every frame, against the world's exact solids. "Reached" cannot see a robot
@@ -546,6 +559,14 @@ def drive(a: argparse.Namespace) -> dict:
                         prev_diff=prev_diff,
                         speed=speed,
                     )
+            if governor is not None:
+                wl_in = wl
+                wl, wr = governor.cap(
+                    wl, wr, plan_sim.controlled, plan_sim.elevation, planner.measured, plan_sim.grid
+                )
+                gov_log.append(
+                    [f, governor.clearance, governor.v_cap, wl / wl_in if wl_in != 0.0 else 1.0]
+                )
             cmd = np.array([wl, wr, 0.5 * (wl + wr)], np.float32)
         else:
             # the lattice's own policy, walked in the ROUTING window's frame, then followed
@@ -692,6 +713,7 @@ def drive(a: argparse.Namespace) -> dict:
             **{f"hist_{k}": np.asarray(v) for k, v in hist.items() if v},
             **({"escape": np.asarray(esc)} if esc else {}),
             **({"narrow_here": np.asarray(narrow_here)} if narrow_here else {}),
+            **({"governor": np.asarray(gov_log)} if gov_log else {}),
         )
         print(f"wrote {a.out}")
 

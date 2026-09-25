@@ -66,6 +66,15 @@ PLAN_DEFAULTS: dict[str, Any] = {
     # [m] how far from a wall the narrow route charge reaches, grading down to zero -- the pull
     # toward the middle of a passage (CostToGo._narrow_kernel)
     "plan_narrow_reach_m": 0.6,
+    # CAREFUL WHERE IT IS TIGHT (control/governor.py). plan_clear_t_react > 0 replaces the spatial
+    # tube's veto with the clearance speed law v = clearance / t_react (floored at v_min): the route
+    # is priced in travel time under it, capped at v_cruise, and a governor after MPPI enforces it
+    # on the next plan_clear_lookahead_s of the plan. 0 = off (the spatial tube vetoes).
+    # t_react is seconds of error at the body's fastest-point speed (~0.125 s: see the module).
+    "plan_clear_t_react": 0.0,
+    "plan_clear_v_cruise": 1.5,
+    "plan_clear_v_min": 0.15,
+    "plan_clear_lookahead_s": 1.0,
     # robot
     "plan_wheel_width": 0.10,
     # the coarse "which way" layer (planning/coarse.py) and the turn-first brake
@@ -92,6 +101,9 @@ class PlannerConfig:
     wheel_width: float
     coarse: dict[str, float]  # block_m, memory_m, bridge_m -- CoarseRouter, sized by the caller
     turn_first: dict[str, float]  # start_deg, reach_m -- control.command.turn_first
+    governor: (
+        dict[str, float] | None
+    )  # t_react, v_min, lookahead_s -- ClearanceGovernor; None = off
 
 
 def resolve(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -113,9 +125,18 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
     batch -= batch % n_mu
     # slow-in-narrow: absent entirely when off, so the off state IS the configuration before it
     narrow_on = float(p["plan_narrow_speed"]) > 0.0
-    narrow_cost_kw = (
-        dict(narrow=float(p["plan_narrow_weight"]), narrow_speed=float(p["plan_narrow_speed"]))
-        if narrow_on
+    clear_on = float(p["plan_clear_t_react"]) > 0.0
+    if clear_on:
+        narrow_on = False  # the governor supersedes narrow mode
+    time_ctg_kw = (
+        dict(
+            time_cost=(
+                float(p["plan_clear_v_cruise"]),
+                float(p["plan_clear_t_react"]),
+                float(p["plan_clear_v_min"]),
+            )
+        )
+        if clear_on
         else {}
     )
     narrow_ctg_kw = (
@@ -123,6 +144,11 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             narrow_cost=float(p["plan_narrow_cost"]),
             narrow_reach_m=float(p["plan_narrow_reach_m"]),
         )
+        if narrow_on
+        else {}
+    )
+    narrow_cost_kw = (
+        dict(narrow=float(p["plan_narrow_weight"]), narrow_speed=float(p["plan_narrow_speed"]))
         if narrow_on
         else {}
     )
@@ -156,6 +182,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             obstacle_step_m=float(p["plan_obstacle_step_m"]),
             pivot_cost=float(p["plan_pivot_cost"]),
             **narrow_ctg_kw,
+            **time_ctg_kw,
         ),
         n_theta=int(p["plan_n_theta"]),
         horizon=int(p["plan_horizon"]),
@@ -171,5 +198,14 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
         turn_first=dict(
             start_deg=float(p["plan_turn_first_deg"]),
             reach_m=float(p["plan_turn_first_reach_m"]),
+        ),
+        governor=(
+            dict(
+                t_react=float(p["plan_clear_t_react"]),
+                v_min=float(p["plan_clear_v_min"]),
+                lookahead_s=float(p["plan_clear_lookahead_s"]),
+            )
+            if clear_on
+            else None
         ),
     )

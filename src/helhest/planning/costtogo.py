@@ -626,6 +626,51 @@ def _narrow_kernel(
 
 
 @wp.kernel
+def _time_cost_kernel(
+    hazard: wp.array3d(dtype=wp.float32),  # wall contact / unresolved settle, per pose
+    loose: wp.array3d(dtype=wp.float32),  # blocked under the heading bin alone
+    reach: int,  # [cells] past this the law allows cruise and nothing is charged
+    dt: int,  # the heading bin [bins]
+    cell: wp.float32,
+    v_cruise: wp.float32,
+    t_react: wp.float32,
+    v_min: wp.float32,
+    inv_flatness: wp.float32,  # 1 / flatness_weight: the solver multiplies the penalty by it
+    tilt: wp.array3d(dtype=wp.float32),  # the loose set's graded tilt, charged in place
+):
+    """Price every free pose by TRAVEL TIME under the clearance speed law
+    (control/governor.speed_law), so the route and the governor that enforces it agree.
+
+    Clearance is `(d - 0.5) * cell`, `d` the Chebyshev distance [cells] to the nearest hazard pose
+    within the heading bin: somewhere between d-1 and d cells, so the middle. The solver charges a step `arc * (1 + flatness * pen)`, so
+    `pen = (v_cruise / v - 1) / flatness` makes that `arc * v_cruise / v`: seconds, in metres at
+    cruise. Hugging an obstacle for 3 m at 0.5 m/s then costs what 9 m in the open does, and the
+    route swings wide wherever wide is faster; in a corridor with no wide option it pays the time.
+    """
+    r, c, t = wp.tid()
+    if loose[r, c, t] > 0.5:
+        return
+    ny = hazard.shape[0]
+    nx = hazard.shape[1]
+    nth = hazard.shape[2]
+    best = reach + 1
+    for i in range(-reach, reach + 1):
+        rr = wp.clamp(r + i, 0, ny - 1)
+        for j in range(-reach, reach + 1):
+            d = wp.max(wp.abs(i), wp.abs(j))
+            if d < best:
+                cc = wp.clamp(c + j, 0, nx - 1)
+                for k in range(-dt, dt + 1):
+                    if hazard[rr, cc, (t + k + nth) % nth] > 0.5:
+                        best = d
+    if best > reach:
+        return
+    # a pose d cells from a contact pose has between d-1 and d cells of room: take the middle
+    v = wp.min(v_cruise, wp.max(v_min, (float(best) - 0.5) * cell / t_react))
+    tilt[r, c, t] = tilt[r, c, t] + (v_cruise / v - 1.0) * inv_flatness
+
+
+@wp.kernel
 def _pose_cost_kernel(
     blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     graded_tilt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
@@ -783,6 +828,9 @@ class CostToGo:
         # and MPPI slows down in narrow poses (see _narrow_kernel, CostWeights.narrow).
         narrow_cost: float | None = None,
         narrow_reach_m: float = 0.6,  # [m] how far from a wall the narrow route charge reaches
+        # (v_cruise [m/s], t_react [s], v_min [m/s]): price the route in TRAVEL TIME under the
+        # clearance speed law (control/governor.py) instead of vetoing the spatial tube. None = off.
+        time_cost: tuple[float, float, float] | None = None,
         obstacle_step_m: float = 0.0,  # hard-block cells with a local step taller than this [m];
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
         pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives so
@@ -841,6 +889,16 @@ class CostToGo:
         self._narrow = narrow_cost is not None and self._mr > 0
         self.narrow_cost = 0.0 if narrow_cost is None else float(narrow_cost)
         self._narrow_reach = max(self._mr, int(round(narrow_reach_m / self.grid.cell_size)))
+        self._time = time_cost
+        if time_cost is not None:
+            if narrow_cost is not None:
+                raise ValueError("time_cost and narrow_cost are alternatives; set one")
+            if flatness_weight <= 0.0:
+                raise ValueError("time_cost rides on the solver's penalty: flatness_weight > 0")
+            v_cruise, t_react, _ = time_cost
+            self._time_reach = max(
+                1, int(math.ceil(v_cruise * t_react / self.grid.cell_size + 0.5))
+            )
         self._escape_reach = max(1, int(round(self.ESCAPE_REACH_M / self.grid.cell_size)))
         # a turn costs what the lattice charges for one when it has point turns; the deployed
         # value otherwise, so an escape that is mostly turning still reads cheaper than the cap
@@ -1308,6 +1366,42 @@ class CostToGo:
                     self.narrow_cost,
                 ],
                 outputs=[self.narrow, self._loose_tilt],
+                device=self.device,
+            )
+            feas, tilt = self._loose_blocked, self._loose_tilt
+        if self._time is not None:  # the spatial tube becomes a price in seconds
+            wp.launch(
+                _robust_kernel,
+                dim=self.V.shape,
+                inputs=[
+                    self.blocked,
+                    self.hazard,
+                    self.violation,
+                    self.graded_tilt,
+                    0,
+                    0,
+                    self._mt,
+                    self.robust_soft_weight,
+                ],
+                outputs=[self._loose_blocked, self._loose_tilt],
+                device=self.device,
+            )
+            v_cruise, t_react, v_min = self._time
+            wp.launch(
+                _time_cost_kernel,
+                dim=self.V.shape,
+                inputs=[
+                    self.hazard,
+                    self._loose_blocked,
+                    self._time_reach,
+                    self._mt,
+                    self.grid.cell_size,
+                    float(v_cruise),
+                    float(t_react),
+                    float(v_min),
+                    1.0 / self.flatness_weight,
+                ],
+                outputs=[self._loose_tilt],
                 device=self.device,
             )
             feas, tilt = self._loose_blocked, self._loose_tilt

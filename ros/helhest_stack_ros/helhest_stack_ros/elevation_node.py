@@ -75,6 +75,7 @@ from helhest.planning.coarse import mask_from_count
 from helhest import dynamics
 from helhest.control.command import condition_command
 from helhest.control.command import turn_first
+from helhest.control.governor import ClearanceGovernor
 from helhest.control.command import in_flight_history
 from helhest.control.command import JOINT_NAMES
 from helhest.control.command import to_engine_order
@@ -187,6 +188,10 @@ _PLAN_BUILD = frozenset(
         "plan_narrow_weight",
         "plan_narrow_cost",
         "plan_narrow_reach_m",
+        "plan_clear_t_react",
+        "plan_clear_v_cruise",
+        "plan_clear_v_min",
+        "plan_clear_lookahead_s",
         "plan_coarse_block_m",
         "plan_coarse_memory_m",
         "plan_coarse_win_m",
@@ -747,6 +752,11 @@ class ElevationNode(Node):
         d("plan_narrow_weight", PLAN_DEFAULTS["plan_narrow_weight"])
         d("plan_narrow_cost", PLAN_DEFAULTS["plan_narrow_cost"])
         d("plan_narrow_reach_m", PLAN_DEFAULTS["plan_narrow_reach_m"])
+        # Careful where it is tight: the clearance speed governor (control/governor.py). 0 = off.
+        d("plan_clear_t_react", PLAN_DEFAULTS["plan_clear_t_react"])
+        d("plan_clear_v_cruise", PLAN_DEFAULTS["plan_clear_v_cruise"])
+        d("plan_clear_v_min", PLAN_DEFAULTS["plan_clear_v_min"])
+        d("plan_clear_lookahead_s", PLAN_DEFAULTS["plan_clear_lookahead_s"])
         # ROBUST-MU replicas: each MPPI candidate is rolled out under this many friction hypotheses
         # spanning the current uncertainty band and ranked by its WORST outcome, so the winner is a
         # plan that works whether the ground grips or slips (the over/understeer sim-to-real gap).
@@ -1024,6 +1034,10 @@ class ElevationNode(Node):
         self.plan_narrow_weight: float = g("plan_narrow_weight")
         self.plan_narrow_cost: float = g("plan_narrow_cost")
         self.plan_narrow_reach_m: float = g("plan_narrow_reach_m")
+        self.plan_clear_t_react: float = g("plan_clear_t_react")
+        self.plan_clear_v_cruise: float = g("plan_clear_v_cruise")
+        self.plan_clear_v_min: float = g("plan_clear_v_min")
+        self.plan_clear_lookahead_s: float = g("plan_clear_lookahead_s")
         self.plan_n_mu: int = g("plan_n_mu")
         self.plan_mu_span: float = g("plan_mu_span")
         self.plan_mu_adapt: bool = g("plan_mu_adapt")
@@ -1170,6 +1184,16 @@ class ElevationNode(Node):
         self.planner = MppiGpu(self.plan_sim, cfg.cost, sampling=cfg.sampling, n_theta=cfg.n_theta)
         self.planner.reset_nominal(cfg.nominal_reset)
         self.planner.set_mu_band(1.0, cfg.mu_span)
+        self.governor: ClearanceGovernor | None = None
+        if cfg.governor is not None:
+            self.governor = ClearanceGovernor(
+                dynamics.robot_params(cfg.wheel_width),
+                plan_dt=float(self.planner.cw.dt),
+                t_react=cfg.governor["t_react"],
+                v_min=cfg.governor["v_min"],
+                lookahead_s=cfg.governor["lookahead_s"],
+                device=self.device,
+            )
         if self.plan_wmin < 0.0:
             self.planner.set_wmin(0.0)  # reverse stays locked until the gate in _plan opens it
         # ONLINE mu estimation: recenter the planner's friction on the realized turn gain (both
@@ -2278,6 +2302,12 @@ class ElevationNode(Node):
                             else None
                         ),
                     )
+            if self.governor is not None:
+                # only as fast as the room along the next second of the plan allows
+                sim = self.planner.sim
+                wl, wr = self.governor.cap(
+                    wl, wr, sim.controlled, sim.elevation, self.planner.measured, sim.grid
+                )
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
         turn_boost = (
             self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost

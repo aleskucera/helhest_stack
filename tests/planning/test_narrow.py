@@ -8,6 +8,7 @@ must stay routable, with exactly those poses marked.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import warp as wp
 
 from helhest.control.mppi import CostParams
@@ -77,3 +78,35 @@ def test_the_route_charge_grades_toward_the_middle():
     # from the wall side toward the centre line the charge never rises, and it does fall
     seq = [charge[r] for r in rows]
     assert all(a >= b - 1e-6 for a, b in zip(seq, seq[1:])) and seq[0] > seq[-1]
+
+
+def _solve_time() -> CostToGo:
+    ctg = CostToGo(
+        GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0),
+        RobotParams(wheel_width=0.1),
+        SolverParams(),
+        n_theta=24,
+        robust_margin_m=0.2,
+        robust_margin_deg=15.0,
+        time_cost=(1.5, 0.5, 0.15),
+    )
+    goal = ((N // 2) * CELL + 6.0, (N // 2) * CELL)
+    ctg.compute(wp.array(_corridor(), dtype=wp.float32), goal)
+    return ctg
+
+
+def test_time_cost_keeps_the_corridor_routable_and_prices_the_walls_in_time():
+    ctg = _solve_time()
+    cap = ctg._vcap
+    r, c = N // 2 - 2, N // 2  # 0.48 m off the centre line: dead under the veto
+    assert (ctg.V.numpy()[r, c] < 0.9 * cap).any()
+    charge = ctg._loose_tilt.numpy()[:, c, 0]
+    free = ctg._loose_blocked.numpy()[:, c, 0] < 0.5
+    rows = [q for q in range(N // 2 - 4, N // 2 + 1) if free[q]]
+    seq = [charge[q] for q in rows]
+    assert all(a >= b - 1e-6 for a, b in zip(seq, seq[1:])) and seq[0] > seq[-1]
+    # the centre line is past the law's reach: no charge. The first free pose from the wall is at
+    # most two cells from a contact pose, so it pays at least the two-cell multiplier
+    # v_cruise / v = 1.5 / (0.48 / 0.5), as a penalty (multiplier - 1) / flatness_weight
+    assert seq[-1] < 1e-3
+    assert seq[0] >= (1.5 / (2 * CELL / 0.5) - 1.0) / ctg.flatness_weight - 1e-4
