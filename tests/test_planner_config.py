@@ -34,6 +34,16 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         saturation=p["plan_saturation"],
         # added after the move: the wall veto, which the node now sets from the table
         veto=p["plan_wall_veto"],
+        # added after the move: the clearance governor's MPPI term, present only when it is on
+        **(
+            dict(
+                clear_time=p["plan_clear_mppi_weight"],
+                clear_t_react=p["plan_clear_t_react"],
+                clear_v_min=p["plan_clear_v_min"],
+            )
+            if p["plan_clear_t_react"] > 0.0
+            else {}
+        ),
     )
     sampling = SamplingConfig(
         wmax=p["plan_wmax"],
@@ -52,6 +62,12 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         obstacle_step_m=p["plan_obstacle_step_m"],
         pivot_cost=p["plan_pivot_cost"],
     )
+    if p["plan_clear_t_react"] > 0.0:  # added after the move: the route priced in travel time
+        ctg["time_cost"] = (
+            p["plan_clear_v_cruise"],
+            p["plan_clear_t_react"],
+            p["plan_clear_v_min"],
+        )
     return cost, sampling, ctg
 
 
