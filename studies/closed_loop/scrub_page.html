@@ -236,8 +236,9 @@
     { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
     { k: "route", name: "headings with a route", unit: "", grid: "route" },
   ];
-  const ORDER = ["gap", "slalom", "pillars", "pocket", "ridge", "bumpy", "false_door"];
+  let ORDER = ["gap", "slalom", "pillars", "pocket", "ridge", "bumpy", "false_door"];
   const LABEL = { false_door: "false door" };
+  const labelOf = (name) => LABEL[name] || name.replace(/_/g, " ");
 
   // --- colour ramps, one per layer role -------------------------------------------------
   function ramp(stops) {
@@ -336,7 +337,8 @@
       ctx.stroke();
     }
     if (show.goal) {
-      const gx = px(w.goal[0]), gy = py(w.goal[1]);
+      const goal = meta.g || w.goal;  // a recording with a goal per frame draws that frame's
+      const gx = px(goal[0]), gy = py(goal[1]);
       ctx.fillStyle = cssVar("--goal"); ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 2;
       star(ctx, gx, gy, 13, 6);
       ctx.fill(); ctx.stroke();
@@ -406,7 +408,7 @@
     const v = $("m-verdict");
     v.textContent = w.reached ? "REACHED" : "did not reach";
     v.className = "verdict " + (w.reached ? "ok" : "miss");
-    $("m-goal").textContent = fmt(w.goal[0], 1) + ", " + fmt(w.goal[1], 1);
+    $("m-goal").textContent = fmt((meta.g || w.goal)[0], 1) + ", " + fmt((meta.g || w.goal)[1], 1);
     $("m-win").textContent = (w.n * w.cell).toFixed(0) + " m @ " + w.cell.toFixed(2) + " m";
     $("m-rwin").textContent = (w.nr * w.cell).toFixed(0) + " m @ " + w.cell.toFixed(2) + " m";
     const cl = $("m-cl"), touching = meta.cl != null && meta.cl < 0;
@@ -444,7 +446,7 @@
       const w = M.worlds[name]; if (!w) continue;
       const b = document.createElement("button");
       b.className = "tab"; b.setAttribute("role", "tab"); b.id = "tab-" + name;
-      b.innerHTML = '<span class="dot' + (w.reached ? "" : " miss") + '"></span>' + (LABEL[name] || name);
+      b.innerHTML = '<span class="dot' + (w.reached ? "" : " miss") + '"></span>' + labelOf(name);
       b.onclick = () => selectWorld(name);
       t.appendChild(b);
     }
@@ -568,6 +570,9 @@
     .then((r) => r.json())
     .then((m) => {
       M = m;
+      if (m.order) ORDER = m.order;
+      if (m.title) { document.querySelector("h1").textContent = m.title; document.title = m.title; }
+      if (m.intro) document.querySelector("p.sub").textContent = m.intro;
       buildTabs(); buildLayers(); buildSpeeds();
       const first = ORDER.find((n) => M.worlds[n]);
       if (first) selectWorld(first);

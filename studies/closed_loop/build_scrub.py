@@ -62,6 +62,7 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path, rate: float) -> 
     # without solids. Older runs have none.
     clear = d["clearance"] if "clearance" in d.files else None
     cap = float(v[np.isfinite(v)].max()) if np.isfinite(v).any() else 1.0
+    goals = d["hist_goal"] if "hist_goal" in d.files else None
 
     strips = {k: [] for k in LAYERS}
     frames = []
@@ -134,6 +135,8 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path, rate: float) -> 
                     if clear is None or int(f) >= len(clear) or not np.isfinite(clear[int(f)])
                     else round(float(clear[int(f)]), 3)
                 ),
+                # the goal this frame planned toward, where it changed over the run (real bags)
+                **({} if goals is None else dict(g=[round(float(x), 2) for x in goals[i]])),
             )
         )
     nbytes = 0
@@ -185,6 +188,11 @@ def main() -> None:
     p.add_argument("--dir", default="studies/closed_loop/out/sweep2")
     p.add_argument("--out", default="studies/closed_loop/out/scrub")
     p.add_argument("--rate", type=float, default=14.5, help="[Hz] frame rate of runs without `dt`")
+    # Recordings that are not the sim worlds -- the node's plan_debug_record on real bags
+    # (studies/bag_replay) -- name their own runs and say what the page is showing.
+    p.add_argument("--runs", nargs="*", default=None, help="npz stems to build, in tab order")
+    p.add_argument("--title", default=None, help="the page's heading, for non-sim recordings")
+    p.add_argument("--intro", default=None, help="the page's intro paragraph")
     a = p.parse_args()
     src, out = pathlib.Path(a.dir), pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -203,8 +211,15 @@ def main() -> None:
         },
         "worlds": {},
     }
+    runs = a.runs if a.runs is not None else ORDER
+    if a.runs is not None:
+        manifest["order"] = runs
+    if a.title:
+        manifest["title"] = a.title
+    if a.intro:
+        manifest["intro"] = a.intro
     total = 0
-    for w in ORDER:
+    for w in runs:
         f = src / f"{w}.npz"
         if not f.exists():
             print(f"  {w:<8s} missing, skipped")

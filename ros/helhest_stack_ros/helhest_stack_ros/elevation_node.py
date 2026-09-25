@@ -25,6 +25,7 @@ world frame is bootstrapped to odom at the first scan.
 
 from __future__ import annotations
 
+import json
 import math
 import time
 import traceback
@@ -257,6 +258,12 @@ class ElevationNode(Node):
         self.map_ages: wp.array | None = None  # per-map-point last-seen frame (recency pruning)
         self.map_streak: wp.array | None = None  # per-map-point seen-through streak (persist carve)
         self._frame: int = 0  # monotonic frame counter for recency stamps
+        self._rec: dict[str, list] | None = (
+            {k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "meta", "goal", "t", "trail")}
+            if self.plan_debug_record
+            else None
+        )
+        self._rec_planned: int = 0  # planned frames so far, for the every-Nth rule
         # Latest map->odom correction, cached from the last processed cloud and re-broadcast
         # at the full odom rate (see _odom_tf_callback) so base_link stays dense for TF lookups.
         self._map_T_odom: np.ndarray | None = None
@@ -838,6 +845,11 @@ class ElevationNode(Node):
         # Planner-input dump to /tmp/plan_dump.npz, one-shot. 1 = the next planned frame;
         # 2 = the first frame planned toward the NEXT goal (what you want for "why didn't it turn").
         d("plan_debug_dump", 0)
+        # Frame-history recording for the replay page (studies/closed_loop/build_scrub.py): the
+        # routing maps, the coarse map and the pose of every Nth planned frame, plus the final
+        # accumulated map, written as one npz to this path when the node shuts down. "" = off.
+        d("plan_debug_record", "")
+        d("plan_debug_record_every", 4)
         # deceleration cap [rad/s^2] -- separate from accel so stops can be firmer than the gentle
         # launch. 12.0 = ground ~4.2 m/s^2, stops from cruise in ~0.32s. None/<=0 would mean symmetric.
         d("plan_max_decel", 12.0)
@@ -990,6 +1002,8 @@ class ElevationNode(Node):
         self.plan_straight_frac: float = g("plan_straight_frac")
         self.plan_debug_cmd: int = int(g("plan_debug_cmd"))
         self.plan_debug_dump: int = int(g("plan_debug_dump"))
+        self.plan_debug_record: str = str(g("plan_debug_record"))
+        self.plan_debug_record_every: int = max(1, int(g("plan_debug_record_every")))
         self.plan_spin_frac: float = g("plan_spin_frac")
         self.plan_spin_min: float = g("plan_spin_min")
         self.plan_elite_frac: float = g("plan_elite_frac")
@@ -1788,6 +1802,133 @@ class ElevationNode(Node):
         cloud.data = pts.tobytes()
         self.pub_accum.publish(cloud)
 
+    def _record_frame(
+        self,
+        mf: _MapFrame,
+        V: wp.array,
+        world_T_base: np.ndarray,
+        eyaw: float,
+        d_goal: float,
+        stamp,
+    ) -> None:
+        """Keep this planned frame for the replay page, in drive_sim's npz layout.
+
+        The page draws every layer over ONE lattice, so the routing field (kr x kr coarser than
+        the raster) is expanded back onto the raster's cells and padded to its size. The command
+        stored is the one published on the PREVIOUS planned frame: this frame's is not
+        conditioned yet at this point, and the difference is one frame.
+        """
+        rec = self._rec
+        rec["trail"].append([mf.ex, mf.ey])
+        self._rec_planned += 1
+        if (self._rec_planned - 1) % self.plan_debug_record_every != 0:
+            return
+        rwh, rww = mf.relev_mem.shape
+        kr = self._plan_kr
+        vh = V.numpy()
+        n_theta = vh.shape[2]
+        cap = float(self.ctg._vcap)
+
+        def expand(a: np.ndarray, fill: float) -> np.ndarray:
+            a = np.repeat(np.repeat(a, kr, axis=0), kr, axis=1)
+            out = np.full((rwh, rww), fill, np.float32)
+            out[: a.shape[0], : a.shape[1]] = a[:rwh, :rww]
+            return out
+
+        rec["h"].append(np.asarray(mf.relev_mem, np.float32))
+        rec["seen"].append(np.asarray(mf.relev_measured, np.uint8))
+        rec["blk"].append(expand(self.ctg.blocked.numpy().mean(2), 1.0))
+        rec["v"].append(expand(vh.min(2), cap))
+        rec["route"].append(expand((vh < 0.9 * cap).mean(2), 0.0))
+        rec["cv"].append(
+            np.zeros((1, 1), np.float32)
+            if self.coarse is None
+            else self.coarse.V.numpy()[:, :, 0].astype(np.float32)
+        )
+        R = world_T_base[:3, :3]
+        roll = float(np.arctan2(R[2, 1], R[2, 2]))
+        pitch = float(np.arcsin(-np.clip(R[2, 0], -1.0, 1.0)))  # nose-up = NEGATIVE
+        rcell = mf.cell * kr
+        c, r = int((mf.ex - mf.rxmin) / rcell), int((mf.ey - mf.rymin) / rcell)
+        t = int(round((eyaw % (2.0 * np.pi)) / (2.0 * np.pi / n_theta))) % n_theta
+        v_here = (
+            float(vh[r, c, t]) if 0 <= r < vh.shape[0] and 0 <= c < vh.shape[1] else float("nan")
+        )
+        rec["meta"].append(
+            [
+                self._rec_planned - 1,
+                mf.ex,
+                mf.ey,
+                eyaw,
+                float(self._prev_cmd[0]),  # /cmd_joints order: left, rear, right
+                float(self._prev_cmd[2]),
+                d_goal,
+                mf.rxmin,
+                mf.rymin,
+                roll,
+                pitch,
+                v_here,
+            ]
+        )
+        rec["goal"].append([float(self.goal_xy[0]), float(self.goal_xy[1])])
+        rec["t"].append(stamp.sec + stamp.nanosec * 1e-9)
+
+    def _record_save(self) -> None:
+        """Write the recording, plus the final accumulated map over the coarse memory's extent
+        and the coarse map's own layers, so the sealing can be audited offline."""
+        rec = self._rec
+        if rec is None or not rec["meta"]:
+            return
+        t = np.asarray(rec["t"], np.float64)
+        out: dict = dict(
+            plan_config=np.array(json.dumps({k: getattr(self, k) for k in PLAN_DEFAULTS})),
+            dt=float(np.median(np.diff(t))) if len(t) > 1 else 0.0,
+            trail=np.asarray(rec["trail"], np.float64),
+            goal=np.asarray(rec["goal"][-1], np.float64),
+            cell=float(self.resolution),
+            reached=bool(self._goal_reached),
+            coarse_cell=(0.0 if self.coarse is None else self.coarse.grid.cell_size),
+            coarse_memory=(self.coarse is not None and self.coarse.persistent),
+            coarse_bounds=np.array(
+                (
+                    [self.coarse.grid.origin_x, self.coarse.grid.origin_y]
+                    if self.coarse is not None
+                    else [0.0, 0.0]
+                ),
+                np.float64,
+            ),
+            **{f"hist_{k}": np.asarray(v) for k, v in rec.items() if k != "trail"},
+        )
+        if self.coarse is not None and self.map_wp is not None and len(self.map_wp):
+            g = self.coarse.grid
+            fine_cell = g.cell_size / self.coarse.factor  # the map's own cell; blocks are whole
+            bounds = (
+                g.origin_x,
+                g.origin_x + g.cells_x * g.cell_size,
+                g.origin_y,
+                g.origin_y + g.cells_y * g.cell_size,
+            )
+            with wp.ScopedDevice(self.device):
+                lay = HeightMapBuilder(fine_cell, bounds, device=self.device).build(self.map_wp)
+                out["final_h"] = lay.max.numpy().astype(np.float32)
+                out["final_seen"] = (lay.count.numpy() > 0).astype(np.uint8)
+            out["final_bounds"] = np.array([bounds[0], bounds[2]], np.float64)
+            for k in ("passable", "seen", "coverage", "bridged", "floor"):
+                out[f"coarse_{k}"] = getattr(self.coarse, k).numpy()
+            out["coarse_V"] = self.coarse.V.numpy()[:, :, 0]
+        np.savez_compressed(self.plan_debug_record, **out)
+        self.get_logger().info(
+            f"plan recording -> {self.plan_debug_record} ({len(rec['meta'])} frames)"
+        )
+
+    def destroy_node(self) -> bool:
+        if self._rec is not None:
+            try:
+                self._record_save()
+            except Exception as e:  # a diagnostic must never block the shutdown
+                self.get_logger().warn(f"plan recording failed: {e}")
+        return super().destroy_node()
+
     def _publish_grid(self, pub, elev: np.ndarray, xmin: float, ymin: float, cell: float, stamp):
         ny, nx = elev.shape
         tm = TerrainMap(resolution=cell, bounds=(xmin, xmin + nx * cell, ymin, ymin + ny * cell))
@@ -2005,6 +2146,8 @@ class ElevationNode(Node):
                     self.coarse.grid.cell_size,
                     stamp,
                 )
+            if self._rec is not None:
+                self._record_frame(mf, V, world_T_base, eyaw, d_goal, stamp)
             # ONE-SHOT PLANNER DUMP. Set plan_debug_dump to 1 and the next planned frame writes
             # everything the planner was given -- routing elevation, the MEASURED mask, the goal
             # and pose in the routing frame, and V -- so an offline probe can be run on exactly

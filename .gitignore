@@ -34,3 +34,4 @@ data/
 site/
 .tools/
 studies/dynamic/out/
+studies/bag_replay/out/
