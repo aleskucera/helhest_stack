@@ -75,6 +75,9 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_clear_v_cruise": 1.5,
     "plan_clear_v_min": 0.15,
     "plan_clear_lookahead_s": 1.0,
+    # [cost per second] MPPI's price for the time the governor would add to a manoeuvre, so it
+    # picks one with room instead of one that has to be braked (CostWeights.clear_time)
+    "plan_clear_mppi_weight": 100.0,
     # robot
     "plan_wheel_width": 0.10,
     # the coarse "which way" layer (planning/coarse.py) and the turn-first brake
@@ -152,6 +155,12 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
         if narrow_on
         else {}
     )
+    if clear_on:
+        narrow_cost_kw = dict(
+            clear_time=float(p["plan_clear_mppi_weight"]),
+            clear_t_react=float(p["plan_clear_t_react"]),
+            clear_v_min=float(p["plan_clear_v_min"]),
+        )
     return PlannerConfig(
         cost=CostParams(
             goal_running=float(p["plan_goal_running"]),

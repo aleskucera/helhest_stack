@@ -102,6 +102,48 @@ def _plan_clearance_kernel(
     out[k] = best
 
 
+@wp.kernel
+def clearance_map_kernel(
+    elevation: wp.array2d(dtype=wp.float32),
+    measured: wp.array2d(dtype=wp.float32),  # 1 = real data
+    cell: wp.float32,
+    face_h: wp.float32,  # [m] a rise this tall to a 4-neighbour is a wall face
+    reach: int,  # [cells] distances past this read as `reach * cell`
+    out: wp.array2d(dtype=wp.float32),  # [m] distance from each cell centre to the nearest face
+):
+    """Per-cell distance to the nearest wall-face cell, the same face test as the governor, so
+    MPPI can read a footprint's clearance with a few lookups per rollout step instead of a search.
+    Built once per frame on the MPPI terrain."""
+    r, c = wp.tid()
+    ny = elevation.shape[0]
+    nx = elevation.shape[1]
+    best = float(reach) * cell
+    for i in range(-reach, reach + 1):
+        rr = r + i
+        if rr < 1 or rr >= ny - 1:
+            continue
+        for j in range(-reach, reach + 1):
+            cc = c + j
+            if cc < 1 or cc >= nx - 1:
+                continue
+            d = wp.sqrt(float(i * i + j * j)) * cell
+            if d >= best or measured[rr, cc] < 0.5:
+                continue
+            h = elevation[rr, cc]
+            rise = float(0.0)
+            if measured[rr - 1, cc] > 0.5:
+                rise = wp.max(rise, h - elevation[rr - 1, cc])
+            if measured[rr + 1, cc] > 0.5:
+                rise = wp.max(rise, h - elevation[rr + 1, cc])
+            if measured[rr, cc - 1] > 0.5:
+                rise = wp.max(rise, h - elevation[rr, cc - 1])
+            if measured[rr, cc + 1] > 0.5:
+                rise = wp.max(rise, h - elevation[rr, cc + 1])
+            if rise > face_h:
+                best = d
+    out[r, c] = best
+
+
 class ClearanceGovernor:
     """Scale MPPI's first command so the body's fastest point moves no faster than the clearance
     along the next `lookahead_s` of the plan allows. Device work is one tiny kernel; the only

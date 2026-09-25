@@ -69,3 +69,17 @@ def test_a_pivot_is_slowed_by_its_tail_swing():
     gov = _gov()
     wl, wr = gov.cap(-2.0, 2.0, _plan(y=4.0), elev, meas, grid)  # no forward speed at all
     assert abs(wr) < 2.0 and wl == pytest.approx(-wr)
+
+
+def test_the_clearance_map_is_the_distance_to_the_wall_face():
+    from helhest.control.governor import clearance_map_kernel
+
+    elev, meas, grid = _scene(wall_y=5.0)
+    out = wp.zeros((N, N), dtype=wp.float32)
+    wp.launch(clearance_map_kernel, dim=(N, N), inputs=[elev, meas, CELL, 0.35, 40], outputs=[out])
+    m = out.numpy()
+    face_row = int(5.0 / CELL)  # the first wall cell
+    for y in (4.0, 4.5, 4.9):
+        r = int(y / CELL)
+        assert m[r, N // 2] == pytest.approx((face_row - r) * CELL, abs=1e-5)
+    assert m[int(1.0 / CELL), N // 2] == pytest.approx(40 * CELL)  # past the reach

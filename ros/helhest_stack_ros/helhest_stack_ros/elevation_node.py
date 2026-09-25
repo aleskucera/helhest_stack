@@ -192,6 +192,7 @@ _PLAN_BUILD = frozenset(
         "plan_clear_v_cruise",
         "plan_clear_v_min",
         "plan_clear_lookahead_s",
+        "plan_clear_mppi_weight",
         "plan_coarse_block_m",
         "plan_coarse_memory_m",
         "plan_coarse_win_m",
@@ -757,6 +758,7 @@ class ElevationNode(Node):
         d("plan_clear_v_cruise", PLAN_DEFAULTS["plan_clear_v_cruise"])
         d("plan_clear_v_min", PLAN_DEFAULTS["plan_clear_v_min"])
         d("plan_clear_lookahead_s", PLAN_DEFAULTS["plan_clear_lookahead_s"])
+        d("plan_clear_mppi_weight", PLAN_DEFAULTS["plan_clear_mppi_weight"])
         # ROBUST-MU replicas: each MPPI candidate is rolled out under this many friction hypotheses
         # spanning the current uncertainty band and ranked by its WORST outcome, so the winner is a
         # plan that works whether the ground grips or slips (the over/understeer sim-to-real gap).
@@ -1038,6 +1040,7 @@ class ElevationNode(Node):
         self.plan_clear_v_cruise: float = g("plan_clear_v_cruise")
         self.plan_clear_v_min: float = g("plan_clear_v_min")
         self.plan_clear_lookahead_s: float = g("plan_clear_lookahead_s")
+        self.plan_clear_mppi_weight: float = g("plan_clear_mppi_weight")
         self.plan_n_mu: int = g("plan_n_mu")
         self.plan_mu_span: float = g("plan_mu_span")
         self.plan_mu_adapt: bool = g("plan_mu_adapt")
@@ -2224,6 +2227,8 @@ class ElevationNode(Node):
                 self.planner.set_veto(self.ctg.hazard, self.sgrid)
             if self.planner.cw.narrow > 0.0:  # drive slowly where the router's tube is tight
                 self.planner.set_narrow(self.ctg.narrow, self.sgrid)
+            if self.planner.cw.clear_time > 0.0:  # the wall-distance map the clearance cost reads
+                self.planner.update_clearance()
             self._load_command_history()
             self.planner.replan(state_l, goal_l, int(self.plan_n_refine))
             self._ck("plan:replan")

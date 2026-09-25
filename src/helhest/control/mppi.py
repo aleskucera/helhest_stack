@@ -13,6 +13,7 @@ Kernels (all suffixed _kernel):
   _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
 """
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,6 +25,7 @@ from ..engine.terrain import _locate
 from ..engine.terrain import Grid
 from ..engine.terrain import sample_field
 from ..profiling import StageProfiler
+from .governor import clearance_map_kernel
 
 
 def _n_bisect(n_cand: int) -> int:
@@ -127,6 +129,13 @@ class CostWeights:
     # this slowly". Speed of the body's fastest point, so a pivot is limited as well as a drive.
     narrow: float
     narrow_speed: float  # [m/s]
+    # TIME LOST TO THE CLEARANCE LAW (control/governor.py), per rollout: the seconds the governor
+    # would add, dt * (s / v_allowed - 1) per step where the fastest body point's speed s exceeds
+    # v_allowed = max(clear_v_min, footprint clearance / clear_t_react). Lets MPPI choose a manoeuvre
+    # with room over one the governor would have to brake, instead of learning it by stalling.
+    clear_time: float
+    clear_t_react: float
+    clear_v_min: float
     # (alpha - 1) -> grip recovery: total_grip = (alpha-1)*m*g/k_turn. 0 disables saturation.
     inv_k_turn: float
     dt: float  # rollout timestep [s] for the accel term of the saturation demand
@@ -205,6 +214,11 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # cost-to-go built with narrow_cost and set_narrow() called, or the field stays zero.
     narrow: float = 0.0
     narrow_speed: float = 0.4  # [m/s]
+    # [cost per second lost] to the clearance law, see CostWeights.clear_time. 0 = off; it also needs
+    # update_clearance() each frame, or the map reads "no wall" everywhere.
+    clear_time: float = 0.0
+    clear_t_react: float = 0.125  # [s]
+    clear_v_min: float = 0.15  # [m/s]
 
     def build(self) -> CostWeights:
         cw = CostWeights()
@@ -225,6 +239,9 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.reverse = self.reverse
         cw.narrow = self.narrow
         cw.narrow_speed = self.narrow_speed
+        cw.clear_time = self.clear_time
+        cw.clear_t_react = self.clear_t_react
+        cw.clear_v_min = self.clear_v_min
         cw.inv_k_turn = 0.0  # armed by MppiGpu from the sim's solver (0 = saturation off)
         cw.dt = 0.1  # overwritten by MppiGpu from the sim's solver
         return cw
@@ -424,6 +441,7 @@ def _cost_kernel(
     ),  # [ny, nx, n_theta] cost-to-go V(x,y,theta); the goal cost
     veto_field: wp.array3d(dtype=float),  # [ny, nx, n_theta] 1 = the cost-to-go refuses this pose
     narrow_field: wp.array3d(dtype=float),  # [ny, nx, n_theta] 1 = narrow: drive it slowly
+    clear_field: wp.array2d(dtype=float),  # [ny, nx] on sgrid: distance to the nearest wall face
     n_theta: int,
     cw: CostWeights,
     robot: Robot,  # envelope + feasibility thresholds (shared with the cost-to-go feasibility)
@@ -443,6 +461,7 @@ def _cost_kernel(
     tip_sum = float(0.0)
     veto_sum = float(0.0)
     narrow_sum = float(0.0)
+    time_sum = float(0.0)
     unk_sum = float(0.0)
     rev_sum = float(0.0)
     edge = float(0.4)  # soft-wall margin inside the grid border
@@ -543,6 +562,39 @@ def _cost_kernel(
             if over > 0.0:
                 nf = sample_lattice(narrow_field, grid, n_theta, pose[0], pose[1], yaw_eff)
                 narrow_sum += nf * over * over
+        if cw.clear_time > 0.0:
+            # the footprint's clearance: the wall-distance map read around its perimeter
+            tail = -robot.wheel_pos[2][0] + robot.wheel_radius
+            hw = robot.half_track + wp.where(
+                robot.wheel_half_width > 0.0, robot.wheel_half_width, robot.wheel_radius
+            )
+            ca = wp.cos(pose[2])
+            sa = wp.sin(pose[2])
+            cmin = float(1.0e3)
+            for q in range(12):
+                u = -tail + (robot.wheel_radius + tail) * float(q) / 11.0
+                for side in range(2):
+                    w = wp.where(side == 0, -hw, hw)
+                    cmin = wp.min(
+                        cmin,
+                        sample_field(
+                            clear_field, sgrid, pose[0] + ca * u - sa * w, pose[1] + sa * u + ca * w
+                        ),
+                    )
+            for q in range(7):
+                w = -hw + 2.0 * hw * float(q) / 6.0
+                for end in range(2):
+                    u = wp.where(end == 0, -tail, robot.wheel_radius)
+                    cmin = wp.min(
+                        cmin,
+                        sample_field(
+                            clear_field, sgrid, pose[0] + ca * u - sa * w, pose[1] + sa * u + ca * w
+                        ),
+                    )
+            fastest = wp.abs(v) + tail * wp.abs(wz)
+            allowed = wp.max(cw.clear_v_min, cmin / cw.clear_t_react)
+            if fastest > allowed:
+                time_sum += cw.dt * (fastest / allowed - 1.0)
         if cw.tip > 0.0:
             ld = loads[t, r]
             min_n = wp.min(wp.min(ld[0], ld[1]), ld[2])
@@ -576,6 +628,7 @@ def _cost_kernel(
         + cw.smoothness * smooth_sum
         + cw.turn * turn_sum
         + cw.reverse * rev_sum
+        + cw.clear_time * time_sum
         + safe
     )
 
@@ -859,6 +912,8 @@ class MppiGpu:
             # behaviour exactly
             self.veto_field = wp.zeros((ny, nx, n_theta), dtype=wp.float32)
             self.narrow_field = wp.zeros((ny, nx, n_theta), dtype=wp.float32)  # set_narrow
+            # [m] distance to the nearest wall face on the sim grid; far everywhere until update_clearance
+            self.clear_field = wp.full((ny, nx), 1.0e3, dtype=wp.float32)
             # observed-cell mask on the sim grid (1 = real data); all-measured by default so the
             # unknown-cell penalty is inert until a perception mask is supplied (set_measured)
             self.measured = wp.full((ny, nx), 1.0, dtype=wp.float32)
@@ -946,6 +1001,25 @@ class MppiGpu:
         if grid is not None:
             self.lattice_grid = grid
 
+    def update_clearance(self, reach_m: float = 1.0) -> None:
+        """Rebuild the wall-distance map from the sim's current terrain and `measured` mask, for
+        the clearance-time cost. Call after set_terrain and before replan, every frame; a wall is a
+        rise taller than a wheel radius, as in the governor."""
+        grid = self.sim.grid
+        wp.launch(
+            clearance_map_kernel,
+            dim=self.clear_field.shape,
+            inputs=[
+                self.sim.elevation,
+                self.measured,
+                float(grid.cell_size),
+                float(self.robot.wheel_radius),
+                max(1, int(math.ceil(reach_m / float(grid.cell_size)))),
+            ],
+            outputs=[self.clear_field],
+            device=self.device,
+        )
+
     def set_narrow(self, narrow, grid=None):
         """Copy the cost-to-go's NARROW field (`CostToGo.narrow`) into the stable buffer the cost
         kernel reads. Same shape, grid and call rule as `set_veto`; inert while
@@ -1004,6 +1078,7 @@ class MppiGpu:
                 self.lattice_field,
                 self.veto_field,
                 self.narrow_field,
+                self.clear_field,
                 self.n_theta,
                 self.cw,
                 self.robot,

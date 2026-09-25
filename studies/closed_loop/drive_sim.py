@@ -541,6 +541,8 @@ def drive(a: argparse.Namespace) -> dict:
                 planner.set_veto(ctg.hazard, sgrid)
             if a.cfg.cost.narrow > 0.0:  # drive slowly where the router's tube is tight
                 planner.set_narrow(ctg.narrow, sgrid)
+            if a.cfg.cost.clear_time > 0.0:  # the wall-distance map the clearance-time cost reads
+                planner.update_clearance()
             planner.replan(state_l, goal_l, a.refine)
             u = planner.nominal()
             wl, wr = float(u[0, 0]), float(u[0, 1])
