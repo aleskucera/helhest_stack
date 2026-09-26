@@ -181,7 +181,7 @@ class TerrainValueField:
         source costs 0; what this adds is sources that already carry a price. That is what a
         coarser layer hands down -- "leaving the window here still costs you this much" -- and it
         is what makes the fine solve prefer the right exit instead of treating every boundary cell
-        as equally good. See `boundary_seeds`.
+        as equally good. See `seed_from_coarse`.
         """
         if isinstance(values, wp.array):
             wp.copy(self._seeds, values)
@@ -193,26 +193,39 @@ class TerrainValueField:
         coarse_value: wp.array,
         coarse_grid: Grid,
         fine_grid: Grid,
+        goal_xy: tuple[float, float],
         band: int | None = None,
     ) -> None:
         """Seed this window's border from a coarser layer's cost-to-go. See `hierarchical`.
 
         `fine_grid` says where the window sits in the world THIS frame -- it moves with the robot,
-        so it is an argument rather than state. `band` is the ring thickness in cells and defaults
-        to the furthest a single move reaches, because a thinner ring can be jumped clean over.
+        so it is an argument rather than state. `goal_xy` is in the same world frame: a goal inside
+        the window is seeded alone and the ring is not, since the heading-free coarse layer
+        understates distance in this layer's metric. `band` is the ring thickness in cells and
+        defaults to the furthest a single move reaches, because a thinner ring can be jumped
+        clean over.
         """
         if coarse_value.shape[2] != 1:
             raise ValueError(
                 f"the coarse layer is expected to be heading-free (n_theta=1, omni_control_set); "
                 f"got {coarse_value.shape[2]} headings"
             )
+        # the kernel works from min corners; the grids carry cell centres
+        fine_x0 = float(fine_grid.origin_x) - 0.5 * float(fine_grid.cell_size)
+        fine_y0 = float(fine_grid.origin_y) - 0.5 * float(fine_grid.cell_size)
+        coarse_x0 = float(coarse_grid.origin_x) - 0.5 * float(coarse_grid.cell_size)
+        coarse_y0 = float(coarse_grid.origin_y) - 0.5 * float(coarse_grid.cell_size)
         wp.launch(
-            _hier.boundary_seeds_kernel,
+            _hier.seed_goal_and_ring_kernel,
             dim=(self.rows, self.cols, self.n_theta),
             inputs=[
+                wp.array(np.asarray(goal_xy[:2], np.float32), device=self.device),
                 coarse_value,
-                coarse_grid,
-                fine_grid,
+                wp.array(np.array([coarse_x0, coarse_y0], np.float32), device=self.device),
+                float(coarse_grid.cell_size),
+                fine_x0,
+                fine_y0,
+                float(fine_grid.cell_size),
                 int(self.solver.reach_cells if band is None else band),
                 float(self.solver_inf),
             ],

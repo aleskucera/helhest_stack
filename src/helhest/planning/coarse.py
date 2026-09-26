@@ -63,6 +63,8 @@ import warp as wp
 
 from ..engine import GridParams
 from .terrain_value_field import omni_control_set
+from .terrain_value_field.hierarchical import goal_cell_kernel
+from .terrain_value_field.hierarchical import seed_goal_kernel
 from .terrain_value_field.solver import ValueSolver
 
 
@@ -303,34 +305,6 @@ def _cost_kernel(
     pose_cost[r, c, 0] = wp.where(near > 0.5, 0.0, void_penalty)
 
 
-@wp.kernel
-def _seed_goal_kernel(
-    goal_rc: wp.array(dtype=wp.int32),  # [2]
-    inf: wp.float32,
-    seeds: wp.array3d(dtype=wp.float32),  # coarse [cy, cx, 1]
-):
-    r, c, t = wp.tid()
-    seeds[r, c, t] = wp.where(r == goal_rc[0] and c == goal_rc[1], 0.0, inf)
-
-
-@wp.kernel
-def _goal_cell_kernel(
-    goal_xy: wp.array(dtype=wp.float32),  # [2], in the coarse grid's own frame
-    origin_x: wp.float32,
-    origin_y: wp.float32,
-    cell_size: wp.float32,
-    rows: wp.int32,
-    cols: wp.int32,
-    goal_rc: wp.array(dtype=wp.int32),  # [2]
-):
-    """Resolve and CLAMP the goal into the window, so a goal beyond it becomes a carrot at the
-    edge rather than no goal at all."""
-    c = int((goal_xy[0] - origin_x) / cell_size)
-    r = int((goal_xy[1] - origin_y) / cell_size)
-    goal_rc[0] = wp.clamp(r, 0, rows - 1)
-    goal_rc[1] = wp.clamp(c, 0, cols - 1)
-
-
 class CoarseRouter:
     """A heading-free cost-to-go over the whole window, at a cell size where coverage is good.
 
@@ -517,7 +491,7 @@ class CoarseRouter:
             device=self.device,
         )
         wp.launch(
-            _goal_cell_kernel,
+            goal_cell_kernel,
             dim=1,
             inputs=[
                 self._goal_xy,
@@ -531,7 +505,7 @@ class CoarseRouter:
             device=self.device,
         )
         wp.launch(
-            _seed_goal_kernel,
+            seed_goal_kernel,
             dim=self._seeds.shape,
             inputs=[self._goal_rc, self.solver._inf],
             outputs=[self._seeds],

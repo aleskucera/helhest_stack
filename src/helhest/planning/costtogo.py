@@ -48,6 +48,9 @@ from .clearance import ClearanceParams
 from .clearance import ClearanceRoute
 from .terrain_value_field import closing_step
 from .terrain_value_field.drift import footprint_drift_spread
+from .terrain_value_field.hierarchical import goal_cell_kernel
+from .terrain_value_field.hierarchical import seed_goal_and_ring_kernel
+from .terrain_value_field.hierarchical import seed_goal_kernel
 from .terrain_value_field.solver import ValueSolver
 
 if TYPE_CHECKING:
@@ -567,20 +570,6 @@ def _escape_kernel(
 
 
 @wp.kernel
-def _goal_cell_kernel(
-    goal_xy: wp.array(dtype=wp.float32),  # [2] world (x, y)
-    xmin: wp.float32,
-    ymin: wp.float32,
-    resolution: wp.float32,
-    height: wp.int32,
-    width: wp.int32,
-    goal_rc: wp.array(dtype=wp.int32),  # [2] out (row, col)
-):
-    goal_rc[0] = wp.clamp(int((goal_xy[1] - ymin) / resolution), 0, height - 1)  # row from y
-    goal_rc[1] = wp.clamp(int((goal_xy[0] - xmin) / resolution), 0, width - 1)  # col from x
-
-
-@wp.kernel
 def _pose_cost_kernel(
     blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     graded_tilt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
@@ -596,87 +585,6 @@ def _pose_cost_kernel(
     r, c, t = wp.tid()
     pen = wp.max(graded_tilt[r, c, t], 0.0)
     pose_cost[r, c, t] = wp.where(blocked[r, c, t] > 0.5, -1.0 - pen, pen)
-
-
-@wp.kernel
-def _seed_goal_kernel(
-    goal_rc: wp.array(dtype=wp.int32),  # [2]
-    inf: wp.float32,
-    seeds: wp.array3d(dtype=wp.float32),  # [row, col, heading]
-):
-    """Seed the goal cell at every heading, on DEVICE.
-
-    The goal cell is resolved inside the captured graph (`_goal_cell_kernel`), so the seeding has
-    to be too -- reading it back to call a host-side seeder would put a sync in the middle of the
-    graph and defeat the point of capturing it.
-    """
-    r, c, t = wp.tid()
-    seeds[r, c, t] = wp.where(r == goal_rc[0] and c == goal_rc[1], 0.0, inf)
-
-
-@wp.kernel
-def _seed_goal_and_boundary_kernel(
-    goal_xy: wp.array(dtype=wp.float32),  # [2], this window's frame -- UNCLAMPED on purpose
-    coarse_value: wp.array3d(dtype=wp.float32),  # [cy, cx, 1], the coarse layer's cost-to-go
-    coarse_origin: wp.array(dtype=wp.float32),  # [2], the coarse grid in THIS window's frame
-    coarse_cell: wp.float32,
-    origin_x: wp.float32,  # this window's own origin, same frame
-    origin_y: wp.float32,
-    cell_size: wp.float32,
-    band: wp.int32,  # ring thickness, in fine cells
-    inf: wp.float32,
-    seeds: wp.array3d(dtype=wp.float32),  # [row, col, heading]
-):
-    """Seed the goal AND the window's border, in one pass because each writes every cell.
-
-    A border cell is seeded at what the coarse layer says it costs to carry on from there, so the
-    fine solve pays the real price of each exit and prefers the right one instead of treating
-    every way out of the window as equally good. See `terrain_value_field.hierarchical`; this is
-    that kernel fused with the goal seeding, which the fine layer does on device because the goal
-    is resolved inside the captured graph.
-
-    The goal is taken UNCLAMPED here, unlike the single-layer path. Clamping an out-of-window goal
-    onto the border is what makes one layer work at all -- it becomes a carrot the window drags
-    along -- but with a coarse layer it is actively wrong: a zero-cost seed on the border beats
-    every finite coarse value, so the ring is overridden and the robot chases the exit nearest the
-    goal even when the coarse layer knows that exit is a dead end. When the goal is outside, the
-    ring IS the goal information and nothing else should be seeded.
-
-    The coarse value is read from the NEAREST coarse cell, never interpolated: unreachable cells
-    hold +inf, and blending that with a finite neighbour yields a large finite number -- a cell
-    that reads as reachable at an invented price, which is worse than either truth.
-
-    """
-    r, c, t = wp.tid()
-    rows = seeds.shape[0]
-    cols = seeds.shape[1]
-    gc = int((goal_xy[0] - origin_x) / cell_size)
-    gr = int((goal_xy[1] - origin_y) / cell_size)
-    if gr >= 0 and gr < rows and gc >= 0 and gc < cols:
-        # The goal is in the window, so the window is not missing anything and the ring is not
-        # seeded at all. It would not merely be redundant: the coarse layer is omnidirectional and
-        # pays no turn cost, so it UNDERSTATES distance in the fine layer's own metric, and a ring
-        # priced that way reads as a shortcut. The fine solve would route the robot out of the
-        # window and back to reach a goal sitting a few metres in front of it. Seeding the ring
-        # at a 5 m margin instead was tried: no better on false_door (2/3 either way), and it
-        # took pocket from 3/3 to 2/3 with a run three times slower.
-        seeds[r, c, t] = wp.where(r == gr and c == gc, 0.0, inf)
-        return
-    v = inf
-    if r < band or r >= rows - band or c < band or c >= cols - band:
-        # origin + c*cell, NOT + (c + 0.5)*cell: this file places a pose at `origin + c * cell`
-        # (see `_margin_kernel`) and resolves the goal the same way, so the half cell that the
-        # engine's `_locate` convention would add puts this lookup half a cell from where every
-        # other kernel here thinks cell c is. It feeds a NEAREST-cell read of the coarse field
-        # rather than a smooth interpolation, so at --coarsen 1 the 0.1 m offset flips the
-        # rounding for about half the ring and reads a neighbour's value.
-        x = origin_x + float(c) * cell_size
-        y = origin_y + float(r) * cell_size
-        cc = int(wp.round((x - coarse_origin[0]) / coarse_cell))
-        cr = int(wp.round((y - coarse_origin[1]) / coarse_cell))
-        if cr >= 0 and cr < coarse_value.shape[0] and cc >= 0 and cc < coarse_value.shape[1]:
-            v = coarse_value[cr, cc, 0]
-    seeds[r, c, t] = v
 
 
 @wp.kernel
@@ -1263,7 +1171,7 @@ class CostToGo:
             self.clearance_route.charge(self.hazard, self._loose_blocked, self._loose_tilt)
             feas, tilt = self._loose_blocked, self._loose_tilt
         wp.launch(
-            _goal_cell_kernel,
+            goal_cell_kernel,
             dim=1,
             inputs=[
                 self._goal_xy,
@@ -1285,7 +1193,7 @@ class CostToGo:
         )
         if self._coarse_in is None:
             wp.launch(
-                _seed_goal_kernel,
+                seed_goal_kernel,
                 dim=self.V.shape,
                 inputs=[self._goal_rc, self.solver._inf],
                 outputs=[self._seeds],
@@ -1293,7 +1201,7 @@ class CostToGo:
             )
         else:
             wp.launch(
-                _seed_goal_and_boundary_kernel,
+                seed_goal_and_ring_kernel,
                 dim=self.V.shape,
                 inputs=[
                     self._goal_xy,

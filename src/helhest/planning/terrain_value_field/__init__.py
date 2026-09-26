@@ -6,14 +6,12 @@ from .control_set import DEFAULT_PIVOT_ARCS
 from .control_set import omni_control_set
 from .field import Constraints
 from .field import TerrainValueField
-from .hierarchical import boundary_seeds_kernel
 
 __all__ = [
     "Constraints",
     "TerrainValueField",
     "arc_control_set",
     "closing_step",
-    "boundary_seeds_kernel",
     "DEFAULT_PIVOT_ARCS",
     "omni_control_set",
 ]

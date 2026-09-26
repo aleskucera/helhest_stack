@@ -358,7 +358,7 @@ class ValueSolver:
 
         A ring of boundary seeds thinner than this can be JUMPED: an arc starting inside the
         window can land outside it without ever touching a seeded cell, and the solve then never
-        learns what leaving costs. `boundary_seeds` uses this as its default band.
+        learns what leaving costs. `seed_from_coarse` uses this as its default band.
         """
         return int(
             max(

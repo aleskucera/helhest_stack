@@ -105,7 +105,7 @@ def test_the_coarse_layer_routes_around_the_wall(layers):
 
 def test_the_fine_window_finds_a_plan_it_could_not_have_found_alone(layers):
     coarse, fine, cg, fg, _ = layers
-    fine.seed_from_coarse(coarse.V, cg, fg)
+    fine.seed_from_coarse(coarse.V, cg, fg, GOAL_XY)
     v = fine.solve(_constraints(np.zeros((FINE_N, FINE_N), bool), 16)).numpy()
     here = v[FINE_N // 2, FINE_N // 2, :].min()
     assert here < UNREACHABLE, "the robot should have a route although the goal is out of sight"
@@ -118,7 +118,7 @@ def test_the_cheapest_way_out_is_the_one_that_goes_around(layers):
     """The load-bearing test. Inside the window every cell is free and identical, so a preference
     for the northern exits can only have come down from the coarse layer."""
     coarse, fine, cg, fg, _ = layers
-    fine.seed_from_coarse(coarse.V, cg, fg)
+    fine.seed_from_coarse(coarse.V, cg, fg, GOAL_XY)
     seeds = fine._seeds.numpy()[:, :, 0]
     band = fine.solver.reach_cells
     north = seeds[-band:, :].min()  # +y edge: toward the gap
@@ -137,11 +137,11 @@ def test_the_seed_band_is_thick_enough_that_an_arc_cannot_jump_it(layers):
     free = _constraints(np.zeros((FINE_N, FINE_N), bool), 16)
     assert fine.solver.reach_cells >= 2, "a single cell is thinner than one move"
 
-    fine.seed_from_coarse(coarse.V, cg, fg, band=1)
+    fine.seed_from_coarse(coarse.V, cg, fg, GOAL_XY, band=1)
     thin_seeds = int((fine._seeds.numpy() < UNREACHABLE).sum())
     thin_v = fine.solve(free).numpy()[FINE_N // 2, FINE_N // 2, :].min()
 
-    fine.seed_from_coarse(coarse.V, cg, fg)  # default band = reach_cells
+    fine.seed_from_coarse(coarse.V, cg, fg, GOAL_XY)  # default band = reach_cells
     assert int((fine._seeds.numpy() < UNREACHABLE).sum()) > thin_seeds
     full_v = fine.solve(free).numpy()[FINE_N // 2, FINE_N // 2, :].min()
     assert full_v <= thin_v + 1e-4, "a thicker ring can only offer more ways out, never fewer"
@@ -150,4 +150,4 @@ def test_the_seed_band_is_thick_enough_that_an_arc_cannot_jump_it(layers):
 def test_a_heading_bearing_coarse_layer_is_refused(layers):
     _, fine, cg, fg, _ = layers
     with pytest.raises(ValueError, match="heading-free"):
-        fine.seed_from_coarse(fine.V, cg, fg)  # fine.V has 16 headings
+        fine.seed_from_coarse(fine.V, cg, fg, GOAL_XY)  # fine.V has 16 headings

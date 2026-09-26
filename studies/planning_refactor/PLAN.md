@@ -141,7 +141,13 @@ It keeps its pooling (the producer) and hands its pose cost to a heading-free
 - a. Sample sigma at the settle's own heading (`t`, not `t + 0.5`) in the settle producer. This
   affects only the z-margin path (sim only). Re-record golden C and run the drive_sim z-margin
   arm before and after.
-- b. Anything else found in steps 1-7 goes here, not into the step it was found in.
+- b. The coarse-ring lookup (`hierarchical.seed_goal_and_ring_kernel`, moved verbatim from
+  `CostToGo` in step 2b) rounds `min_corner + c*cell` against the coarse grid's MIN CORNER. That
+  picks the nearest coarse cell only when the two cell sizes match; at a coarse factor k it reads
+  0.5*(1 - 1/k) coarse cells off (0.44 at the deployed ~8). tvf's old `boundary_seeds_kernel` used
+  centres and was right. Since 2b `seed_from_coarse` inherits the offset too. Fix: centres, then
+  re-record golden A/E and run the closed loop.
+- c. Anything else found in steps 1-7 goes here, not into the step it was found in.
 
 ## 9. Final validation
 
