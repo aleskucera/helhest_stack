@@ -1,0 +1,426 @@
+"""Cost-to-go V(row, col, heading) over a discretised state space, value-iterated on the GPU.
+
+Takes only the per-state `blocked` and graded-`penalty` fields that a feasibility producer makes,
+a control set, and a set of zero-cost seed states -- it never learns what a constraint meant or
+what produced it. Value iteration runs to a fixed point over EVERY state rather than searching
+for one path, so the output is a field you can query from wherever the robot actually is, not a
+trajectory it has to re-attach to.
+
+That is the difference from a lattice planner in the usual sense. Those search the lattice with
+A* and use a precomputed cost-to-go as the heuristic; this computes that cost-to-go and stops.
+Every state updates from the previous sweep's values with no priority queue and no ordering, so
+it is one GPU thread per state, and the convergence loop runs ON DEVICE (`capture_while`) --
+the whole solve is CUDA-graph-capturable.
+
+A state from which the seeds are unreachable under the control set keeps cost +inf. For a
+forward-only robot that is not a failure but information: it is exactly the misaligned approach
+a 2-D geodesic cannot express.
+"""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import warp as wp
+
+from .control_set import arc_control_set
+from .control_set import closing_step
+
+
+@wp.kernel
+def _free_seeds_kernel(
+    seeds: wp.array(dtype=wp.float32, ndim=3),
+    inf: wp.float32,
+    pose_cost: wp.array(dtype=wp.float32, ndim=3),
+):
+    """Lift the veto on seeded states, so the iteration has somewhere to start.
+
+    Flipping the sign back restores the state's graded penalty exactly (-1 - (-1 - p) = p), so a
+    seeded state still costs what it costs to stand on.
+
+    Whether this SHOULD run depends on what the seeds mean. A single goal cell on marginal ground
+    is still where the robot was told to go, so freeing it is right. A ring of boundary seeds
+    handed down from a coarser layer is not: a blocked boundary cell is not a usable exit, and
+    freeing it would invent one. Hence `ValueSolver(free_blocked_seeds=...)`.
+    """
+    r, c, t = wp.tid()
+    if seeds[r, c, t] < inf and pose_cost[r, c, t] < 0.0:
+        pose_cost[r, c, t] = -1.0 - pose_cost[r, c, t]
+
+
+@wp.kernel
+def _keep_going_kernel(
+    changed: wp.array(dtype=wp.int32),
+    iter_count: wp.array(dtype=wp.int32),
+    cap: wp.int32,
+    keep_running: wp.array(dtype=wp.int32),
+):
+    """Device-side loop condition (so capture_while keeps the value iteration on the GPU, no host
+    sync): keep going while the last body improved SOME cell and we're under the cap. dim=1."""
+    it = iter_count[0] + 1
+    iter_count[0] = it
+    if changed[0] != 0 and it < cap:
+        keep_running[0] = 1
+    else:
+        keep_running[0] = 0
+
+
+@wp.kernel
+def _relax_kernel(
+    dist_in: wp.array(dtype=wp.float32, ndim=3),
+    pose_cost: wp.array(dtype=wp.float32, ndim=3),  # [rows, cols, headings]
+    prim_dr: wp.array(dtype=wp.int32, ndim=2),  # [n_theta, n_prim] endpoint row offset
+    prim_dc: wp.array(dtype=wp.int32, ndim=2),  # endpoint col offset
+    prim_heading: wp.array(dtype=wp.int32, ndim=2),  # heading bin the arc ends at
+    prim_cost: wp.array(dtype=wp.float32, ndim=2),  # arc length
+    sweep_dr: wp.array(dtype=wp.int32, ndim=3),  # [n_theta, n_prim, max_sweep] swept-cell offsets
+    sweep_dc: wp.array(dtype=wp.int32, ndim=3),
+    sweep_dt: wp.array(dtype=wp.int32, ndim=3),  # heading-bin offset at each swept cell
+    sweep_n: wp.array(dtype=wp.int32, ndim=2),  # [n_theta, n_prim] swept-cell count
+    n_prim: wp.int32,
+    penalty_scale: wp.float32,  # 0 -> pure distance; >0 -> prefer states with more margin
+    inf: wp.float32,
+    # TURN PRICE (optional; turn_on = 0 leaves every cost exactly as before). A per-pose time
+    # multiplier T = v_cruise / v_allowed, and the tail's lever: a turning arc of radius R swings a
+    # point `lever` behind the axle at v * lever / R, so its allowed axle speed is v_allowed / (1 +
+    # lever / R) and it is charged arc * (max(1, T (1 + k)) - max(1, T)) on top, k = lever / R.
+    turn_field: wp.array(dtype=wp.float32, ndim=3),
+    turn_on: wp.int32,
+    turn_lever: wp.float32,  # [m]
+    bin_rad: wp.float32,  # [rad] one heading bin
+    dist_out: wp.array(dtype=wp.float32, ndim=3),
+    changed: wp.array(dtype=wp.int32),
+):
+    """One min-relaxation sweep of the (row, col, heading) value function:
+
+        V_out[s] = min( V_in[s], min over forward-arc primitives p
+                         of  cost(p) + V_in[ next(s, p) ]   if p's swept cells are all free )
+
+    cost(p) = arc_length * (1 + penalty_scale * mean penalty over the swept cells), so with
+    penalty_scale > 0 the geodesic PREFERS flatter poses (not just avoids blocked ones). Feasibility and
+    graded cost come from the PER-POSE field (the robot's settle), sampled at each swept cell using the
+    heading the arc is FACING there (`sweep_dt`), not the heading it started in -- the sharpest arc turns
+    a full `bins` worth of bins over one step, so the two differ for most of the arc. A wall face, where
+    a body tilts or high-centers, blocks the crossing arc while flat ground stays cheap. The whole swept arc must be
+    clear (not just the endpoint), so the robot can't jump a thin wall. Iterating to a fixed point gives
+    the forward-only cost-to-go; a misaligned pose from which the goal is unreachable stays +inf."""
+    r, c, t = wp.tid()
+    h = dist_in.shape[0]
+    w = dist_in.shape[1]
+    nt = dist_in.shape[2]
+    if pose_cost[r, c, t] < 0.0:
+        dist_out[r, c, t] = inf
+        return
+    best = dist_in[r, c, t]
+    for p in range(n_prim):
+        ok = int(1)
+        ns = sweep_n[t, p]
+        tsum = float(0.0)
+        msum = float(0.0)
+        for s in range(ns):
+            sr = r + sweep_dr[t, p, s]
+            sc = c + sweep_dc[t, p, s]
+            inb = int(0)
+            if sr >= 0 and sr < h and sc >= 0 and sc < w:
+                inb = 1
+            scr = wp.clamp(sr, 0, h - 1)
+            scc = wp.clamp(sc, 0, w - 1)
+            # ONE load carries both the veto (sign) and the graded cost (magnitude). Bailing on
+            # the first vetoed cell skips the rest of the arc's loads; tsum is then short, which
+            # does not matter because ok = 0 discards it. Worth 4-6%, and flat in how much of
+            # the map is blocked -- the loop still runs until every thread in the warp has left,
+            # so only whole warps bailing together actually save anything.
+            # the heading the robot is FACING at this cell, not the one it started the arc in
+            tt = (t + sweep_dt[t, p, s]) % nt
+            pc = pose_cost[scr, scc, tt]
+            if inb == 0 or pc < 0.0:
+                ok = 0
+                break
+            tsum += pc
+            if turn_on != 0:
+                msum += turn_field[scr, scc, tt]
+        if ok == 1:
+            nr = r + prim_dr[t, p]
+            nc = c + prim_dc[t, p]
+            if nr >= 0 and nr < h and nc >= 0 and nc < w:
+                arc = prim_cost[t, p]
+                base = arc
+                if ns > 0:
+                    arc = arc * (1.0 + penalty_scale * tsum / float(ns))
+                    # a turning ARC (not a pivot: those do not move) near walls pays for its tail
+                    dh = prim_heading[t, p] - t
+                    if turn_on != 0 and dh != 0 and (prim_dr[t, p] != 0 or prim_dc[t, p] != 0):
+                        dh = (dh + nt + nt // 2) % nt - nt // 2
+                        k = turn_lever * wp.abs(float(dh)) * bin_rad / wp.max(base, 1.0e-3)
+                        tm = msum / float(ns)
+                        arc = arc + base * (wp.max(1.0, tm * (1.0 + k)) - wp.max(1.0, tm))
+                best = wp.min(best, arc + dist_in[nr, nc, prim_heading[t, p]])
+    dist_out[r, c, t] = best
+    if best < dist_in[r, c, t]:
+        changed[0] = 1
+
+
+class ValueSolver:
+    def __init__(
+        self,
+        resolution: float,
+        height: int,
+        width: int,
+        n_theta: int = 16,
+        turn_radius: float = 0.6,
+        step: float | None = None,
+        turn_weight: float = 0.0,  # [m per rad] on top of arc length; makes straight < arc
+        pivot_cost: float | None = None,  # [m] per bin; None = 8x the equal-turn arc
+        sweep_spacing: float | None = None,  # [m] between checked poses; None = every cell
+        control_set: tuple | None = None,  # from control_set.py; None builds forward arcs
+        free_blocked_seeds: bool = True,  # see _free_seeds_kernel
+        device: wp.Device | None = None,
+    ):
+        self.resolution = resolution
+        self.height = height
+        self.width = width
+        self.n_theta = n_theta
+        self.free_blocked_seeds = bool(free_blocked_seeds)
+        self.device = wp.get_device(device)
+        self._inf = 1.0e30
+        # The default step CLOSES on the lattice: an arc that does not land on a heading bin
+        # records an end heading the robot never reaches (see control_set.closing_step).
+        self._step = (
+            float(step) if step is not None else closing_step(self.n_theta, float(turn_radius))
+        )
+
+        # a single arc can sweep ~step/resolution cells; size the swept-cell buffer + arc sampling
+        # to that ratio so fine grids don't truncate the collision check and jump thin walls.
+        if control_set is None:
+            step_cells = self._step / self.resolution
+            max_sweep = max(6, int(math.ceil(step_cells)) * 2 + 3)
+            nseg = max(8, int(step_cells * 4))
+            control_set = arc_control_set(
+                self.n_theta,
+                self.resolution,
+                self._step,
+                float(turn_radius),
+                max_sweep,
+                nseg,
+                turn_weight=float(turn_weight),
+                pivot_cost=None if pivot_cost is None else float(pivot_cost),
+                sweep_spacing=sweep_spacing,
+            )
+        (
+            n_prim,
+            prim_dr,
+            prim_dc,
+            prim_heading,
+            prim_cost,
+            sweep_dr,
+            sweep_dc,
+            sweep_dt,
+            sweep_n,
+        ) = control_set
+        self.n_prim = n_prim
+        # motion-primitive table on device, indexed [heading_bin, primitive]: where each forward arc
+        # lands + what it crosses (see _build_primitives). The relax kernel reads these every sweep.
+        with wp.ScopedDevice(self.device):
+            self._prim_dr = wp.array(prim_dr, dtype=wp.int32)  # endpoint row offset of the arc
+            self._prim_dc = wp.array(prim_dc, dtype=wp.int32)  # endpoint col offset
+            # heading bin the arc ends at
+            self._prim_heading = wp.array(prim_heading, dtype=wp.int32)
+            # arc length (the move's base cost)
+            self._prim_cost = wp.array(prim_cost, dtype=wp.float32)
+            # row offsets of the cells the arc crosses
+            self._sweep_dr = wp.array(sweep_dr, dtype=wp.int32)
+            self._sweep_dc = wp.array(sweep_dc, dtype=wp.int32)  # col offsets of those swept cells
+            # heading-bin offset from the state's own bin at each swept cell
+            self._sweep_dt = wp.array(sweep_dt, dtype=wp.int32)
+            self._sweep_n = wp.array(sweep_n, dtype=wp.int32)  # how many swept cells each arc has
+            # two value buffers, ping-ponged each sweep (read one, write the other, swap); +changed flag
+            self._dist_a = wp.zeros((self.height, self.width, self.n_theta), dtype=wp.float32)
+            self._dist_b = wp.zeros((self.height, self.width, self.n_theta), dtype=wp.float32)
+            # >0 if any cell improved this sweep (convergence)
+            self._changed = wp.zeros(1, dtype=wp.int32)
+            # the turn price is off until set_turn_price: a 1-cell stand-in keeps the launch valid
+            self._turn_field = wp.zeros((1, 1, 1), dtype=wp.float32)
+            # device while-condition for capture_while
+            self._keep_running = wp.zeros(1, dtype=wp.int32)
+            self._iter = wp.zeros(1, dtype=wp.int32)
+        self._cap = self.height + self.width  # max bodies (each = 2 sweeps -> 2*(h+w) sweeps total)
+        # Recorded solve, replayed while it stays valid. A graph bakes in the pointers and the
+        # scalar it was recorded with, so the key is what has to match -- the array CONTENTS may
+        # change freely between replays, which is the whole point: the map is new every frame.
+        self._graph: wp.Graph | None = None
+        self._graph_key: tuple | None = None
+        self._turn_on = 0
+        self._turn_lever = 0.0
+
+    def set_turn_price(self, turn_field: wp.array | None, lever_m: float = 0.0) -> None:
+        """Charge turning arcs for their tail near walls (see `_relax_kernel`). `turn_field` is a
+        per-pose time multiplier [rows, cols, headings] -- v_cruise / v_allowed, filled by the
+        caller every frame in place (a graph bakes in the pointer); None switches it off."""
+        if turn_field is None:
+            self._turn_on, self._turn_lever = 0, 0.0
+            self._turn_field = wp.zeros((1, 1, 1), dtype=wp.float32, device=self.device)
+        else:
+            self._turn_on, self._turn_lever = 1, float(lever_m)
+            self._turn_field = turn_field
+        self._graph = None  # the launch arguments changed
+
+    def _relax(
+        self,
+        dist_in: wp.array,
+        dist_out: wp.array,
+        pose_cost: wp.array,
+        penalty_scale: float,
+    ) -> None:
+        """One min-relaxation sweep dist_in -> dist_out (race-free pull); raises self._changed if any
+        cell improved."""
+        wp.launch(
+            _relax_kernel,
+            dim=(self.height, self.width, self.n_theta),
+            inputs=[
+                dist_in,
+                pose_cost,
+                self._prim_dr,
+                self._prim_dc,
+                self._prim_heading,
+                self._prim_cost,
+                self._sweep_dr,
+                self._sweep_dc,
+                self._sweep_dt,
+                self._sweep_n,
+                self.n_prim,
+                float(penalty_scale),
+                self._inf,
+                self._turn_field,
+                self._turn_on,
+                self._turn_lever,
+                2.0 * math.pi / float(self.n_theta),
+            ],
+            outputs=[dist_out, self._changed],
+            device=self.device,
+        )
+
+    def value_iterate(
+        self,
+        pose_cost: wp.array,
+        seeds: wp.array,
+        penalty_scale: float,
+        capture: bool = True,
+    ) -> wp.array:
+        """Run value iteration to a fixed point. Returns the cost-to-go.
+
+        Seed the sources, set everything else to +inf, then sweep the Bellman update until a
+        sweep improves nothing:
+
+            V[s] = min( V[s],  min over moves of  cost(move) + V[next(s, move)] )
+
+        Information spreads exactly one move per sweep, so the number of sweeps is the length
+        of the longest route in moves. That is more total arithmetic than Dijkstra needs, and
+        faster anyway: a priority queue is inherently sequential, while this has no ordering at
+        all and runs one thread per state.
+
+        The body is TWO sweeps, not one. `_relax` reads one buffer and writes the other so a
+        state sees the previous sweep's values rather than half-updated ones; doing a->b->a
+        lands the answer back in `_dist_a` every time, which the captured graph relies on.
+
+        `capture=True` records the whole thing into a CUDA graph once and replays it, so the
+        continue condition is evaluated ON the device and the host is not in the loop at all.
+        `capture=False` runs the same launches eagerly, reading the flag back each body.
+
+        Note `wp.capture_while` only builds a device-side conditional node when a capture is
+        ACTIVE; called on its own it falls back to exactly that host loop. So the recording here
+        is not optional decoration -- without it the flag would mean nothing.
+
+        Do not expect much from it. Measured on an A500 the replay is 1.17x at 64x64x16 and
+        within noise of the host loop from 128x128 up: the relax kernel is bandwidth-bound and
+        the sweeps dominate, so the per-body sync was never the cost. What the recording buys is
+        that the solve can now nest inside a LARGER capture, which a host sync would forbid.
+        """
+        if penalty_scale < 0.0:
+            raise ValueError(
+                f"penalty_scale must be >= 0 or a move can cost less than "
+                f"nothing, got {penalty_scale}"
+            )
+        if capture and self.device.is_cuda:
+            key = (pose_cost.ptr, seeds.ptr, float(penalty_scale))
+            if self._graph is None or self._graph_key != key:
+                with wp.ScopedCapture(device=self.device) as cap:
+                    self._iterate(pose_cost, seeds, penalty_scale)
+                self._graph, self._graph_key = cap.graph, key
+            wp.capture_launch(self._graph)
+        else:
+            self._iterate(pose_cost, seeds, penalty_scale)
+        return self._dist_a
+
+    @property
+    def reach_cells(self) -> int:
+        """The furthest a single move reaches, in cells -- endpoint or swept cell, whichever.
+
+        A ring of boundary seeds thinner than this can be JUMPED: an arc starting inside the
+        window can land outside it without ever touching a seeded cell, and the solve then never
+        learns what leaving costs. `boundary_seeds` uses this as its default band.
+        """
+        return int(
+            max(
+                np.abs(self._prim_dr.numpy()).max(),
+                np.abs(self._prim_dc.numpy()).max(),
+                np.abs(self._sweep_dr.numpy()).max(),
+                np.abs(self._sweep_dc.numpy()).max(),
+            )
+        )
+
+    def converged(self) -> bool:
+        """Did the last solve reach a fixed point, or stop at the iteration cap?
+
+        The cap exists so a misconfigured control set cannot spin forever, but a solve that hits
+        it returns a V that is too HIGH -- routes that exist read as longer than they are, or as
+        unreachable altogether. Nothing else distinguishes that from an honestly walled-off map,
+        so a caller that trusts "unreachable" should ask.
+
+        `_changed` is the exact signal, not the body count: the loop stops either because a whole
+        body improved nothing (converged) or because the cap bound (and then the last body DID
+        improve something). Reads back from the device, so it costs a sync -- ask when you want
+        to know, not every frame.
+        """
+        return int(self._changed.numpy()[0]) == 0
+
+    def bodies_used(self) -> int:
+        """Loop bodies the last solve ran, two sweeps each. Syncs; for diagnostics."""
+        return int(self._iter.numpy()[0])
+
+    def _iterate(
+        self,
+        pose_cost: wp.array,
+        seeds: wp.array,
+        penalty_scale: float,
+    ) -> None:
+        """The launches themselves: seed, initialise, then sweep until nothing improves."""
+        grid_dim = (self.height, self.width, self.n_theta)
+
+        if self.free_blocked_seeds:
+            wp.launch(
+                _free_seeds_kernel,
+                dim=grid_dim,
+                inputs=[seeds, self._inf],
+                outputs=[pose_cost],
+                device=self.device,
+            )
+        # The seed field IS the initial value function: a state starts at the cost the seeds say
+        # it already carries, and +inf means "not a seed". A plain goal mask is the special case
+        # where that cost is 0; a boundary ring handed down from a coarser layer is not.
+        wp.copy(self._dist_a, seeds)
+        self._keep_running.fill_(1)
+        self._iter.zero_()
+
+        def body() -> None:
+            self._changed.zero_()
+            self._relax(self._dist_a, self._dist_b, pose_cost, penalty_scale)
+            self._relax(self._dist_b, self._dist_a, pose_cost, penalty_scale)
+            wp.launch(
+                _keep_going_kernel,
+                dim=1,
+                inputs=[self._changed, self._iter, self._cap, self._keep_running],
+                device=self.device,
+            )
+
+        wp.capture_while(self._keep_running, body)
