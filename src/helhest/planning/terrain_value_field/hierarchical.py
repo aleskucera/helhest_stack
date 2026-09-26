@@ -73,9 +73,9 @@ def seed_goal_kernel(
 def seed_goal_and_ring_kernel(
     goal_xy: wp.array(dtype=wp.float32),  # [2], this window's frame -- UNCLAMPED on purpose
     coarse_value: wp.array3d(dtype=wp.float32),  # [cy, cx, 1], the coarse layer's cost-to-go
-    coarse_origin: wp.array(dtype=wp.float32),  # [2], the coarse grid in THIS window's frame
+    coarse_origin: wp.array(dtype=wp.float32),  # [2], the coarse grid's min corner, this frame
     coarse_cell: wp.float32,
-    origin_x: wp.float32,  # this window's own origin, same frame
+    origin_x: wp.float32,  # this window's own min corner, same frame
     origin_y: wp.float32,
     cell_size: wp.float32,
     band: wp.int32,  # ring thickness, in fine cells
@@ -96,7 +96,8 @@ def seed_goal_and_ring_kernel(
     goal even when the coarse layer knows that exit is a dead end. When the goal is outside, the
     ring IS the goal information and nothing else should be seeded.
 
-    The coarse value is read from the NEAREST coarse cell, never interpolated: unreachable cells
+    The coarse value is read from the block each fine cell's centre lies in -- the nearest coarse
+    cell -- never interpolated: unreachable cells
     hold +inf, and blending that with a finite neighbour yields a large finite number -- a cell
     that reads as reachable at an invented price, which is worse than either truth.
 
@@ -118,14 +119,14 @@ def seed_goal_and_ring_kernel(
         return
     v = inf
     if r < band or r >= rows - band or c < band or c >= cols - band:
-        # origin + c*cell, NOT + (c + 0.5)*cell: the cost-to-go places a pose at
-        # `origin + c * cell` and resolves the goal the same way. It feeds a NEAREST-cell read of
-        # the coarse field rather than a smooth interpolation, so at --coarsen 1 a 0.1 m offset
-        # flips the rounding for about half the ring and reads a neighbour's value.
-        x = origin_x + float(c) * cell_size
-        y = origin_y + float(r) * cell_size
-        cc = int(wp.round((x - coarse_origin[0]) / coarse_cell))
-        cr = int(wp.round((y - coarse_origin[1]) / coarse_cell))
+        # Both origins are MIN corners, so the fine cell's centre is origin + (c + 0.5) * cell and
+        # the coarse block holding it is the floor. Rounding the min corners against each other
+        # instead is exact only when the two cell sizes match: at a coarse factor k it read
+        # 0.5 * (1 - 1/k) blocks toward +x/+y -- 0.2 m at the deployed 0.24 m / 0.64 m.
+        x = origin_x + (float(c) + 0.5) * cell_size
+        y = origin_y + (float(r) + 0.5) * cell_size
+        cc = int(wp.floor((x - coarse_origin[0]) / coarse_cell))
+        cr = int(wp.floor((y - coarse_origin[1]) / coarse_cell))
         if cr >= 0 and cr < coarse_value.shape[0] and cc >= 0 and cc < coarse_value.shape[1]:
             v = coarse_value[cr, cc, 0]
     seeds[r, c, t] = v

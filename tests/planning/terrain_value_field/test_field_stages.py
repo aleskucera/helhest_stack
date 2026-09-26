@@ -134,3 +134,37 @@ def test_one_graph_follows_the_goal_the_veto_and_the_coarse_origin(ring):
         np.testing.assert_array_equal(replayed, frame.V.numpy(), err_msg=f"{goal} {k} {origin}")
         results.append(replayed)
     assert not np.array_equal(results[0], results[1]), "the change must matter, or this is empty"
+
+
+@pytest.mark.parametrize("factor", [1, 3, 4])
+def test_the_ring_reads_the_coarse_cell_under_each_fine_cell(factor):
+    """A ring cell is seeded with the coarse value of the block its CENTRE lies in. Rounding the
+    min corner against the coarse min corner instead is right only when the cells match: at a
+    factor k it reads 0.5 * (1 - 1/k) coarse cells toward +x/+y."""
+    n, fine = 12, 0.24
+    coarse = fine * factor
+    cn = n // factor + 4
+    c_origin = -2.0 * coarse  # the coarse grid starts two blocks before the window, in its frame
+    cols = np.broadcast_to(np.arange(cn, dtype=np.float32), (cn, cn))
+    value = wp.array(np.ascontiguousarray(cols[:, :, None]), dtype=wp.float32)
+    seeds = wp.zeros((n, n, 1), dtype=wp.float32)
+    wp.launch(
+        seed_goal_and_ring_kernel,
+        dim=(n, n, 1),
+        inputs=[
+            wp.array([1.0e6, 1.0e6], dtype=wp.float32),  # the goal is outside: the ring alone
+            value,
+            wp.array([c_origin, c_origin], dtype=wp.float32),
+            coarse,
+            0.0,
+            0.0,
+            fine,
+            n,  # the whole window is ring
+            1.0e30,
+        ],
+        outputs=[seeds],
+    )
+    got = seeds.numpy()[0, :, 0]
+    centres = (np.arange(n) + 0.5) * fine
+    want = np.floor((centres - c_origin) / coarse).astype(np.float32)
+    np.testing.assert_array_equal(got, want)
