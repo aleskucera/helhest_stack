@@ -21,9 +21,9 @@ import numpy as np
 import pytest
 import warp as wp
 
-from terrain_value_field import build_grid
-from terrain_value_field.drift import footprint_drift_spread
-from terrain_value_field.producers import GeometricProducer
+from helhest.planning.terrain_value_field import build_grid
+from helhest.planning.terrain_value_field.drift import footprint_drift_spread
+from helhest.planning.terrain_value_field.producers import GeometricProducer
 
 N = 41
 CELL = 0.1

@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import numpy as np
 import warp as wp
-from terrain_value_field import omni_control_set
-from terrain_value_field.solver import ValueSolver
 
 from helhest.engine import GridParams
 from helhest.planning.coarse import _omni_no_corner_cutting
 from helhest.planning.coarse import CoarseRouter
+from helhest.planning.terrain_value_field import omni_control_set
+from helhest.planning.terrain_value_field.solver import ValueSolver
 
 CELL = 0.2
 FACTOR = 3

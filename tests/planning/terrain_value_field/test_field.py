@@ -11,10 +11,10 @@ import numpy as np
 import pytest
 import warp as wp
 
-from terrain_value_field import build_grid
-from terrain_value_field import omni_control_set
-from terrain_value_field import TerrainValueField
-from terrain_value_field.producers import GeometricProducer
+from helhest.planning.terrain_value_field import build_grid
+from helhest.planning.terrain_value_field import omni_control_set
+from helhest.planning.terrain_value_field import TerrainValueField
+from helhest.planning.terrain_value_field.producers import GeometricProducer
 
 N = 41
 CELL = 0.1
@@ -192,7 +192,7 @@ def test_a_negative_penalty_scale_is_rejected():
 
 
 def test_the_solver_rejects_a_negative_scale_at_its_own_boundary():
-    from terrain_value_field.solver import ValueSolver
+    from helhest.planning.terrain_value_field.solver import ValueSolver
 
     s = ValueSolver(CELL, 8, 8, n_theta=1, control_set=omni_control_set(CELL))
     buf = wp.zeros((8, 8, 1), dtype=wp.float32)

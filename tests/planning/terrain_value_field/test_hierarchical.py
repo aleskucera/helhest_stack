@@ -12,10 +12,10 @@ import numpy as np
 import pytest
 import warp as wp
 
-from terrain_value_field import build_grid
-from terrain_value_field import omni_control_set
-from terrain_value_field import TerrainValueField
-from terrain_value_field.field import Constraints
+from helhest.planning.terrain_value_field import build_grid
+from helhest.planning.terrain_value_field import omni_control_set
+from helhest.planning.terrain_value_field import TerrainValueField
+from helhest.planning.terrain_value_field.field import Constraints
 
 COARSE_CELL, COARSE_N = 0.5, 80  # 40 m of world, cell (0,0) centred at (-20, -20)
 FINE_CELL, FINE_N = 0.2, 70  # 13.8 m window about the robot

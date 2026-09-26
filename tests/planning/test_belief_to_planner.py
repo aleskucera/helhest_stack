@@ -3,7 +3,7 @@
 Three repositories meet here and this is the only test that exercises the seam between all of
 them. `elevation_belief` fuses sweeps into (height, measurement sd, pose drift); the settle
 producer turns those into per-pose margins and the sigmas they are judged against;
-`terrain_value_field` value-iterates the result. Each piece is tested in its own repo against
+`terrain_value_field` value-iterates the result. Each piece is tested on its own against
 its own oracle -- what is tested here is that the quantities mean the same thing on both sides
 of each boundary.
 

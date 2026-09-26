@@ -18,7 +18,7 @@ LOG="${OUT%.npz}.log"
 REPO="$1"; BAG="$2"; OUT="$3"; RATE="$4"; LOG="$5"; shift 5
 source "$REPO/ros/dev-shell.sh"
 export PYTHONPATH="$REPO/ros/helhest_stack_ros:$PYTHONPATH"
-# editable installs (elevation_belief, terrain_value_field) live in .pth files, which python
+# editable installs (elevation_belief) live in .pth files, which python
 # ignores on PYTHONPATH entries -- add their source dirs by hand
 for f in "$REPO"/.venv/lib/python*/site-packages/_editable_impl_*.pth; do
   export PYTHONPATH="$(cat "$f"):$PYTHONPATH"

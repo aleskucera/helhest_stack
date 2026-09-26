@@ -81,8 +81,8 @@ Size the window to what the map actually knows, not to what it stores. On the ro
 
 ```python
 import numpy as np, warp as wp
-from terrain_value_field import TerrainValueField, build_grid, omni_control_set
-from terrain_value_field.producers import GeometricProducer
+from helhest.planning.terrain_value_field import TerrainValueField, build_grid, omni_control_set
+from helhest.planning.terrain_value_field.producers import GeometricProducer
 
 grid  = build_grid(rows, cols, 0.1, origin_x, origin_y)
 field = TerrainValueField(rows, cols, 0.1, n_theta=1,

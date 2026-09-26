@@ -12,8 +12,8 @@ import numpy as np
 import pytest
 import warp as wp
 
-from terrain_value_field import build_grid
-from terrain_value_field.producers import GeometricProducer
+from helhest.planning.terrain_value_field import build_grid
+from helhest.planning.terrain_value_field.producers import GeometricProducer
 
 N, CELL = 21, 0.1
 

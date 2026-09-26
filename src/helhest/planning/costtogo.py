@@ -32,9 +32,8 @@ even where the arc had turned 45 degrees by the time it got there.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import math
+from typing import TYPE_CHECKING
 
 import numpy as np
 import warp as wp
@@ -47,9 +46,9 @@ from ..heightmap import Heightmap
 from ..profiling import StageProfiler
 from .clearance import ClearanceParams
 from .clearance import ClearanceRoute
-from terrain_value_field import closing_step
-from terrain_value_field.drift import footprint_drift_spread
-from terrain_value_field.solver import ValueSolver
+from .terrain_value_field import closing_step
+from .terrain_value_field.drift import footprint_drift_spread
+from .terrain_value_field.solver import ValueSolver
 
 if TYPE_CHECKING:
     from ..engine import GridParams

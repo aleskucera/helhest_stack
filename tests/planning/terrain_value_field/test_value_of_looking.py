@@ -15,9 +15,9 @@ import numpy as np
 import pytest
 import warp as wp
 
-from terrain_value_field import omni_control_set
-from terrain_value_field import TerrainValueField
-from terrain_value_field.field import Constraints
+from helhest.planning.terrain_value_field import omni_control_set
+from helhest.planning.terrain_value_field import TerrainValueField
+from helhest.planning.terrain_value_field.field import Constraints
 
 N, CELL = 40, 0.5
 ROBOT = (20, 3)

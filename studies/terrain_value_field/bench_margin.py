@@ -13,10 +13,10 @@ import time
 import numpy as np
 import warp as wp
 
-from terrain_value_field.margin import classify_kernel
-from terrain_value_field.margin import IGNORED
-from terrain_value_field.margin import margin_to_fields_kernel as margin_fused
-from terrain_value_field.margin import margin_to_z_kernel
+from helhest.planning.terrain_value_field.margin import classify_kernel
+from helhest.planning.terrain_value_field.margin import IGNORED
+from helhest.planning.terrain_value_field.margin import margin_to_fields_kernel as margin_fused
+from helhest.planning.terrain_value_field.margin import margin_to_z_kernel
 
 
 @wp.kernel

@@ -8,10 +8,10 @@ import warnings
 import numpy as np
 import pytest
 
-from terrain_value_field import arc_control_set
-from terrain_value_field import closing_step
-from terrain_value_field import DEFAULT_PIVOT_ARCS
-from terrain_value_field.solver import ValueSolver
+from helhest.planning.terrain_value_field import arc_control_set
+from helhest.planning.terrain_value_field import closing_step
+from helhest.planning.terrain_value_field import DEFAULT_PIVOT_ARCS
+from helhest.planning.terrain_value_field.solver import ValueSolver
 
 RES = 0.1
 SWEEP = 24

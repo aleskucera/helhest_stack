@@ -25,9 +25,9 @@ import numpy as np
 import warp as wp
 
 import helhest.engine.terrain as ht
-import terrain_value_field.grid as tg
+import helhest.planning.terrain_value_field.grid as tg
 from helhest.engine.terrain import GridParams
-from terrain_value_field.grid import build_grid
+from helhest.planning.terrain_value_field.grid import build_grid
 
 CELLS, CELL = 10, 1.0
 # mid-grid: at world (0, 0) the border clamp pulls both to cell 0, which hides any disagreement

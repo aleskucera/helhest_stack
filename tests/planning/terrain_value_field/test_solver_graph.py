@@ -11,10 +11,10 @@ import numpy as np
 import pytest
 import warp as wp
 
-from terrain_value_field import arc_control_set
-from terrain_value_field import closing_step
-from terrain_value_field import TerrainValueField
-from terrain_value_field.field import Constraints
+from helhest.planning.terrain_value_field import arc_control_set
+from helhest.planning.terrain_value_field import closing_step
+from helhest.planning.terrain_value_field import TerrainValueField
+from helhest.planning.terrain_value_field.field import Constraints
 
 N = 48
 CELL = 0.1

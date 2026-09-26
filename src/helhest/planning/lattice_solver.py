@@ -1,10 +1,9 @@
 """Walk the lattice's own policy, for drawing the route it would actually drive.
 
-The value iteration this used to hold now lives in `terrain_value_field` -- one copy, serving
-more than this robot, and carrying a pile of fixes this one never had: arcs that close on the
-lattice, a cost that follows the ground a move really covers, swept cells checked at the heading
-they are crossed at, and a fused feasibility field. What stays here is the policy walk, because
-it exists to draw a picture and nothing else reads it.
+The value iteration this used to hold now lives in `terrain_value_field`, carrying a pile of fixes
+this one never had: arcs that close on the lattice, a cost that follows the ground a move really
+covers, swept cells checked at the heading they are crossed at, and a fused feasibility field.
+What stays here is the policy walk, because it exists to draw a picture and nothing else reads it.
 """
 
 from __future__ import annotations

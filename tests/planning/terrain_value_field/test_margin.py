@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import warp as wp
 
-from terrain_value_field import margin as M
+from helhest.planning.terrain_value_field import margin as M
 
 
 def _reduce(margins, sigmas, floors, shape=(1, 1, 1)):

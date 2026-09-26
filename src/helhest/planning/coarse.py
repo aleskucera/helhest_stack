@@ -60,10 +60,10 @@ from __future__ import annotations
 
 import numpy as np
 import warp as wp
-from terrain_value_field import omni_control_set
-from terrain_value_field.solver import ValueSolver
 
 from ..engine import GridParams
+from .terrain_value_field import omni_control_set
+from .terrain_value_field.solver import ValueSolver
 
 
 @wp.kernel
