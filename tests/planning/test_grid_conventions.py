@@ -9,7 +9,7 @@ at `origin + c*cell` and then sampled sigma through the min-corner `_locate`; an
 boundary ring read the coarse field half a cell off, which mattered because it feeds a
 NEAREST-cell lookup rather than an interpolation (518876a).
 
-So the kernels now share tvf's convention, and `GridParams.build()` adds the half cell once. That
+So there is now one struct, `helhest.grid.Grid`, and `GridParams.build()` adds the half cell once. That
 keeps `GridParams.origin_x` meaning what a caller measuring a window computes -- the min corner --
 while everything on the device sees cell centres.
 
@@ -24,10 +24,9 @@ from __future__ import annotations
 import numpy as np
 import warp as wp
 
-import helhest.engine.terrain as ht
-import helhest.planning.terrain_value_field.grid as tg
+import helhest.grid as hg
 from helhest.engine.terrain import GridParams
-from helhest.planning.terrain_value_field.grid import build_grid
+from helhest.grid import build_grid
 
 CELLS, CELL = 10, 1.0
 # mid-grid: at world (0, 0) the border clamp pulls both to cell 0, which hides any disagreement
@@ -35,17 +34,10 @@ PROBES = (2.5, 5.0, 7.25)
 
 
 @wp.kernel
-def _probe_helhest(g: ht.Grid, x: wp.float32, out: wp.array(dtype=wp.float32)):
-    c = ht._locate(g, x, x)
+def _probe(g: hg.Grid, x: wp.float32, out: wp.array(dtype=wp.float32)):
+    c = hg.locate(g, x, x)
     out[0] = c[0]  # cell index
     out[1] = c[2]  # fraction into it
-
-
-@wp.kernel
-def _probe_tvf(g: tg.Grid, x: wp.float32, out: wp.array(dtype=wp.float32)):
-    c = tg.locate(g, x, x)
-    out[0] = c[0]
-    out[1] = c[2]
 
 
 def _run(kernel, *inputs) -> np.ndarray:
@@ -72,19 +64,8 @@ def test_sampling_through_grid_params_is_what_it_always_was():
     produced. If one moves, a caller read the struct's origin and assumed the old meaning."""
     g = _params().build()
     for probe, want_cell, want_frac in ((2.5, 2.0, 0.0), (5.0, 4.0, 0.5), (7.25, 6.0, 0.75)):
-        cell, frac = _run(_probe_helhest, g, probe)
+        cell, frac = _run(_probe, g, probe)
         assert (cell, frac) == (want_cell, want_frac), f"at {probe}"
-
-
-def test_the_two_locates_now_agree_given_the_same_struct():
-    """The point of the merge. Hand both the identical grid and they place a point identically --
-    which is what makes it safe for one struct to serve both, and what was not true before."""
-    g_h = _params().build()
-    g_t = build_grid(CELLS, CELLS, CELL, g_h.origin_x, g_h.origin_y)
-    for probe in PROBES:
-        np.testing.assert_allclose(
-            _run(_probe_helhest, g_h, probe), _run(_probe_tvf, g_t, probe), atol=1e-6
-        )
 
 
 def test_a_raw_min_corner_origin_still_reads_half_a_cell_out():
@@ -94,6 +75,6 @@ def test_a_raw_min_corner_origin_still_reads_half_a_cell_out():
     p = _params()
     raw = build_grid(CELLS, CELLS, CELL, p.origin_x, p.origin_y)  # forgot the half cell
     for probe in PROBES:
-        good = _run(_probe_helhest, p.build(), probe)
-        bad = _run(_probe_tvf, raw, probe)
+        good = _run(_probe, p.build(), probe)
+        bad = _run(_probe, raw, probe)
         assert (good[0] + good[1]) + 0.5 == (bad[0] + bad[1]), f"at {probe}: {good} vs {bad}"

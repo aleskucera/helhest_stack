@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import warp as wp
 
-from helhest.planning.terrain_value_field import build_grid
+from helhest.grid import build_grid
 from helhest.planning.terrain_value_field import omni_control_set
 from helhest.planning.terrain_value_field import TerrainValueField
 from helhest.planning.terrain_value_field.producers import GeometricProducer

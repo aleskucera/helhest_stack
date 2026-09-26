@@ -33,8 +33,8 @@ from __future__ import annotations
 
 import warp as wp
 
-from .grid import Grid
-from .grid import world_of
+from ...grid import Grid
+from ...grid import world_of
 
 
 @wp.kernel

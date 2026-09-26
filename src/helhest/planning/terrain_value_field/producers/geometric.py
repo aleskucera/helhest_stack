@@ -26,10 +26,10 @@ from __future__ import annotations
 import numpy as np
 import warp as wp
 
+from ....grid import Grid
+from ....grid import sample_field
 from ..drift import footprint_drift_spread
 from ..field import Constraints
-from ..grid import Grid
-from ..grid import sample
 
 SLOPE = wp.constant(0)
 STEP = wp.constant(1)
@@ -79,18 +79,18 @@ def geometric_margins_kernel(
     h = footprint_m
 
     # --- slope: central differences across the footprint ---------------------------------
-    hxp = sample(height, grid, x + h, y)
-    hxm = sample(height, grid, x - h, y)
-    hyp = sample(height, grid, x, y + h)
-    hym = sample(height, grid, x, y - h)
+    hxp = sample_field(height, grid, x + h, y)
+    hxm = sample_field(height, grid, x - h, y)
+    hyp = sample_field(height, grid, x, y + h)
+    hym = sample_field(height, grid, x, y - h)
     gx = (hxp - hxm) / (2.0 * h)
     gy = (hyp - hym) / (2.0 * h)
     slope = wp.atan(wp.sqrt(gx * gx + gy * gy))
 
-    sxp = sample(height_sd, grid, x + h, y)
-    sxm = sample(height_sd, grid, x - h, y)
-    syp = sample(height_sd, grid, x, y + h)
-    sym = sample(height_sd, grid, x, y - h)
+    sxp = sample_field(height_sd, grid, x + h, y)
+    sxm = sample_field(height_sd, grid, x - h, y)
+    syp = sample_field(height_sd, grid, x, y + h)
+    sym = sample_field(height_sd, grid, x, y - h)
     # A difference of two independent cells: variances add, then divide by the baseline. The
     # baseline is why a wide footprint is not only more conservative but also less UNCERTAIN.
     var_gx = (sxp * sxp + sxm * sxm) / (4.0 * h * h)
@@ -102,7 +102,7 @@ def geometric_margins_kernel(
     sigma[SLOPE, r, c, t] = sd_slope
 
     # --- step: the largest departure from the plane the slope term just fitted -------------
-    h0 = sample(height, grid, x, y)
+    h0 = sample_field(height, grid, x, y)
     n = int(wp.ceil(h / grid.cell_size))
     worst = float(0.0)
     sd_worst = float(0.0)
@@ -120,7 +120,7 @@ def geometric_margins_kernel(
     # Difference of the offending cell against the plane's own centre. Reading the sd off the
     # arg-max is the one-hot estimate and runs HIGH where two cells nearly tie for worst; a
     # producer that cares can fold the maximum instead of taking it.
-    sd_centre = sample(height_sd, grid, x, y)
+    sd_centre = sample_field(height_sd, grid, x, y)
     sd_step = wp.sqrt(sd_worst * sd_worst + sd_centre * sd_centre)
 
     margin[STEP, r, c, t] = max_step - step

@@ -19,7 +19,7 @@ import warp as wp
 
 from . import hierarchical as _hier
 from . import margin as _margin
-from .grid import Grid
+from ...grid import Grid
 from .solver import ValueSolver
 
 
