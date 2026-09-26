@@ -797,6 +797,7 @@ class CostToGo:
         self._escape_per_bin = float(pivot_cost) if pivot_cost > 0.0 else self.ESCAPE_PER_BIN
         # tall-step obstacle gate: block cells within a robot footprint of a step > obstacle_step_m.
         self._step_gate = float(obstacle_step_m)
+        self._foot_r = max(1, int(round(robot_params.half_track / self.grid.cell_size)))
 
         # A lattice arc has to end on a heading BIN or the table records a heading the robot
         # never reaches -- up to half a bin of error on every move, compounding, with feasibility
