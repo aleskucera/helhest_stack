@@ -136,3 +136,28 @@ here), and re-run step 4's dynamic bag. Also re-run the sim dynamic study
 - **Noise model.** The linear model (1.2 cm + 0.4 cm/m) was fitted to Odin bags
   (studies/calib/fit_drift.py). Check the cell size it was fitted at: at 0.08 m a cell collects
   about 6x fewer returns than at 0.2 m, so the fused sd per cell is larger.
+
+---
+
+## Progress (2026-09-26)
+
+- **0 done** (STEP0.md): baselines repeat on the audit, not on timing; no Odin bag with movers --
+  the user will record one.
+- **1 done**: `perception/belief_frame.py`; drive_sim on it, bit-identical to its old code on
+  measured cells (test) and within scatter on dasenka (27/27 reach). Found and fixed on the way: the
+  belief stores 0, not NaN, in never-measured cells, so drive_sim's inpaint never ran and blind
+  ground read as z = 0 -- invisible in the sim (ground at 0), a 0.5 m plateau on the robot. With the
+  fill the sim still reaches 27/27; cornerL24 and bumpy faster, pocket slower with a 0.40 m closest
+  pass (inpainted slopes in wall shadows, to look at). The sim no longer sees the true height of
+  ground it has not observed.
+- **2 done** (behind `map_source:=belief`, default still accumulator): single replays -- in_speed 0
+  no-route frames (accumulator 1-2); outdoor sealed 214 vs 319, path samples in sealed 10 vs 33, no
+  coarse route 2 vs 9, no fine route 9 vs 4 (the same rough patch at 85 s, stalled longer).
+  The ground under the robot: unmeasured at start, now inpainted from around it; no start-up
+  stalls, so no footprint pseudo-measurement for now.
+- **3 done**: `plan_z_veto` / `plan_charge_per_sigma` in planner_config, both 0; the robot's
+  0.5 -> 0 made no measurable difference on the bags.
+- Also fixed: the node never imported `joint_states_to_model` (NameError on the first
+  /joint_states message since 83d35b6).
+- **Next: 4** -- the interleaved A/B on in_speed and outdoor can run now; the carving part waits
+  for the movers bag.
