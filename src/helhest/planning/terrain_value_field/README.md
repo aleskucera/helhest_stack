@@ -21,6 +21,8 @@ One knob follows — `z_veto`, how many standard deviations of room the robot in
 
 `floor_i` is not optional. Without it a perfectly known map makes a state at 14.9° of roll against a 15° limit read as infinitely safe. The floor is the irreducible error — localisation, controller tracking, model mismatch — that no map improvement removes.
 
+`floor_i = 0` marks a **hard** constraint instead: a test with no uncertainty to divide by (a solver that did not resolve, a step taller than a gate). It vetoes at `margin < 0` and takes no part in `z`, the graded charge or doubt.
+
 ## Doubt: ignorance is not bad ground
 
 Every state is scored twice — once against the believed map, once as if σ were at the floor:
@@ -99,16 +101,17 @@ state = field.at(robot_row, robot_col)
 #  'reachable_if_certain', 'unreachable_by_ignorance'}
 ```
 
-## The shipped producer is not a toy
+## Producers
 
-A great many robots decide traversability exactly this way — too steep, or too tall a step — and for them this is the whole feasibility model with the uncertainty handled properly.
+Odin's own producer is `helhest.planning.settle_producer`: the robot settled at every pose, its roll / pitch / belly margins with σ propagated through the wheel geometry, and the settle residual and step gate as hard constraints. `helhest.planning.costtogo` joins it to this library in stages — `classify`, the robot's own edits of the classified fields (a robust tube, travel-time prices), `iterate` — recorded into one CUDA graph.
+
+The geometric producer (slope and step from a `(mean, σ)` heightmap, `tests/planning/terrain_value_field/geometric_producer.py`) is the fast, engine-free one the library is tested with. It is not a toy: a great many robots decide traversability exactly this way — too steep, or too tall a step — and for them this is the whole feasibility model with the uncertainty handled properly.
 
 One detail worth knowing, because the obvious implementation is wrong: **step is the largest departure from the local plane, not the footprint's peak-to-trough.** On a smooth 20° incline an 0.8 m footprint spans 0.29 m top to bottom with no step present, so a peak-to-trough measure re-reports the slope and the two constraints stop being independent. Removing the plane the slope term already fitted leaves roughness, which is what a step limit is about. `test_a_plane_has_no_step_however_steep` pins it.
 
 ## Tests
 
 ```sh
-PYTHONPATH=src python -m pytest tests -q
+python -m pytest tests/planning/terrain_value_field -q
 ```
-
-56 tests. Lattice closure and the cost model are pinned by their own file — the arc cost is checked against a numerically integrated circle rather than the closed form it uses. The margin reduction is checked against the algebra rather than another implementation; the producer against planes and steps of known geometry; and there is a guard, with tests, for a map whose shape disagrees with its grid — that reads out of bounds and returns *plausible nonsense* rather than failing, which cost real debugging time.
+ Lattice closure and the cost model are pinned by their own file — the arc cost is checked against a numerically integrated circle rather than the closed form it uses. The margin reduction is checked against the algebra rather than another implementation; the producer against planes and steps of known geometry; and there is a guard, with tests, for a map whose shape disagrees with its grid — that reads out of bounds and returns *plausible nonsense* rather than failing, which cost real debugging time.

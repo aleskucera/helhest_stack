@@ -18,16 +18,22 @@ knob: how much detour to trade for flatness). The lattice arc cost is
 flatness_weight is the only global gain; the per-axis weights only set the shape (keep them a ratio,
 e.g. 1.0 : 0.5, not a second gain).
 
-This is the settle-based feasibility PRODUCER, and that is now ALL it is. It settles the robot at
-every pose to make the per-pose blocked / graded-tilt fields, packs them into the one signed field
-`terrain_value_field` reads, and hands the value iteration to it.
+The pieces, and where each lives:
 
-The split is deliberate. What is here is Odin's physics -- the settle, the tall-step gate, the
-robust-tube erosion -- and it is worth nothing to another robot. What moved out is the cost-to-go
-machinery, which is worth the same to every robot and was previously a copy that had drifted: it
-charged a flat step for arcs that covered different ground, took heading bins at their midpoints
-so no move ran along a grid axis, and checked every swept cell at the heading the arc STARTED in
-even where the arc had turned 45 degrees by the time it got there.
+  planning/settle_producer.py   Odin's physics: the settle at every pose, read as
+                                terrain_value_field constraints (margins in sigmas), plus the
+                                hazard / violation / flatness fields the tube needs
+  terrain_value_field           the cost-to-go machinery, the same for every robot: classify the
+                                constraints (veto, graded charge, doubt), seed, value-iterate
+  this file                     the frame that joins them, and the routing policy around it --
+                                the wall-face hazard, the robust tube, the clearance route, the
+                                escape field -- all recorded into ONE captured graph per window
+
+The split is deliberate. Odin's physics is worth nothing to another robot; the cost-to-go
+machinery is worth the same to every robot, and was once a copy here that had drifted: it charged
+a flat step for arcs that covered different ground, took heading bins at their midpoints so no
+move ran along a grid axis, and checked every swept cell at the heading the arc STARTED in even
+where the arc had turned 45 degrees by the time it got there.
 """
 
 from __future__ import annotations
