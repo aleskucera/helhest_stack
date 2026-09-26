@@ -81,6 +81,19 @@ def _relax_kernel(
     n_prim: wp.int32,
     penalty_scale: wp.float32,  # 0 -> pure distance; >0 -> prefer states with more margin
     inf: wp.float32,
+    # TURN PRICE (optional; turn_on = 0 leaves every cost exactly as before). A per-pose time
+    # multiplier T = v_cruise / v_allowed, and the tail's lever: a turning arc of radius R swings a
+    # point `lever` behind the axle at v * lever / R, so its allowed axle speed is v_allowed / (1 +
+    # lever / R) and it is charged arc * (max(1, T (1 + k)) - max(1, T)) on top, k = lever / R.
+    turn_field: wp.array(dtype=wp.float32, ndim=3),
+    turn_on: wp.int32,
+    turn_lever: wp.float32,  # [m]
+    # KEEP-OUT (a rule, not a time): turning arcs whose swept cells are flagged here (1 = within
+    # the keep-out of a wall) pay `keepout_cost` x arc length x the flagged fraction on top, so
+    # the route straightens before a gap and turns after it
+    keepout_field: wp.array(dtype=wp.float32, ndim=3),
+    keepout_cost: wp.float32,
+    bin_rad: wp.float32,  # [rad] one heading bin
     dist_out: wp.array(dtype=wp.float32, ndim=3),
     changed: wp.array(dtype=wp.int32),
 ):
@@ -109,6 +122,8 @@ def _relax_kernel(
         ok = int(1)
         ns = sweep_n[t, p]
         tsum = float(0.0)
+        msum = float(0.0)
+        ksum = float(0.0)
         for s in range(ns):
             sr = r + sweep_dr[t, p, s]
             sc = c + sweep_dc[t, p, s]
@@ -129,13 +144,25 @@ def _relax_kernel(
                 ok = 0
                 break
             tsum += pc
+            if turn_on != 0:
+                msum += turn_field[scr, scc, tt]
+                ksum += keepout_field[scr, scc, tt]
         if ok == 1:
             nr = r + prim_dr[t, p]
             nc = c + prim_dc[t, p]
             if nr >= 0 and nr < h and nc >= 0 and nc < w:
                 arc = prim_cost[t, p]
+                base = arc
                 if ns > 0:
                     arc = arc * (1.0 + penalty_scale * tsum / float(ns))
+                    # a turning ARC (not a pivot: those do not move) near walls pays for its tail
+                    dh = prim_heading[t, p] - t
+                    if turn_on != 0 and dh != 0 and (prim_dr[t, p] != 0 or prim_dc[t, p] != 0):
+                        dh = (dh + nt + nt // 2) % nt - nt // 2
+                        k = turn_lever * wp.abs(float(dh)) * bin_rad / wp.max(base, 1.0e-3)
+                        tm = msum / float(ns)
+                        arc = arc + base * (wp.max(1.0, tm * (1.0 + k)) - wp.max(1.0, tm))
+                        arc = arc + base * keepout_cost * ksum / float(ns)
                 best = wp.min(best, arc + dist_in[nr, nc, prim_heading[t, p]])
     dist_out[r, c, t] = best
     if best < dist_in[r, c, t]:
@@ -220,6 +247,9 @@ class ValueSolver:
             self._dist_b = wp.zeros((self.height, self.width, self.n_theta), dtype=wp.float32)
             # >0 if any cell improved this sweep (convergence)
             self._changed = wp.zeros(1, dtype=wp.int32)
+            # the turn price is off until set_turn_price: a 1-cell stand-in keeps the launch valid
+            self._turn_field = wp.zeros((1, 1, 1), dtype=wp.float32)
+            self._keepout_field = wp.zeros((1, 1, 1), dtype=wp.float32)
             # device while-condition for capture_while
             self._keep_running = wp.zeros(1, dtype=wp.int32)
             self._iter = wp.zeros(1, dtype=wp.int32)
@@ -229,6 +259,32 @@ class ValueSolver:
         # change freely between replays, which is the whole point: the map is new every frame.
         self._graph: wp.Graph | None = None
         self._graph_key: tuple | None = None
+        self._turn_on = 0
+        self._turn_lever = 0.0
+        self._keepout_cost = 0.0
+
+    def set_turn_price(
+        self,
+        turn_field: wp.array | None,
+        lever_m: float = 0.0,
+        keepout_field: wp.array | None = None,
+        keepout_cost: float = 0.0,
+    ) -> None:
+        """Charge turning arcs for their tail near walls (see `_relax_kernel`). `turn_field` is a
+        per-pose time multiplier [rows, cols, headings] -- v_cruise / v_allowed, filled by the
+        caller every frame in place (a graph bakes in the pointer); None switches it off."""
+        if turn_field is None:
+            self._turn_on, self._turn_lever = 0, 0.0
+            self._turn_field = wp.zeros((1, 1, 1), dtype=wp.float32, device=self.device)
+        else:
+            self._turn_on, self._turn_lever = 1, float(lever_m)
+            self._turn_field = turn_field
+        if keepout_field is None or turn_field is None:
+            self._keepout_field = wp.zeros_like(self._turn_field)
+            self._keepout_cost = 0.0
+        else:
+            self._keepout_field, self._keepout_cost = keepout_field, float(keepout_cost)
+        self._graph = None  # the launch arguments changed
 
     def _relax(
         self,
@@ -256,6 +312,12 @@ class ValueSolver:
                 self.n_prim,
                 float(penalty_scale),
                 self._inf,
+                self._turn_field,
+                self._turn_on,
+                self._turn_lever,
+                self._keepout_field,
+                self._keepout_cost,
+                2.0 * math.pi / float(self.n_theta),
             ],
             outputs=[dist_out, self._changed],
             device=self.device,
