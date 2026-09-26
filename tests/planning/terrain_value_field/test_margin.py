@@ -21,6 +21,7 @@ def _reduce(margins, sigmas, floors, shape=(1, 1, 1)):
         mar[i], sig[i] = m, s
     z = wp.zeros(shape, dtype=wp.float32)
     zc = wp.zeros(shape, dtype=wp.float32)
+    hard = wp.zeros(shape, dtype=wp.float32)
     wp.launch(
         M.margin_to_z_kernel,
         dim=shape,
@@ -29,8 +30,9 @@ def _reduce(margins, sigmas, floors, shape=(1, 1, 1)):
             wp.array(sig, dtype=wp.float32),
             wp.array(np.array(floors, np.float32), dtype=wp.float32),
         ],
-        outputs=[z, zc],
+        outputs=[z, zc, hard],
     )
+    _reduce.hard = float(hard.numpy()[0, 0, 0])
     return float(z.numpy()[0, 0, 0]), float(zc.numpy()[0, 0, 0])
 
 
@@ -78,15 +80,16 @@ def test_a_map_at_the_floor_has_nothing_left_to_learn():
     assert z == pytest.approx(zc, rel=1e-6)
 
 
-def _classify(z, zc, k=2.0, z_charge=4.0, w=1.0):
+def _classify(z, zc, k=2.0, z_charge=4.0, w=1.0, hard=0.0):
     shape = (1, 1, 1)
     az = wp.array(np.full(shape, z, np.float32), dtype=wp.float32)
     azc = wp.array(np.full(shape, zc, np.float32), dtype=wp.float32)
+    ah = wp.array(np.full(shape, hard, np.float32), dtype=wp.float32)
     out = [wp.zeros(shape, dtype=wp.float32) for _ in range(2)]
     wp.launch(
         M.classify_kernel,
         dim=shape,
-        inputs=[az, azc, wp.array(np.array([k], np.float32), dtype=wp.float32), z_charge, w],
+        inputs=[az, azc, ah, wp.array(np.array([k], np.float32), dtype=wp.float32), z_charge, w],
         outputs=out,
     )
     pose_cost, doubt = (float(o.numpy()[0, 0, 0]) for o in out)
@@ -130,20 +133,22 @@ def test_fusion_matches_the_split_pair():
     margin[0, ::7] = float(M.IGNORED)  # exercise the opt-out branch too
     mar = wp.array(margin, dtype=wp.float32)
     sig = wp.array(rng.uniform(0.0, 0.2, shape).astype(np.float32), dtype=wp.float32)
-    flo = wp.array(rng.uniform(0.01, 0.05, shape[0]).astype(np.float32), dtype=wp.float32)
+    floors = rng.uniform(0.01, 0.05, shape[0]).astype(np.float32)
+    floors[4] = 0.0  # and a hard constraint
+    flo = wp.array(floors, dtype=wp.float32)
     k = wp.array(np.array([2.0], np.float32), dtype=wp.float32)
     z_charge, w = 4.0, 1.5
 
-    split = [wp.zeros(out3, dtype=wp.float32) for _ in range(4)]
-    wp.launch(M.margin_to_z_kernel, dim=out3, inputs=[mar, sig, flo], outputs=split[:2])
+    split = [wp.zeros(out3, dtype=wp.float32) for _ in range(5)]
+    wp.launch(M.margin_to_z_kernel, dim=out3, inputs=[mar, sig, flo], outputs=split[:3])
     wp.launch(
         M.classify_kernel,
         dim=out3,
-        inputs=[split[0], split[1], k, z_charge, w],
-        outputs=split[2:],
+        inputs=[split[0], split[1], split[2], k, z_charge, w],
+        outputs=split[3:],
     )
 
-    fused = [wp.zeros(out3, dtype=wp.float32) for _ in range(4)]
+    fused = [wp.zeros(out3, dtype=wp.float32) for _ in range(5)]
     wp.launch(
         M.margin_to_fields_kernel,
         dim=out3,
@@ -151,11 +156,12 @@ def test_fusion_matches_the_split_pair():
         outputs=fused,
     )
 
-    names = ("z", "z_certain", "pose_cost", "doubt")
+    names = ("z", "z_certain", "hard", "pose_cost", "doubt")
     for name, a, b in zip(names, split, fused):
         np.testing.assert_array_equal(a.numpy(), b.numpy(), err_msg=f"{name} drifted")
-    assert (fused[2].numpy() < 0).any(), "the scene must actually block something"
-    assert (fused[3].numpy() > 0).any(), "and produce some doubt, or this proves little"
+    assert (fused[2].numpy() > 0).any(), "the hard constraint must fail somewhere"
+    assert (fused[3].numpy() < 0).any(), "the scene must actually block something"
+    assert (fused[4].numpy() > 0).any(), "and produce some doubt, or this proves little"
 
 
 def test_the_pose_cost_encoding_loses_nothing_at_a_vetoed_state():
@@ -185,15 +191,34 @@ def test_a_state_every_constraint_declines_to_judge_reads_as_perfect_ground():
     mar = wp.array(np.full(shape, float(M.IGNORED), np.float32), dtype=wp.float32)
     sig = wp.array(np.full(shape, 0.5, np.float32), dtype=wp.float32)
     flo = wp.array(np.array([0.01, 0.01], np.float32), dtype=wp.float32)
-    out = [wp.zeros(shape[1:], dtype=wp.float32) for _ in range(4)]
+    out = [wp.zeros(shape[1:], dtype=wp.float32) for _ in range(5)]
     wp.launch(
         M.margin_to_fields_kernel,
         dim=shape[1:],
         inputs=[mar, sig, flo, wp.array(np.array([2.0], np.float32), dtype=wp.float32), 4.0, 1.0],
         outputs=out,
     )
-    z, _, pose_cost, doubt = (float(o.numpy()[0, 0, 0]) for o in out)
+    z, _, _, pose_cost, doubt = (float(o.numpy()[0, 0, 0]) for o in out)
     assert z >= float(M.IGNORED), "nothing spoke, so nothing bounds the margin"
     assert pose_cost >= 0.0, "NOT vetoed"
     assert pose_cost == pytest.approx(0.0), "and not even penalised"
     assert doubt == pytest.approx(0.0), "and no doubt raised -- this is the silent part"
+
+
+# ----------------------------------------------------------------------- hard constraints
+
+
+def test_a_hard_constraint_is_a_sign_test_that_stays_out_of_z():
+    """floor = 0: vetoed exactly at margin < 0, and the soft margin alone still sets z."""
+    z, _ = _reduce([0.30, -1.0e-6], [0.10, 0.0], [0.01, 0.0])
+    assert _reduce.hard == 1.0
+    assert z == pytest.approx(3.0, rel=1e-5), "the hard constraint must not enter z"
+    _reduce([0.30, 0.0], [0.10, 0.0], [0.01, 0.0])
+    assert _reduce.hard == 0.0, "a margin of exactly 0 passes, as `margin < 0` says"
+
+
+def test_a_hard_failure_vetoes_a_state_the_soft_margins_pass_and_keeps_its_penalty():
+    blocked, penalty, doubt = _classify(3.0, 99.0, hard=1.0)  # z=3 >= k=2: soft would pass
+    assert blocked == 1.0
+    assert penalty == pytest.approx(1.0, rel=1e-5), "the graded cost survives in the magnitude"
+    assert doubt == 0.0, "z >= k, so no soft doubt either"

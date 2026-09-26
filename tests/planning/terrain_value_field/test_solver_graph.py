@@ -56,7 +56,7 @@ def test_the_recorded_solve_matches_the_eager_one_bit_for_bit():
     con = _constraints((10, 38, 12, 16))
     f.solve(con)
     recorded = _finite(f.V).copy()
-    eager = _finite(f.solver.value_iterate(f.pose_cost, f._seeds, f.penalty_scale, capture=False))
+    eager = _finite(f.solver.value_iterate(f.pose_cost, f.seeds, f.penalty_scale, capture=False))
     assert np.array_equal(recorded, eager)
 
 

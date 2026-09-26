@@ -147,11 +147,11 @@ def test_asking_leaves_the_believed_solve_in_place():
     con = _constraints(_gap_scene())
     f.solve_pair(con)
     want = {n: getattr(f, n).numpy().copy() for n in ("V", "V_certain", "z", "doubt", "pose_cost")}
-    seeds = f._seeds.numpy().copy()
+    seeds = f.seeds.numpy().copy()
     f.value_of_looking(con, *ROBOT)
     for n, v in want.items():
         np.testing.assert_array_equal(getattr(f, n).numpy(), v, err_msg=f"{n} was left disturbed")
-    np.testing.assert_array_equal(f._seeds.numpy(), seeds, "the goal seeding was not restored")
+    np.testing.assert_array_equal(f.seeds.numpy(), seeds, "the goal seeding was not restored")
 
 
 def test_seed_doubt_makes_the_field_the_distance_to_the_nearest_doubt():

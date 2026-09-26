@@ -119,7 +119,7 @@ def test_the_cheapest_way_out_is_the_one_that_goes_around(layers):
     for the northern exits can only have come down from the coarse layer."""
     coarse, fine, cg, fg, _ = layers
     fine.seed_from_coarse(coarse.V, cg, fg, GOAL_XY)
-    seeds = fine._seeds.numpy()[:, :, 0]
+    seeds = fine.seeds.numpy()[:, :, 0]
     band = fine.solver.reach_cells
     north = seeds[-band:, :].min()  # +y edge: toward the gap
     south = seeds[:band, :].min()  # -y edge: away from it
@@ -138,11 +138,11 @@ def test_the_seed_band_is_thick_enough_that_an_arc_cannot_jump_it(layers):
     assert fine.solver.reach_cells >= 2, "a single cell is thinner than one move"
 
     fine.seed_from_coarse(coarse.V, cg, fg, GOAL_XY, band=1)
-    thin_seeds = int((fine._seeds.numpy() < UNREACHABLE).sum())
+    thin_seeds = int((fine.seeds.numpy() < UNREACHABLE).sum())
     thin_v = fine.solve(free).numpy()[FINE_N // 2, FINE_N // 2, :].min()
 
     fine.seed_from_coarse(coarse.V, cg, fg, GOAL_XY)  # default band = reach_cells
-    assert int((fine._seeds.numpy() < UNREACHABLE).sum()) > thin_seeds
+    assert int((fine.seeds.numpy() < UNREACHABLE).sum()) > thin_seeds
     full_v = fine.solve(free).numpy()[FINE_N // 2, FINE_N // 2, :].min()
     assert full_v <= thin_v + 1e-4, "a thicker ring can only offer more ways out, never fewer"
 

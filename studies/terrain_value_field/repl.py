@@ -27,7 +27,7 @@ producer = GeometricProducer(N, N, 1)
 
 def solve(sd: float = 0.02, k: float = 2.0, seed=(N // 2, N - 3)):
     """Re-run the whole chain at a given map uncertainty and z_veto. Returns the `at` dict."""
-    field.z_veto = k
+    field.set_z_veto(k)
     cons = producer(
         wp.array(height, dtype=wp.float32),
         wp.array(np.full((N, N), sd, np.float32), dtype=wp.float32),

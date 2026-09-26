@@ -132,13 +132,16 @@ class TerrainValueField:
         with wp.ScopedDevice(self.device):
             self.z = wp.zeros(shape, dtype=wp.float32)
             self.z_certain = wp.zeros(shape, dtype=wp.float32)
+            self.hard = wp.zeros(shape, dtype=wp.float32)  # 1 = a hard constraint fails
             # graded cost with the veto in the sign; see margin.POSE COST
             self.pose_cost = wp.zeros(shape, dtype=wp.float32)
             self.doubt = wp.zeros(shape, dtype=wp.float32)
             self.V = wp.zeros(shape, dtype=wp.float32)
             self.V_certain = wp.zeros(shape, dtype=wp.float32)
-            # +inf = not a seed. zeros would mean EVERY state is a free goal.
-            self._seeds = wp.full(shape, float(self.solver_inf), dtype=wp.float32)
+            # +inf = not a seed. zeros would mean EVERY state is a free goal. Public so device-side
+            # seeders (`hierarchical`) can write it inside a captured graph.
+            self.seeds = wp.full(shape, float(self.solver_inf), dtype=wp.float32)
+            # a device scalar, so a captured graph can be retuned without re-recording it
             self._k = wp.array([self.z_veto], dtype=wp.float32)
 
         self.solver = ValueSolver(
@@ -155,6 +158,12 @@ class TerrainValueField:
             free_blocked_seeds=free_blocked_seeds,
             device=self.device,
         )
+
+    def set_z_veto(self, z_veto: float) -> None:
+        """Retune the veto. A host-to-device copy, so call it outside any graph capture; a graph
+        recorded around `classify` reads the new value on its next replay."""
+        self.z_veto = float(z_veto)
+        self._k.assign(np.array([self.z_veto], np.float32))
 
     # -- seeds ----------------------------------------------------------------------------
     def seed_states(self, mask: np.ndarray | wp.array) -> None:
@@ -184,9 +193,9 @@ class TerrainValueField:
         as equally good. See `seed_from_coarse`.
         """
         if isinstance(values, wp.array):
-            wp.copy(self._seeds, values)
+            wp.copy(self.seeds, values)
         else:
-            self._seeds.assign(np.ascontiguousarray(values, dtype=np.float32))
+            self.seeds.assign(np.ascontiguousarray(values, dtype=np.float32))
 
     def seed_from_coarse(
         self,
@@ -229,7 +238,7 @@ class TerrainValueField:
                 int(self.solver.reach_cells if band is None else band),
                 float(self.solver_inf),
             ],
-            outputs=[self._seeds],
+            outputs=[self.seeds],
             device=self.device,
         )
 
@@ -244,19 +253,21 @@ class TerrainValueField:
             _seed_doubt_kernel,
             dim=(self.rows, self.cols, self.n_theta),
             inputs=[self.doubt, float(min_doubt), float(self.solver_inf)],
-            outputs=[self._seeds],
+            outputs=[self.seeds],
             device=self.device,
         )
 
     # -- solve ----------------------------------------------------------------------------
-    def solve(self, constraints: Constraints, certain: bool = False) -> wp.array:
-        """Reduce the constraints, classify, and value-iterate. Returns `V` (device-resident).
+    def classify(self, constraints: Constraints, certain: bool = False) -> wp.array:
+        """Reduce the constraints and classify: fills `z`, `z_certain`, `hard`, `pose_cost` and
+        `doubt`, and returns `pose_cost`. No host sync and no host-to-device copy, so it can be
+        recorded into a larger graph; a robot that edits `pose_cost` before `iterate` (erosion,
+        costs of its own) does it here, between the two.
 
         `certain=True` scores every state as if the map carried no uncertainty beyond the
         floors. That is not a cheaper approximation -- it is the second half of the pair that
         makes `doubt` meaningful, and on its own it is the optimistic reading.
         """
-        self._k.assign(np.array([self.z_veto], np.float32))
         wp.launch(
             _margin.margin_to_fields_kernel,
             dim=(self.rows, self.cols, self.n_theta),
@@ -268,7 +279,7 @@ class TerrainValueField:
                 self.z_charge,
                 self.charge_per_sigma,
             ],
-            outputs=[self.z, self.z_certain, self.pose_cost, self.doubt],
+            outputs=[self.z, self.z_certain, self.hard, self.pose_cost, self.doubt],
             device=self.device,
         )
         if certain:
@@ -281,6 +292,7 @@ class TerrainValueField:
                 inputs=[
                     self.z_certain,
                     self.z_certain,
+                    self.hard,
                     self._k,
                     self.z_charge,
                     self.charge_per_sigma,
@@ -288,8 +300,24 @@ class TerrainValueField:
                 outputs=[self.pose_cost, self.doubt],
                 device=self.device,
             )
-        result = self.solver.value_iterate(self.pose_cost, self._seeds, self.penalty_scale)
-        wp.copy(self.V, result)
+        return self.pose_cost
+
+    def iterate(self, capture: bool = True) -> wp.array:
+        """Value-iterate `pose_cost` from `seeds` to a fixed point. Returns the solver's buffer,
+        device-resident and overwritten by the next solve; `solve` copies it into `V`.
+
+        `capture=False` inside a caller's own capture: `ValueSolver.value_iterate` would
+        otherwise try to open a second one. Its loop still becomes a device-side conditional
+        node of the outer graph.
+        """
+        return self.solver.value_iterate(
+            self.pose_cost, self.seeds, self.penalty_scale, capture=capture
+        )
+
+    def solve(self, constraints: Constraints, certain: bool = False) -> wp.array:
+        """`classify` then `iterate`. Returns `V` (device-resident)."""
+        self.classify(constraints, certain=certain)
+        wp.copy(self.V, self.iterate())
         return self.V
 
     def solve_pair(self, constraints: Constraints) -> tuple[wp.array, wp.array]:
@@ -349,14 +377,14 @@ class TerrainValueField:
         n_doubted = int((self.doubt.numpy() > min_doubt).sum())
 
         parked = {n: wp.clone(getattr(self, n)) for n in ("V", "z", "pose_cost", "doubt")}
-        parked_seeds = wp.clone(self._seeds)
+        parked_seeds = wp.clone(self.seeds)
         self.seed_doubt(min_doubt)
         # optimistic: the way to somewhere unseen runs through the unseen, so the believed
         # reading would refuse to plan the very trip this is costing
         look = float(self.solve(constraints, certain=True).numpy()[row, col, heading_bin])
         for n, buf in parked.items():
             wp.copy(getattr(self, n), buf)
-        wp.copy(self._seeds, parked_seeds)
+        wp.copy(self.seeds, parked_seeds)
 
         cap = self.unreachable_value()
         blocked_by_ignorance = here["unreachable_by_ignorance"]

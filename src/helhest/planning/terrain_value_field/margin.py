@@ -47,6 +47,11 @@ route exists if the ground is as good as it looks, and `doubt` says which cells 
 `IGNORED` is for a constraint that does not APPLY to a state -- a slope test where no plane was
 fitted -- not for one whose input was never measured.
 
+HARD CONSTRAINTS. `floor_i = 0` marks a test with no uncertainty to divide by -- a solver that
+failed to resolve, a step taller than a gate. It is a pure sign test: `margin < 0` vetoes the state
+and sets `hard`, and the constraint takes no part in `z`, the graded charge or `doubt`. Dividing by
+a made-up tiny sigma instead would drag `z` to +-1e9 and swamp every real margin in the `min`.
+
 POSE COST. The veto and the graded cost travel as ONE field, with the veto in the sign:
 
     pose_cost = penalty          a state the robot may occupy, penalty >= 0
@@ -78,6 +83,7 @@ def margin_to_fields_kernel(
     charge_per_sigma: wp.float32,
     z: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    hard: wp.array3d(dtype=wp.float32),  # [row, col, heading] 1 = a hard constraint fails
     pose_cost: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
 ):
@@ -102,20 +108,26 @@ def margin_to_fields_kernel(
     r, c, t = wp.tid()
     best = float(IGNORED)
     best_certain = float(IGNORED)
+    failed = float(0.0)
     for i in range(margin.shape[0]):
         m = margin[i, r, c, t]
         if m >= IGNORED:
             continue  # this constraint declines to speak about this state
         f = floor[i]
+        if f <= 0.0:  # hard: a sign test, see HARD CONSTRAINTS above
+            if m < 0.0:
+                failed = 1.0
+            continue
         s = wp.max(sigma[i, r, c, t], f)
         best = wp.min(best, m / s)
         best_certain = wp.min(best_certain, m / f)
     z[r, c, t] = best
     z_certain[r, c, t] = best_certain
+    hard[r, c, t] = failed
     k = z_veto[0]
     pen = wp.where(best < z_charge, charge_per_sigma * (z_charge - best), 0.0)
     # veto in the sign; see POSE COST above
-    pose_cost[r, c, t] = wp.where(best < k, -1.0 - pen, pen)
+    pose_cost[r, c, t] = wp.where(best < k or failed > 0.5, -1.0 - pen, pen)
     doubt[r, c, t] = wp.where(best < k and best_certain >= k, best_certain - best, 0.0)
 
 
@@ -126,6 +138,7 @@ def margin_to_z_kernel(
     floor: wp.array(dtype=wp.float32),  # [constraint]
     z: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    hard: wp.array3d(dtype=wp.float32),  # [row, col, heading] 1 = a hard constraint fails
 ):
     """Reduce per-constraint (margin, sigma) to the binding margin, twice.
 
@@ -140,22 +153,29 @@ def margin_to_z_kernel(
     r, c, t = wp.tid()
     best = float(IGNORED)
     best_certain = float(IGNORED)
+    failed = float(0.0)
     for i in range(margin.shape[0]):
         m = margin[i, r, c, t]
         if m >= IGNORED:
             continue  # this constraint declines to speak about this state
         f = floor[i]
+        if f <= 0.0:  # hard: a sign test, see HARD CONSTRAINTS above
+            if m < 0.0:
+                failed = 1.0
+            continue
         s = wp.max(sigma[i, r, c, t], f)
         best = wp.min(best, m / s)
         best_certain = wp.min(best_certain, m / f)
     z[r, c, t] = best
     z_certain[r, c, t] = best_certain
+    hard[r, c, t] = failed
 
 
 @wp.kernel
 def classify_kernel(
     z: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    hard: wp.array3d(dtype=wp.float32),  # [row, col, heading] 1 = a hard constraint fails
     z_veto: wp.array(dtype=wp.float32),  # [1]
     z_charge: wp.float32,
     charge_per_sigma: wp.float32,
@@ -178,5 +198,7 @@ def classify_kernel(
     zz = z[r, c, t]
     zc = z_certain[r, c, t]
     pen = wp.where(zz < z_charge, charge_per_sigma * (z_charge - zz), 0.0)
-    pose_cost[r, c, t] = wp.where(zz < k, -1.0 - pen, pen)  # veto in the sign
+    pose_cost[r, c, t] = wp.where(
+        zz < k or hard[r, c, t] > 0.5, -1.0 - pen, pen
+    )  # veto in the sign
     doubt[r, c, t] = wp.where(zz < k and zc >= k, zc - zz, 0.0)
