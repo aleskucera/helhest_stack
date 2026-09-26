@@ -165,3 +165,36 @@ It keeps its pooling (the producer) and hands its pose cost to a heading-free
   the tvf README) and the memory.
 
 Push only when asked.
+
+---
+
+## Outcome (2026-09-26)
+
+Steps 0-8 done on study/tvf-migration (1a9ef6e .. 08f5d3e), each commit held to the golden fields.
+
+- **Equivalence.** Steps 1-7 bit-identical on every field of every config, except config C's
+  `doubt` at <= 3.8e-7 relative (the certain reading's floors now come from the same function as
+  the sigmas). dasenka, 24 runs per arm: `ref` (the refactor) vs `base` (pre-refactor) differ only
+  by the simulator's run-to-run scatter; every run reaches.
+- **8a** (sigma at the settled heading): z-margin arm (`--z-veto 2 --charge-per-sigma 0.5`),
+  zmref -> zmyaw: all reach; false_door turns near walls 3-4 deg vs 13-37; pocket and corridors a
+  few frames slower. Sim-only path.
+- **8b** (ring reads the block under each fine centre): default arm, ref -> ring: all reach;
+  slalom closest pass 0.36 vs 0.28 m with less turning, false_door and cornerL24 faster, the rest
+  within scatter.
+- **8c** (no doubt where a hard constraint fails): doubt only, no control effect.
+- **Frame time.** `CostToGo.compute`, deployed config, 66x66x24, laptop A500, interleaved:
+  p10 22.9 / 23.1 ms before, 21.9 / 22.0 ms after. No cost from the 4-D constraint buffers; the
+  single producer kernel replaced two passes. Node replays too noisy to resolve it (+-3 ms within
+  an arm).
+- **Bag audit** (in_speed_odin0): frames with no fine route at the robot's heading 1/56 before,
+  2/79 after (2/67 this morning).
+
+Found on the way, fixed: the step gate crashed since 4d38bf7 (`_foot_r` lost); the golden harness
+first reproduced a stale Warp kernel cache; `-1 - p` is not exact in float32 (`penalty` output);
+run_bag.sh replayed the venv's checkout, not its own.
+
+Found, NOT changed: the node runs CostToGo's default `charge_per_sigma` 0.5 (a sigma charge at
+the floor), while drive_sim passes 0 -- the sim and the robot differ on this one knob.
+`studies/terrain_value_field/bench_margin.py` predates the current kernel signatures and does not
+run.
