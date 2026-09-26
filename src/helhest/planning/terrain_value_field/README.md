@@ -40,7 +40,7 @@ Nothing here knows what a constraint means. A producer supplies `(margin, σ, fl
 
 | producer | margins |
 |---|---|
-| `GeometricProducer` (shipped) | `max_slope − slope`, `max_step − step` |
+| `GeometricProducer` (test fixture, `tests/planning/terrain_value_field/`) | `max_slope − slope`, `max_step − step` |
 | physics (a settle, a contact solve) | tilt limits, belly clearance |
 | learned | whatever it scores, with its own σ |
 
@@ -83,7 +83,7 @@ Size the window to what the map actually knows, not to what it stores. On the ro
 import numpy as np, warp as wp
 from helhest.grid import build_grid
 from helhest.planning.terrain_value_field import TerrainValueField, omni_control_set
-from helhest.planning.terrain_value_field.producers import GeometricProducer
+from tests.planning.terrain_value_field.geometric_producer import GeometricProducer
 
 grid  = build_grid(rows, cols, 0.1, origin_x, origin_y)
 field = TerrainValueField(rows, cols, 0.1, n_theta=1,

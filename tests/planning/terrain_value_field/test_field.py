@@ -14,7 +14,7 @@ import warp as wp
 from helhest.grid import build_grid
 from helhest.planning.terrain_value_field import omni_control_set
 from helhest.planning.terrain_value_field import TerrainValueField
-from helhest.planning.terrain_value_field.producers import GeometricProducer
+from .geometric_producer import GeometricProducer
 
 N = 41
 CELL = 0.1

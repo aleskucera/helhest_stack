@@ -18,7 +18,8 @@ mapper is unsure about widens the margin it needs rather than being silently tru
          actually about.
 
 Neither uses a body model, so neither depends on a physics engine. A robot that has one -- a
-settle, a contact solve -- should write its own producer and keep this as the shape to follow.
+settle, a contact solve -- writes its own producer (Odin's is `helhest.planning.settle_producer`).
+This one lives with the tests: it is the fast, engine-free producer the library is tested with.
 """
 
 from __future__ import annotations
@@ -26,10 +27,10 @@ from __future__ import annotations
 import numpy as np
 import warp as wp
 
-from ....grid import Grid
-from ....grid import sample_field
-from ..drift import footprint_drift_spread
-from ..field import Constraints
+from helhest.grid import Grid
+from helhest.grid import sample_field
+from helhest.planning.terrain_value_field.drift import footprint_drift_spread
+from helhest.planning.terrain_value_field.field import Constraints
 
 SLOPE = wp.constant(0)
 STEP = wp.constant(1)

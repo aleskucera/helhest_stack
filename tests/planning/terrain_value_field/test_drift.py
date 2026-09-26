@@ -23,7 +23,7 @@ import warp as wp
 
 from helhest.grid import build_grid
 from helhest.planning.terrain_value_field.drift import footprint_drift_spread
-from helhest.planning.terrain_value_field.producers import GeometricProducer
+from .geometric_producer import GeometricProducer
 
 N = 41
 CELL = 0.1

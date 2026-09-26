@@ -1,10 +1,13 @@
 """Scratch scene for the REPL pane: a field, a producer and a world already wired up.
 
-Run with `python -i studies/terrain_value_field/repl.py`. Everything is left in module scope so the prompt lands with
-something to poke at rather than fifteen lines of setup to retype.
+Run with `python -i studies/terrain_value_field/repl.py`. Everything is left in module scope so
+the prompt lands with something to poke at rather than fifteen lines of setup to retype.
 """
 
 from __future__ import annotations
+
+import pathlib
+import sys
 
 import numpy as np
 import warp as wp
@@ -12,7 +15,10 @@ import warp as wp
 from helhest.grid import build_grid
 from helhest.planning.terrain_value_field import omni_control_set
 from helhest.planning.terrain_value_field import TerrainValueField
-from helhest.planning.terrain_value_field.producers import GeometricProducer
+
+# the geometric producer is a test fixture now; the repo root makes `tests` importable
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+from tests.planning.terrain_value_field.geometric_producer import GeometricProducer  # noqa: E402
 
 N, CELL = 81, 0.1
 XS = -N * CELL / 2 + np.arange(N) * CELL
