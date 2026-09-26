@@ -124,11 +124,6 @@ class CostWeights:
     veto: float
     # mild per-meter preference against reverse motion (forward keeps the sensor looking ahead).
     reverse: float
-    # speed penalty in NARROW poses (CostToGo.narrow): (|v| + tail * |wz| - narrow_speed)^2 per
-    # step where the rollout holds a narrow pose -- the router's spatial tube, turned into "drive
-    # this slowly". Speed of the body's fastest point, so a pivot is limited as well as a drive.
-    narrow: float
-    narrow_speed: float  # [m/s]
     # TIME LOST TO THE CLEARANCE LAW (control/governor.py), per rollout: the seconds the governor
     # would add, dt * (s / v_allowed - 1) per step where the fastest body point's speed s exceeds
     # v_allowed = max(clear_v_min, footprint clearance / clear_t_react). Lets MPPI choose a manoeuvre
@@ -139,11 +134,6 @@ class CostWeights:
     clear_c0: float  # [m] the law's fixed margin
     clear_v_cruise: float  # [m/s] the route's time unit: V is metres at this speed
     clear_turn_ratio: float  # t_turn / t_react: how much more the tail's swing counts than driving
-    clear_keepout_m: float  # [m] turning with the footprint this close to a wall is ruled out ...
-    clear_keepout_cost: float  # ... priced at this x the distance it covers (the route's rule)
-    clear_heading: float  # near walls: heading regret vs the route's best heading, in goal units
-    clear_prox: float  # proximity: ((prox_m - clearance) / prox_m)^2 per second, in goal units
-    clear_prox_m: float  # [m]
     # (alpha - 1) -> grip recovery: total_grip = (alpha-1)*m*g/k_turn. 0 disables saturation.
     inv_k_turn: float
     dt: float  # rollout timestep [s] for the accel term of the saturation demand
@@ -215,13 +205,6 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # routes. ~75 makes any forward-capable route win while a genuinely stuck robot (forward
     # progress impossible, V flat ahead) still backs out over remembered ground.
     reverse: float = 75.0
-    # Speed limit where the cost-to-go marks a pose NARROW (feasible, but without room for the
-    # lateral tracking error its spatial tube stands for). Charged as narrow * (|v| + tail * |wz|
-    # - narrow_speed)^2 per rollout step, in the safety share: the speed of the body's fastest
-    # point, the tail 1.1 m behind the axle, so a pivot is slowed as well as a drive. 0 = off; it also needs the
-    # cost-to-go built with narrow_cost and set_narrow() called, or the field stays zero.
-    narrow: float = 0.0
-    narrow_speed: float = 0.4  # [m/s]
     # The clearance law's time lost, priced in GOAL units: a second lost is worth
     # (goal_terminal + goal_running) * 2 * V * v_cruise -- the goal cost V^2 of the route distance
     # that second would have covered, at the V where it is lost. A fixed price per second made the
@@ -234,21 +217,6 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     clear_c0: float = 0.15  # [m]
     clear_v_cruise: float = 1.5  # [m/s]
     clear_turn_ratio: float = 1.0  # t_turn / t_react (ClearanceGovernor.turn_ratio)
-    # THE TURNING KEEP-OUT, the route's rule in MPPI too: without it the route crossed slalom's
-    # third gap at +15 deg turning nowhere near the edges, while MPPI arrived at +35 and turned
-    # 10-22 deg inside (a turn costs the same to MPPI before a gap as in it). 0 = off.
-    clear_keepout_m: float = 0.0
-    clear_keepout_cost: float = 0.0
-    # HEADING REGRET near walls (within clear_keepout_m): how much worse the rollout's heading is
-    # than the route's best at that spot, V(x, y, yaw) - min over headings, in goal units, x this
-    # weight. Follows the route's entry angle into a gap instead of banning turns -- the route
-    # crossed slalom's gap 3 at +15 deg while MPPI arrived at +35 and turned inside. 0 = off.
-    clear_heading: float = 0.0
-    # PROXIMITY, independent of speed: each step within clear_prox_m of a wall pays
-    # ((clear_prox_m - clearance) / clear_prox_m)^2 x the goal-unit worth of a second of driving,
-    # x this weight -- pushes rollouts to the middle of a gap without banning turns. 0 = off.
-    clear_prox: float = 0.0
-    clear_prox_m: float = 0.5
 
     def build(self) -> CostWeights:
         cw = CostWeights()
@@ -267,34 +235,15 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.unknown = self.unknown
         cw.veto = self.veto
         cw.reverse = self.reverse
-        cw.narrow = self.narrow
-        cw.narrow_speed = self.narrow_speed
         cw.clear_time = self.clear_time
         cw.clear_t_react = self.clear_t_react
         cw.clear_v_min = self.clear_v_min
         cw.clear_c0 = self.clear_c0
         cw.clear_v_cruise = self.clear_v_cruise
         cw.clear_turn_ratio = self.clear_turn_ratio
-        cw.clear_keepout_m = self.clear_keepout_m
-        cw.clear_keepout_cost = self.clear_keepout_cost
-        cw.clear_heading = self.clear_heading
-        cw.clear_prox = self.clear_prox
-        cw.clear_prox_m = self.clear_prox_m
         cw.inv_k_turn = 0.0  # armed by MppiGpu from the sim's solver (0 = saturation off)
         cw.dt = 0.1  # overwritten by MppiGpu from the sim's solver
         return cw
-
-
-@wp.kernel
-def _min_heading_kernel(
-    field: wp.array3d(dtype=float),  # [ny, nx, n_theta]
-    out: wp.array2d(dtype=float),  # [ny, nx] the best heading's value per cell
-):
-    r, c = wp.tid()
-    best = field[r, c, 0]
-    for t in range(1, field.shape[2]):
-        best = wp.min(best, field[r, c, t])
-    out[r, c] = best
 
 
 @wp.func
@@ -490,11 +439,7 @@ def _cost_kernel(
         dtype=float
     ),  # [ny, nx, n_theta] cost-to-go V(x,y,theta); the goal cost
     veto_field: wp.array3d(dtype=float),  # [ny, nx, n_theta] 1 = the cost-to-go refuses this pose
-    narrow_field: wp.array3d(dtype=float),  # [ny, nx, n_theta] 1 = narrow: drive it slowly
     clear_field: wp.array2d(dtype=float),  # [ny, nx] on sgrid: distance to the nearest wall face
-    lattice_best: wp.array2d(
-        dtype=float
-    ),  # [ny', nx'] on `grid`: min over headings of lattice_field
     n_theta: int,
     cw: CostWeights,
     robot: Robot,  # envelope + feasibility thresholds (shared with the cost-to-go feasibility)
@@ -513,7 +458,6 @@ def _cost_kernel(
     sat_sum = float(0.0)
     tip_sum = float(0.0)
     veto_sum = float(0.0)
-    narrow_sum = float(0.0)
     time_sum = float(0.0)
     unk_sum = float(0.0)
     rev_sum = float(0.0)
@@ -606,15 +550,6 @@ def _cost_kernel(
             # pose is refused per heading, and a cell that is fine facing one way is not fine
             # facing another
             veto_sum += early * sample_lattice(veto_field, grid, n_theta, pose[0], pose[1], yaw_eff)
-        if cw.narrow > 0.0:
-            # the speed of the body's FASTEST point, not the axle's: the tail sits 1.1 m behind
-            # the drive axle, so a near-pivot at walking pace swings it sideways at over 1 m/s --
-            # measured, a 27 deg left turn at 0.1-0.4 m/s put it 0.02 m from a corridor wall
-            tail = -robot.wheel_pos[2][0] + robot.wheel_radius
-            over = wp.max(wp.abs(v) + tail * wp.abs(wz) - cw.narrow_speed, 0.0)
-            if over > 0.0:
-                nf = sample_lattice(narrow_field, grid, n_theta, pose[0], pose[1], yaw_eff)
-                narrow_sum += nf * over * over
         if cw.clear_time > 0.0:
             # the footprint's clearance: the wall-distance map read around its perimeter
             tail = -robot.wheel_pos[2][0] + robot.wheel_radius
@@ -651,22 +586,6 @@ def _cost_kernel(
             if fastest > allowed:
                 # seconds lost, in goal units at this step's V (see CostParams.clear_time)
                 time_sum += per_m * cw.clear_v_cruise * cw.dt * (fastest / allowed - 1.0)
-            # the keep-out: a turning step (not a spin on the spot) with the footprint this close
-            # to a wall pays the route's price for the distance it covers
-            if cw.clear_prox > 0.0 and cmin < cw.clear_prox_m:
-                depth = (cw.clear_prox_m - wp.max(cmin, 0.0)) / cw.clear_prox_m
-                time_sum += per_m * cw.clear_v_cruise * cw.dt * cw.clear_prox * depth * depth
-            if cw.clear_heading > 0.0 and cmin < cw.clear_keepout_m:
-                # metres of route cost this heading gives away against the best one here
-                regret = wp.max(vl - sample_field(lattice_best, grid, pose[0], pose[1]), 0.0)
-                time_sum += per_m * cw.clear_heading * wp.min(regret, 5.0) / float(horizon)
-            if (
-                cw.clear_keepout_cost > 0.0
-                and cmin < cw.clear_keepout_m
-                and wp.abs(wz) > 0.05
-                and wp.abs(v) > 0.02
-            ):
-                time_sum += per_m * cw.clear_keepout_cost * wp.abs(v) * cw.dt
         if cw.tip > 0.0:
             ld = loads[t, r]
             min_n = wp.min(wp.min(ld[0], ld[1]), ld[2])
@@ -690,7 +609,6 @@ def _cost_kernel(
         + cw.tip * tip_sum
         + cw.unknown * unk_sum
         + cw.veto * veto_sum
-        + cw.narrow * narrow_sum
     )
     Jsafe[r] = safe
     Jout[r] = (
@@ -980,11 +898,9 @@ class MppiGpu:
             ny, nx = sim.elevation.shape
             self.n_theta = int(n_theta)
             self.lattice_field = wp.zeros((ny, nx, n_theta), dtype=wp.float32)  # V(x,y,theta)
-            self.lattice_best = wp.zeros((ny, nx), dtype=wp.float32)  # min over headings of it
             # all-clear until armed by set_veto, so a caller that never calls it keeps the old
             # behaviour exactly
             self.veto_field = wp.zeros((ny, nx, n_theta), dtype=wp.float32)
-            self.narrow_field = wp.zeros((ny, nx, n_theta), dtype=wp.float32)  # set_narrow
             # [m] distance to the nearest wall face on the sim grid; far everywhere until update_clearance
             self.clear_field = wp.full((ny, nx), 1.0e3, dtype=wp.float32)
             # observed-cell mask on the sim grid (1 = real data); all-measured by default so the
@@ -1056,15 +972,7 @@ class MppiGpu:
         with the SAME shape -- it copies into the stable buffer the captured graph reads."""
         if tuple(V.shape) != tuple(self.lattice_field.shape):
             self.lattice_field = wp.zeros(V.shape, dtype=float, device=self.device)
-            self.lattice_best = wp.zeros(V.shape[:2], dtype=float, device=self.device)
         wp.copy(self.lattice_field, V)
-        wp.launch(
-            _min_heading_kernel,
-            dim=self.lattice_best.shape,
-            inputs=[self.lattice_field],
-            outputs=[self.lattice_best],
-            device=self.device,
-        )
         if grid is not None:
             self.lattice_grid = grid
 
@@ -1100,16 +1008,6 @@ class MppiGpu:
             outputs=[self.clear_field],
             device=self.device,
         )
-
-    def set_narrow(self, narrow, grid=None):
-        """Copy the cost-to-go's NARROW field (`CostToGo.narrow`) into the stable buffer the cost
-        kernel reads. Same shape, grid and call rule as `set_veto`; inert while
-        `CostWeights.narrow` is 0."""
-        if tuple(narrow.shape) != tuple(self.narrow_field.shape):
-            self.narrow_field = wp.zeros(narrow.shape, dtype=float, device=self.device)
-        wp.copy(self.narrow_field, narrow)
-        if grid is not None:
-            self.lattice_grid = grid
 
     def _refine(self):
         """One MPPI iteration: sample -> rollout -> cost -> CEM reweight, all on device."""
@@ -1158,9 +1056,7 @@ class MppiGpu:
                 self.lattice_grid,
                 self.lattice_field,
                 self.veto_field,
-                self.narrow_field,
                 self.clear_field,
-                self.lattice_best,
                 self.n_theta,
                 self.cw,
                 self.robot,

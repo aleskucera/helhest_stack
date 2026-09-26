@@ -184,10 +184,6 @@ _PLAN_BUILD = frozenset(
         "plan_saturation",
         "plan_wall_veto",
         "plan_pivot_cost",
-        "plan_narrow_speed",
-        "plan_narrow_weight",
-        "plan_narrow_cost",
-        "plan_narrow_reach_m",
         "plan_clear_t_react",
         "plan_clear_v_cruise",
         "plan_clear_v_min",
@@ -198,12 +194,6 @@ _PLAN_BUILD = frozenset(
         "plan_clear_t_turn",
         "plan_clear_route_turn",
         "plan_clear_v_blind",
-        "plan_clear_turn_keepout_m",
-        "plan_clear_turn_keepout_cost",
-        "plan_clear_mppi_keepout",
-        "plan_clear_heading_weight",
-        "plan_clear_prox_weight",
-        "plan_clear_prox_m",
         "plan_coarse_block_m",
         "plan_coarse_memory_m",
         "plan_coarse_win_m",
@@ -759,11 +749,6 @@ class ElevationNode(Node):
         # primitive -- which is why plan_n_theta above is chosen as if this were 0. Connectivity
         # must not depend on a price someone may reasonably set to zero.
         d("plan_pivot_cost", PLAN_DEFAULTS["plan_pivot_cost"])
-        # Slow in narrow places instead of vetoing them: see planner_config. 0 = off.
-        d("plan_narrow_speed", PLAN_DEFAULTS["plan_narrow_speed"])
-        d("plan_narrow_weight", PLAN_DEFAULTS["plan_narrow_weight"])
-        d("plan_narrow_cost", PLAN_DEFAULTS["plan_narrow_cost"])
-        d("plan_narrow_reach_m", PLAN_DEFAULTS["plan_narrow_reach_m"])
         # Careful where it is tight: the clearance speed governor (control/governor.py). 0 = off.
         d("plan_clear_t_react", PLAN_DEFAULTS["plan_clear_t_react"])
         d("plan_clear_v_cruise", PLAN_DEFAULTS["plan_clear_v_cruise"])
@@ -775,12 +760,6 @@ class ElevationNode(Node):
         d("plan_clear_t_turn", PLAN_DEFAULTS["plan_clear_t_turn"])
         d("plan_clear_route_turn", PLAN_DEFAULTS["plan_clear_route_turn"])
         d("plan_clear_v_blind", PLAN_DEFAULTS["plan_clear_v_blind"])
-        d("plan_clear_turn_keepout_m", PLAN_DEFAULTS["plan_clear_turn_keepout_m"])
-        d("plan_clear_turn_keepout_cost", PLAN_DEFAULTS["plan_clear_turn_keepout_cost"])
-        d("plan_clear_mppi_keepout", PLAN_DEFAULTS["plan_clear_mppi_keepout"])
-        d("plan_clear_heading_weight", PLAN_DEFAULTS["plan_clear_heading_weight"])
-        d("plan_clear_prox_weight", PLAN_DEFAULTS["plan_clear_prox_weight"])
-        d("plan_clear_prox_m", PLAN_DEFAULTS["plan_clear_prox_m"])
         # ROBUST-MU replicas: each MPPI candidate is rolled out under this many friction hypotheses
         # spanning the current uncertainty band and ranked by its WORST outcome, so the winner is a
         # plan that works whether the ground grips or slips (the over/understeer sim-to-real gap).
@@ -1054,10 +1033,6 @@ class ElevationNode(Node):
         self.plan_wmin: float = g("plan_wmin")
         self.plan_reverse_clear_m: float = g("plan_reverse_clear_m")
         self.plan_pivot_cost: float = g("plan_pivot_cost")
-        self.plan_narrow_speed: float = g("plan_narrow_speed")
-        self.plan_narrow_weight: float = g("plan_narrow_weight")
-        self.plan_narrow_cost: float = g("plan_narrow_cost")
-        self.plan_narrow_reach_m: float = g("plan_narrow_reach_m")
         self.plan_clear_t_react: float = g("plan_clear_t_react")
         self.plan_clear_v_cruise: float = g("plan_clear_v_cruise")
         self.plan_clear_v_min: float = g("plan_clear_v_min")
@@ -1068,12 +1043,6 @@ class ElevationNode(Node):
         self.plan_clear_t_turn: float = g("plan_clear_t_turn")
         self.plan_clear_route_turn: float = g("plan_clear_route_turn")
         self.plan_clear_v_blind: float = g("plan_clear_v_blind")
-        self.plan_clear_turn_keepout_m: float = g("plan_clear_turn_keepout_m")
-        self.plan_clear_turn_keepout_cost: float = g("plan_clear_turn_keepout_cost")
-        self.plan_clear_mppi_keepout: float = g("plan_clear_mppi_keepout")
-        self.plan_clear_heading_weight: float = g("plan_clear_heading_weight")
-        self.plan_clear_prox_weight: float = g("plan_clear_prox_weight")
-        self.plan_clear_prox_m: float = g("plan_clear_prox_m")
         self.plan_n_mu: int = g("plan_n_mu")
         self.plan_mu_span: float = g("plan_mu_span")
         self.plan_mu_adapt: bool = g("plan_mu_adapt")
@@ -2264,8 +2233,6 @@ class ElevationNode(Node):
             self.planner.set_lattice(self.ctg.V_escape, self.sgrid)
             if self.planner.cw.veto > 0.0:  # walls are a hard no for the controller too
                 self.planner.set_veto(self.ctg.hazard, self.sgrid)
-            if self.planner.cw.narrow > 0.0:  # drive slowly where the router's tube is tight
-                self.planner.set_narrow(self.ctg.narrow, self.sgrid)
             if self.planner.cw.clear_time > 0.0:  # the wall-distance map the clearance cost reads
                 self.planner.update_clearance()
             self._load_command_history()

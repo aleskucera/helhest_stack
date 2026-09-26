@@ -581,52 +581,6 @@ def _goal_cell_kernel(
 
 
 @wp.kernel
-def _narrow_kernel(
-    hazard: wp.array3d(dtype=wp.float32),  # wall contact / unresolved settle, per pose
-    loose: wp.array3d(dtype=wp.float32),  # blocked under the heading bin alone
-    dr: int,  # the spatial tube [cells]: a hazard this close makes a pose NARROW
-    reach: int,  # [cells] how far out the route charge grades down to zero
-    dt: int,  # the heading bin [bins], as in the tube
-    narrow_cost: wp.float32,
-    narrow: wp.array3d(dtype=wp.float32),
-    tilt: wp.array3d(dtype=wp.float32),  # the loose set's graded tilt, charged in place
-):
-    """How close a free pose is to losing its margin, as a route charge; and whether it already
-    has, as the NARROW mark MPPI slows down on.
-
-    `d` is the Chebyshev distance [cells] to the nearest hazard pose within the heading bin. A
-    pose with d <= dr is what the spatial tube would have removed: it is marked narrow. The charge
-    is `narrow_cost * (reach + 1 - d) / reach` for 1 <= d <= reach, full next to a wall and zero
-    past `reach`, so the route prefers the middle of a passage by how much room it leaves, and
-    plans a re-centring turn early instead of leaving MPPI to linger beside the narrow poses. A
-    yes/no charge on the narrow poses alone gave no such pull: an off-centre pose facing along a
-    corridor is not narrow, so the route never asked to leave it (measured, 2026-09-25).
-    `narrow_cost` is per unit of the solver's penalty, i.e. `flatness_weight * narrow_cost` of
-    extra cost per metre at full charge. Never vetoes."""
-    r, c, t = wp.tid()
-    narrow[r, c, t] = 0.0
-    if loose[r, c, t] > 0.5:
-        return
-    ny = hazard.shape[0]
-    nx = hazard.shape[1]
-    nth = hazard.shape[2]
-    best = reach + 1
-    for i in range(-reach, reach + 1):
-        rr = wp.clamp(r + i, 0, ny - 1)
-        for j in range(-reach, reach + 1):
-            d = wp.max(wp.abs(i), wp.abs(j))
-            if d < best:
-                cc = wp.clamp(c + j, 0, nx - 1)
-                for k in range(-dt, dt + 1):
-                    if hazard[rr, cc, (t + k + nth) % nth] > 0.5:
-                        best = d
-    if best <= dr:
-        narrow[r, c, t] = 1.0
-    if best <= reach:
-        tilt[r, c, t] = tilt[r, c, t] + narrow_cost * float(reach + 1 - best) / float(reach)
-
-
-@wp.kernel
 def _time_cost_kernel(
     hazard: wp.array3d(dtype=wp.float32),  # wall contact / unresolved settle, per pose
     loose: wp.array3d(dtype=wp.float32),  # blocked under the heading bin alone
@@ -683,16 +637,13 @@ def _turn_time_kernel(
     t_react: wp.float32,
     v_min: wp.float32,
     c0: wp.float32,
-    keepout: wp.float32,  # [m] turning inside this clearance is ruled out (priced, see the solver)
     out: wp.array3d(dtype=wp.float32),  # v_cruise / v_allowed per pose, UNCAPPED at 1
-    near: wp.array3d(dtype=wp.float32),  # 1 = within the turning keep-out of a wall
 ):
     """The time multiplier the solver's turn price reads (ValueSolver.set_turn_price): the same
     clearance law as `_time_cost_kernel`, but not capped at cruise and reaching further, because a
     sharp turn's tail is slowed at clearances where driving straight is not."""
     r, c, t = wp.tid()
     out[r, c, t] = 0.0
-    near[r, c, t] = 0.0
     if loose[r, c, t] > 0.5:
         return
     ny = hazard.shape[0]
@@ -711,8 +662,6 @@ def _turn_time_kernel(
     if best > reach:
         return
     clearance = (float(best) - 0.5) * cell
-    if clearance < keepout:
-        near[r, c, t] = 1.0
     v = wp.max(v_min, (clearance - c0) / t_react)
     out[r, c, t] = v_cruise / v
 
@@ -870,11 +819,6 @@ class CostToGo:
         # [per rad] of the worst soft violation inside the tube, as graded tilt. Tilt and belly
         # clearance are charged, walls and unresolved settles are eroded hard -- `_robust_kernel`.
         robust_soft_weight: float = 10.0,
-        # None = the spatial tube VETOES (the old behaviour). A number = the spatial tube only
-        # marks poses NARROW and charges them this much; routing then uses the heading bin alone
-        # and MPPI slows down in narrow poses (see _narrow_kernel, CostWeights.narrow).
-        narrow_cost: float | None = None,
-        narrow_reach_m: float = 0.6,  # [m] how far from a wall the narrow route charge reaches
         # (v_cruise [m/s], t_react [s], v_min [m/s], c0 [m]): price the route in TRAVEL TIME under the
         # clearance speed law (control/governor.py) instead of vetoing the spatial tube. None = off.
         time_cost: tuple[float, ...] | None = None,
@@ -933,16 +877,9 @@ class CostToGo:
         self._mt = int(round(robust_margin_deg / (360.0 / n_theta)))
         self._eroded = self._mr > 0 or self._mt > 0
         self.robust_soft_weight = float(robust_soft_weight)
-        self._narrow = narrow_cost is not None and self._mr > 0
-        self.narrow_cost = 0.0 if narrow_cost is None else float(narrow_cost)
-        self._narrow_reach = max(self._mr, int(round(narrow_reach_m / self.grid.cell_size)))
         self._time = time_cost
         self._turn_lever = 0.0  # the route's turn price; set below when time_cost carries it
-        self._keepout_m = 0.0
-        self._keepout_cost = 0.0
         if time_cost is not None:
-            if narrow_cost is not None:
-                raise ValueError("time_cost and narrow_cost are alternatives; set one")
             if flatness_weight <= 0.0:
                 raise ValueError("time_cost rides on the solver's penalty: flatness_weight > 0")
             v_cruise, t_react = time_cost[0], time_cost[1]
@@ -953,9 +890,6 @@ class CostToGo:
             # the ROUTE's turn price: element 4 is t_turn / t_react (0 or absent = off). A turning
             # arc swings the tail at v * lever / R; the solver charges the time that costs.
             turn_ratio = time_cost[4] if len(time_cost) > 4 else 0.0
-            # elements 5, 6: the turning keep-out [m] and its price (x arc length); 0 = off
-            self._keepout_m = time_cost[5] if len(time_cost) > 5 else 0.0
-            self._keepout_cost = time_cost[6] if len(time_cost) > 6 else 0.0
             self._turn_lever = turn_ratio * (robot_params.rear_offset + robot_params.wheel_radius)
             k_max = self._turn_lever / float(robot_params.min_turn_radius)
             self._turn_reach = max(
@@ -963,7 +897,6 @@ class CostToGo:
                 int(
                     math.ceil((v_cruise * (1.0 + k_max) * t_react + c0) / self.grid.cell_size + 0.5)
                 ),
-                int(math.ceil(self._keepout_m / self.grid.cell_size + 0.5)) + 1,
             )
         self._escape_reach = max(1, int(round(self.ESCAPE_REACH_M / self.grid.cell_size)))
         # a turn costs what the lattice charges for one when it has point turns; the deployed
@@ -1095,14 +1028,10 @@ class CostToGo:
         self.hazard = wp.zeros_like(self.V)
         self.violation = wp.zeros_like(self.V)  # [rad] how badly a soft test fails, 0 if none does
         self.robust_tilt = wp.zeros_like(self.V)  # graded_tilt + the tube's tilt charge
-        # 1 where the spatial tube would have removed a pose the heading bin keeps; all zero unless
-        # narrow_cost is set
-        self.narrow = wp.zeros_like(self.V)
         self._loose_blocked = wp.zeros_like(self.V)
         self._loose_tilt = wp.zeros_like(self.V)
         # per-pose v_cruise / v_allowed for the solver's turn price; zero unless time_cost has it
         self._turn_T = wp.zeros_like(self.V)
-        self._turn_near = wp.zeros_like(self.V)  # 1 = within the turning keep-out
         if (
             self._time is not None
             and self._turn_lever > 0.0
@@ -1112,16 +1041,11 @@ class CostToGo:
             # (branch study/turn-price); an older pinned copy plans without it rather than crash
             warnings.warn(
                 "terrain_value_field has no ValueSolver.set_turn_price: the route's turn price "
-                "and turning keep-out are OFF -- update the terrain_value_field pin"
+                "is OFF -- update the terrain_value_field pin"
             )
             self._turn_lever = 0.0
         if self._time is not None and self._turn_lever > 0.0:
-            self.solver.set_turn_price(
-                self._turn_T,
-                self._turn_lever,
-                keepout_field=self._turn_near if self._keepout_cost > 0.0 else None,
-                keepout_cost=self._keepout_cost,
-            )
+            self.solver.set_turn_price(self._turn_T, self._turn_lever)
         # V with a way back out of every no-route pose: what MPPI follows (see _escape_kernel)
         self.V_escape = wp.zeros_like(self.V)
         self._descent_out = wp.zeros(2, dtype=wp.float32, device=self.device)
@@ -1425,38 +1349,6 @@ class CostToGo:
             )
         feas = self.robust_blocked if self._eroded else self.blocked
         tilt = self.robust_tilt if self._eroded else self.graded_tilt
-        if self._narrow:  # the spatial tube marks and charges instead of vetoing
-            wp.launch(
-                _robust_kernel,
-                dim=self.V.shape,
-                inputs=[
-                    self.blocked,
-                    self.hazard,
-                    self.violation,
-                    self.graded_tilt,
-                    0,
-                    0,
-                    self._mt,
-                    self.robust_soft_weight,
-                ],
-                outputs=[self._loose_blocked, self._loose_tilt],
-                device=self.device,
-            )
-            wp.launch(
-                _narrow_kernel,
-                dim=self.V.shape,
-                inputs=[
-                    self.hazard,
-                    self._loose_blocked,
-                    self._mr,
-                    self._narrow_reach,
-                    self._mt,
-                    self.narrow_cost,
-                ],
-                outputs=[self.narrow, self._loose_tilt],
-                device=self.device,
-            )
-            feas, tilt = self._loose_blocked, self._loose_tilt
         if self._time is not None:  # the spatial tube becomes a price in seconds
             wp.launch(
                 _robust_kernel,
@@ -1509,9 +1401,8 @@ class CostToGo:
                         float(t_react),
                         float(v_min),
                         float(c0),
-                        float(self._keepout_m),
                     ],
-                    outputs=[self._turn_T, self._turn_near],
+                    outputs=[self._turn_T],
                     device=self.device,
                 )
         wp.launch(

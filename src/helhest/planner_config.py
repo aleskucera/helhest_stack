@@ -56,16 +56,6 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_robust_margin_deg": 0.0,
     "plan_obstacle_step_m": 0.0,
     "plan_pivot_cost": 0.0,
-    # SLOW IN NARROW PLACES. 0 = the spatial tube vetoes (plan_robust_margin_m removes poses).
-    # > 0 = it only marks them narrow: the router charges plan_narrow_cost per unit penalty
-    # (x flatness_weight 2 = extra cost per metre) and MPPI charges plan_narrow_weight *
-    # (|v| - plan_narrow_speed)^2 per rollout step held there.
-    "plan_narrow_speed": 0.0,
-    "plan_narrow_weight": 100.0,
-    "plan_narrow_cost": 0.15,
-    # [m] how far from a wall the narrow route charge reaches, grading down to zero -- the pull
-    # toward the middle of a passage (CostToGo._narrow_kernel)
-    "plan_narrow_reach_m": 0.6,
     # CAREFUL WHERE IT IS TIGHT (control/governor.py). plan_clear_t_react > 0 replaces the spatial
     # tube's veto with the clearance speed law v = clearance / t_react (floored at v_min): the route
     # is priced in travel time under it, capped at v_cruise, and a governor after MPPI enforces it
@@ -93,22 +83,6 @@ PLAN_DEFAULTS: dict[str, Any] = {
     # [m/s] the governor's cap while the footprint is about to cover never-measured ground (beside
     # and behind the robot the sensor has not looked); 0 = off
     "plan_clear_v_blind": 0.3,
-    # THE TURNING KEEP-OUT, a behaviour rule on the route (needs plan_clear_route_turn): a turning
-    # arc whose swept footprint comes within plan_clear_turn_keepout_m of a wall pays
-    # plan_clear_turn_keepout_cost x its length on top -- straighten before a gap, turn after it.
-    # Priced, not banned: pocket, false door and tight bends have to turn near walls. 0 = off.
-    "plan_clear_turn_keepout_m": 0.5,
-    "plan_clear_turn_keepout_cost": 10.0,
-    # the same keep-out in MPPI's cost, x this multiplier. 0 = OFF: at 1 (the route's price) it cut
-    # slalom's near-wall turning 30 -> 13 deg but wedged the robot where turning near a wall is
-    # unavoidable (L-bend corner 1/3, false door side gap 2/3 never reached; 79 frames touching)
-    "plan_clear_mppi_keepout": 0.0,
-    # near walls (plan_clear_turn_keepout_m), MPPI follows the ROUTE's heading: each step pays how
-    # much worse its heading is than the route's best there, x this weight (CostParams.clear_heading)
-    "plan_clear_heading_weight": 0.0,
-    # speed-independent proximity cost in MPPI (CostParams.clear_prox): weight, and its range [m]
-    "plan_clear_prox_weight": 0.0,
-    "plan_clear_prox_m": 0.5,
     # robot
     "plan_wheel_width": 0.10,
     # the coarse "which way" layer (planning/coarse.py) and the turn-first brake
@@ -157,11 +131,8 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
     # it only changes configurations that could not start at all.
     batch = int(p["plan_batch"])
     batch -= batch % n_mu
-    # slow-in-narrow: absent entirely when off, so the off state IS the configuration before it
-    narrow_on = float(p["plan_narrow_speed"]) > 0.0
+    # the clearance governor: absent entirely when off, so the off state IS the veto configuration
     clear_on = float(p["plan_clear_t_react"]) > 0.0
-    if clear_on:
-        narrow_on = False  # the governor supersedes narrow mode
     time_ctg_kw = (
         dict(
             time_cost=(
@@ -174,48 +145,23 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
                     if float(p["plan_clear_route_turn"]) > 0.0
                     else 0.0
                 ),
-                float(p["plan_clear_turn_keepout_m"]),
-                float(p["plan_clear_turn_keepout_cost"]),
             )
         )
         if clear_on
         else {}
     )
-    narrow_ctg_kw = (
+    clear_cost_kw = (
         dict(
-            narrow_cost=float(p["plan_narrow_cost"]),
-            narrow_reach_m=float(p["plan_narrow_reach_m"]),
-        )
-        if narrow_on
-        else {}
-    )
-    narrow_cost_kw = (
-        dict(narrow=float(p["plan_narrow_weight"]), narrow_speed=float(p["plan_narrow_speed"]))
-        if narrow_on
-        else {}
-    )
-    if clear_on:
-        narrow_cost_kw = dict(
             clear_time=float(p["plan_clear_mppi_weight"]),
             clear_t_react=float(p["plan_clear_t_react"]),
             clear_v_min=float(p["plan_clear_v_min"]),
             clear_c0=float(p["plan_clear_c0"]),
             clear_v_cruise=float(p["plan_clear_v_cruise"]),
             clear_turn_ratio=float(p["plan_clear_t_turn"]) / float(p["plan_clear_t_react"]),
-            clear_keepout_m=(
-                float(p["plan_clear_turn_keepout_m"])
-                if float(p["plan_clear_route_turn"]) > 0.0
-                else 0.0
-            ),
-            clear_keepout_cost=(
-                float(p["plan_clear_turn_keepout_cost"]) * float(p["plan_clear_mppi_keepout"])
-                if float(p["plan_clear_route_turn"]) > 0.0
-                else 0.0
-            ),
-            clear_heading=float(p["plan_clear_heading_weight"]),
-            clear_prox=float(p["plan_clear_prox_weight"]),
-            clear_prox_m=float(p["plan_clear_prox_m"]),
         )
+        if clear_on
+        else {}
+    )
     return PlannerConfig(
         cost=CostParams(
             goal_running=float(p["plan_goal_running"]),
@@ -224,7 +170,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             smoothness=float(p["plan_smooth"]),
             saturation=float(p["plan_saturation"]),
             veto=float(p["plan_wall_veto"]),
-            **narrow_cost_kw,
+            **clear_cost_kw,
         ),
         sampling=SamplingConfig(
             wmax=float(p["plan_wmax"]),
@@ -245,7 +191,6 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             robust_margin_deg=float(p["plan_robust_margin_deg"]),
             obstacle_step_m=float(p["plan_obstacle_step_m"]),
             pivot_cost=float(p["plan_pivot_cost"]),
-            **narrow_ctg_kw,
             **time_ctg_kw,
         ),
         n_theta=int(p["plan_n_theta"]),

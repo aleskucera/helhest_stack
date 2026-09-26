@@ -412,7 +412,6 @@ def drive(a: argparse.Namespace) -> dict:
     hist: dict[str, list] = {k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "meta")}
     # per frame with the governor: [frame, clearance m, cap m/s, scale, about to sweep unseen ground]
     gov_log: list = []
-    narrow_here: list = []  # per recorded frame: 1 = the robot's own pose is marked narrow
     esc: list = []  # per recorded frame: [best rollout's worst violation, median, clean fraction]
     # WALL CLEARANCE, every frame, against the world's exact solids. "Reached" cannot see a robot
     # scraping a wall on its way through, and the robust margin exists precisely so that never
@@ -547,8 +546,6 @@ def drive(a: argparse.Namespace) -> dict:
                 # is exactly where a pose is vetoed -- the goal term cannot carry a veto, so it has
                 # to be its own term. Walls only, and without the router's margin (CostToGo.hazard)
                 planner.set_veto(ctg.hazard, sgrid)
-            if a.cfg.cost.narrow > 0.0:  # drive slowly where the router's tube is tight
-                planner.set_narrow(ctg.narrow, sgrid)
             if a.cfg.cost.clear_time > 0.0:  # the wall-distance map the clearance-time cost reads
                 planner.update_clearance()
             planner.replan(state_l, goal_l, a.refine)
@@ -668,10 +665,6 @@ def drive(a: argparse.Namespace) -> dict:
                     _v_here(vh, rx - r0, ry - s0, yaw, a.cell, a.n_theta),
                 ]
             )
-            if a.cfg.cost.narrow > 0.0:
-                narrow_here.append(
-                    _v_here(ctg.narrow.numpy(), rx - r0, ry - s0, yaw, a.cell, a.n_theta)
-                )
         # Replayed as a captured CUDA graph, not launched from Python: the solver is launch-bound
         # (16 Newton x 26 PCR iterations of small kernels), and the eager step was 80% of the
         # frame -- 81 ms of a 101 ms frame, against a 69 ms sensor period. Same physics: the step
@@ -728,7 +721,6 @@ def drive(a: argparse.Namespace) -> dict:
             # the windows are robot-centred, so each recorded frame carries its own origin
             **{f"hist_{k}": np.asarray(v) for k, v in hist.items() if v},
             **({"escape": np.asarray(esc)} if esc else {}),
-            **({"narrow_here": np.asarray(narrow_here)} if narrow_here else {}),
             **({"governor": np.asarray(gov_log)} if gov_log else {}),
         )
         print(f"wrote {a.out}")
