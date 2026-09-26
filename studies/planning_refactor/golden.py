@@ -5,7 +5,8 @@
 
 The bar is bit-identical, so the check compares SHA-256 hashes of every field. A hash pins one
 machine's GPU and Warp build (transcendentals are not bit-portable across architectures), which
-is why this lives here and not in tests/: record and check on the same machine. The arrays are
+is why this lives here and not in tests/: record and check on the same machine. Every run compiles
+from scratch into its own cache (a few minutes), see `compute`. The arrays are
 kept locally (gitignored) only to diagnose a mismatch -- how many cells, how large, which flips.
 
 Five configurations over 8 stress-world windows (3 poses each) and 6 real-bag frames:
@@ -17,11 +18,13 @@ Five configurations over 8 stress-world windows (3 poses each) and 6 real-bag fr
     D  B + the step gate (0.3 m), with blind cells in the measured mask
     E  A with a window-bound coarse layer and the goal 30 m ahead, so the ring is seeded
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 import pathlib
+import shutil
 import sys
 
 import numpy as np
@@ -202,6 +205,12 @@ def _hash(a: np.ndarray) -> str:
 
 
 def compute(device: str = "cuda:0") -> dict[str, dict[str, np.ndarray]]:
+    # A private kernel cache, emptied every run. Warp's shared cache served a binary that a fresh
+    # compile of the same source does not reproduce (one ill-conditioned settle pose moved), so
+    # both record and check must build from the source as it stands.
+    cache = HERE / "golden" / "kernel_cache"
+    shutil.rmtree(cache, ignore_errors=True)
+    wp.config.kernel_cache_dir = str(cache)
     wp.init()
     cases = _world_windows() + _bag_windows()
     return {k: _run_config(k, s, cases, device) for k, s in _configs().items()}
