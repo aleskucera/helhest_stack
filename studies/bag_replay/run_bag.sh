@@ -23,6 +23,9 @@ export PYTHONPATH="$REPO/ros/helhest_stack_ros:$PYTHONPATH"
 for f in "$REPO"/.venv/lib/python*/site-packages/_editable_impl_*.pth; do
   export PYTHONPATH="$(cat "$f"):$PYTHONPATH"
 done
+# ...and the own src of this checkout ahead of them: the helhest editable install points at whichever
+# checkout the venv was made in, so a worktree would otherwise replay the code of the main tree
+export PYTHONPATH="$REPO/src:$PYTHONPATH"
 export FASTRTPS_DEFAULT_PROFILES_FILE="$REPO/ros/fastdds_shm.xml"
 export FASTDDS_DEFAULT_PROFILES_FILE="$REPO/ros/fastdds_shm.xml"
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
