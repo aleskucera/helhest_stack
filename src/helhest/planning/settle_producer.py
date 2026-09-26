@@ -211,7 +211,7 @@ def _settle_constraints_kernel(
     # --- sigmas: the measurement sd under each support, propagated through the settle's rows
     x = grid.origin_x + float(c) * grid.cell_size
     y = grid.origin_y + float(r) * grid.cell_size
-    yaw = (float(t) + 0.5) * 2.0 * 3.14159265 / float(n_theta)
+    yaw = float(t) * 2.0 * 3.14159265 / float(n_theta)  # the settle's heading convention
     ca = wp.cos(yaw)
     sa = wp.sin(yaw)
     # Read the layout off the robot itself rather than reconstructing it: `wheel_pos` is the
