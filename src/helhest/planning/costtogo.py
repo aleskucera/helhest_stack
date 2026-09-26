@@ -585,7 +585,6 @@ class CostToGo:
         self._sigma_scale_d = wp.array([1.0], dtype=wp.float32, device=self.device)
         self._goal_xy = wp.zeros(2, dtype=wp.float32, device=self.device)
         self._goal_rc = wp.zeros(2, dtype=wp.int32, device=self.device)
-        self._prims: tuple | None = None  # host copy of the primitive tables, for policy walks
         self._graph = None
 
         self._prof = StageProfiler(
@@ -654,72 +653,6 @@ class CostToGo:
             "reachable_optimistic": v_opt < unreachable,
             "unreachable_by_ignorance": v_pess >= unreachable and v_opt < unreachable,
         }
-
-    def doubt_targets(
-        self,
-        x: float,
-        y: float,
-        yaw: float,
-        max_steps: int = 40,
-        top_k: int = 8,
-    ) -> list[dict]:
-        """Where to look: the doubtful poses along the route the robot would take if it knew.
-
-        Follows the OPTIMISTIC policy greedily from the robot's pose and collects the poses
-        carrying `doubt` -- blocked by ignorance rather than by terrain. Those are the cells
-        whose resolution would unlock the better route, so resolving them is what the plan
-        means by decision-focused sensing: sense where the decision rests, not where entropy is
-        highest. Maximising information gain instead sends the robot to look at whatever is
-        least observed, which is usually the far edge of the map.
-
-        This is the cheap form of `SENSITIVITY_PLAN.md`'s C4 -- a policy rollout rather than an
-        adjoint. Call after `solve_gap`. The primitive tables come to the host once and the walk
-        is 40 steps of table lookup, so it is control data, not a field.
-        """
-        if self._prims is None:
-            sv = self.solver
-            self._prims = (
-                sv._prim_dr.numpy(),
-                sv._prim_dc.numpy(),
-                sv._prim_heading.numpy(),
-                sv._prim_cost.numpy(),
-            )
-        prim_dr, prim_dc, prim_head, prim_cost = self._prims
-        v_opt = self.V_optimistic.numpy()
-        doubt = self.doubt_pessimistic.numpy()
-        ny, nx = self.grid.cells_y, self.grid.cells_x
-        cap = self._vcap * 0.99
-
-        r, c, t = self._pose_index(x, y, yaw)
-        hits: list[dict] = []
-        seen = set()
-        for _ in range(max_steps):
-            if v_opt[r, c, t] >= cap:
-                break  # the optimistic route does not reach the goal from here either
-            if doubt[r, c, t] > 0.0 and (r, c, t) not in seen:
-                seen.add((r, c, t))
-                hits.append(
-                    {
-                        "x": float(self.grid.origin_x + c * self.grid.cell_size),
-                        "y": float(self.grid.origin_y + r * self.grid.cell_size),
-                        "heading": float((t + 0.5) * 2.0 * np.pi / self.n_theta),
-                        "doubt": float(doubt[r, c, t]),
-                    }
-                )
-            best, best_next = np.inf, None
-            for pmt in range(self.solver.n_prim):
-                nr, nc = r + int(prim_dr[t, pmt]), c + int(prim_dc[t, pmt])
-                if not (0 <= nr < ny and 0 <= nc < nx):
-                    continue
-                nt = int(prim_head[t, pmt])
-                total = float(prim_cost[t, pmt]) + float(v_opt[nr, nc, nt])
-                if total < best:
-                    best, best_next = total, (nr, nc, nt)
-            if best_next is None or best >= v_opt[r, c, t] + 1e-6:
-                break  # no primitive makes progress: the goal cell, or a dead end
-            r, c, t = best_next
-        hits.sort(key=lambda h: -h["doubt"])
-        return hits[:top_k]
 
     def descent_bearing(self, x: float, y: float, radius_m: float) -> float:
         """The bearing [rad, this window's frame] from (x, y) to the cheapest routable cell of

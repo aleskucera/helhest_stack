@@ -115,22 +115,6 @@ def test_an_ignorance_blocked_goal_diagnoses_itself():
     assert r["unreachable_by_ignorance"]
 
 
-def test_targets_land_in_the_uncertain_half_not_the_known_one():
-    """Decision-focused, not entropy-focused: look where the route needs it."""
-    ctg = _ctg()
-    ctg.solve_gap(_terrain(), GOAL, _frontier_sigma())
-    targets = ctg.doubt_targets(*START)
-    assert targets, "a frontier map must offer somewhere to look"
-    assert all(t["x"] > 0.0 for t in targets), f"targets strayed into the known half: {targets}"
-    assert targets == sorted(targets, key=lambda t: -t["doubt"]), "must rank by doubt"
-
-
-def test_no_targets_when_nothing_is_doubtful():
-    ctg = _ctg()
-    ctg.solve_gap(_terrain(), GOAL, _sigma(FLOOR / 4))
-    assert ctg.doubt_targets(*START) == []
-
-
 def test_solve_gap_keeps_both_value_functions():
     """`compute` reuses self.V, so the pessimistic solve must be preserved explicitly."""
     ctg = _ctg()

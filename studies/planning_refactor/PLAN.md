@@ -7,8 +7,11 @@ Decisions (2026-09-26):
    Preferences (flatness, robust-tube charge, clearance time price) are **costs**, added to the
    classified pose cost. The field runs in stages: classify -> the robot's post-processing ->
    iterate.
-2. **Gap / doubt:** keep tvf's `solve_pair` / `value_of_looking` / `at`. Delete `CostToGo`'s
-   `solve_gap` / `gap_at` / `doubt_targets`, and port the two demos that use them.
+2. **Gap / doubt:** REVISED during step 7. tvf's `solve_pair` / `value_of_looking` see only the
+   constraints, while the robot's V also carries flatness, the robust tube and the clearance route
+   -- so `CostToGo.solve_gap` / `gap_at` (the full pipeline twice, sigma believed / at the floor)
+   stay as the robot's gap, and tvf's stay as the library's, for producers with no post-processing.
+   Only `doubt_targets` (a numpy policy walk on the host) is deleted.
 3. **`GeometricProducer`** becomes a test fixture.
 
 Out of scope: turning the sigma model on for the robot (the node passing sigma), archiving the
