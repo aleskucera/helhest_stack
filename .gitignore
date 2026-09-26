@@ -35,3 +35,4 @@ site/
 .tools/
 studies/dynamic/out/
 studies/bag_replay/out/
+studies/bag_replay/out2/
