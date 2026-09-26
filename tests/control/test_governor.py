@@ -98,3 +98,36 @@ def test_a_plan_tight_only_at_its_far_end_is_not_braked_now():
     wl, wr = gov.cap(4.0, 4.0, wp.array(p, dtype=wp.vec3f), elev, meas, grid)
     assert gov.clearance < 0.1  # the far end really is tight
     assert (wl, wr) == (4.0, 4.0)  # 1.4 m/s now; 1 s of braking at 2 m/s^2 sheds far more
+
+
+def test_a_longer_turn_allowance_slows_a_pivot_more_but_not_a_straight_drive():
+    elev, meas, grid = _scene(wall_y=4.8)
+    plain = ClearanceGovernor(ROBOT, plan_dt=0.1, t_react=0.125, v_min=0.15)
+    turn = ClearanceGovernor(ROBOT, plan_dt=0.1, t_react=0.125, v_min=0.15, t_turn=0.25)
+    assert (
+        turn.cap(-2.0, 2.0, _plan(y=4.0), elev, meas, grid)[1]
+        < plain.cap(-2.0, 2.0, _plan(y=4.0), elev, meas, grid)[1]
+    )
+    assert turn.cap(3.0, 3.0, _plan(y=4.0), elev, meas, grid) == plain.cap(
+        3.0, 3.0, _plan(y=4.0), elev, meas, grid
+    )
+
+
+def test_sweeping_ground_nobody_has_measured_is_slow_but_driving_onto_seen_ground_is_not():
+    """Beside and behind the robot the sensor has never looked. A turn that swings the tail over
+    that ground is capped; driving straight onto measured ground ahead is not; the ground under
+    the robot now is exempt (it is never measured)."""
+    elev, meas, grid = _scene(wall_y=7.9)
+    m = np.ones((N, N), np.float32)
+    ys = (np.arange(N) + 0.5) * CELL
+    xs = (np.arange(N) + 0.5) * CELL
+    m[np.ix_(ys < 3.6, xs < 3.2)] = 0.0  # blind: beside, behind and under the robot at (3, 4)
+    meas = wp.array(m)
+    gov = ClearanceGovernor(ROBOT, plan_dt=0.1, t_react=0.125, v_min=0.15, v_blind=0.3)
+    straight = _plan(y=4.0)  # drives +x: the tail follows over ground that was under the body
+    assert gov.cap(3.0, 3.0, straight, elev, meas, grid) == (3.0, 3.0) and not gov.blind
+    p = np.zeros((12, 2, 3), np.float32)
+    p[:, 0, 0], p[:, 0, 1] = 3.0, 4.0
+    p[:, 0, 2] = np.linspace(0.0, 0.8, 12)  # turns left on the spot: the tail swings right and down
+    wl, wr = gov.cap(-2.0, 2.0, wp.array(p, dtype=wp.vec3f), elev, meas, grid)
+    assert gov.blind and abs(wr) < 2.0

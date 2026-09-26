@@ -81,7 +81,34 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_clear_mppi_weight": 1.0,
     # [m] the law's fixed margin: error that does not shrink with speed (map cells, sparse wall
     # edges, tracking when slow). v = max(v_min, (clearance - c0) / t_react)
-    "plan_clear_c0": 0.1,
+    # 0.15 (2026-09-26): 0.2 halved turning near walls in false door and pillars but cost narrow
+    # corridors ~10%; 0.15 is the middle (sim, 8 worlds x3, 0 contacts either way)
+    "plan_clear_c0": 0.15,
+    # [s] the tail swing's own t_react: turning is where this robot's model is least accurate
+    # (turn realised ~0.74x, turn_boost per terrain), so a turn near a wall costs more than a drive
+    "plan_clear_t_turn": 0.25,
+    # 1 = the ROUTE also charges turning arcs for their tail near walls (plan_clear_t_turn), so it
+    # plans to pass a gap straight and turn after; 0 = only MPPI and the governor see turning
+    "plan_clear_route_turn": 1.0,
+    # [m/s] the governor's cap while the footprint is about to cover never-measured ground (beside
+    # and behind the robot the sensor has not looked); 0 = off
+    "plan_clear_v_blind": 0.3,
+    # THE TURNING KEEP-OUT, a behaviour rule on the route (needs plan_clear_route_turn): a turning
+    # arc whose swept footprint comes within plan_clear_turn_keepout_m of a wall pays
+    # plan_clear_turn_keepout_cost x its length on top -- straighten before a gap, turn after it.
+    # Priced, not banned: pocket, false door and tight bends have to turn near walls. 0 = off.
+    "plan_clear_turn_keepout_m": 0.5,
+    "plan_clear_turn_keepout_cost": 10.0,
+    # the same keep-out in MPPI's cost, x this multiplier. 0 = OFF: at 1 (the route's price) it cut
+    # slalom's near-wall turning 30 -> 13 deg but wedged the robot where turning near a wall is
+    # unavoidable (L-bend corner 1/3, false door side gap 2/3 never reached; 79 frames touching)
+    "plan_clear_mppi_keepout": 0.0,
+    # near walls (plan_clear_turn_keepout_m), MPPI follows the ROUTE's heading: each step pays how
+    # much worse its heading is than the route's best there, x this weight (CostParams.clear_heading)
+    "plan_clear_heading_weight": 0.0,
+    # speed-independent proximity cost in MPPI (CostParams.clear_prox): weight, and its range [m]
+    "plan_clear_prox_weight": 0.0,
+    "plan_clear_prox_m": 0.5,
     # robot
     "plan_wheel_width": 0.10,
     # the coarse "which way" layer (planning/coarse.py) and the turn-first brake
@@ -142,6 +169,13 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
                 float(p["plan_clear_t_react"]),
                 float(p["plan_clear_v_min"]),
                 float(p["plan_clear_c0"]),
+                (
+                    float(p["plan_clear_t_turn"]) / float(p["plan_clear_t_react"])
+                    if float(p["plan_clear_route_turn"]) > 0.0
+                    else 0.0
+                ),
+                float(p["plan_clear_turn_keepout_m"]),
+                float(p["plan_clear_turn_keepout_cost"]),
             )
         )
         if clear_on
@@ -167,6 +201,20 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             clear_v_min=float(p["plan_clear_v_min"]),
             clear_c0=float(p["plan_clear_c0"]),
             clear_v_cruise=float(p["plan_clear_v_cruise"]),
+            clear_turn_ratio=float(p["plan_clear_t_turn"]) / float(p["plan_clear_t_react"]),
+            clear_keepout_m=(
+                float(p["plan_clear_turn_keepout_m"])
+                if float(p["plan_clear_route_turn"]) > 0.0
+                else 0.0
+            ),
+            clear_keepout_cost=(
+                float(p["plan_clear_turn_keepout_cost"]) * float(p["plan_clear_mppi_keepout"])
+                if float(p["plan_clear_route_turn"]) > 0.0
+                else 0.0
+            ),
+            clear_heading=float(p["plan_clear_heading_weight"]),
+            clear_prox=float(p["plan_clear_prox_weight"]),
+            clear_prox_m=float(p["plan_clear_prox_m"]),
         )
     return PlannerConfig(
         cost=CostParams(
@@ -222,6 +270,8 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
                 lookahead_s=float(p["plan_clear_lookahead_s"]),
                 decel=float(p["plan_clear_decel"]),
                 c0=float(p["plan_clear_c0"]),
+                t_turn=float(p["plan_clear_t_turn"]),
+                v_blind=float(p["plan_clear_v_blind"]),
             )
             if clear_on
             else None

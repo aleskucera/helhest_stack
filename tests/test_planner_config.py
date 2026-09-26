@@ -42,6 +42,18 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
                 clear_v_min=p["plan_clear_v_min"],
                 clear_c0=p["plan_clear_c0"],
                 clear_v_cruise=p["plan_clear_v_cruise"],
+                clear_turn_ratio=p["plan_clear_t_turn"] / p["plan_clear_t_react"],
+                clear_keepout_m=(
+                    p["plan_clear_turn_keepout_m"] if p["plan_clear_route_turn"] > 0.0 else 0.0
+                ),
+                clear_keepout_cost=(
+                    p["plan_clear_turn_keepout_cost"] * p["plan_clear_mppi_keepout"]
+                    if p["plan_clear_route_turn"] > 0.0
+                    else 0.0
+                ),
+                clear_heading=p["plan_clear_heading_weight"],
+                clear_prox=p["plan_clear_prox_weight"],
+                clear_prox_m=p["plan_clear_prox_m"],
             )
             if p["plan_clear_t_react"] > 0.0
             else {}
@@ -70,6 +82,13 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
             p["plan_clear_t_react"],
             p["plan_clear_v_min"],
             p["plan_clear_c0"],
+            (
+                p["plan_clear_t_turn"] / p["plan_clear_t_react"]
+                if p["plan_clear_route_turn"] > 0.0
+                else 0.0
+            ),
+            p["plan_clear_turn_keepout_m"],
+            p["plan_clear_turn_keepout_cost"],
         )
     return cost, sampling, ctg
 

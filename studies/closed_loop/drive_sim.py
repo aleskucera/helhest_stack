@@ -335,6 +335,8 @@ def drive(a: argparse.Namespace) -> dict:
             lookahead_s=a.cfg.governor["lookahead_s"],
             decel=a.cfg.governor["decel"],
             c0=a.cfg.governor["c0"],
+            t_turn=a.cfg.governor["t_turn"],
+            v_blind=a.cfg.governor["v_blind"],
             device=a.device,
         )
     ctg = CostToGo(
@@ -389,6 +391,7 @@ def drive(a: argparse.Namespace) -> dict:
     scratch, measured_d, sd_d = zeros2d(n), zeros2d(n), zeros2d(n)
     h_r, m_r, sd_r, drift_r = zeros2d(nr), zeros2d(nr), zeros2d(nr), zeros2d(nr)
     fine_d = zeros2d(nw)
+    fine_m = zeros2d(nw)  # the belief's measured mask on the MPPI crop, for the governor
     height_d = scratch  # so a run that arrives before its first frame can still dump
 
     def crop(src: wp.array, off: int, out: wp.array) -> wp.array:
@@ -407,7 +410,8 @@ def drive(a: argparse.Namespace) -> dict:
     # Opt-in, strided history for the scrub page. Host reads, so it is off by default and never
     # on the measured path -- with --history 0 the loop below is byte-identical to before.
     hist: dict[str, list] = {k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "meta")}
-    gov_log: list = []  # per frame with the governor: [frame, clearance m, cap m/s, scale]
+    # per frame with the governor: [frame, clearance m, cap m/s, scale, about to sweep unseen ground]
+    gov_log: list = []
     narrow_here: list = []  # per recorded frame: 1 = the robot's own pose is marked narrow
     esc: list = []  # per recorded frame: [best rollout's worst violation, median, clean fraction]
     # WALL CLEARANCE, every frame, against the world's exact solids. "Reached" cannot see a robot
@@ -519,6 +523,8 @@ def drive(a: argparse.Namespace) -> dict:
             cmd = dock_control(state_l, goal_l)
         elif mppi:
             plan_sim.set_terrain(crop(height_d, off_w, fine_d))
+            if governor is not None:  # what is measured, so it can slow down over what is not
+                planner.set_measured(crop(measured_d, off_w, fine_m))
             if chain:
                 # the rollouts start from the REALIZED state: the last conditioned command as the
                 # wheel seed, the true body twist from the pose delta (the node's odometry twist)
@@ -569,7 +575,13 @@ def drive(a: argparse.Namespace) -> dict:
                     wl, wr, plan_sim.controlled, plan_sim.elevation, planner.measured, plan_sim.grid
                 )
                 gov_log.append(
-                    [f, governor.clearance, governor.v_cap, wl / wl_in if wl_in != 0.0 else 1.0]
+                    [
+                        f,
+                        governor.clearance,
+                        governor.v_cap,
+                        wl / wl_in if wl_in != 0.0 else 1.0,
+                        float(governor.blind),
+                    ]
                 )
             cmd = np.array([wl, wr, 0.5 * (wl + wr)], np.float32)
         else:

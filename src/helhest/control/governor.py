@@ -58,6 +58,7 @@ def _plan_clearance_kernel(
     face_h: wp.float32,  # [m] a rise this tall to a 4-neighbour is a wall face
     search: int,  # [cells] how far around the footprint to look
     out: wp.array(dtype=wp.float32),  # [K] clearance per plan step, `search` cells if none
+    blind: wp.array(dtype=wp.float32),  # [K] never-measured area [m^2] the footprint newly covers
 ):
     """Clearance [m] from the footprint rectangle at plan step k to the nearest wall-face cell.
     One thread per plan step; rollout 0 is the nominal (MPPI keeps candidate 0 noise-free)."""
@@ -75,6 +76,14 @@ def _plan_clearance_kernel(
     r0 = int(wp.round((cy - grid.origin_y) / grid.cell_size))
     best = float(search) * grid.cell_size
     hx = 0.5 * (x_hi - x_lo)
+    # the footprint NOW (plan step 0): the ground under the robot is never measured -- the sensor
+    # cannot see it -- so only ground the footprint is about to cover counts as blind
+    p0 = controlled[0, 0]
+    ca0 = wp.cos(p0[2])
+    sa0 = wp.sin(p0[2])
+    cx_0 = p0[0] + ca0 * xm
+    cy_0 = p0[1] + sa0 * xm
+    unseen = float(0.0)
     for i in range(-search, search + 1):
         r = r0 + i
         if r < 1 or r >= ny - 1:
@@ -84,6 +93,19 @@ def _plan_clearance_kernel(
             if c < 1 or c >= nx - 1:
                 continue
             if measured[r, c] < 0.5:
+                if k > 0:
+                    gx = grid.origin_x + float(c) * grid.cell_size
+                    gy = grid.origin_y + float(r) * grid.cell_size
+                    ex = gx - cx
+                    ey = gy - cy
+                    in_k = wp.abs(ca * ex + sa * ey) <= hx and wp.abs(-sa * ex + ca * ey) <= half_w
+                    fx = gx - cx_0
+                    fy = gy - cy_0
+                    in_0 = (
+                        wp.abs(ca0 * fx + sa0 * fy) <= hx and wp.abs(-sa0 * fx + ca0 * fy) <= half_w
+                    )
+                    if in_k and not in_0:
+                        unseen += grid.cell_size * grid.cell_size
                 continue
             h = elevation[r, c]
             rise = float(0.0)
@@ -106,6 +128,7 @@ def _plan_clearance_kernel(
             d = d + wp.min(wp.max(u, v), 0.0)
             best = wp.min(best, d)
     out[k] = best
+    blind[k] = unseen
 
 
 @wp.kernel
@@ -161,16 +184,25 @@ class ClearanceGovernor:
         plan_dt: float,
         t_react: float = 0.125,
         v_min: float = 0.15,
-        c0: float = 0.1,  # [m] fixed margin: error that does not shrink with speed
+        c0: float = 0.15,  # [m] fixed margin: error that does not shrink with speed
+        t_turn: float | None = None,  # [s] the tail swing's own t_react; None = t_react
         lookahead_s: float = 1.0,
         decel: float = 2.0,  # [m/s^2] how fast the fastest body point can shed speed
         search_m: float = 1.5,
+        # [m/s] the fastest point's speed while the footprint is about to cover ground nobody has
+        # measured -- beside and behind the robot the sensor has never looked. 0 = off.
+        v_blind: float = 0.3,
+        blind_area: float = 0.05,  # [m^2] of newly covered unseen ground that counts
         device: str | None = None,
     ) -> None:
         self.device = wp.get_device(device)
         self.t_react = float(t_react)
         self.v_min = float(v_min)
         self.c0 = float(c0)
+        # a turn is the least certain thing this robot does (the drivetrain realised ~0.74x the
+        # commanded differential; turn_boost compensates, per terrain), so the tail's swing is
+        # charged against a longer reaction time than driving straight: turning in a gap costs more
+        self.turn_ratio = (t_react if t_turn is None else float(t_turn)) / float(t_react)
         self.r = float(robot.wheel_radius)
         self.half_track = float(robot.half_track)
         self.tail = float(robot.rear_offset + robot.wheel_radius)
@@ -182,6 +214,10 @@ class ClearanceGovernor:
         self.plan_dt = float(plan_dt)
         self.decel = float(decel)
         self._out = wp.zeros(self.steps + 1, dtype=wp.float32, device=self.device)
+        self._blind = wp.zeros(self.steps + 1, dtype=wp.float32, device=self.device)
+        self.v_blind = float(v_blind)
+        self.blind_area = float(blind_area)
+        self.blind = False  # last frame's: was the plan about to sweep unseen ground
         self.clearance = float("inf")  # last frame's, for logging
         self.v_cap = float("inf")
 
@@ -211,10 +247,11 @@ class ClearanceGovernor:
                 self.face_h,
                 search,
             ],
-            outputs=[self._out],
+            outputs=[self._out, self._blind],
             device=self.device,
         )
         per_step = self._out.numpy()[:k]
+        unseen = self._blind.numpy()[:k] >= self.blind_area
         self.clearance = float(np.min(per_step))
         # Step i is reached i * plan_dt from now, and the robot can brake on the way: it only has
         # to be at that step's allowed speed WHEN it gets there. Taking the plain minimum instead
@@ -222,10 +259,15 @@ class ClearanceGovernor:
         # stalled the robot 1-2.5 s at pocket's corner while MPPI kept proposing the same spin.
         t_i = np.arange(k) * self.plan_dt
         allowed = np.maximum(self.v_min, (per_step - self.c0) / self.t_react)
+        # a wall the sensor never saw is invisible to the clearance above: measured, a turn at
+        # the start swung the tail to 0.08 m from one while the map read 0.27 m of room
+        if self.v_blind > 0.0:
+            allowed = np.where(unseen, np.minimum(allowed, self.v_blind), allowed)
+        self.blind = bool(unseen.any())
         self.v_cap = float(np.min(allowed + self.decel * t_i))
         v = self.r * 0.5 * abs(wl + wr)
         wz = self.r * abs(wr - wl) / (2.0 * self.half_track)  # alpha 1: over-estimates the swing
-        fastest = v + self.tail * wz
+        fastest = v + self.turn_ratio * self.tail * wz
         if fastest <= self.v_cap:
             return wl, wr
         s = self.v_cap / fastest

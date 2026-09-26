@@ -110,3 +110,53 @@ def test_time_cost_keeps_the_corridor_routable_and_prices_the_walls_in_time():
     # v_cruise / v = 1.5 / (0.48 / 0.5), as a penalty (multiplier - 1) / flatness_weight
     assert seq[-1] < 1e-3
     assert seq[0] >= (1.5 / (2 * CELL / 0.5) - 1.0) / ctg.flatness_weight - 1e-4
+
+
+def test_the_route_turn_price_charges_turning_next_to_walls_only():
+    """With the turn price on, V can only rise (it adds cost to turning arcs, never removes any),
+    and it rises by more beside the walls than on the centre line."""
+
+    def solve(ratio: float) -> CostToGo:
+        ctg = CostToGo(
+            GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0),
+            RobotParams(wheel_width=0.1),
+            SolverParams(),
+            n_theta=24,
+            robust_margin_m=0.2,
+            robust_margin_deg=15.0,
+            time_cost=(1.5, 0.125, 0.15, 0.1, ratio),
+        )
+        ctg.compute(
+            wp.array(_corridor(), dtype=wp.float32), ((N // 2) * CELL + 6.0, (N // 2) * CELL)
+        )
+        return ctg
+
+    off, on = solve(0.0), solve(2.0)
+    v0, v1 = off.V.numpy(), on.V.numpy()
+    ok = (v0 < 0.9 * off._vcap) & (v1 < 0.9 * on._vcap)
+    assert (v1[ok] >= v0[ok] - 1e-4).all()
+    assert (v1[ok] > v0[ok] + 1e-3).any()
+    assert on._turn_T.numpy().max() > 0.0 and off._turn_T.numpy().max() == 0.0
+
+
+def test_the_turning_keepout_makes_turning_near_walls_costlier_than_the_time_price_alone():
+    def solve(keepout_cost: float) -> CostToGo:
+        ctg = CostToGo(
+            GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0),
+            RobotParams(wheel_width=0.1),
+            SolverParams(),
+            n_theta=24,
+            robust_margin_m=0.2,
+            robust_margin_deg=15.0,
+            time_cost=(1.5, 0.125, 0.15, 0.1, 2.0, 0.5, keepout_cost),
+        )
+        ctg.compute(
+            wp.array(_corridor(), dtype=wp.float32), ((N // 2) * CELL + 6.0, (N // 2) * CELL)
+        )
+        return ctg
+
+    off, on = solve(0.0), solve(10.0)
+    v0, v1 = off.V.numpy(), on.V.numpy()
+    ok = (v0 < 0.9 * off._vcap) & (v1 < 0.9 * on._vcap)
+    assert (v1[ok] >= v0[ok] - 1e-4).all() and (v1[ok] > v0[ok] + 1e-2).any()
+    assert on._turn_near.numpy().max() == 1.0

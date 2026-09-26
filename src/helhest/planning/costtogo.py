@@ -35,6 +35,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import math
+import warnings
 
 import numpy as np
 import warp as wp
@@ -672,6 +673,51 @@ def _time_cost_kernel(
 
 
 @wp.kernel
+def _turn_time_kernel(
+    hazard: wp.array3d(dtype=wp.float32),
+    loose: wp.array3d(dtype=wp.float32),
+    reach: int,  # [cells] past this even the sharpest turn runs at cruise: T = 0
+    dt: int,
+    cell: wp.float32,
+    v_cruise: wp.float32,
+    t_react: wp.float32,
+    v_min: wp.float32,
+    c0: wp.float32,
+    keepout: wp.float32,  # [m] turning inside this clearance is ruled out (priced, see the solver)
+    out: wp.array3d(dtype=wp.float32),  # v_cruise / v_allowed per pose, UNCAPPED at 1
+    near: wp.array3d(dtype=wp.float32),  # 1 = within the turning keep-out of a wall
+):
+    """The time multiplier the solver's turn price reads (ValueSolver.set_turn_price): the same
+    clearance law as `_time_cost_kernel`, but not capped at cruise and reaching further, because a
+    sharp turn's tail is slowed at clearances where driving straight is not."""
+    r, c, t = wp.tid()
+    out[r, c, t] = 0.0
+    near[r, c, t] = 0.0
+    if loose[r, c, t] > 0.5:
+        return
+    ny = hazard.shape[0]
+    nx = hazard.shape[1]
+    nth = hazard.shape[2]
+    best = reach + 1
+    for i in range(-reach, reach + 1):
+        rr = wp.clamp(r + i, 0, ny - 1)
+        for j in range(-reach, reach + 1):
+            d = wp.max(wp.abs(i), wp.abs(j))
+            if d < best:
+                cc = wp.clamp(c + j, 0, nx - 1)
+                for k in range(-dt, dt + 1):
+                    if hazard[rr, cc, (t + k + nth) % nth] > 0.5:
+                        best = d
+    if best > reach:
+        return
+    clearance = (float(best) - 0.5) * cell
+    if clearance < keepout:
+        near[r, c, t] = 1.0
+    v = wp.max(v_min, (clearance - c0) / t_react)
+    out[r, c, t] = v_cruise / v
+
+
+@wp.kernel
 def _pose_cost_kernel(
     blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     graded_tilt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
@@ -891,6 +937,9 @@ class CostToGo:
         self.narrow_cost = 0.0 if narrow_cost is None else float(narrow_cost)
         self._narrow_reach = max(self._mr, int(round(narrow_reach_m / self.grid.cell_size)))
         self._time = time_cost
+        self._turn_lever = 0.0  # the route's turn price; set below when time_cost carries it
+        self._keepout_m = 0.0
+        self._keepout_cost = 0.0
         if time_cost is not None:
             if narrow_cost is not None:
                 raise ValueError("time_cost and narrow_cost are alternatives; set one")
@@ -900,6 +949,21 @@ class CostToGo:
             c0 = time_cost[3] if len(time_cost) > 3 else 0.0
             self._time_reach = max(
                 1, int(math.ceil((v_cruise * t_react + c0) / self.grid.cell_size + 0.5))
+            )
+            # the ROUTE's turn price: element 4 is t_turn / t_react (0 or absent = off). A turning
+            # arc swings the tail at v * lever / R; the solver charges the time that costs.
+            turn_ratio = time_cost[4] if len(time_cost) > 4 else 0.0
+            # elements 5, 6: the turning keep-out [m] and its price (x arc length); 0 = off
+            self._keepout_m = time_cost[5] if len(time_cost) > 5 else 0.0
+            self._keepout_cost = time_cost[6] if len(time_cost) > 6 else 0.0
+            self._turn_lever = turn_ratio * (robot_params.rear_offset + robot_params.wheel_radius)
+            k_max = self._turn_lever / float(robot_params.min_turn_radius)
+            self._turn_reach = max(
+                1,
+                int(
+                    math.ceil((v_cruise * (1.0 + k_max) * t_react + c0) / self.grid.cell_size + 0.5)
+                ),
+                int(math.ceil(self._keepout_m / self.grid.cell_size + 0.5)) + 1,
             )
         self._escape_reach = max(1, int(round(self.ESCAPE_REACH_M / self.grid.cell_size)))
         # a turn costs what the lattice charges for one when it has point turns; the deployed
@@ -1036,6 +1100,28 @@ class CostToGo:
         self.narrow = wp.zeros_like(self.V)
         self._loose_blocked = wp.zeros_like(self.V)
         self._loose_tilt = wp.zeros_like(self.V)
+        # per-pose v_cruise / v_allowed for the solver's turn price; zero unless time_cost has it
+        self._turn_T = wp.zeros_like(self.V)
+        self._turn_near = wp.zeros_like(self.V)  # 1 = within the turning keep-out
+        if (
+            self._time is not None
+            and self._turn_lever > 0.0
+            and not hasattr(self.solver, "set_turn_price")
+        ):
+            # the route's turn price needs terrain_value_field with ValueSolver.set_turn_price
+            # (branch study/turn-price); an older pinned copy plans without it rather than crash
+            warnings.warn(
+                "terrain_value_field has no ValueSolver.set_turn_price: the route's turn price "
+                "and turning keep-out are OFF -- update the terrain_value_field pin"
+            )
+            self._turn_lever = 0.0
+        if self._time is not None and self._turn_lever > 0.0:
+            self.solver.set_turn_price(
+                self._turn_T,
+                self._turn_lever,
+                keepout_field=self._turn_near if self._keepout_cost > 0.0 else None,
+                keepout_cost=self._keepout_cost,
+            )
         # V with a way back out of every no-route pose: what MPPI follows (see _escape_kernel)
         self.V_escape = wp.zeros_like(self.V)
         self._descent_out = wp.zeros(2, dtype=wp.float32, device=self.device)
@@ -1409,6 +1495,25 @@ class CostToGo:
                 device=self.device,
             )
             feas, tilt = self._loose_blocked, self._loose_tilt
+            if self._turn_lever > 0.0:
+                wp.launch(
+                    _turn_time_kernel,
+                    dim=self.V.shape,
+                    inputs=[
+                        self.hazard,
+                        self._loose_blocked,
+                        self._turn_reach,
+                        self._mt,
+                        self.grid.cell_size,
+                        float(v_cruise),
+                        float(t_react),
+                        float(v_min),
+                        float(c0),
+                        float(self._keepout_m),
+                    ],
+                    outputs=[self._turn_T, self._turn_near],
+                    device=self.device,
+                )
         wp.launch(
             _goal_cell_kernel,
             dim=1,
