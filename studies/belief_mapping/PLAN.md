@@ -161,3 +161,13 @@ here), and re-run step 4's dynamic bag. Also re-run the sim dynamic study
   /joint_states message since 83d35b6).
 - **Next: 4** -- the interleaved A/B on in_speed and outdoor can run now; the carving part waits
   for the movers bag.
+- **4 done** except movers (STEP4.md): the belief map is better on every audit count and ~9 ms/frame
+  faster outdoors.
+- **6 done 2026-09-27, before the movers check, at the user's call.** The node plans on the belief
+  only: `map_source`, the accumulator's planning rasters, the single-scan MPPI raster, the host
+  inpaint and the footprint stamp are deleted (the ground under the robot is inpainted from around
+  it); the accumulator is ICP's target and the point-cloud topic. `elevation-belief` is a core
+  dependency. Final-tree replays on dasenka reproduce step 4's belief numbers. No new sim sweep:
+  drive_sim has not changed since the fill sweep.
+- **Still open:** the movers bag (step 4's carve check, step 5 if it fails); the pocket slowdown
+  since the fill; the node's `_coarse_mask` is now only a crop buffer.

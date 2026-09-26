@@ -257,14 +257,12 @@ name = "helhest-stack"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "elevation-belief" },
     { name = "numpy" },
     { name = "warp-lang" },
 ]
 
 [package.optional-dependencies]
-belief = [
-    { name = "elevation-belief" },
-]
 calib = [
     { name = "elevation-belief" },
     { name = "mcap" },
@@ -292,7 +290,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "elevation-belief", marker = "extra == 'belief'", git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=f2afa95" },
+    { name = "elevation-belief", git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=f2afa95" },
     { name = "elevation-belief", marker = "extra == 'calib'", git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=f2afa95" },
     { name = "glfw", marker = "extra == 'viz'", specifier = ">=2.6" },
     { name = "h5py", marker = "extra == 'data'", specifier = ">=3.0" },
@@ -304,7 +302,7 @@ requires-dist = [
     { name = "pyopengl", marker = "extra == 'viz'", specifier = ">=3.1" },
     { name = "warp-lang", specifier = ">=1.13" },
 ]
-provides-extras = ["viz", "data", "belief", "calib"]
+provides-extras = ["viz", "data", "calib"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -9,6 +9,10 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.4.4",
     "warp-lang>=1.13",
+    # The probabilistic elevation belief every planning map is built from (the robot's node and
+    # the closed-loop sim alike, through helhest.perception.belief_frame). A separate repo rather
+    # than a vendored copy: clark_paper uses it too, and a git pin has exactly one copy.
+    "elevation-belief",
 ]
 
 [project.optional-dependencies]
@@ -16,11 +20,6 @@ dependencies = [
 viz = ["matplotlib>=3.8", "glfw>=2.6", "PyOpenGL>=3.1", "pillow>=10.0"]
 # Rosbag loading for calibration / eval (data.py).
 data = ["h5py>=3.0"]
-# Probabilistic elevation belief (mean + sigma + the drift/measurement split). A separate repo
-# rather than a vendored copy, deliberately: helhest.perception is a SNAPSHOT of terrain_toolkit
-# with no sync strategy, and the two will drift. A git pin has exactly one copy, so it cannot.
-# Same process either way -- this is an import, not a transport boundary.
-belief = ["elevation-belief"]
 # Map-uncertainty calibration harness (studies/calib): reads Odin .mcap bags directly, so no
 # ROS install is needed to replay them.
 calib = ["elevation-belief", "mcap>=1.2", "mcap-ros2-support>=0.5"]

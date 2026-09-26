@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
-"""Dual elevation mapper for ROS 2 Kilted — the tuning front-end for the planner.
+"""Elevation mapper and planner for ROS 2 Kilted — Odin's on-robot stack.
 
-Publishes the two elevation maps the motion stack consumes, elevation-ONLY (no
-traversability), mirroring the closed-loop sim's heightmap stage (demos/pipeline_sim):
+Every planning map comes from one probabilistic elevation belief (elevation_belief, through
+helhest.perception.belief_frame -- the same path the closed-loop sim plans on), fed with the
+ICP-corrected scan. Published, elevation-only (no traversability):
 
-  * `elevation_local`  — the SINGLE-SCAN map for MPPI: this scan rasterized in a
-    robot-centered `win_m` window, trusted only where it has support and inpainted
-    over small gaps; blind cells fall back to the accumulated map (memory).
-  * `elevation_global` — the ACCUMULATED map for planning/routing: the rolling
-    device map rasterized over a larger `route_m` robot-centered window.
-  * `accumulated_map` — the raw accumulated device cloud itself (up to the
-    `map_max_radius_m` crop), for visualization. Unlike `elevation_global` (a
-    small route-window heightmap driven by the planner), this shows the full
-    mapped extent, so it's the topic to watch to confirm the map is persisting.
+  * `elevation_local`  — the MPPI window (`win_m`, robot-centred crop of the belief), NaN where the
+    belief never measured.
+  * `elevation_global` — the routing window (`route_m`), likewise.
+  * `accumulated_map` — the raw accumulated device cloud (up to the `map_max_radius_m` crop): ICP's
+    scan-to-submap target, and the topic to watch to confirm the map is persisting.
 
 Pose comes from odometry (`nav_msgs/Odometry`) refined by scan-to-submap 6-DOF
 point-to-plane ICP. When `gravity_enable`, the IMU's gravity vector anchors the
@@ -58,20 +55,17 @@ from visualization_msgs.msg import Marker
 from helhest.perception import DeviceMapAccumulator
 from helhest.perception import DynamicFilterConfig
 from helhest.perception import DynamicPointFilter
-from helhest.perception import FlatGroundFootprint
-from helhest.perception import FootprintConfig
 from helhest.perception import HeightMapBuilder
 from helhest.perception import IcpAligner
 from helhest.perception import IcpConfig
-from helhest.perception import multigrid_inpaint
 from helhest.perception import ScanPreprocessor
+from helhest.perception.belief_frame import BeliefFrame
 from helhest.perception import OutlierFilterConfig
 from helhest.perception import StatisticalOutlierFilter
 from helhest.perception import TerrainMap
 from helhest.perception import transform_points
 from helhest.perception.dynamic.frontier import frontier_from_organized
 from helhest.planning.coarse import CoarseRouter
-from helhest.planning.coarse import mask_from_count
 from helhest import dynamics
 from helhest.control.command import condition_command
 from helhest.control.command import turn_first
@@ -225,21 +219,8 @@ class _MapFrame:
     lymin: float
     rxmin: float
     rymin: float
-    # the belief path's device-resident planner inputs (map_source "belief"); None otherwise
-    dev: dict | None = None
-
-
-def _dilate_bool(mask: np.ndarray, k: int) -> np.ndarray:
-    """Grow a boolean mask by k cells (4-neighbour) — the reach we trust the inpaint over."""
-    out = mask.copy()
-    for _ in range(max(0, k)):
-        n = out.copy()
-        n[1:, :] |= out[:-1, :]
-        n[:-1, :] |= out[1:, :]
-        n[:, 1:] |= out[:, :-1]
-        n[:, :-1] |= out[:, 1:]
-        out = n
-    return out
+    # the device-resident planner inputs: the MPPI crop and its mask, the routing crop's offset
+    dev: dict
 
 
 def _same_manoeuvre(a: np.ndarray, b: np.ndarray, spin_th: float = 0.25) -> bool:
@@ -258,7 +239,7 @@ def _same_manoeuvre(a: np.ndarray, b: np.ndarray, spin_th: float = 0.25) -> bool
 
 
 class ElevationNode(Node):
-    """Publish the single-scan (MPPI) and accumulated (planning) elevation maps."""
+    """Map with the elevation belief, localise with ICP, plan with the cost-to-go and MPPI."""
 
     def __init__(self) -> None:
         super().__init__("elevation")
@@ -273,7 +254,7 @@ class ElevationNode(Node):
         self.map_wp: wp.array | None = None  # accumulated device cloud (world frame)
         self.map_ages: wp.array | None = None  # per-map-point last-seen frame (recency pruning)
         self.map_streak: wp.array | None = None  # per-map-point seen-through streak (persist carve)
-        self._bframe = None  # BeliefFrame, created on the first scan when map_source is "belief"
+        self._bframe = None  # BeliefFrame, created on the first scan
         self._bframe_t: float | None = None  # stamp of the last scan folded into it [s]
         self._bbuf: dict[str, wp.array] = {}  # the belief path's preallocated crops and pools
         self._frame: int = 0  # monotonic frame counter for recency stamps
@@ -463,29 +444,13 @@ class ElevationNode(Node):
         # + 12 m fine window let the MPPI actually see berms across its plan (footprint violations
         # 36%->8% vs the old 0.15/8) -- see the Tier-B planner analysis.
         d("resolution", 0.08)
-        d("win_m", 12.0)  # single-scan / MPPI window (robot-centered)
+        d("win_m", 12.0)  # MPPI window (robot-centered)
         d("route_m", 16.0)  # accumulated / planning window (robot-centered)
-        # What the planner's three maps are built from. "accumulator": max-height rasters of the
-        # accumulated cloud (the MPPI one from the single scan). "belief": elevation_belief, fed
-        # with the ICP-corrected scan -- the path drive_sim plans on (perception/belief_frame.py),
-        # which also hands the cost-to-go its sigma and drift. Launch-time only.
-        d("map_source", "accumulator")
+        # The planner's three maps (routing, MPPI, coarse) are crops of one elevation_belief window,
+        # fed with the ICP-corrected scan -- the path drive_sim plans on (perception/belief_frame.py),
+        # which also hands the cost-to-go its sigma and drift. The accumulated cloud is ICP's target
+        # and the point-cloud topic, nothing more.
         d("belief_carve_m", 6.0)  # [m] the belief's visibility carve reach; 0 disables it
-        d("local_support", 2)  # min points/cell to trust the single scan
-        d("local_max_gap_m", 0.4)  # trust the inpaint this far from a real return
-        d("inpaint_iters_per_level", 50)
-        d("inpaint_coarse_iters", 200)
-        # Robot footprint: force a flat ground patch under the robot in the LOCAL (MPPI)
-        # map, so the blind spot the robot's own body/wheels carve out reads as level
-        # ground instead of a hole. The patch tilts with roll/pitch (plane from
-        # world_T_base). Robot-centered box; height = robot_frame → ground distance.
-        d("footprint_enable", True)
-        d("footprint_robot_height", 0.4)  # base_link -> ground (m); patch sits this far below
-        d("footprint_half_x", 0.5)
-        d("footprint_half_y", 0.5)
-        d("footprint_center_x", 0.0)  # box center offset in base_frame (m)
-        d("footprint_center_y", 0.0)
-        d("footprint_mode", "overwrite")  # 'overwrite' | 'fill' (fill only stamps empty cells)
         # Accumulator
         d("accumulation_voxel_m", 0.10)
         # RADIUS (half-extent) of the robot-centered accumulated map: 15 m reaches 15 m in
@@ -612,9 +577,8 @@ class ElevationNode(Node):
         # here; set false if the odom source ever starts publishing it, or TF double-publishes.
         d("publish_odom_tf", True)
         d("publish_accumulated", True)  # republish the raw accumulated cloud on accumulated_map
-        # MPPI planning (visualization only — no motor commands). Consumes the maps this node
-        # already builds: elevation_local as the rollout terrain, elevation_global for the
-        # cost-to-go routing field. Goal comes from RViz "2D Nav Goal" on goal_topic. Publishes
+        # MPPI planning. Consumes the maps this node already builds: elevation_local as the
+        # rollout terrain, elevation_global for the cost-to-go routing field. Goal comes from RViz "2D Nav Goal" on goal_topic. Publishes
         # the intended path (nav_msgs/Path + a thick LINE_STRIP marker).
         d("plan_enable", True)
         d("goal_topic", "/goal_pose")  # RViz "2D Nav Goal" (a one-shot click, latches on reach)
@@ -763,8 +727,7 @@ class ElevationNode(Node):
         # primitive -- which is why plan_n_theta above is chosen as if this were 0. Connectivity
         # must not depend on a price someone may reasonably set to zero.
         d("plan_pivot_cost", PLAN_DEFAULTS["plan_pivot_cost"])
-        # the cost-to-go's sigma path (helhest.planner_config); needs map_source "belief" to have
-        # a sigma to act on
+        # the cost-to-go's sigma path (helhest.planner_config), on the belief's measurement sd
         d("plan_z_veto", PLAN_DEFAULTS["plan_z_veto"])
         d("plan_charge_per_sigma", PLAN_DEFAULTS["plan_charge_per_sigma"])
         # The clearance law (helhest/planning/clearance.py); see helhest.planner_config.
@@ -972,23 +935,7 @@ class ElevationNode(Node):
         self.resolution: float = g("resolution")
         self.win_m: float = g("win_m")
         self.route_m: float = g("route_m")
-        self.map_source: str = g("map_source")
-        if self.map_source not in ("accumulator", "belief"):
-            raise ValueError(
-                f"map_source must be 'accumulator' or 'belief', got {self.map_source!r}"
-            )
         self.belief_carve_m: float = g("belief_carve_m")
-        self.local_support: int = g("local_support")
-        self.local_max_gap_m: float = g("local_max_gap_m")
-        self.inpaint_iters_per_level: int = g("inpaint_iters_per_level")
-        self.inpaint_coarse_iters: int = g("inpaint_coarse_iters")
-        self.footprint_enable: bool = g("footprint_enable")
-        self.footprint_robot_height: float = g("footprint_robot_height")
-        self.footprint_half_x: float = g("footprint_half_x")
-        self.footprint_half_y: float = g("footprint_half_y")
-        self.footprint_center_x: float = g("footprint_center_x")
-        self.footprint_center_y: float = g("footprint_center_y")
-        self.footprint_mode: str = g("footprint_mode")
         self.icp_enable: bool = g("icp_enable")
         self.icp_submap_radius_m: float = g("icp_submap_radius_m")
         self.icp_min_inliers: int = g("icp_min_inliers")
@@ -1661,11 +1608,10 @@ class ElevationNode(Node):
             self.map_ages = None
             self.map_streak = None
         self._ck("accumulate")
-        if self.map_source == "belief":
-            stamp = cloud_msg.header.stamp.sec + cloud_msg.header.stamp.nanosec * 1e-9
-            self._belief_update(world_scan, world_T_base @ base_T_sensor, stamp)
-            self._ck("belief_update")
-        mf = self._build_maps(world_T_base, world_scan)
+        stamp = cloud_msg.header.stamp.sec + cloud_msg.header.stamp.nanosec * 1e-9
+        self._belief_update(world_scan, world_T_base @ base_T_sensor, stamp)
+        self._ck("belief_update")
+        mf = self._build_maps(world_T_base)
         self._ck("build_maps")
         if mf is not None:
             self._publish_maps(mf, cloud_msg.header.stamp)
@@ -1687,62 +1633,8 @@ class ElevationNode(Node):
                 )
 
     # ------------------------------------------------------------------
-    # Dual elevation map (mirrors demos/pipeline_sim's heightmap stage)
+    # The planning maps: one elevation belief, cropped (perception/belief_frame.py)
     # ------------------------------------------------------------------
-
-    def _footprint_plane_world(self, world_T_base: np.ndarray) -> tuple[float, float, float] | None:
-        """Ground plane `z = a*x + b*y + c` (world/grid frame) under the robot.
-
-        The footprint is flat at z = -robot_height in the base frame; expressed in the
-        world grid it tilts with roll/pitch, so we project the base body z-axis (third
-        column of world_R_base). Returns None if that axis is near-horizontal (rollover),
-        where the level fallback would be meaningless in absolute world z.
-        """
-        r3 = world_T_base[:3, 2]  # base body z-axis in world
-        rz = float(r3[2])
-        if abs(rz) < 1e-6:
-            return None
-        t = world_T_base[:3, 3]
-        h = self.footprint_robot_height
-        r3_dot_t = float(r3[0] * t[0] + r3[1] * t[1] + r3[2] * t[2])
-        a = -float(r3[0]) / rz
-        b = -float(r3[1]) / rz
-        c = (-h + r3_dot_t) / rz
-        return (a, b, c)
-
-    def _stamp_footprint(
-        self,
-        primary: wp.array,
-        conf: np.ndarray,
-        world_T_base: np.ndarray,
-        cell: float,
-        bounds: tuple[float, float, float, float],
-    ) -> None:
-        """Stamp the flat footprint patch into the local primary layer, in place.
-
-        Mirrors the pipeline: write the ground plane into the `max` reduction (device)
-        before it's read out, and force the patched cells to read as measured (`conf`)
-        so they survive inpaint and show. No-op when disabled or the plane is degenerate.
-        """
-        if not self.footprint_enable:
-            return
-        plane = self._footprint_plane_world(world_T_base)
-        if plane is None:
-            return
-        height, width = conf.shape
-        ex, ey = float(world_T_base[0, 3]), float(world_T_base[1, 3])
-        cfg = FootprintConfig(
-            half_x=self.footprint_half_x,
-            half_y=self.footprint_half_y,
-            center=(ex + self.footprint_center_x, ey + self.footprint_center_y),
-            ground_z=-self.footprint_robot_height,
-            mode=self.footprint_mode,
-        )
-        fp = FlatGroundFootprint(cell, bounds, height, width, cfg, device=self.device)
-        if fp.is_empty:
-            return
-        fp.apply(primary, plane)
-        conf[fp.i0 : fp.i1, fp.j0 : fp.j1] = True
 
     def _belief_update(
         self, world_scan: wp.array, world_T_sensor: np.ndarray, stamp: float
@@ -1750,8 +1642,6 @@ class ElevationNode(Node):
         """Fold this frame's ICP-corrected scan into the belief (created on the first scan)."""
         ex, ey = float(world_T_sensor[0, 3]), float(world_T_sensor[1, 3])
         if self._bframe is None:
-            from helhest.perception.belief_frame import BeliefFrame  # needs the `belief` extra
-
             cell = self.resolution
             span = max(self.route_m, self.plan_coarse_win_m)
             # On the world lattice the anchored coarse memory uses (origin -memory/2, whole cells),
@@ -1814,85 +1704,9 @@ class ElevationNode(Node):
             dev={"local_h": local_h, "local_m": local_m, "off_r": off_r},
         )
 
-    def _build_maps(self, world_T_base: np.ndarray, world_scan: wp.array) -> _MapFrame | None:
-        """Build the local (single-scan/MPPI) and global (routing) elevation maps for this frame."""
-        if self.map_source == "belief":
-            return None if self._bframe is None else self._build_belief_maps(world_T_base)
-        if self.map_wp is None or len(self.map_wp) == 0:
-            return None
-        cell = self.resolution
-        ex, ey = float(world_T_base[0, 3]), float(world_T_base[1, 3])
-
-        with wp.ScopedDevice(self.device):
-            # GLOBAL accumulated map over the routing window.
-            rww = rwh = int(round(self.route_m / cell))
-            rxmin, rymin = ex - 0.5 * rww * cell, ey - 0.5 * rwh * cell
-            rgl = HeightMapBuilder(
-                cell, (rxmin, rxmin + rww * cell, rymin, rymin + rwh * cell), device=self.device
-            ).build(self.map_wp)
-            rcount = rgl.count.numpy()
-            rmax = rgl.max.numpy()
-            rmeasured = rcount > 0
-            relev_view = np.where(rmeasured, rmax, np.nan).astype(np.float32)
-            # Blind cells: INPAINT from the measured neighbourhood instead of a constant. 0.0 is the
-            # MAP ORIGIN height, not ground -- as the terrain descends relative to that origin, the
-            # unmeasured part of the window turns into a phantom plateau metres tall and the settle
-            # walls the robot in. Measured on out_experiment_goal_unreachable1: ground at -1.29 m
-            # with 66% of the window unmeasured -> V saturated at the robot -> "goal unreachable".
-            relev_mem = np.nan_to_num(
-                np.asarray(
-                    multigrid_inpaint(  # copies its input, so the NaN view for RViz is untouched
-                        relev_view,
-                        iters_per_level=self.inpaint_iters_per_level,
-                        coarse_iters=self.inpaint_coarse_iters,
-                    )
-                ),
-                nan=0.0,  # nothing measured anywhere -> fall back to the old constant
-            ).astype(np.float32)
-
-            # LOCAL single-scan map over the (centered) MPPI window.
-            lww = lwh = int(round(self.win_m / cell))
-            ox, oy = (rww - lww) // 2, (rwh - lwh) // 2  # plan window == center of routing window
-            lxmin, lymin = rxmin + ox * cell, rymin + oy * cell
-            lbounds = (lxmin, lxmin + lww * cell, lymin, lymin + lwh * cell)
-            ll = HeightMapBuilder(cell, lbounds, device=self.device).build(world_scan)
-            conf = ll.count.numpy() >= self.local_support
-            # Force the flat patch under the robot into the primary max (device) and mark
-            # those cells measured — before max is read out and inpainted.
-            self._stamp_footprint(ll.max, conf, world_T_base, cell, lbounds)
-            hm = np.where(conf, ll.max.numpy(), np.nan).astype(np.float32)
-            filled = np.nan_to_num(
-                np.asarray(
-                    multigrid_inpaint(
-                        hm,
-                        iters_per_level=self.inpaint_iters_per_level,
-                        coarse_iters=self.inpaint_coarse_iters,
-                    )
-                ),
-                nan=0.0,
-            ).astype(np.float32)
-            known = _dilate_bool(conf, int(round(self.local_max_gap_m / cell)))
-
-        mem = relev_mem[oy : oy + lwh, ox : ox + lww]
-        mem_known = rmeasured[oy : oy + lwh, ox : ox + lww]
-        elev_local = np.where(known, filled, mem).astype(np.float32)
-        # Cells with real info (fresh scan or remembered); the rest are unknown -> NaN for RViz.
-        show = known | mem_known
-        elev_local_view = np.where(show, elev_local, np.nan).astype(np.float32)
-        return _MapFrame(
-            elev_local=elev_local,
-            elev_local_view=elev_local_view,
-            relev_view=relev_view,
-            relev_mem=relev_mem,
-            relev_measured=rmeasured,
-            cell=cell,
-            ex=ex,
-            ey=ey,
-            lxmin=lxmin,
-            lymin=lymin,
-            rxmin=rxmin,
-            rymin=rymin,
-        )
+    def _build_maps(self, world_T_base: np.ndarray) -> _MapFrame | None:
+        """This frame's planning maps: crops of the belief window (see `_build_belief_maps`)."""
+        return None if self._bframe is None else self._build_belief_maps(world_T_base)
 
     def _publish_maps(self, mf: _MapFrame, stamp) -> None:
         self._publish_grid(self.pub_local, mf.elev_local_view, mf.lxmin, mf.lymin, mf.cell, stamp)
@@ -2138,8 +1952,8 @@ class ElevationNode(Node):
     def _plan(self, mf: _MapFrame, world_T_base: np.ndarray, stamp) -> None:
         """Run MPPI toward the goal on this frame's maps; publish the intended path.
 
-        Terrain = the single-scan elevation_local; the routing cost-to-go is solved on the
-        accumulated elevation_global. Visualization only — no motor commands are emitted.
+        Terrain = the belief's MPPI crop; the routing cost-to-go is solved on its routing crop,
+        pooled to the routing cell, with the belief's measurement sd and drift.
         """
         gx, gy = self.goal_xy
         ez = float(world_T_base[2, 3])
@@ -2185,14 +1999,7 @@ class ElevationNode(Node):
                 self._publish_cmd(cmd)
             return
         with wp.ScopedDevice(self.device):
-            if mf.dev is not None:
-                self.plan_sim.set_terrain(mf.dev["local_h"])
-            else:
-                self.plan_sim.set_terrain(
-                    wp.array(
-                        np.ascontiguousarray(mf.elev_local), dtype=wp.float32, device=self.device
-                    )
-                )
+            self.plan_sim.set_terrain(mf.dev["local_h"])
             self._ck("plan:set_terrain")
             # Seed the rollouts' REALIZED initial state -- without this every replan planned from
             # wheels-at-rest and zero body twist (command_history only covers in-flight COMMANDS).
@@ -2218,16 +2025,7 @@ class ElevationNode(Node):
             # map -- no rear sensor, so reverse may only use REMEMBERED ground.
             # the governor needs the same mask: it slows the robot over ground nobody has measured
             if self.plan_wmin < 0.0 or self.governor is not None:
-                if mf.dev is not None:
-                    self.planner.set_measured(mf.dev["local_m"])
-                else:
-                    ww, wh, rww, rwh, _, _ = self._plan_dims
-                    oy, ox = (rwh - wh) // 2, (rww - ww) // 2
-                    self.planner.set_measured(
-                        np.ascontiguousarray(
-                            mf.relev_measured[oy : oy + wh, ox : ox + ww], np.float32
-                        )
-                    )
+                self.planner.set_measured(mf.dev["local_m"])
             if self.plan_wmin < 0.0:
                 rev_open = self._reverse_clear(mf, eyaw)
                 self.planner.set_wmin(self.plan_wmin if rev_open else 0.0)
@@ -2237,94 +2035,44 @@ class ElevationNode(Node):
                         f"(map behind {'measured' if rev_open else 'blind'})"
                     )
                 self._rev_open = rev_open
-            relev = mf.relev_mem  # (rwh, rww), blind cells inpainted from measured neighbours
-            rmeas = mf.relev_measured
-            route_sd = route_drift = None
-            if mf.dev is not None:
-                # the same pooling rule, on the device, with the sigma and drift pooled beside it
-                bf, off_r = self._bframe, mf.dev["off_r"]
-                Hc = self._belief_buf("pool_h", rcny)
-                Mc = self._belief_buf("pool_m", rcny)
-                route_sd = self._belief_buf("pool_sd", rcny)
-                route_drift = self._belief_buf("pool_drift", rcny)
-                bf.pool(off_r, off_r, kr, Hc, Mc, route_sd, route_drift)
-            elif kr > 1:
-                # Reduce over MEASURED cells only: a plain .max() would let the inpainted fill
-                # outvote real ground wherever the fill sits higher, so one unobserved fine cell
-                # would speak for the whole coarse cell. -inf drops blind cells out of the max; a
-                # coarse cell counts as measured if ANY of its fine cells is.
-                blk = np.where(rmeas, relev, -np.inf)[: rcny * kr, : rcnx * kr]
-                Hm = blk.reshape(rcny, kr, rcnx, kr).max(axis=(1, 3))
-                Mc = np.isfinite(Hm)
-                # Fully-blind coarse cells fall back to the INPAINTED surface (not a constant), so
-                # unmeasured ground reads as terrain rather than a plateau at the map origin.
-                Hall = relev[: rcny * kr, : rcnx * kr].reshape(rcny, kr, rcnx, kr).max(axis=(1, 3))
-                Hc = np.where(Mc, Hm, Hall).astype(np.float32)
-            else:
-                Hc = relev
-                Mc = rmeas
-            # WHICH WAY -- the coarse layer, pooled from a wider raster of the accumulated map
-            # than the routing window and remembered across frames; its value prices the routing
-            # window's border. Device end to end: raster, mask, pool, solve.
+            # the routing grid: the belief pooled kr x kr, sigma and drift beside the height
+            bf, off_r = self._bframe, mf.dev["off_r"]
+            Hc = self._belief_buf("pool_h", rcny)
+            Mc = self._belief_buf("pool_m", rcny)
+            route_sd = self._belief_buf("pool_sd", rcny)
+            route_drift = self._belief_buf("pool_drift", rcny)
+            bf.pool(off_r, off_r, kr, Hc, Mc, route_sd, route_drift)
+            # WHICH WAY -- the coarse layer, pooled from the belief window (wider than the routing
+            # window) and remembered across frames; its value prices the routing window's border.
             vc = None
             coarse_origin = None
             if self.coarse is not None:
                 cw = self._coarse_cw
                 cell = mf.cell
+                # the belief window's centred cw x cw crop, on its (and the memory's) lattice
+                off_c = bf.measured.shape[0] // 2 - cw // 2
+                cxmin, cymin = bf.xmin + off_c * cell, bf.ymin + off_c * cell
                 if self.coarse.persistent:
-                    # the raster sits on the memory's lattice (whole cells), so its blocks pool
-                    # into the map's blocks exactly
                     cx0, cy0 = self.coarse.grid.origin_x, self.coarse.grid.origin_y
-                    cxmin = cx0 + round((mf.ex - 0.5 * cw * cell - cx0) / cell) * cell
-                    cymin = cy0 + round((mf.ey - 0.5 * cw * cell - cy0) / cell) * cell
                 else:
-                    cxmin, cymin = mf.ex - 0.5 * cw * cell, mf.ey - 0.5 * cw * cell
                     cx0, cy0 = cxmin, cymin
-                if mf.dev is not None:
-                    # the belief window's centred cw x cw crop, on its (and the memory's) lattice
-                    bf = self._bframe
-                    off_c = bf.measured.shape[0] // 2 - cw // 2
-                    cxmin, cymin = bf.xmin + off_c * cell, bf.ymin + off_c * cell
-                    if not self.coarse.persistent:
-                        cx0, cy0 = cxmin, cymin
-                    c_h = bf.crop(bf.height, off_c, off_c, self._belief_buf("coarse_h", cw))
-                    c_m = bf.crop(bf.measured, off_c, off_c, self._coarse_mask)
-                else:
-                    lay = HeightMapBuilder(
-                        cell,
-                        (cxmin, cxmin + cw * cell, cymin, cymin + cw * cell),
-                        device=self.device,
-                    ).build(self.map_wp)
-                    mask_from_count(lay.count, self._coarse_mask)
-                    c_h, c_m = lay.max, self._coarse_mask
+                c_h = bf.crop(bf.height, off_c, off_c, self._belief_buf("coarse_h", cw))
+                c_m = bf.crop(bf.measured, off_c, off_c, self._coarse_mask)
                 if self.coarse.persistent:
                     vc = self.coarse.solve(c_h, c_m, (gx, gy), (cxmin, cymin))
                 else:
                     vc = self.coarse.solve(c_h, c_m, (gx - cxmin, gy - cymin))
                 coarse_origin = (cx0 - mf.rxmin, cy0 - mf.rymin)
                 self._ck("plan:coarse")
-            if mf.dev is not None:
-                V = self.ctg.compute(
-                    Hc,
-                    goal_r,
-                    measured=Mc,
-                    sigma=route_sd,
-                    drift=route_drift,
-                    coarse_value=vc,
-                    coarse_origin=coarse_origin,
-                )
-            else:
-                V = self.ctg.compute(
-                    wp.array(np.ascontiguousarray(Hc), dtype=wp.float32, device=self.device),
-                    goal_r,
-                    measured=wp.array(
-                        np.ascontiguousarray(Mc, dtype=np.float32),
-                        dtype=wp.float32,
-                        device=self.device,
-                    ),
-                    coarse_value=vc,
-                    coarse_origin=coarse_origin,
-                )
+            V = self.ctg.compute(
+                Hc,
+                goal_r,
+                measured=Mc,
+                sigma=route_sd,
+                drift=route_drift,
+                coarse_value=vc,
+                coarse_origin=coarse_origin,
+            )
             self._ck("plan:ctg")
             if vc is not None:
                 # for RViz: the coarse cost-to-go as a height grid, unreachable blocks left out
@@ -2351,10 +2099,8 @@ class ElevationNode(Node):
                 try:
                     np.savez_compressed(
                         "/tmp/plan_dump.npz",
-                        elevation=Hc.numpy() if isinstance(Hc, wp.array) else Hc,
-                        measured=np.asarray(
-                            Mc.numpy() if isinstance(Mc, wp.array) else Mc, np.float32
-                        ),
+                        elevation=Hc.numpy(),
+                        measured=Mc.numpy(),
                         V=V.numpy(),
                         goal_r=np.asarray(goal_r, np.float32),
                         # MPPI's own frame: the rollouts start at state_l and chase goal_l, and V

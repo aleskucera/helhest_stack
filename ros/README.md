@@ -1,6 +1,6 @@
 # helhest_stack ROS
 
-The `elevation_node` (localization + accumulated mapping + MPPI planning viz) and the
+The `elevation_node` (localization + belief mapping + cost-to-go / MPPI planning) and the
 `elevation-demo` tmuxinator. Run via the apptainer container + `dev-shell.sh` (see the
 tmuxinator header). This file records **deployment gotchas** that are easy to lose hours to.
 
@@ -73,6 +73,13 @@ matching `/odom_2d`.
 
 ## Other defaults worth knowing
 
+- **The planner plans on the elevation belief, not the accumulated cloud** (since 2026-09-27):
+  every planning map -- MPPI terrain, routing grid (with sigma and drift), coarse layer -- is a crop
+  of one `elevation_belief` window fed with the ICP-corrected scan, through the same helper the
+  closed-loop sim uses (`helhest/perception/belief_frame.py`). The accumulated cloud remains ICP's
+  target and the `accumulated_map` topic. So the carve rules below keep ICP's cloud clean, but the
+  PLANNER's moving-object handling is the belief's own carve (`belief_carve_m`, 6 m), which has not
+  yet been checked on a real bag with people in it (studies/belief_mapping/STEP0.md).
 - **Rotation prior = integrated gyro**, not the fused `/imu/data` orientation (its yaw is
   wrong-sign on this hardware — AHRS ENU/NED bug). See `elevation_node._gyro_orientation_base`.
 - **Gyro glitch guard (`max_gyro_rate_dps`, 600):** this robot's `/imu/data` angular_velocity
