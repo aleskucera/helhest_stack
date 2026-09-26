@@ -232,3 +232,10 @@ def test_penalty_is_exact_where_the_sign_encoding_is_not():
     assert blocked == 1.0
     assert penalty > 0.0
     assert float(_decode(np.float32(-1.0) - np.float32(penalty))[1]) != penalty
+
+
+def test_a_hard_failure_leaves_nothing_to_learn():
+    """z < k on this map and >= k on a certain one would be doubt -- unless something certain
+    blocks the state anyway. Looking cannot help there."""
+    assert _classify(1.0, 99.0)[2] > 0.0, "without the hard failure this is doubt"
+    assert _classify(1.0, 99.0, hard=1.0)[2] == 0.0

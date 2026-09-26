@@ -49,7 +49,8 @@ fitted -- not for one whose input was never measured.
 
 HARD CONSTRAINTS. `floor_i = 0` marks a test with no uncertainty to divide by -- a solver that
 failed to resolve, a step taller than a gate. It is a pure sign test: `margin < 0` vetoes the state
-and sets `hard`, and the constraint takes no part in `z`, the graded charge or `doubt`. Dividing by
+and sets `hard`, and the constraint takes no part in `z` or the graded charge. A state it vetoes
+carries no `doubt` either: no amount of looking unblocks it, so it is not worth going to see. Dividing by
 a made-up tiny sigma instead would drag `z` to +-1e9 and swamp every real margin in the `min`.
 
 POSE COST. The veto and the graded cost travel as ONE field, with the veto in the sign:
@@ -134,7 +135,9 @@ def margin_to_fields_kernel(
     # veto in the sign; see POSE COST above
     pose_cost[r, c, t] = wp.where(best < k or failed > 0.5, -1.0 - pen, pen)
     penalty[r, c, t] = pen
-    doubt[r, c, t] = wp.where(best < k and best_certain >= k, best_certain - best, 0.0)
+    # blocked by ignorance only if nothing certain blocks it too; see HARD CONSTRAINTS above
+    ignorance = best < k and best_certain >= k and failed < 0.5
+    doubt[r, c, t] = wp.where(ignorance, best_certain - best, 0.0)
 
 
 @wp.kernel
@@ -208,7 +211,7 @@ def classify_kernel(
     # veto in the sign
     pose_cost[r, c, t] = wp.where(zz < k or hard[r, c, t] > 0.5, -1.0 - pen, pen)
     penalty[r, c, t] = pen
-    doubt[r, c, t] = wp.where(zz < k and zc >= k, zc - zz, 0.0)
+    doubt[r, c, t] = wp.where(zz < k and zc >= k and hard[r, c, t] < 0.5, zc - zz, 0.0)
 
 
 @wp.kernel
