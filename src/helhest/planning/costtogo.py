@@ -38,20 +38,18 @@ from typing import TYPE_CHECKING
 import numpy as np
 import warp as wp
 
-from ..engine import ForwardSimulator
-from ..engine.robot import Robot  # the built struct, passed straight into the feasibility kernel
+from ..engine.robot import Robot  # the built struct, passed straight into the hazard kernel
 from ..engine.terrain import Grid
-from ..engine.terrain import sample_field
-from ..heightmap import Heightmap
 from ..profiling import StageProfiler
 from .clearance import ClearanceParams
 from .clearance import ClearanceRoute
+from .settle_producer import SettleProducer
 from .terrain_value_field import closing_step
-from .terrain_value_field.drift import footprint_drift_spread
+from .terrain_value_field import TerrainValueField
 from .terrain_value_field.hierarchical import goal_cell_kernel
 from .terrain_value_field.hierarchical import seed_goal_and_ring_kernel
 from .terrain_value_field.hierarchical import seed_goal_kernel
-from .terrain_value_field.solver import ValueSolver
+from .terrain_value_field.margin import pack_pose_cost_kernel
 
 if TYPE_CHECKING:
     from ..engine import GridParams
@@ -76,248 +74,18 @@ def _clamp3d_kernel(
 
 
 @wp.kernel
-def _feasibility_kernel(
-    derived: wp.array2d(dtype=wp.vec3f),  # (z, pitch, roll) per pose; row 0 = the static settle
-    residual: wp.array2d(dtype=wp.float32),
-    clearance: wp.array2d(dtype=wp.float32),
-    robot: Robot,
+def _unpack_kernel(
+    pose_cost: wp.array3d(dtype=wp.float32),  # [row, col, heading] classified, veto in the sign
+    penalty: wp.array3d(dtype=wp.float32),  # [row, col, heading] the sigma charge, exact
+    flat_tilt: wp.array3d(dtype=wp.float32),  # [row, col, heading] the producer's flatness cost
     blocked: wp.array3d(dtype=wp.float32),
-    hazard: wp.array3d(dtype=wp.float32),
-    violation: wp.array3d(dtype=wp.float32),
-    tilt: wp.array3d(dtype=wp.float32),
+    graded_tilt: wp.array3d(dtype=wp.float32),
 ):
-    """The per-pose feasibility OR + graded tilt cost, one thread per (y, x, theta), no readback.
-    Direction-aware: climb = nose-up = NEGATIVE pitch, so the climb limit is on -pitch, descend on
-    +pitch. Pose b = (r*nx + c)*n_theta + t is the C-order flatten matching start_pose in __init__.
-
-    `blocked` is the union; the causes are also kept apart because the robust tube treats them
-    differently. `hazard` here is only the settle failing to resolve (residual); walls join it in
-    `_step_hazard_kernel`. `violation` [rad] is how badly a SOFT test fails, 0 when none does:
-    the attitude's excess past the envelope, or the belly's shortfall below clear_margin divided
-    by the rear offset -- roughly the pitch that would lift it clear, so both are angles.
-    """
+    """The classified field back into the veto and the graded cost the tube works on. The
+    penalty is read from its own field: a vetoed state's magnitude does not survive -1 - p."""
     r, c, t = wp.tid()
-    nx = blocked.shape[1]
-    n_theta = blocked.shape[2]
-    b = (r * nx + c) * n_theta + t
-    der = derived[0, b]
-    pitch = der[1]
-    roll = der[2]
-    over_envelope = (
-        wp.abs(roll) > robot.max_roll or pitch < -robot.max_pitch_up or pitch > robot.max_pitch_down
-    )
-    unresolved = residual[0, b] > robot.resid_tol
-    belly_short = robot.clear_margin - clearance[0, b]
-    if over_envelope or unresolved or belly_short > 0.0:
-        blocked[r, c, t] = 1.0
-    else:
-        blocked[r, c, t] = 0.0
-    hazard[r, c, t] = wp.where(unresolved, 1.0, 0.0)
-    tilt_over = wp.max(
-        wp.max(0.0, wp.abs(roll) - robot.max_roll),
-        wp.max(-pitch - robot.max_pitch_up, pitch - robot.max_pitch_down),
-    )
-    violation[r, c, t] = wp.max(tilt_over, belly_short / (-robot.wheel_pos[2][0]))
-    tilt[r, c, t] = robot.roll_cost_weight * wp.abs(roll) + robot.pitch_cost_weight * wp.abs(pitch)
-
-
-@wp.kernel
-def _margin_kernel(
-    derived: wp.array2d(dtype=wp.vec3f),  # (z, pitch, roll) per pose; row 0 = the static settle
-    clearance: wp.array2d(dtype=wp.float32),
-    sigma: wp.array2d(dtype=wp.float32),  # per-cell MEASUREMENT sd of the elevation belief [m]
-    spread: wp.array2d(dtype=wp.float32),  # per-cell footprint DRIFT spread [m^2]
-    grid: Grid,
-    robot: Robot,
-    n_theta: wp.int32,
-    sigma_floor_m: wp.float32,
-    z_veto: wp.array(dtype=wp.float32),  # device scalar: settable between CUDA-graph replays
-    sigma_scale: wp.array(dtype=wp.float32),  # 1 = believe the map, 0 = optimistic (floor only)
-    z_charge: wp.float32,
-    charge_per_sigma: wp.float32,
-    blocked: wp.array3d(dtype=wp.float32),
-    tilt: wp.array3d(dtype=wp.float32),
-    zmargin: wp.array3d(dtype=wp.float32),
-    doubt: wp.array3d(dtype=wp.float32),
-):
-    """Safety margin in SIGMAS, and the veto and graded penalty that come off it.
-
-    Each feasibility test is asked how much room is left in units of its OWN uncertainty:
-
-        z_roll  = (max_roll - |roll|)           / sigma_roll
-        z_climb = (max_pitch_up + pitch)        / sigma_pitch     (climb = NEGATIVE pitch)
-        z_desc  = (max_pitch_down - pitch)      / sigma_pitch
-        z_clear = (clearance - clear_margin)    / sigma_clear
-        z       = min over tests                                  -- the binding constraint
-
-    Dividing each by its own sigma is what makes the `min` meaningful: roll is in radians and
-    clearance in metres, and a raw `min` over those compares nothing. `blocked = z < z_veto`
-    then has one interpretable knob -- how many sigmas of room the robot insists on -- and the
-    same number drives the graded penalty, so pessimism and "how close is this to bad" are not
-    two independently-tuned things.
-
-    Attitude sigmas come from the settle's closed-form rows. With wheels at (0, +b), (0, -b),
-    (-l, 0), `roll = (e1 - e2)/2b` and `pitch = (e3 - (e1+e2)/2)/l`, and both are DIFFERENCES of
-    supports -- so the pose drift shared by every cell cancels exactly, and what enters is the
-    per-cell MEASUREMENT sd, not the total. That is why `sigma` here must be the belief's
-    `meas_sd` and not its `sigma`.
-
-    `sigma_floor_m` is not optional. Without it a perfectly known map makes a pose at 14.9 deg
-    of roll against a 15 deg limit read as infinitely safe; the floor is the irreducible error
-    -- localisation, controller tracking, model -- that never reaches zero.
-
-    Two approximations, both marked for upgrade:
-      - sigma is sampled at each WHEEL CENTRE rather than at the cell that won the envelope
-        dilation. Elevation sigma varies smoothly with observation range (~3 cm/m measured), so
-        over the <=0.35 m to the contact cell this is worth ~1 cm; the terrain max it stands in
-        for is not smooth at all, but sigma is.
-      - the footprint maximum is not folded. Reading sigma off one cell is the linearized,
-        one-hot estimate, which overstates the sd at contested contacts; the Clark fold at the
-        dilation stage is the fix, and it needs the envelope's own contact indices.
-    """
-    r, c, t = wp.tid()
-    nx = blocked.shape[1]
-    b = (r * nx + c) * n_theta + t
-    der = derived[0, b]
-    pitch = der[1]
-    roll = der[2]
-
-    x = grid.origin_x + float(c) * grid.cell_size
-    y = grid.origin_y + float(r) * grid.cell_size
-    yaw = (float(t) + 0.5) * 2.0 * 3.14159265 / float(n_theta)
-    ca = wp.cos(yaw)
-    sa = wp.sin(yaw)
-    # Read the layout off the robot itself rather than reconstructing it: `wheel_pos` is the
-    # same array the settle uses, so the sigma is sampled where the supports actually are.
-    w0 = robot.wheel_pos[0]
-    w1 = robot.wheel_pos[1]
-    w2 = robot.wheel_pos[2]
-    hb = w0[1]  # half track
-    rl = -w2[0]  # rear offset
-
-    # Measurement sd under each wheel, and midway back for the belly.
-    scale = sigma_scale[0]
-    s1 = _sigma_at(
-        sigma, grid, x + ca * w0[0] - sa * w0[1], y + sa * w0[0] + ca * w0[1], sigma_floor_m, scale
-    )
-    s2 = _sigma_at(
-        sigma, grid, x + ca * w1[0] - sa * w1[1], y + sa * w1[0] + ca * w1[1], sigma_floor_m, scale
-    )
-    s3 = _sigma_at(
-        sigma, grid, x + ca * w2[0] - sa * w2[1], y + sa * w2[0] + ca * w2[1], sigma_floor_m, scale
-    )
-    sb = _sigma_at(sigma, grid, x - ca * rl * 0.5, y - sa * rl * 0.5, sigma_floor_m, scale)
-
-    # Pose drift is ONE shared random walk, so it cancels between two contacts and only the part
-    # accrued since the older of them was last seen survives: Var(h_A - h_B) picks up
-    # |drift_A - drift_B|, which the footprint's max-min spread bounds. Charged to each variance
-    # directly rather than folded into s1..s3, because each difference here has its own lever arm
-    # and inflating the sds would land the wrong coefficient on pitch. `scale` gates it with the
-    # measurement term: the optimistic reading assumes a map with no drift either.
-    sp = scale * sample_field(spread, grid, x, y)
-
-    two_b = 2.0 * hb
-    var_roll = (s1 * s1 + s2 * s2 + sp) / (two_b * two_b)
-    var_pitch = (s3 * s3 + 0.25 * (s1 * s1 + s2 * s2) + sp) / (rl * rl)
-    # The belly sits on a weighted mean of the three supports (weights summing to one), so its
-    # own height carries about a third of their variance. The cross term against the ground
-    # beneath it is dropped, which OVERSTATES sigma_clear -- the conservative direction.
-    var_clear = sb * sb + (s1 * s1 + s2 * s2 + s3 * s3) / 9.0 + sp
-
-    sigma_roll = wp.sqrt(wp.max(var_roll, 1.0e-12))
-    sigma_pitch = wp.sqrt(wp.max(var_pitch, 1.0e-12))
-    sigma_clear = wp.sqrt(wp.max(var_clear, 1.0e-12))
-
-    z_roll = (robot.max_roll - wp.abs(roll)) / sigma_roll
-    z_climb = (robot.max_pitch_up + pitch) / sigma_pitch
-    z_desc = (robot.max_pitch_down - pitch) / sigma_pitch
-    z_clear = (clearance[0, b] - robot.clear_margin) / sigma_clear
-
-    z = wp.min(wp.min(z_roll, z_climb), wp.min(z_desc, z_clear))
-    zmargin[r, c, t] = z
-
-    # The same pose scored as if the map were CERTAIN -- every cell at the irreducible floor.
-    # The attitude sigmas are linear in the per-cell sd, so the optimistic ones follow from the
-    # same rows with s1 = s2 = s3 = sb = floor. They are NOT simply the floor: a pose's roll
-    # uncertainty is the floor propagated through the track width, not the floor itself.
-    k = z_veto[0]
-    f = sigma_floor_m
-    o_roll = wp.sqrt(2.0 * f * f) / two_b
-    o_pitch = wp.sqrt(f * f + 0.5 * f * f) / rl
-    o_clear = wp.sqrt(f * f + f * f / 3.0)
-    z_opt = wp.min(
-        wp.min(
-            (robot.max_roll - wp.abs(roll)) / o_roll,
-            (robot.max_pitch_up + pitch) / o_pitch,
-        ),
-        wp.min(
-            (robot.max_pitch_down - pitch) / o_pitch,
-            (clearance[0, b] - robot.clear_margin) / o_clear,
-        ),
-    )
-
-    # Doubt: blocked by IGNORANCE, not by terrain. A pose the robot would accept on a certain
-    # map and refuses on this one is worth going to look at; a pose that fails either way is
-    # simply bad ground and looking at it will not help. This is the distinction that separates
-    # purposeful exploration from wandering toward whatever is least observed.
-    if z < k and z_opt >= k:
-        doubt[r, c, t] = z_opt - z
-    else:
-        doubt[r, c, t] = 0.0
-
-    if z < k:
-        blocked[r, c, t] = 1.0
-    if z < z_charge:  # graded: pay for being near a boundary, not only for crossing it
-        tilt[r, c, t] = tilt[r, c, t] + charge_per_sigma * (z_charge - z)
-
-
-@wp.func
-def _sigma_at(
-    sigma: wp.array2d(dtype=wp.float32),
-    grid: Grid,
-    x: wp.float32,
-    y: wp.float32,
-    floor_m: wp.float32,
-    scale: wp.float32,
-) -> wp.float32:
-    """Elevation sd at a world point, scaled then floored.
-
-    `scale = 0` collapses every cell to the floor, which is the optimistic reading: what the
-    robot would believe if the map carried no uncertainty beyond the irreducible.
-    """
-    return wp.max(scale * sample_field(sigma, grid, x, y), floor_m)
-
-
-@wp.kernel
-def _local_step_kernel(
-    elev: wp.array2d(dtype=wp.float32),
-    measured: wp.array2d(dtype=wp.float32),  # 1 = cell has real data, 0 = never observed
-    step: wp.array2d(dtype=wp.float32),
-):
-    """Per-cell prominence: how much a cell rises above its immediate (3x3) neighbourhood -- a STEP.
-    A thin pole rises ~its full height above the adjacent ground (large step); a drivable slope rises
-    only cell_size*tan(theta) per cell (small step). This lets the gate below catch vertical obstacles
-    the settle STRADDLES (a stick that fits between the wheel/belly contacts) without blocking slopes.
-
-    UNOBSERVED cells carry no elevation evidence, so they neither get a prominence of their own nor
-    lower a neighbour's minimum. Without that, the caller's blind-cell fill (a constant, e.g. 0.0)
-    reads as a real step wherever the ground sits away from that constant, and the map frontier
-    gates off as a closed ring. Prominence at the frontier is still taken over MEASURED
-    neighbours, so a pole standing at the edge of the mapped area is still caught."""
-    r, c = wp.tid()
-    ny = elev.shape[0]
-    nx = elev.shape[1]
-    if measured[r, c] < 0.5:
-        step[r, c] = 0.0
-        return
-    lo = elev[r, c]
-    for i in range(-1, 2):
-        rr = wp.clamp(r + i, 0, ny - 1)
-        for j in range(-1, 2):
-            cc = wp.clamp(c + j, 0, nx - 1)
-            if measured[rr, cc] > 0.5:
-                lo = wp.min(lo, elev[rr, cc])
-    step[r, c] = elev[r, c] - lo
+    blocked[r, c, t] = wp.where(pose_cost[r, c, t] < 0.0, 1.0, 0.0)
+    graded_tilt[r, c, t] = flat_tilt[r, c, t] + penalty[r, c, t]
 
 
 @wp.kernel
@@ -354,33 +122,6 @@ def _face_kernel(
             if measured[rr, cc] > 0.5:
                 top = wp.max(top, elev[r, c] - elev[rr, cc])
     face[r, c] = top
-
-
-@wp.kernel
-def _step_gate_kernel(
-    step: wp.array2d(dtype=wp.float32),
-    foot_r: int,
-    step_gate: wp.float32,
-    blocked: wp.array3d(dtype=wp.float32),
-    hazard: wp.array3d(dtype=wp.float32),
-):
-    """OR a hard block (ALL headings) onto any pose whose footprint (radius foot_r cells) contains a
-    STEP taller than step_gate -- a vertical obstacle the body would hit but the settle straddles.
-    Heading-independent: the robot cannot be centred within foot_r cells of a tall pole in ANY
-    orientation. Only ever SETS blocked=1 (never clears), so it composes with the settle feasibility.
-    """
-    r, c, t = wp.tid()
-    ny = step.shape[0]
-    nx = step.shape[1]
-    hit = float(0.0)
-    for i in range(-foot_r, foot_r + 1):
-        rr = wp.clamp(r + i, 0, ny - 1)
-        for j in range(-foot_r, foot_r + 1):
-            cc = wp.clamp(c + j, 0, nx - 1)
-            hit = wp.max(hit, step[rr, cc])
-    if hit > step_gate:
-        blocked[r, c, t] = 1.0
-        hazard[r, c, t] = 1.0
 
 
 @wp.kernel
@@ -570,24 +311,6 @@ def _escape_kernel(
 
 
 @wp.kernel
-def _pose_cost_kernel(
-    blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading]
-    graded_tilt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
-    pose_cost: wp.array3d(dtype=wp.float32),  # [row, col, heading]
-):
-    """Pack this robot's feasibility into the one signed field the solver reads.
-
-    The veto rides in the sign and the graded cost in the magnitude (terrain_value_field.margin,
-    POSE COST), which halves the loads in the relax kernel's inner loop. The clamp at zero is not
-    defensive noise: a negative penalty would read as a veto and quietly make a passable pose
-    impassable, so the encoding's one precondition is enforced where it is produced.
-    """
-    r, c, t = wp.tid()
-    pen = wp.max(graded_tilt[r, c, t], 0.0)
-    pose_cost[r, c, t] = wp.where(blocked[r, c, t] > 0.5, -1.0 - pen, pen)
-
-
-@wp.kernel
 def _descent_kernel(
     V: wp.array3d(dtype=wp.float32),  # [rows, cols, headings], the field the controller follows
     row: wp.int32,
@@ -705,7 +428,6 @@ class CostToGo:
         self._escape_per_bin = float(pivot_cost) if pivot_cost > 0.0 else self.ESCAPE_PER_BIN
         # tall-step obstacle gate: block cells within a robot footprint of a step > obstacle_step_m.
         self._step_gate = float(obstacle_step_m)
-        self._foot_r = max(1, int(round(robot_params.half_track / self.grid.cell_size)))
 
         # A lattice arc has to end on a heading BIN or the table records a heading the robot
         # never reaches -- up to half a bin of error on every move, compounding, with feasibility
@@ -764,30 +486,35 @@ class CostToGo:
         )
 
         ny, nx = self.grid.cells_y, self.grid.cells_x
-        self.settle_sim = ForwardSimulator(
-            robot_params=robot_params,
-            solver_params=solver_params,
-            grid_params=grid_params,
-            batch_size=nx * ny * n_theta,
-            n_steps=1,
+        # Odin's physics: the settle at every pose, as terrain_value_field constraints
+        self.producer = SettleProducer(
+            grid_params,
+            robot_params,
+            solver_params,
+            n_theta,
+            self.sigma_floor_m,
+            obstacle_step_m=self._step_gate,
             device=self.device,
         )
-        rr, cc, tt = np.meshgrid(np.arange(ny), np.arange(nx), np.arange(n_theta), indexing="ij")
-        px = (self.grid.origin_x + cc * self.grid.cell_size).ravel().astype(np.float32)
-        py = (self.grid.origin_y + rr * self.grid.cell_size).ravel().astype(np.float32)
-        # Heading bin `it` means exactly it*dth -- the solver's convention. It used to be the bin
-        # MIDPOINT, which tilts every primitive half a bin off the grid and costs the left/right
-        # symmetry of the fan; the settle poses have to move with it or feasibility would be
-        # produced at one set of headings and consumed at another.
-        ph = (tt * 2.0 * np.pi / n_theta).ravel().astype(np.float32)
-        self.settle_sim.start_pose.assign(np.stack([px, py, ph], 1))
-        self.settle_sim.target_wheel_omega.zero_()
-        self._mu = Heightmap(
-            np.full((self.grid.cells_y, self.grid.cells_x), 0.8, np.float32),
-            (self.grid.origin_x, self.grid.origin_y),
+        self.settle_sim = self.producer.settle_sim
+        # the cost-to-go machinery: classification in sigmas, then the value iteration
+        self.field = TerrainValueField(
+            ny,
+            nx,
             self.grid.cell_size,
+            n_theta,
+            z_veto=self.z_veto,
+            z_charge=self.z_charge,
+            charge_per_sigma=self.charge_per_sigma,
+            penalty_scale=self.flatness_weight,
+            turn_radius=float(self.robot.min_turn_radius),
+            step=self.step,
+            # helhest spells "no point turns" as 0.0; the solver spells it as an infinite price,
+            # which leaves the two primitives out of the table instead of pricing them out.
+            pivot_cost=math.inf if pivot_cost <= 0.0 else float(pivot_cost),
+            device=self.device,
         )
-        self.settle_sim.set_friction(self._mu)
+        self.solver = self.field.solver
 
         # Two-layer routing is opt-in and is armed by `set_coarse`, not by the constructor: the
         # coarse grid's SHAPE and cell size are constant, and its origin and values live in device
@@ -798,37 +525,20 @@ class CostToGo:
         self._coarse_cell = 0.0
         self._band = 0
 
-        self.solver = ValueSolver(
-            self.grid.cell_size,
-            self.grid.cells_y,
-            self.grid.cells_x,
-            n_theta=n_theta,
-            turn_radius=float(self.robot.min_turn_radius),
-            step=self.step,
-            # helhest spells "no point turns" as 0.0; the solver spells it as an infinite price,
-            # which leaves the two primitives out of the table instead of pricing them out.
-            pivot_cost=math.inf if pivot_cost <= 0.0 else float(pivot_cost),
-            device=self.device,
-        )
-
-        self.V = wp.zeros(
-            (self.grid.cells_y, self.grid.cells_x, n_theta),
-            dtype=wp.float32,
-            device=self.device,
-        )
+        self.V = wp.zeros((ny, nx, n_theta), dtype=wp.float32, device=self.device)
         self.blocked = wp.zeros_like(self.V)
-        self.zmargin = wp.zeros_like(self.V)  # safety margin in sigmas, per pose
-        self.doubt = wp.zeros_like(self.V)  # > 0 where a pose is blocked by IGNORANCE alone
+        self.zmargin = self.field.z  # safety margin in sigmas, per pose
+        self.doubt = self.field.doubt  # > 0 where a pose is blocked by IGNORANCE alone
         self.V_optimistic = wp.zeros_like(self.V)  # filled by solve_gap()
         self.V_pessimistic = wp.zeros_like(self.V)  # ditto; `compute` reuses self.V
         self.doubt_pessimistic = wp.zeros_like(self.V)
         self.robust_blocked = wp.zeros_like(self.V)  # blocked after the disturbance-tube erosion
-        self.graded_tilt = wp.zeros_like(self.V)
+        self.graded_tilt = wp.zeros_like(self.V)  # flatness + the sigma charge
         # blocked HARD: a wall, or a settle that did not resolve. Also what MPPI vetoes hard --
         # WITHOUT the tube: the tube is the router's margin, and vetoing it in the controller froze
         # the robot beside every wall (each move, even a turn in place, clipped it)
-        self.hazard = wp.zeros_like(self.V)
-        self.violation = wp.zeros_like(self.V)  # [rad] how badly a soft test fails, 0 if none does
+        self.hazard = self.producer.hazard
+        self.violation = self.producer.violation  # [rad] how badly a soft test fails
         self.robust_tilt = wp.zeros_like(self.V)  # graded_tilt + the tube's tilt charge
         # blocked under the heading bin alone, and its tilt: what routes when the clearance law
         # replaces the spatial tube
@@ -853,37 +563,25 @@ class CostToGo:
         self._descent_out = wp.zeros(2, dtype=wp.float32, device=self.device)
         self._solid = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)  # inside a wall
         # what the solver actually reads: veto in the sign, graded cost in the magnitude
-        self._pose_cost = wp.zeros_like(self.V)
-        self._seeds = wp.zeros_like(self.V)
-        self._step = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)  # per-cell prominence
-        self._face = wp.zeros(
-            (ny, nx), dtype=wp.float32, device=self.device
-        )  # per-cell face height
+        self._pose_cost = self.field.pose_cost
+        self._seeds = self.field.seeds
+        self._spread = self.producer.spread
+        self._face = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)  # face height
 
         self._elev_in = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
         # Per-cell measurement sd. Defaults to zero, which the floor then lifts to
         # `sigma_floor_m` everywhere -- so an unsupplied sigma is a uniform-uncertainty map, not
         # a claim of perfect knowledge.
         self._sigma_in = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
-        # Pose-drift variance per cell (`var_h - var_meas` from the belief), and the footprint
-        # spread reduced from it. Zero everywhere is a map of one age, which contributes nothing
-        # -- so a caller that passes no drift gets exactly the no-drift behaviour.
+        # Pose-drift variance per cell (`var_h - var_meas` from the belief). Zero everywhere is a
+        # map of one age, which contributes nothing -- so a caller that passes no drift gets
+        # exactly the no-drift behaviour.
         self._drift_in = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
-        self._spread = wp.zeros((ny, nx), dtype=wp.float32, device=self.device)
-        # The settle differences heights under the three wheels and midway back, so the spread has
-        # to cover every contact: the furthest of them from the pose centre.
-        self._drift_r = max(
-            1,
-            int(
-                round(max(robot_params.rear_offset, robot_params.half_track) / self.grid.cell_size)
-            ),
-        )
         # Stable mask buffer the captured graph reads. Defaults to all-measured, so a caller that
         # passes no mask gets exactly the pre-mask behaviour.
         self._measured_in = wp.full((ny, nx), 1.0, dtype=wp.float32, device=self.device)
-        # Device scalars so `compute` can retune them between CUDA-graph replays: a captured
-        # graph freezes host floats at record time, and the two-solve gap needs to vary them.
-        self._z_veto_d = wp.array([self.z_veto], dtype=wp.float32, device=self.device)
+        # A device scalar so `compute` can retune it between CUDA-graph replays: a captured graph
+        # freezes host floats at record time, and the two-solve gap needs to vary it.
         self._sigma_scale_d = wp.array([1.0], dtype=wp.float32, device=self.device)
         self._goal_xy = wp.zeros(2, dtype=wp.float32, device=self.device)
         self._goal_rc = wp.zeros(2, dtype=wp.int32, device=self.device)
@@ -1064,43 +762,24 @@ class CostToGo:
         return self._prof.stats()
 
     def _record_compute(self, capture: bool) -> None:
-        """Record the whole pipeline on stable owned buffers: terrain -> settle -> per-pose
-        feasibility -> goal cell (on device) -> value iteration -> clamp into V. Used both to build
-        the captured graph (capture=True) and for the eager CPU fallback (capture=False)."""
-        sim = self.settle_sim
+        """Record the whole pipeline on stable owned buffers: terrain -> settle -> constraints ->
+        classification -> tube -> goal cell (on device) -> value iteration -> clamp into V. Used
+        both to build the captured graph (capture=True) and for the eager CPU fallback
+        (capture=False)."""
         self._prof.mark(0)
-        sim.set_terrain(self._elev_in)  # D2D copy + envelope rebuild from the stable terrain buffer
-        sim.rollout_launch()
+        self.producer.settle(self._elev_in)
         self._prof.mark(1)  # settle done
+        constraints = self.producer.run(
+            self._elev_in, self._measured_in, self._sigma_in, self._drift_in, self._sigma_scale_d
+        )
+        self.field.classify(constraints)
         wp.launch(
-            _feasibility_kernel,
+            _unpack_kernel,
             dim=self.V.shape,
-            inputs=[sim.derived, sim.residual, sim.clearance, self.robot],
-            outputs=[self.blocked, self.hazard, self.violation, self.graded_tilt],
+            inputs=[self.field.pose_cost, self.field.penalty, self.producer.tilt],
+            outputs=[self.blocked, self.graded_tilt],
             device=self.device,
         )
-        if self.z_veto > 0.0 or self.charge_per_sigma > 0.0:
-            footprint_drift_spread(self._drift_in, self._drift_r, out=self._spread)
-            wp.launch(
-                _margin_kernel,
-                dim=self.V.shape,
-                inputs=[
-                    sim.derived,
-                    sim.clearance,
-                    self._sigma_in,
-                    self._spread,
-                    self.grid,
-                    self.robot,
-                    self.n_theta,
-                    self.sigma_floor_m,
-                    self._z_veto_d,
-                    self._sigma_scale_d,
-                    self.z_charge,
-                    self.charge_per_sigma,
-                ],
-                outputs=[self.blocked, self.graded_tilt, self.zmargin, self.doubt],
-                device=self.device,
-            )
         if self._eroded:  # a tilt over an unmountable face is a wall, not a slope
             wp.launch(
                 _face_kernel,
@@ -1114,21 +793,6 @@ class CostToGo:
                 dim=self.V.shape,
                 inputs=[self._face, self.grid, self.robot, self.blocked],
                 outputs=[self.hazard],
-                device=self.device,
-            )
-        if self._step_gate > 0.0:  # hard-block tall steps the settle straddles (thin poles/sticks)
-            wp.launch(
-                _local_step_kernel,
-                dim=(self.grid.cells_y, self.grid.cells_x),
-                inputs=[self._elev_in, self._measured_in],
-                outputs=[self._step],
-                device=self.device,
-            )
-            wp.launch(
-                _step_gate_kernel,
-                dim=self.V.shape,
-                inputs=[self._step, self._foot_r, self._step_gate],
-                outputs=[self.blocked, self.hazard],
                 device=self.device,
             )
         self._prof.mark(2)  # feasibility done
@@ -1185,10 +849,10 @@ class CostToGo:
             device=self.device,
         )
         wp.launch(
-            _pose_cost_kernel,
+            pack_pose_cost_kernel,
             dim=self.V.shape,
             inputs=[feas, tilt],
-            outputs=[self._pose_cost],
+            outputs=[self.field.pose_cost],
             device=self.device,
         )
         if self._coarse_in is None:
@@ -1220,9 +884,7 @@ class CostToGo:
         # capture=False: `compute` has already opened a ScopedCapture around this whole pipeline,
         # and value_iterate would try to nest a second one. Its `capture_while` still builds a
         # device-side conditional node inside the OUTER capture, so the loop stays on the GPU.
-        result = self.solver.value_iterate(
-            self._pose_cost, self._seeds, self.flatness_weight, capture=False
-        )
+        result = self.field.iterate(capture=False)
         self._prof.mark(3)  # value iteration done (goal cell + solve)
         wp.launch(
             _clamp3d_kernel,
@@ -1344,7 +1006,7 @@ class CostToGo:
                     measured.device == self.device
                 ), f"measured must be a wp.array on {self.device}, got {measured.device}"
                 wp.copy(self._measured_in, measured)
-        self._z_veto_d.assign(np.array([self.z_veto if z_veto is None else z_veto], np.float32))
+        self.field.set_z_veto(self.z_veto if z_veto is None else z_veto)
         self._sigma_scale_d.assign(
             np.array([1.0 if sigma_scale is None else sigma_scale], np.float32)
         )

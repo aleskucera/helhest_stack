@@ -47,16 +47,16 @@ def _solve(z_veto: float, sigma_m: float, **kw):
 
 
 def test_z_veto_zero_is_exactly_the_old_behaviour():
-    """Opt-in: with BOTH knobs at zero the margin kernel does not run and nothing is added.
+    """Opt-in: with BOTH knobs at zero the sigma decides nothing.
 
-    Both, because the kernel is gated on `z_veto > 0 or charge_per_sigma > 0` and charge_per_sigma now
-    defaults to 0.5 -- a graded cost with no veto is a perfectly sensible configuration, so
-    z_veto = 0 alone no longer means "off".
+    Both, because charge_per_sigma defaults to 0.5 -- a graded cost with no veto is a perfectly
+    sensible configuration, so z_veto = 0 alone does not mean "off". `z` is still computed (at
+    k = 0 the veto `margin / sigma < 0` is the hard threshold itself), it just has no say.
     """
-    ctg_off, _ = _solve(0.0, 0.05, charge_per_sigma=0.0)
-    ctg_on, _ = _solve(0.0, 0.50, charge_per_sigma=0.0)  # a wildly uncertain map changes nothing
+    ctg_off, v_off = _solve(0.0, 0.05, charge_per_sigma=0.0)
+    ctg_on, v_on = _solve(0.0, 0.50, charge_per_sigma=0.0)  # a wildly uncertain map changes nothing
     np.testing.assert_array_equal(ctg_off.blocked.numpy(), ctg_on.blocked.numpy())
-    assert ctg_off.zmargin.numpy().max() == 0.0, "z is not even computed when the knob is off"
+    np.testing.assert_array_equal(v_off, v_on)
 
 
 def test_blocked_fraction_rises_with_z_veto():

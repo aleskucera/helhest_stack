@@ -135,6 +135,7 @@ class TerrainValueField:
             self.hard = wp.zeros(shape, dtype=wp.float32)  # 1 = a hard constraint fails
             # graded cost with the veto in the sign; see margin.POSE COST
             self.pose_cost = wp.zeros(shape, dtype=wp.float32)
+            self.penalty = wp.zeros(shape, dtype=wp.float32)  # the graded cost alone, exact
             self.doubt = wp.zeros(shape, dtype=wp.float32)
             self.V = wp.zeros(shape, dtype=wp.float32)
             self.V_certain = wp.zeros(shape, dtype=wp.float32)
@@ -259,8 +260,8 @@ class TerrainValueField:
 
     # -- solve ----------------------------------------------------------------------------
     def classify(self, constraints: Constraints, certain: bool = False) -> wp.array:
-        """Reduce the constraints and classify: fills `z`, `z_certain`, `hard`, `pose_cost` and
-        `doubt`, and returns `pose_cost`. No host sync and no host-to-device copy, so it can be
+        """Reduce the constraints and classify: fills `z`, `z_certain`, `hard`, `pose_cost`,
+        `penalty` and `doubt`, and returns `pose_cost`. No host sync and no host-to-device copy, so it can be
         recorded into a larger graph; a robot that edits `pose_cost` before `iterate` (erosion,
         costs of its own) does it here, between the two.
 
@@ -279,7 +280,14 @@ class TerrainValueField:
                 self.z_charge,
                 self.charge_per_sigma,
             ],
-            outputs=[self.z, self.z_certain, self.hard, self.pose_cost, self.doubt],
+            outputs=[
+                self.z,
+                self.z_certain,
+                self.hard,
+                self.pose_cost,
+                self.penalty,
+                self.doubt,
+            ],
             device=self.device,
         )
         if certain:
@@ -297,7 +305,7 @@ class TerrainValueField:
                     self.z_charge,
                     self.charge_per_sigma,
                 ],
-                outputs=[self.pose_cost, self.doubt],
+                outputs=[self.pose_cost, self.penalty, self.doubt],
                 device=self.device,
             )
         return self.pose_cost

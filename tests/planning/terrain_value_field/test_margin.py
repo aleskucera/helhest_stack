@@ -85,15 +85,17 @@ def _classify(z, zc, k=2.0, z_charge=4.0, w=1.0, hard=0.0):
     az = wp.array(np.full(shape, z, np.float32), dtype=wp.float32)
     azc = wp.array(np.full(shape, zc, np.float32), dtype=wp.float32)
     ah = wp.array(np.full(shape, hard, np.float32), dtype=wp.float32)
-    out = [wp.zeros(shape, dtype=wp.float32) for _ in range(2)]
+    out = [wp.zeros(shape, dtype=wp.float32) for _ in range(3)]
     wp.launch(
         M.classify_kernel,
         dim=shape,
         inputs=[az, azc, ah, wp.array(np.array([k], np.float32), dtype=wp.float32), z_charge, w],
         outputs=out,
     )
-    pose_cost, doubt = (float(o.numpy()[0, 0, 0]) for o in out)
-    return [*_decode(pose_cost), doubt]
+    pose_cost, penalty, doubt = (float(o.numpy()[0, 0, 0]) for o in out)
+    blocked, decoded = _decode(pose_cost)
+    assert float(decoded) == pytest.approx(penalty, rel=1e-6, abs=1e-6)
+    return [blocked, penalty, doubt]
 
 
 def _decode(pose_cost):
@@ -139,7 +141,7 @@ def test_fusion_matches_the_split_pair():
     k = wp.array(np.array([2.0], np.float32), dtype=wp.float32)
     z_charge, w = 4.0, 1.5
 
-    split = [wp.zeros(out3, dtype=wp.float32) for _ in range(5)]
+    split = [wp.zeros(out3, dtype=wp.float32) for _ in range(6)]
     wp.launch(M.margin_to_z_kernel, dim=out3, inputs=[mar, sig, flo], outputs=split[:3])
     wp.launch(
         M.classify_kernel,
@@ -148,7 +150,7 @@ def test_fusion_matches_the_split_pair():
         outputs=split[3:],
     )
 
-    fused = [wp.zeros(out3, dtype=wp.float32) for _ in range(5)]
+    fused = [wp.zeros(out3, dtype=wp.float32) for _ in range(6)]
     wp.launch(
         M.margin_to_fields_kernel,
         dim=out3,
@@ -156,12 +158,12 @@ def test_fusion_matches_the_split_pair():
         outputs=fused,
     )
 
-    names = ("z", "z_certain", "hard", "pose_cost", "doubt")
+    names = ("z", "z_certain", "hard", "pose_cost", "penalty", "doubt")
     for name, a, b in zip(names, split, fused):
         np.testing.assert_array_equal(a.numpy(), b.numpy(), err_msg=f"{name} drifted")
     assert (fused[2].numpy() > 0).any(), "the hard constraint must fail somewhere"
     assert (fused[3].numpy() < 0).any(), "the scene must actually block something"
-    assert (fused[4].numpy() > 0).any(), "and produce some doubt, or this proves little"
+    assert (fused[5].numpy() > 0).any(), "and produce some doubt, or this proves little"
 
 
 def test_the_pose_cost_encoding_loses_nothing_at_a_vetoed_state():
@@ -174,7 +176,7 @@ def test_the_pose_cost_encoding_loses_nothing_at_a_vetoed_state():
     blocked, penalty, _ = _classify(1.0, 99.0)  # z=1 < k=2, so vetoed, and z < z_charge so graded
     assert blocked == 1.0
     assert penalty == pytest.approx(3.0, rel=1e-5)  # w * (z_charge - z) = 1.0 * (4 - 1)
-    # and the round trip is exact, not approximate
+    # and at this magnitude the round trip is exact
     encoded = -1.0 - penalty
     assert float(_decode(encoded)[1]) == pytest.approx(penalty, rel=0, abs=0)
 
@@ -191,14 +193,14 @@ def test_a_state_every_constraint_declines_to_judge_reads_as_perfect_ground():
     mar = wp.array(np.full(shape, float(M.IGNORED), np.float32), dtype=wp.float32)
     sig = wp.array(np.full(shape, 0.5, np.float32), dtype=wp.float32)
     flo = wp.array(np.array([0.01, 0.01], np.float32), dtype=wp.float32)
-    out = [wp.zeros(shape[1:], dtype=wp.float32) for _ in range(5)]
+    out = [wp.zeros(shape[1:], dtype=wp.float32) for _ in range(6)]
     wp.launch(
         M.margin_to_fields_kernel,
         dim=shape[1:],
         inputs=[mar, sig, flo, wp.array(np.array([2.0], np.float32), dtype=wp.float32), 4.0, 1.0],
         outputs=out,
     )
-    z, _, _, pose_cost, doubt = (float(o.numpy()[0, 0, 0]) for o in out)
+    z, _, _, pose_cost, _, doubt = (float(o.numpy()[0, 0, 0]) for o in out)
     assert z >= float(M.IGNORED), "nothing spoke, so nothing bounds the margin"
     assert pose_cost >= 0.0, "NOT vetoed"
     assert pose_cost == pytest.approx(0.0), "and not even penalised"
@@ -222,3 +224,11 @@ def test_a_hard_failure_vetoes_a_state_the_soft_margins_pass_and_keeps_its_penal
     assert blocked == 1.0
     assert penalty == pytest.approx(1.0, rel=1e-5), "the graded cost survives in the magnitude"
     assert doubt == 0.0, "z >= k, so no soft doubt either"
+
+
+def test_penalty_is_exact_where_the_sign_encoding_is_not():
+    """-1 - p rounds away a small p in float32; the separate `penalty` field keeps it."""
+    blocked, penalty, _ = _classify(1.0, 99.0, z_charge=1.0 + 1.0e-6, w=0.01)
+    assert blocked == 1.0
+    assert penalty > 0.0
+    assert float(_decode(np.float32(-1.0) - np.float32(penalty))[1]) != penalty

@@ -113,7 +113,7 @@ def test_the_spread_reaches_one_footprint_each_way_and_no_further():
     is how far apart the heights being differenced actually are."""
     ctg = _solve(np.zeros((N, N), np.float32))
     expect = max(1, int(round(RobotParams().rear_offset / CELL)))
-    assert ctg._drift_r == expect
+    assert ctg.producer._drift_r == expect
     seam = np.zeros((N, N), np.float32)
     seam[:, N // 2 :] = Q_Z * 60.0
     ctg2 = _solve(seam)

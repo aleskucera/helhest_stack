@@ -58,7 +58,11 @@ POSE COST. The veto and the graded cost travel as ONE field, with the veto in th
               = -1 - penalty     a vetoed state
 
 The graded penalty is never negative, so the sign bit is free, and -1 - (-1 - p) = p recovers
-it exactly -- nothing is lost, unlike a sentinel. This is not tidiness. The relax kernel reads
+it -- unlike a sentinel. Not to the bit, though: in float32, -1 - p drops every part of p below
+half an ulp of 1 (6e-8), so a vetoed state's penalty comes back approximately. A robot that adds
+its own costs to vetoed states and re-packs them reads `penalty`, written alongside, instead.
+
+This is not tidiness. The relax kernel reads
 this field about 35 times per thread per sweep, once for every swept cell of every primitive,
 and it is bandwidth-bound; as two arrays that was two loads from two cache lines for one
 decision. `blocked = pose_cost < 0` wherever you want to look at it separately.
@@ -85,6 +89,7 @@ def margin_to_fields_kernel(
     z_certain: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     hard: wp.array3d(dtype=wp.float32),  # [row, col, heading] 1 = a hard constraint fails
     pose_cost: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    penalty: wp.array3d(dtype=wp.float32),  # [row, col, heading] the graded cost, >= 0
     doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
 ):
     """Reduce the constraints and classify the result, in one pass.
@@ -128,6 +133,7 @@ def margin_to_fields_kernel(
     pen = wp.where(best < z_charge, charge_per_sigma * (z_charge - best), 0.0)
     # veto in the sign; see POSE COST above
     pose_cost[r, c, t] = wp.where(best < k or failed > 0.5, -1.0 - pen, pen)
+    penalty[r, c, t] = pen
     doubt[r, c, t] = wp.where(best < k and best_certain >= k, best_certain - best, 0.0)
 
 
@@ -180,6 +186,7 @@ def classify_kernel(
     z_charge: wp.float32,
     charge_per_sigma: wp.float32,
     pose_cost: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    penalty: wp.array3d(dtype=wp.float32),  # [row, col, heading] the graded cost, >= 0
     doubt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
 ):
     """Turn the two margins into a veto, a graded cost, and a doubt field.
@@ -198,7 +205,25 @@ def classify_kernel(
     zz = z[r, c, t]
     zc = z_certain[r, c, t]
     pen = wp.where(zz < z_charge, charge_per_sigma * (z_charge - zz), 0.0)
-    pose_cost[r, c, t] = wp.where(
-        zz < k or hard[r, c, t] > 0.5, -1.0 - pen, pen
-    )  # veto in the sign
+    # veto in the sign
+    pose_cost[r, c, t] = wp.where(zz < k or hard[r, c, t] > 0.5, -1.0 - pen, pen)
+    penalty[r, c, t] = pen
     doubt[r, c, t] = wp.where(zz < k and zc >= k, zc - zz, 0.0)
+
+
+@wp.kernel
+def pack_pose_cost_kernel(
+    blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading] > 0.5 = vetoed
+    penalty: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+    pose_cost: wp.array3d(dtype=wp.float32),  # [row, col, heading]
+):
+    """Pack a veto and a graded cost into the one signed field the solver reads (POSE COST).
+
+    For a robot that edits the classified fields -- erodes the veto, adds costs of its own -- and
+    hands the result back. The clamp at zero is not defensive noise: a negative penalty would read
+    as a veto and quietly make a passable state impassable, so the encoding's one precondition is
+    enforced where it is produced.
+    """
+    r, c, t = wp.tid()
+    pen = wp.max(penalty[r, c, t], 0.0)
+    pose_cost[r, c, t] = wp.where(blocked[r, c, t] > 0.5, -1.0 - pen, pen)
