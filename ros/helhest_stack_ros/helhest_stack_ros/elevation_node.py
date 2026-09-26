@@ -78,6 +78,7 @@ from helhest.control.command import turn_first
 from helhest.control.governor import ClearanceGovernor
 from helhest.control.command import in_flight_history
 from helhest.control.command import JOINT_NAMES
+from helhest.control.command import joint_states_to_model
 from helhest.control.command import to_engine_order
 from helhest.control.mppi import MppiGpu
 from helhest.control.terminal import dock_control
