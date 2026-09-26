@@ -8,10 +8,14 @@ Per frame, in this order: `recenter` (whole cells, so the grid never leaves the 
 `motion_update` from the second frame on (drift accrues with the time since the last one),
 `carve` (the visibility carve that retires what moved), `measure_scan`. Then `layers()`:
 
-    height     the belief's height, NaN where nothing was ever measured, inpainted on the device.
+    height     the belief's height, inpainted on the device wherever nothing was ever measured.
                The fill is referenced to the surrounding GROUND rather than to zero: a zero fill
                reads as flat terrain wherever the robot has not looked, and where the ground sits
-               below zero that phantom plateau closes a ring around the routing window.
+               below zero that phantom plateau closes a ring around the routing window. The
+               belief stores 0, not NaN, in a cell it never measured (only `valid` says so), so
+               the unmeasured cells are set to NaN here first -- without that the inpaint has
+               nothing to fill and the plateau is back. drive_sim ran without it until 2026-09-26
+               and never noticed: its worlds' ground sits at 0.
     measured   1 where the belief holds a measurement, else 0 -- the mask the planner takes
     sd         the MEASUREMENT sd, sqrt(meas_var): what the settle's attitude differences see,
                since pose drift is common-mode and cancels (planning/settle_producer.py)
@@ -48,6 +52,17 @@ def _measured_kernel(
 
 
 @wp.kernel
+def _unknown_nan_kernel(
+    h: wp.array2d(dtype=wp.float32),
+    valid: wp.array2d(dtype=wp.int32),
+    out: wp.array2d(dtype=wp.float32),
+):
+    """The belief's height with NaN where it never measured: the inpaint's unknown set."""
+    i, j = wp.tid()
+    out[i, j] = wp.where(valid[i, j] != 0, h[i, j], wp.nan)
+
+
+@wp.kernel
 def _sd_kernel(
     var: wp.array2d(dtype=wp.float32),
     out: wp.array2d(dtype=wp.float32),
@@ -55,6 +70,68 @@ def _sd_kernel(
     """Measurement variance -> sd. Clamped at 0: a fused variance can land a hair below it."""
     i, j = wp.tid()
     out[i, j] = wp.sqrt(wp.max(var[i, j], 0.0))
+
+
+@wp.kernel
+def _crop_kernel(
+    src: wp.array2d(dtype=wp.float32),
+    r0: wp.int32,
+    c0: wp.int32,
+    out: wp.array2d(dtype=wp.float32),
+):
+    """A sub-window of a layer, on the belief's own lattice."""
+    i, j = wp.tid()
+    out[i, j] = src[i + r0, j + c0]
+
+
+@wp.kernel
+def _pool_kernel(
+    height: wp.array2d(dtype=wp.float32),
+    measured: wp.array2d(dtype=wp.float32),
+    sd: wp.array2d(dtype=wp.float32),
+    drift: wp.array2d(dtype=wp.float32),
+    r0: wp.int32,
+    c0: wp.int32,
+    k: wp.int32,
+    out_h: wp.array2d(dtype=wp.float32),
+    out_m: wp.array2d(dtype=wp.float32),
+    out_sd: wp.array2d(dtype=wp.float32),
+    out_drift: wp.array2d(dtype=wp.float32),
+):
+    """k x k blocks of the window at (r0, c0) -> one coarser cell each.
+
+    Height is the max over MEASURED cells only: the inpainted fill must not outvote real ground,
+    or one unobserved fine cell would speak for the whole block. A block with nothing measured
+    falls back to the max of the inpainted surface, so blind ground reads as terrain rather than
+    as a plateau at the map origin. A block counts as measured if any of its cells is. sd is the
+    largest over the measured cells (over all of them when none is), the conservative reading of
+    the block; drift is the largest, and its negative sentinel for unmeasured cells means a
+    measured cell always wins.
+    """
+    i, j = wp.tid()
+    h_meas = float(-1.0e30)
+    h_all = float(-1.0e30)
+    s_meas = float(0.0)
+    s_all = float(0.0)
+    d_max = float(-1.0e30)
+    any_m = float(0.0)
+    for a in range(k):
+        for b in range(k):
+            r = r0 + i * k + a
+            c = c0 + j * k + b
+            h = height[r, c]
+            s = sd[r, c]
+            h_all = wp.max(h_all, h)
+            s_all = wp.max(s_all, s)
+            d_max = wp.max(d_max, drift[r, c])
+            if measured[r, c] > 0.5:
+                any_m = 1.0
+                h_meas = wp.max(h_meas, h)
+                s_meas = wp.max(s_meas, s)
+    out_m[i, j] = any_m
+    out_h[i, j] = wp.where(any_m > 0.5, h_meas, h_all)
+    out_sd[i, j] = wp.where(any_m > 0.5, s_meas, s_all)
+    out_drift[i, j] = d_max
 
 
 class BeliefFrame:
@@ -85,6 +162,7 @@ class BeliefFrame:
         self.measured = wp.zeros(n, dtype=wp.float32, device=self.device)
         self.sd = wp.zeros(n, dtype=wp.float32, device=self.device)
         self.height = self._scratch
+        self.drift = self.belief.drift()
         self._started = False
 
     @property
@@ -115,9 +193,15 @@ class BeliefFrame:
         """(height, measured, sd, drift) on the belief window. Owned buffers, overwritten by the
         next call; `height` comes back from the inpaint (see its docstring)."""
         lay = self.belief.layers()
-        wp.copy(self._scratch, lay["raw_h"])
-        self.height = multigrid_inpaint(self._scratch)
         shape = self.measured.shape
+        wp.launch(
+            _unknown_nan_kernel,
+            dim=shape,
+            inputs=[lay["raw_h"], lay["valid"]],
+            outputs=[self._scratch],
+            device=self.device,
+        )
+        self.height = multigrid_inpaint(self._scratch)
         wp.launch(
             _measured_kernel,
             dim=shape,
@@ -128,4 +212,32 @@ class BeliefFrame:
         wp.launch(
             _sd_kernel, dim=shape, inputs=[lay["meas_var"]], outputs=[self.sd], device=self.device
         )
-        return self.height, self.measured, self.sd, self.belief.drift()
+        self.drift = self.belief.drift()
+        return self.height, self.measured, self.sd, self.drift
+
+    def crop(self, layer: wp.array, r0: int, c0: int, out: wp.array) -> wp.array:
+        """`out`-sized sub-window of a belief-window layer, starting at cell (r0, c0)."""
+        wp.launch(
+            _crop_kernel, dim=out.shape, inputs=[layer, r0, c0], outputs=[out], device=self.device
+        )
+        return out
+
+    def pool(
+        self,
+        r0: int,
+        c0: int,
+        k: int,
+        out_h: wp.array,
+        out_m: wp.array,
+        out_sd: wp.array,
+        out_drift: wp.array,
+    ) -> None:
+        """The last `layers()` pooled k x k from cell (r0, c0) into the four `out_*` (see
+        `_pool_kernel` for the rule). For a planner that routes coarser than the map."""
+        wp.launch(
+            _pool_kernel,
+            dim=out_h.shape,
+            inputs=[self.height, self.measured, self.sd, self.drift, r0, c0, int(k)],
+            outputs=[out_h, out_m, out_sd, out_drift],
+            device=self.device,
+        )
