@@ -78,17 +78,13 @@
     plan_robust_margin_m: 0.20
     plan_lat_coarsen: 3
     plan_robust_margin_deg: 15.0
-    # CAREFUL WHERE IT IS TIGHT (control/governor.py). With this on, plan_robust_margin_m no longer
-    # REMOVES poses near walls -- in a real 2.4 m corridor that left no route at the robot in 55 of
-    # 79 frames (in_speed_odin0). Instead one speed law, v = (clearance - c0) / t_react for the
-    # body's fastest point (tail included), prices the route in travel time (it swings wide wherever wide
-    # is faster), is charged in MPPI's rollouts, and is enforced after MPPI by a governor reading
-    # the footprint's clearance along the next second of the plan. t_react is seconds of error at
-    # that speed: 0.125 = about a 0.5 s reaction at a 15 deg heading error. Sim (6 worlds x 3):
-    # within ~5% of the old veto's time, 0 contacts, no dead routing field. SIM-TUNED: check it in
-    # a real corridor; 0 = the old veto. Also: plan_clear_c0 (0.15 m fixed margin), plan_clear_t_turn
-    # (0.25 s: the tail's swing counts double -- turns are the least accurate), plan_clear_decel
-    # (2.0), plan_clear_mppi_weight (1.0 = time priced exactly in goal-cost units).
+    # THE CLEARANCE LAW (helhest/planning/clearance.py): near walls the robot is slowed, not kept
+    # out. Allowed speed of the body's fastest point, tail included, = (clearance - c0) / t_react:
+    # the route is priced in travel time under it, MPPI is charged for the time it would lose, and
+    # a governor enforces it on the next second of the plan. With it on, plan_robust_margin_m no
+    # longer removes poses near walls (in a real 2.4 m corridor that left no route at the robot in
+    # 55 of 79 frames). t_react 0.125 s and plan_clear_c0 0.15 m are sim-tuned; check them in a real
+    # corridor. 0 = the old veto. The other plan_clear_* keep their helhest.planner_config defaults.
     plan_clear_t_react: 0.125
     plan_wheel_width: 0.10
     # 0.6 -> 1.0 (alpha 1.80) from fast_experiment0/1, 2026-08-10. Regressing the MEASURED gyro

@@ -23,6 +23,7 @@ from typing import Any
 
 from helhest.control.mppi import CostParams
 from helhest.control.mppi import SamplingConfig
+from helhest.planning.clearance import ClearanceParams
 
 # Everything the planner reads that the node and the simulator must agree on. Grid geometry and the
 # command chain after MPPI (turn boost, goal brake, slew, yaw loop, consistency EMA) are NOT here:
@@ -56,33 +57,18 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_robust_margin_deg": 0.0,
     "plan_obstacle_step_m": 0.0,
     "plan_pivot_cost": 0.0,
-    # CAREFUL WHERE IT IS TIGHT (control/governor.py). plan_clear_t_react > 0 replaces the spatial
-    # tube's veto with the clearance speed law v = clearance / t_react (floored at v_min): the route
-    # is priced in travel time under it, capped at v_cruise, and a governor after MPPI enforces it
-    # on the next plan_clear_lookahead_s of the plan. 0 = off (the spatial tube vetoes).
-    # t_react is seconds of error at the body's fastest-point speed (~0.125 s: see the module).
-    "plan_clear_t_react": 0.0,
-    "plan_clear_v_cruise": 1.5,
-    "plan_clear_v_min": 0.15,
-    "plan_clear_lookahead_s": 1.0,
-    "plan_clear_decel": 2.0,  # [m/s^2] braking the governor may count on to reach a tight step
-    # MPPI's price for the time the governor would add to a manoeuvre, in goal-cost units (1 =
-    # exact, CostParams.clear_time), so it picks one with room instead of one that must be braked
-    "plan_clear_mppi_weight": 1.0,
-    # [m] the law's fixed margin: error that does not shrink with speed (map cells, sparse wall
-    # edges, tracking when slow). v = max(v_min, (clearance - c0) / t_react)
-    # 0.15 (2026-09-26): 0.2 halved turning near walls in false door and pillars but cost narrow
-    # corridors ~10%; 0.15 is the middle (sim, 8 worlds x3, 0 contacts either way)
-    "plan_clear_c0": 0.15,
-    # [s] the tail swing's own t_react: turning is where this robot's model is least accurate
-    # (turn realised ~0.74x, turn_boost per terrain), so a turn near a wall costs more than a drive
-    "plan_clear_t_turn": 0.25,
-    # 1 = the ROUTE also charges turning arcs for their tail near walls (plan_clear_t_turn), so it
-    # plans to pass a gap straight and turn after; 0 = only MPPI and the governor see turning
-    "plan_clear_route_turn": 1.0,
-    # [m/s] the governor's cap while the footprint is about to cover never-measured ground (beside
-    # and behind the robot the sensor has not looked); 0 = off
-    "plan_clear_v_blind": 0.3,
+    # THE CLEARANCE LAW (planning/clearance.py): near walls the robot is slowed, not kept out.
+    # plan_clear_t_react > 0 turns it on and replaces the spatial tube's veto; 0 = the tube vetoes.
+    "plan_clear_t_react": 0.0,  # [s] error per unit speed of the fastest body point
+    "plan_clear_c0": 0.15,  # [m] fixed margin (0.2 cost narrow corridors ~10% in sim)
+    "plan_clear_v_min": 0.15,  # [m/s] floor
+    "plan_clear_v_cruise": 1.5,  # [m/s] the route's time unit
+    "plan_clear_t_turn": 0.25,  # [s] the tail swing's own t_react
+    "plan_clear_route_turn": 1.0,  # 1 = the route charges turning arcs for their tail near walls
+    "plan_clear_mppi_weight": 1.0,  # MPPI's price for lost time; 1 = exact in goal units
+    "plan_clear_lookahead_s": 1.0,  # [s] of the plan the governor checks
+    "plan_clear_decel": 2.0,  # [m/s^2] braking the governor may count on
+    "plan_clear_v_blind": 0.3,  # [m/s] while the plan sweeps never-measured ground; 0 = off
     # robot
     "plan_wheel_width": 0.10,
     # the coarse "which way" layer (planning/coarse.py) and the turn-first brake
@@ -109,9 +95,7 @@ class PlannerConfig:
     wheel_width: float
     coarse: dict[str, float]  # block_m, memory_m, bridge_m -- CoarseRouter, sized by the caller
     turn_first: dict[str, float]  # start_deg, reach_m -- control.command.turn_first
-    governor: (
-        dict[str, float] | None
-    )  # t_react, v_min, lookahead_s -- ClearanceGovernor; None = off
+    clearance: ClearanceParams | None  # the clearance law; None = the spatial tube vetoes
 
 
 def resolve(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -131,36 +115,21 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
     # it only changes configurations that could not start at all.
     batch = int(p["plan_batch"])
     batch -= batch % n_mu
-    # the clearance governor: absent entirely when off, so the off state IS the veto configuration
-    clear_on = float(p["plan_clear_t_react"]) > 0.0
-    time_ctg_kw = (
-        dict(
-            time_cost=(
-                float(p["plan_clear_v_cruise"]),
-                float(p["plan_clear_t_react"]),
-                float(p["plan_clear_v_min"]),
-                float(p["plan_clear_c0"]),
-                (
-                    float(p["plan_clear_t_turn"]) / float(p["plan_clear_t_react"])
-                    if float(p["plan_clear_route_turn"]) > 0.0
-                    else 0.0
-                ),
-            )
+    clearance = (
+        ClearanceParams(
+            t_react=float(p["plan_clear_t_react"]),
+            c0=float(p["plan_clear_c0"]),
+            v_min=float(p["plan_clear_v_min"]),
+            v_cruise=float(p["plan_clear_v_cruise"]),
+            t_turn=float(p["plan_clear_t_turn"]),
+            route_turn=float(p["plan_clear_route_turn"]) > 0.0,
+            mppi_weight=float(p["plan_clear_mppi_weight"]),
+            lookahead_s=float(p["plan_clear_lookahead_s"]),
+            decel=float(p["plan_clear_decel"]),
+            v_blind=float(p["plan_clear_v_blind"]),
         )
-        if clear_on
-        else {}
-    )
-    clear_cost_kw = (
-        dict(
-            clear_time=float(p["plan_clear_mppi_weight"]),
-            clear_t_react=float(p["plan_clear_t_react"]),
-            clear_v_min=float(p["plan_clear_v_min"]),
-            clear_c0=float(p["plan_clear_c0"]),
-            clear_v_cruise=float(p["plan_clear_v_cruise"]),
-            clear_turn_ratio=float(p["plan_clear_t_turn"]) / float(p["plan_clear_t_react"]),
-        )
-        if clear_on
-        else {}
+        if float(p["plan_clear_t_react"]) > 0.0
+        else None
     )
     return PlannerConfig(
         cost=CostParams(
@@ -170,7 +139,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             smoothness=float(p["plan_smooth"]),
             saturation=float(p["plan_saturation"]),
             veto=float(p["plan_wall_veto"]),
-            **clear_cost_kw,
+            clearance=clearance,
         ),
         sampling=SamplingConfig(
             wmax=float(p["plan_wmax"]),
@@ -191,7 +160,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             robust_margin_deg=float(p["plan_robust_margin_deg"]),
             obstacle_step_m=float(p["plan_obstacle_step_m"]),
             pivot_cost=float(p["plan_pivot_cost"]),
-            **time_ctg_kw,
+            **({"clearance": clearance} if clearance is not None else {}),
         ),
         n_theta=int(p["plan_n_theta"]),
         horizon=int(p["plan_horizon"]),
@@ -208,17 +177,5 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             start_deg=float(p["plan_turn_first_deg"]),
             reach_m=float(p["plan_turn_first_reach_m"]),
         ),
-        governor=(
-            dict(
-                t_react=float(p["plan_clear_t_react"]),
-                v_min=float(p["plan_clear_v_min"]),
-                lookahead_s=float(p["plan_clear_lookahead_s"]),
-                decel=float(p["plan_clear_decel"]),
-                c0=float(p["plan_clear_c0"]),
-                t_turn=float(p["plan_clear_t_turn"]),
-                v_blind=float(p["plan_clear_v_blind"]),
-            )
-            if clear_on
-            else None
-        ),
+        clearance=clearance,
     )

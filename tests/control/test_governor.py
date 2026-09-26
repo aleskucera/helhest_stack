@@ -8,9 +8,10 @@ import pytest
 import warp as wp
 
 from helhest.control.governor import ClearanceGovernor
-from helhest.control.governor import speed_law
 from helhest.engine import GridParams
 from helhest.engine import RobotParams
+from helhest.planning.clearance import clearance_map_kernel
+from helhest.planning.clearance import ClearanceParams
 
 CELL = 0.05
 N = 160  # 8 m square, origin at the min corner
@@ -36,7 +37,7 @@ def _plan(y: float, yaw: float = 0.0, steps: int = 12) -> wp.array:
 
 
 def _gov() -> ClearanceGovernor:
-    return ClearanceGovernor(ROBOT, plan_dt=0.1, t_react=0.5, v_min=0.15, lookahead_s=1.0)
+    return ClearanceGovernor(ROBOT, plan_dt=0.1, params=ClearanceParams(t_react=0.5, t_turn=0.5))
 
 
 def test_clearance_is_the_footprint_distance_to_the_wall_face():
@@ -61,7 +62,7 @@ def test_a_close_wall_scales_both_wheels_to_the_law():
     assert wl / 4.0 == pytest.approx(wr / 3.0)  # one factor: the curvature is kept
     r, b, tail = ROBOT.wheel_radius, ROBOT.half_track, ROBOT.rear_offset + ROBOT.wheel_radius
     fastest = r * 0.5 * abs(wl + wr) + tail * r * abs(wr - wl) / (2.0 * b)
-    assert fastest == pytest.approx(speed_law(gov.clearance, 0.5, 0.15, gov.c0), rel=1e-4)
+    assert fastest == pytest.approx(gov.params.allowed(gov.clearance), rel=1e-4)
 
 
 def test_a_pivot_is_slowed_by_its_tail_swing():
@@ -72,8 +73,6 @@ def test_a_pivot_is_slowed_by_its_tail_swing():
 
 
 def test_the_clearance_map_is_the_distance_to_the_wall_face():
-    from helhest.control.governor import clearance_map_kernel
-
     elev, meas, grid = _scene(wall_y=5.0)
     out = wp.zeros((N, N), dtype=wp.float32)
     wp.launch(clearance_map_kernel, dim=(N, N), inputs=[elev, meas, CELL, 0.35, 40], outputs=[out])
@@ -102,8 +101,8 @@ def test_a_plan_tight_only_at_its_far_end_is_not_braked_now():
 
 def test_a_longer_turn_allowance_slows_a_pivot_more_but_not_a_straight_drive():
     elev, meas, grid = _scene(wall_y=4.8)
-    plain = ClearanceGovernor(ROBOT, plan_dt=0.1, t_react=0.125, v_min=0.15)
-    turn = ClearanceGovernor(ROBOT, plan_dt=0.1, t_react=0.125, v_min=0.15, t_turn=0.25)
+    plain = ClearanceGovernor(ROBOT, plan_dt=0.1, params=ClearanceParams(t_turn=0.125))
+    turn = ClearanceGovernor(ROBOT, plan_dt=0.1, params=ClearanceParams(t_turn=0.25))
     assert (
         turn.cap(-2.0, 2.0, _plan(y=4.0), elev, meas, grid)[1]
         < plain.cap(-2.0, 2.0, _plan(y=4.0), elev, meas, grid)[1]
@@ -123,7 +122,7 @@ def test_sweeping_ground_nobody_has_measured_is_slow_but_driving_onto_seen_groun
     xs = (np.arange(N) + 0.5) * CELL
     m[np.ix_(ys < 3.6, xs < 3.2)] = 0.0  # blind: beside, behind and under the robot at (3, 4)
     meas = wp.array(m)
-    gov = ClearanceGovernor(ROBOT, plan_dt=0.1, t_react=0.125, v_min=0.15, v_blind=0.3)
+    gov = ClearanceGovernor(ROBOT, plan_dt=0.1, params=ClearanceParams(v_blind=0.3))
     straight = _plan(y=4.0)  # drives +x: the tail follows over ground that was under the body
     assert gov.cap(3.0, 3.0, straight, elev, meas, grid) == (3.0, 3.0) and not gov.blind
     p = np.zeros((12, 2, 3), np.float32)

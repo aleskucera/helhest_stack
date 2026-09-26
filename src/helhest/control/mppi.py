@@ -24,8 +24,10 @@ from ..engine.simulator import ForwardSimulator
 from ..engine.terrain import _locate
 from ..engine.terrain import Grid
 from ..engine.terrain import sample_field
+from ..planning.clearance import allowed_speed
+from ..planning.clearance import clearance_map_kernel
+from ..planning.clearance import ClearanceParams
 from ..profiling import StageProfiler
-from .governor import clearance_map_kernel
 
 
 def _n_bisect(n_cand: int) -> int:
@@ -124,11 +126,8 @@ class CostWeights:
     veto: float
     # mild per-meter preference against reverse motion (forward keeps the sensor looking ahead).
     reverse: float
-    # TIME LOST TO THE CLEARANCE LAW (control/governor.py), per rollout: the seconds the governor
-    # would add, dt * (s / v_allowed - 1) per step where the fastest body point's speed s exceeds
-    # v_allowed = max(clear_v_min, footprint clearance / clear_t_react). Lets MPPI choose a manoeuvre
-    # with room over one the governor would have to brake, instead of learning it by stalling.
-    clear_time: float  # dimensionless: 1 = a second lost costs exactly what it costs in goal terms
+    # TIME LOST TO THE CLEARANCE LAW (planning/clearance.py), built from CostParams.clearance
+    clear_time: float  # weight; 1 = a second lost costs exactly what it costs in goal terms
     clear_t_react: float
     clear_v_min: float
     clear_c0: float  # [m] the law's fixed margin
@@ -205,18 +204,14 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # routes. ~75 makes any forward-capable route win while a genuinely stuck robot (forward
     # progress impossible, V flat ahead) still backs out over remembered ground.
     reverse: float = 75.0
-    # The clearance law's time lost, priced in GOAL units: a second lost is worth
-    # (goal_terminal + goal_running) * 2 * V * v_cruise -- the goal cost V^2 of the route distance
-    # that second would have covered, at the V where it is lost. A fixed price per second made the
-    # trade depend on how far the goal was: early in a run a metre saved outweighed a lot of
-    # braking and MPPI cut corners (slalom's first wall). 1 = exact, 0 = off; needs
-    # update_clearance() each frame, or the map reads "no wall" everywhere.
-    clear_time: float = 0.0
-    clear_t_react: float = 0.125  # [s]
-    clear_v_min: float = 0.15  # [m/s]
-    clear_c0: float = 0.15  # [m]
-    clear_v_cruise: float = 1.5  # [m/s]
-    clear_turn_ratio: float = 1.0  # t_turn / t_react (ClearanceGovernor.turn_ratio)
+    # The clearance law (planning/clearance.py). Each rollout step whose fastest body point is
+    # faster than the law allows at its footprint clearance is charged the seconds the governor
+    # would add, priced in goal units: a second is worth (goal_terminal + goal_running) * 2 * V *
+    # v_cruise, the goal cost of the route distance it would have covered at that step's V, so the
+    # trade does not depend on how far away the goal is. MPPI then prefers a manoeuvre with room
+    # to one the governor would have to brake. None = off; on, update_clearance() must run each
+    # frame or the wall map reads empty.
+    clearance: ClearanceParams | None = None
 
     def build(self) -> CostWeights:
         cw = CostWeights()
@@ -235,15 +230,46 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.unknown = self.unknown
         cw.veto = self.veto
         cw.reverse = self.reverse
-        cw.clear_time = self.clear_time
-        cw.clear_t_react = self.clear_t_react
-        cw.clear_v_min = self.clear_v_min
-        cw.clear_c0 = self.clear_c0
-        cw.clear_v_cruise = self.clear_v_cruise
-        cw.clear_turn_ratio = self.clear_turn_ratio
+        c = self.clearance if self.clearance is not None else ClearanceParams()
+        cw.clear_time = c.mppi_weight if self.clearance is not None else 0.0
+        cw.clear_t_react = c.t_react
+        cw.clear_v_min = c.v_min
+        cw.clear_c0 = c.c0
+        cw.clear_v_cruise = c.v_cruise
+        cw.clear_turn_ratio = c.turn_ratio
         cw.inv_k_turn = 0.0  # armed by MppiGpu from the sim's solver (0 = saturation off)
         cw.dt = 0.1  # overwritten by MppiGpu from the sim's solver
         return cw
+
+
+@wp.func
+def _footprint_clearance(
+    clear_field: wp.array2d(dtype=float), grid: Grid, robot: Robot, pose: wp.vec3
+) -> float:
+    """[m] the footprint rectangle's clearance to the nearest wall face: the per-cell wall-distance
+    map (MppiGpu.update_clearance) read at 38 points around the perimeter."""
+    tail = -robot.wheel_pos[2][0] + robot.wheel_radius
+    hw = robot.half_track + wp.where(
+        robot.wheel_half_width > 0.0, robot.wheel_half_width, robot.wheel_radius
+    )
+    ca = wp.cos(pose[2])
+    sa = wp.sin(pose[2])
+    cmin = float(1.0e3)
+    for q in range(12):  # the long sides
+        u = -tail + (robot.wheel_radius + tail) * float(q) / 11.0
+        for side in range(2):
+            w = wp.where(side == 0, -hw, hw)
+            x = pose[0] + ca * u - sa * w
+            y = pose[1] + sa * u + ca * w
+            cmin = wp.min(cmin, sample_field(clear_field, grid, x, y))
+    for q in range(7):  # the ends
+        w = -hw + 2.0 * hw * float(q) / 6.0
+        for end in range(2):
+            u = wp.where(end == 0, -tail, robot.wheel_radius)
+            x = pose[0] + ca * u - sa * w
+            y = pose[1] + sa * u + ca * w
+            cmin = wp.min(cmin, sample_field(clear_field, grid, x, y))
+    return cmin
 
 
 @wp.func
@@ -551,40 +577,14 @@ def _cost_kernel(
             # facing another
             veto_sum += early * sample_lattice(veto_field, grid, n_theta, pose[0], pose[1], yaw_eff)
         if cw.clear_time > 0.0:
-            # the footprint's clearance: the wall-distance map read around its perimeter
             tail = -robot.wheel_pos[2][0] + robot.wheel_radius
-            hw = robot.half_track + wp.where(
-                robot.wheel_half_width > 0.0, robot.wheel_half_width, robot.wheel_radius
-            )
-            ca = wp.cos(pose[2])
-            sa = wp.sin(pose[2])
-            cmin = float(1.0e3)
-            for q in range(12):
-                u = -tail + (robot.wheel_radius + tail) * float(q) / 11.0
-                for side in range(2):
-                    w = wp.where(side == 0, -hw, hw)
-                    cmin = wp.min(
-                        cmin,
-                        sample_field(
-                            clear_field, sgrid, pose[0] + ca * u - sa * w, pose[1] + sa * u + ca * w
-                        ),
-                    )
-            for q in range(7):
-                w = -hw + 2.0 * hw * float(q) / 6.0
-                for end in range(2):
-                    u = wp.where(end == 0, -tail, robot.wheel_radius)
-                    cmin = wp.min(
-                        cmin,
-                        sample_field(
-                            clear_field, sgrid, pose[0] + ca * u - sa * w, pose[1] + sa * u + ca * w
-                        ),
-                    )
+            cmin = _footprint_clearance(clear_field, sgrid, robot, pose)
             fastest = wp.abs(v) + cw.clear_turn_ratio * tail * wp.abs(wz)
-            allowed = wp.max(cw.clear_v_min, (cmin - cw.clear_c0) / cw.clear_t_react)
+            allowed = allowed_speed(cmin, cw.clear_c0, cw.clear_t_react, cw.clear_v_min)
             v_here = wp.min(vl, cw.lattice_cap)
             per_m = (cw.goal_terminal + cw.goal_running) * 2.0 * v_here  # goal units per metre
             if fastest > allowed:
-                # seconds lost, in goal units at this step's V (see CostParams.clear_time)
+                # seconds lost, in goal units at this step's V (see CostParams.clearance)
                 time_sum += per_m * cw.clear_v_cruise * cw.dt * (fastest / allowed - 1.0)
         if cw.tip > 0.0:
             ld = loads[t, r]

@@ -17,11 +17,29 @@ import pytest
 from helhest.control.mppi import CostParams
 from helhest.control.mppi import SamplingConfig
 from helhest.planner_config import PLAN_DEFAULTS
+from helhest.planning.clearance import ClearanceParams
 from helhest.planner_config import planner_config
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 NODE = REPO / "ros/helhest_stack_ros/helhest_stack_ros/elevation_node.py"
 PARAMS = REPO / "ros/odin/odin_elevation.params.yaml"
+
+
+def _clearance(p: dict) -> ClearanceParams | None:
+    if p["plan_clear_t_react"] <= 0.0:
+        return None
+    return ClearanceParams(
+        t_react=p["plan_clear_t_react"],
+        c0=p["plan_clear_c0"],
+        v_min=p["plan_clear_v_min"],
+        v_cruise=p["plan_clear_v_cruise"],
+        t_turn=p["plan_clear_t_turn"],
+        route_turn=p["plan_clear_route_turn"] > 0.0,
+        mppi_weight=p["plan_clear_mppi_weight"],
+        lookahead_s=p["plan_clear_lookahead_s"],
+        decel=p["plan_clear_decel"],
+        v_blind=p["plan_clear_v_blind"],
+    )
 
 
 def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
@@ -34,19 +52,8 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         saturation=p["plan_saturation"],
         # added after the move: the wall veto, which the node now sets from the table
         veto=p["plan_wall_veto"],
-        # added after the move: the clearance governor's MPPI term, present only when it is on
-        **(
-            dict(
-                clear_time=p["plan_clear_mppi_weight"],
-                clear_t_react=p["plan_clear_t_react"],
-                clear_v_min=p["plan_clear_v_min"],
-                clear_c0=p["plan_clear_c0"],
-                clear_v_cruise=p["plan_clear_v_cruise"],
-                clear_turn_ratio=p["plan_clear_t_turn"] / p["plan_clear_t_react"],
-            )
-            if p["plan_clear_t_react"] > 0.0
-            else {}
-        ),
+        # added after the move: the clearance law, one object for MPPI, the route and the governor
+        clearance=_clearance(p),
     )
     sampling = SamplingConfig(
         wmax=p["plan_wmax"],
@@ -66,17 +73,7 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         pivot_cost=p["plan_pivot_cost"],
     )
     if p["plan_clear_t_react"] > 0.0:  # added after the move: the route priced in travel time
-        ctg["time_cost"] = (
-            p["plan_clear_v_cruise"],
-            p["plan_clear_t_react"],
-            p["plan_clear_v_min"],
-            p["plan_clear_c0"],
-            (
-                p["plan_clear_t_turn"] / p["plan_clear_t_react"]
-                if p["plan_clear_route_turn"] > 0.0
-                else 0.0
-            ),
-        )
+        ctg["clearance"] = _clearance(p)
     return cost, sampling, ctg
 
 

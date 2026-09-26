@@ -35,7 +35,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import math
-import warnings
 
 import numpy as np
 import warp as wp
@@ -46,6 +45,8 @@ from ..engine.terrain import Grid
 from ..engine.terrain import sample_field
 from ..heightmap import Heightmap
 from ..profiling import StageProfiler
+from .clearance import ClearanceParams
+from .clearance import ClearanceRoute
 from terrain_value_field import closing_step
 from terrain_value_field.drift import footprint_drift_spread
 from terrain_value_field.solver import ValueSolver
@@ -581,92 +582,6 @@ def _goal_cell_kernel(
 
 
 @wp.kernel
-def _time_cost_kernel(
-    hazard: wp.array3d(dtype=wp.float32),  # wall contact / unresolved settle, per pose
-    loose: wp.array3d(dtype=wp.float32),  # blocked under the heading bin alone
-    reach: int,  # [cells] past this the law allows cruise and nothing is charged
-    dt: int,  # the heading bin [bins]
-    cell: wp.float32,
-    v_cruise: wp.float32,
-    t_react: wp.float32,
-    v_min: wp.float32,
-    c0: wp.float32,  # [m] the law's fixed margin
-    inv_flatness: wp.float32,  # 1 / flatness_weight: the solver multiplies the penalty by it
-    tilt: wp.array3d(dtype=wp.float32),  # the loose set's graded tilt, charged in place
-):
-    """Price every free pose by TRAVEL TIME under the clearance speed law
-    (control/governor.speed_law), so the route and the governor that enforces it agree.
-
-    Clearance is `(d - 0.5) * cell`, `d` the Chebyshev distance [cells] to the nearest hazard pose
-    within the heading bin: somewhere between d-1 and d cells, so the middle. The solver charges a step `arc * (1 + flatness * pen)`, so
-    `pen = (v_cruise / v - 1) / flatness` makes that `arc * v_cruise / v`: seconds, in metres at
-    cruise. Hugging an obstacle for 3 m at 0.5 m/s then costs what 9 m in the open does, and the
-    route swings wide wherever wide is faster; in a corridor with no wide option it pays the time.
-    """
-    r, c, t = wp.tid()
-    if loose[r, c, t] > 0.5:
-        return
-    ny = hazard.shape[0]
-    nx = hazard.shape[1]
-    nth = hazard.shape[2]
-    best = reach + 1
-    for i in range(-reach, reach + 1):
-        rr = wp.clamp(r + i, 0, ny - 1)
-        for j in range(-reach, reach + 1):
-            d = wp.max(wp.abs(i), wp.abs(j))
-            if d < best:
-                cc = wp.clamp(c + j, 0, nx - 1)
-                for k in range(-dt, dt + 1):
-                    if hazard[rr, cc, (t + k + nth) % nth] > 0.5:
-                        best = d
-    if best > reach:
-        return
-    # a pose d cells from a contact pose has between d-1 and d cells of room: take the middle
-    v = wp.min(v_cruise, wp.max(v_min, ((float(best) - 0.5) * cell - c0) / t_react))
-    tilt[r, c, t] = tilt[r, c, t] + (v_cruise / v - 1.0) * inv_flatness
-
-
-@wp.kernel
-def _turn_time_kernel(
-    hazard: wp.array3d(dtype=wp.float32),
-    loose: wp.array3d(dtype=wp.float32),
-    reach: int,  # [cells] past this even the sharpest turn runs at cruise: T = 0
-    dt: int,
-    cell: wp.float32,
-    v_cruise: wp.float32,
-    t_react: wp.float32,
-    v_min: wp.float32,
-    c0: wp.float32,
-    out: wp.array3d(dtype=wp.float32),  # v_cruise / v_allowed per pose, UNCAPPED at 1
-):
-    """The time multiplier the solver's turn price reads (ValueSolver.set_turn_price): the same
-    clearance law as `_time_cost_kernel`, but not capped at cruise and reaching further, because a
-    sharp turn's tail is slowed at clearances where driving straight is not."""
-    r, c, t = wp.tid()
-    out[r, c, t] = 0.0
-    if loose[r, c, t] > 0.5:
-        return
-    ny = hazard.shape[0]
-    nx = hazard.shape[1]
-    nth = hazard.shape[2]
-    best = reach + 1
-    for i in range(-reach, reach + 1):
-        rr = wp.clamp(r + i, 0, ny - 1)
-        for j in range(-reach, reach + 1):
-            d = wp.max(wp.abs(i), wp.abs(j))
-            if d < best:
-                cc = wp.clamp(c + j, 0, nx - 1)
-                for k in range(-dt, dt + 1):
-                    if hazard[rr, cc, (t + k + nth) % nth] > 0.5:
-                        best = d
-    if best > reach:
-        return
-    clearance = (float(best) - 0.5) * cell
-    v = wp.max(v_min, (clearance - c0) / t_react)
-    out[r, c, t] = v_cruise / v
-
-
-@wp.kernel
 def _pose_cost_kernel(
     blocked: wp.array3d(dtype=wp.float32),  # [row, col, heading]
     graded_tilt: wp.array3d(dtype=wp.float32),  # [row, col, heading]
@@ -819,9 +734,9 @@ class CostToGo:
         # [per rad] of the worst soft violation inside the tube, as graded tilt. Tilt and belly
         # clearance are charged, walls and unresolved settles are eroded hard -- `_robust_kernel`.
         robust_soft_weight: float = 10.0,
-        # (v_cruise [m/s], t_react [s], v_min [m/s], c0 [m]): price the route in TRAVEL TIME under the
-        # clearance speed law (control/governor.py) instead of vetoing the spatial tube. None = off.
-        time_cost: tuple[float, ...] | None = None,
+        # the clearance law (planning/clearance.py): price poses in travel time instead of removing
+        # them with the spatial tube. None = the tube vetoes.
+        clearance: ClearanceParams | None = None,
         obstacle_step_m: float = 0.0,  # hard-block cells with a local step taller than this [m];
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
         pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives so
@@ -877,27 +792,6 @@ class CostToGo:
         self._mt = int(round(robust_margin_deg / (360.0 / n_theta)))
         self._eroded = self._mr > 0 or self._mt > 0
         self.robust_soft_weight = float(robust_soft_weight)
-        self._time = time_cost
-        self._turn_lever = 0.0  # the route's turn price; set below when time_cost carries it
-        if time_cost is not None:
-            if flatness_weight <= 0.0:
-                raise ValueError("time_cost rides on the solver's penalty: flatness_weight > 0")
-            v_cruise, t_react = time_cost[0], time_cost[1]
-            c0 = time_cost[3] if len(time_cost) > 3 else 0.0
-            self._time_reach = max(
-                1, int(math.ceil((v_cruise * t_react + c0) / self.grid.cell_size + 0.5))
-            )
-            # the ROUTE's turn price: element 4 is t_turn / t_react (0 or absent = off). A turning
-            # arc swings the tail at v * lever / R; the solver charges the time that costs.
-            turn_ratio = time_cost[4] if len(time_cost) > 4 else 0.0
-            self._turn_lever = turn_ratio * (robot_params.rear_offset + robot_params.wheel_radius)
-            k_max = self._turn_lever / float(robot_params.min_turn_radius)
-            self._turn_reach = max(
-                1,
-                int(
-                    math.ceil((v_cruise * (1.0 + k_max) * t_react + c0) / self.grid.cell_size + 0.5)
-                ),
-            )
         self._escape_reach = max(1, int(round(self.ESCAPE_REACH_M / self.grid.cell_size)))
         # a turn costs what the lattice charges for one when it has point turns; the deployed
         # value otherwise, so an escape that is mostly turning still reads cheaper than the cap
@@ -1028,24 +922,24 @@ class CostToGo:
         self.hazard = wp.zeros_like(self.V)
         self.violation = wp.zeros_like(self.V)  # [rad] how badly a soft test fails, 0 if none does
         self.robust_tilt = wp.zeros_like(self.V)  # graded_tilt + the tube's tilt charge
+        # blocked under the heading bin alone, and its tilt: what routes when the clearance law
+        # replaces the spatial tube
         self._loose_blocked = wp.zeros_like(self.V)
         self._loose_tilt = wp.zeros_like(self.V)
-        # per-pose v_cruise / v_allowed for the solver's turn price; zero unless time_cost has it
-        self._turn_T = wp.zeros_like(self.V)
-        if (
-            self._time is not None
-            and self._turn_lever > 0.0
-            and not hasattr(self.solver, "set_turn_price")
-        ):
-            # the route's turn price needs terrain_value_field with ValueSolver.set_turn_price
-            # (branch study/turn-price); an older pinned copy plans without it rather than crash
-            warnings.warn(
-                "terrain_value_field has no ValueSolver.set_turn_price: the route's turn price "
-                "is OFF -- update the terrain_value_field pin"
+        self.clearance_route = (
+            ClearanceRoute(
+                clearance,
+                robot_params,
+                self.grid.cell_size,
+                tuple(self.V.shape),
+                self._mt,
+                self.flatness_weight,
+                self.solver,
+                self.device,
             )
-            self._turn_lever = 0.0
-        if self._time is not None and self._turn_lever > 0.0:
-            self.solver.set_turn_price(self._turn_T, self._turn_lever)
+            if clearance is not None
+            else None
+        )
         # V with a way back out of every no-route pose: what MPPI follows (see _escape_kernel)
         self.V_escape = wp.zeros_like(self.V)
         self._descent_out = wp.zeros(2, dtype=wp.float32, device=self.device)
@@ -1349,7 +1243,7 @@ class CostToGo:
             )
         feas = self.robust_blocked if self._eroded else self.blocked
         tilt = self.robust_tilt if self._eroded else self.graded_tilt
-        if self._time is not None:  # the spatial tube becomes a price in seconds
+        if self.clearance_route is not None:  # the spatial tube becomes a price in seconds
             wp.launch(
                 _robust_kernel,
                 dim=self.V.shape,
@@ -1366,45 +1260,8 @@ class CostToGo:
                 outputs=[self._loose_blocked, self._loose_tilt],
                 device=self.device,
             )
-            v_cruise, t_react, v_min = self._time[:3]
-            c0 = self._time[3] if len(self._time) > 3 else 0.0
-            wp.launch(
-                _time_cost_kernel,
-                dim=self.V.shape,
-                inputs=[
-                    self.hazard,
-                    self._loose_blocked,
-                    self._time_reach,
-                    self._mt,
-                    self.grid.cell_size,
-                    float(v_cruise),
-                    float(t_react),
-                    float(v_min),
-                    float(c0),
-                    1.0 / self.flatness_weight,
-                ],
-                outputs=[self._loose_tilt],
-                device=self.device,
-            )
+            self.clearance_route.charge(self.hazard, self._loose_blocked, self._loose_tilt)
             feas, tilt = self._loose_blocked, self._loose_tilt
-            if self._turn_lever > 0.0:
-                wp.launch(
-                    _turn_time_kernel,
-                    dim=self.V.shape,
-                    inputs=[
-                        self.hazard,
-                        self._loose_blocked,
-                        self._turn_reach,
-                        self._mt,
-                        self.grid.cell_size,
-                        float(v_cruise),
-                        float(t_react),
-                        float(v_min),
-                        float(c0),
-                    ],
-                    outputs=[self._turn_T],
-                    device=self.device,
-                )
         wp.launch(
             _goal_cell_kernel,
             dim=1,

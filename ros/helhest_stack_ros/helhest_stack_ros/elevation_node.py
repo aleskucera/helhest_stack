@@ -749,7 +749,7 @@ class ElevationNode(Node):
         # primitive -- which is why plan_n_theta above is chosen as if this were 0. Connectivity
         # must not depend on a price someone may reasonably set to zero.
         d("plan_pivot_cost", PLAN_DEFAULTS["plan_pivot_cost"])
-        # Careful where it is tight: the clearance speed governor (control/governor.py). 0 = off.
+        # The clearance law (helhest/planning/clearance.py); see helhest.planner_config.
         d("plan_clear_t_react", PLAN_DEFAULTS["plan_clear_t_react"])
         d("plan_clear_v_cruise", PLAN_DEFAULTS["plan_clear_v_cruise"])
         d("plan_clear_v_min", PLAN_DEFAULTS["plan_clear_v_min"])
@@ -1190,17 +1190,11 @@ class ElevationNode(Node):
         self.planner.reset_nominal(cfg.nominal_reset)
         self.planner.set_mu_band(1.0, cfg.mu_span)
         self.governor: ClearanceGovernor | None = None
-        if cfg.governor is not None:
+        if cfg.clearance is not None:
             self.governor = ClearanceGovernor(
                 dynamics.robot_params(cfg.wheel_width),
                 plan_dt=float(self.planner.cw.dt),
-                t_react=cfg.governor["t_react"],
-                v_min=cfg.governor["v_min"],
-                lookahead_s=cfg.governor["lookahead_s"],
-                decel=cfg.governor["decel"],
-                c0=cfg.governor["c0"],
-                t_turn=cfg.governor["t_turn"],
-                v_blind=cfg.governor["v_blind"],
+                params=cfg.clearance,
                 device=self.device,
             )
         if self.plan_wmin < 0.0:

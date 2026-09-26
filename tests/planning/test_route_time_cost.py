@@ -1,9 +1,9 @@
 """The route priced in travel time under the clearance speed law, and its turn price.
 
-With the clearance governor on (`time_cost`), the spatial tube no longer removes poses near walls:
+With the clearance law on (`clearance`), the spatial tube no longer removes poses near walls:
 the route uses the heading bin alone and charges every pose the time the law would cost there. A
 2.4 m corridor the old veto closes off-centre must stay routable, charged more toward the walls.
-The turn price (element 4 of `time_cost`) adds the tail swing's time to turning arcs near walls.
+The turn price (`ClearanceParams.route_turn`) adds the tail swing's time to turning arcs near walls.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from helhest.engine import GridParams
 from helhest.engine import RobotParams
 from helhest.engine import SolverParams
 from helhest.planner_config import planner_config
+from helhest.planning.clearance import ClearanceParams
 from helhest.planning.costtogo import CostToGo
 
 N = 66
@@ -37,14 +38,14 @@ def _solve_time() -> CostToGo:
         n_theta=24,
         robust_margin_m=0.2,
         robust_margin_deg=15.0,
-        time_cost=(1.5, 0.5, 0.15),
+        clearance=ClearanceParams(t_react=0.5, c0=0.0, route_turn=False),
     )
     goal = ((N // 2) * CELL + 6.0, (N // 2) * CELL)
     ctg.compute(wp.array(_corridor(), dtype=wp.float32), goal)
     return ctg
 
 
-def test_time_cost_keeps_the_corridor_routable_and_prices_the_walls_in_time():
+def test_the_time_price_keeps_the_corridor_routable_and_charges_toward_the_walls():
     ctg = _solve_time()
     cap = ctg._vcap
     r, c = N // 2 - 2, N // 2  # 0.48 m off the centre line: dead under the veto
@@ -73,7 +74,7 @@ def test_the_route_turn_price_charges_turning_next_to_walls_only():
             n_theta=24,
             robust_margin_m=0.2,
             robust_margin_deg=15.0,
-            time_cost=(1.5, 0.125, 0.15, 0.1, ratio),
+            clearance=ClearanceParams(c0=0.1, t_turn=0.125 * max(ratio, 1.0), route_turn=ratio > 0),
         )
         ctg.compute(
             wp.array(_corridor(), dtype=wp.float32), ((N // 2) * CELL + 6.0, (N // 2) * CELL)
@@ -85,12 +86,14 @@ def test_the_route_turn_price_charges_turning_next_to_walls_only():
     ok = (v0 < 0.9 * off._vcap) & (v1 < 0.9 * on._vcap)
     assert (v1[ok] >= v0[ok] - 1e-4).all()
     assert (v1[ok] > v0[ok] + 1e-3).any()
-    assert on._turn_T.numpy().max() > 0.0 and off._turn_T.numpy().max() == 0.0
+    assert on.clearance_route.turn_time.numpy().max() > 0.0
+    assert off.clearance_route.turn_time.numpy().max() == 0.0
 
 
 def test_off_by_default_and_complete_when_on():
-    assert "time_cost" not in planner_config({}).costtogo
+    off = planner_config({})
+    assert off.clearance is None and "clearance" not in off.costtogo and off.cost.clearance is None
     on = planner_config({"plan_clear_t_react": 0.125})
-    v_cruise, t_react, v_min, c0, turn_ratio = on.costtogo["time_cost"]
-    assert (t_react, c0) == (0.125, 0.15) and turn_ratio == 2.0
-    assert on.cost.clear_time > 0.0 and on.governor is not None
+    c = on.clearance
+    assert (c.t_react, c.c0, c.turn_ratio) == (0.125, 0.15, 2.0) and c.route_turn
+    assert on.costtogo["clearance"] is c and on.cost.clearance is c

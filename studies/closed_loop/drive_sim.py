@@ -326,18 +326,9 @@ def drive(a: argparse.Namespace) -> dict:
         planner.set_mu_band(1.0, a.cfg.mu_span)
     # the clearance speed governor: drive only as fast as the room along the plan allows
     governor = None
-    if mppi and a.cfg.governor is not None:
+    if mppi and a.cfg.clearance is not None:
         governor = ClearanceGovernor(
-            robot,
-            plan_dt=float(planner.cw.dt),
-            t_react=a.cfg.governor["t_react"],
-            v_min=a.cfg.governor["v_min"],
-            lookahead_s=a.cfg.governor["lookahead_s"],
-            decel=a.cfg.governor["decel"],
-            c0=a.cfg.governor["c0"],
-            t_turn=a.cfg.governor["t_turn"],
-            v_blind=a.cfg.governor["v_blind"],
-            device=a.device,
+            robot, plan_dt=float(planner.cw.dt), params=a.cfg.clearance, device=a.device
         )
     ctg = CostToGo(
         route_grid,
@@ -546,7 +537,7 @@ def drive(a: argparse.Namespace) -> dict:
                 # is exactly where a pose is vetoed -- the goal term cannot carry a veto, so it has
                 # to be its own term. Walls only, and without the router's margin (CostToGo.hazard)
                 planner.set_veto(ctg.hazard, sgrid)
-            if a.cfg.cost.clear_time > 0.0:  # the wall-distance map the clearance-time cost reads
+            if a.cfg.clearance is not None:  # the wall-distance map the clearance-time cost reads
                 planner.update_clearance()
             planner.replan(state_l, goal_l, a.refine)
             u = planner.nominal()
