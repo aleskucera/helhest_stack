@@ -2235,6 +2235,7 @@ class ElevationNode(Node):
                 self.planner.set_veto(self.ctg.hazard, self.sgrid)
             if self.planner.cw.clear_time > 0.0:  # the wall-distance map the clearance cost reads
                 self.planner.update_clearance()
+                self._ck("plan:clear_map")
             self._load_command_history()
             self.planner.replan(state_l, goal_l, int(self.plan_n_refine))
             self._ck("plan:replan")
@@ -2319,6 +2320,7 @@ class ElevationNode(Node):
                 wl, wr = self.governor.cap(
                     wl, wr, sim.controlled, sim.elevation, self.planner.measured, sim.grid
                 )
+                self._ck("plan:governor")
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
         turn_boost = (
             self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
