@@ -145,15 +145,15 @@
     <span class="fcount" id="hdr"></span>
   </header>
   <p class="sub">
-    Seven worlds, driven closed-loop by the <b>deployed stack</b> as it stands: <b>ostrich</b> physics as
-    the robot, the measured Odin dToF ray table as the sensor, a probabilistic belief map as the only thing the
-    planner sees, the robot's own controller read from its params file, the coarse map anchored to the world,
-    the turn-first brake, the shadow bridge and the <b>clearance speed governor</b>: near walls the robot is not
-    kept out, it is slowed, by one law (speed = (clearance &minus; 0.1 m) / 0.125 s, for the body's fastest point) that
-    prices the route in time, steers MPPI's choice and brakes the plan it drives. Every frame is what the robot believed and decided; the governor's
-    reading is under "This frame". One run per world, all seven reached, none touching a wall; false door is the
-    trap -- a room 18 m out behind a door aimed at the goal -- taken in, turned round in, left through the door,
-    and solved by the side gap. The robot turns red while it touches a wall.
+    The <b>deployed stack</b> as committed: <b>ostrich</b> physics as the robot, the measured Odin dToF ray table as
+    the sensor, a probabilistic belief map as the only thing the planner sees, the robot's own controller read from its
+    params file, the world-anchored coarse map, the turn-first brake and the shadow bridge. Near walls the robot is not
+    kept out but slowed, by one law: speed = (clearance &minus; 0.15 m) / 0.125 s for the body's fastest point, tail
+    included. It prices the route in time, steers MPPI's choice and brakes the plan it drives; the route also charges
+    turning near walls for the tail swing, and the robot crawls while its tail is about to sweep ground the sensor has
+    never seen. Seven stress worlds plus two study worlds (a 2.4 m L-bend and a 2.4 m corridor started 0.5 m off
+    centre). Every frame is what the robot believed and decided; the governor's reading is under "This frame".
+    The robot turns red while it touches a wall.
   </p>
 
   <div class="tabs" id="tabs" role="tablist"></div>
