@@ -311,11 +311,12 @@ def drive(a: argparse.Namespace) -> dict:
         route_grid,
         robot,
         dynamics.planning_solver(dt=dt, command_delay=0.0),
-        **a.cfg.costtogo,
-        # the z-margin is SIM-ONLY: the node passes no sigma and no z_veto, so on the robot this
-        # whole feasibility test is off. Kept here, flagged rather than silently matched.
-        z_veto=a.z_veto,
-        charge_per_sigma=a.charge_per_sigma,
+        **{
+            **a.cfg.costtogo,
+            # the robot's setting (planner_config) unless overridden on the command line
+            **({} if a.z_veto is None else {"z_veto": a.z_veto}),
+            **({} if a.charge_per_sigma is None else {"charge_per_sigma": a.charge_per_sigma}),
+        },
         device=a.device,
     )
     if mppi:
@@ -752,12 +753,17 @@ def main() -> None:
     # Both sigma terms default to the ROBOT's values, which is off: the node passes no sigma, so
     # neither shapes its field. Left on here they painted 15-20 m of charge over the half of a
     # room the robot had not driven through (false_door f240) -- a planner nobody deploys.
-    p.add_argument("--z-veto", type=float, default=0.0, help="veto below this many sigmas; 0 = off")
+    p.add_argument(
+        "--z-veto",
+        type=float,
+        default=None,
+        help="veto below this many sigmas; default: the robot's",
+    )
     p.add_argument(
         "--charge-per-sigma",
         type=float,
-        default=0.0,
-        help="routing charge per sigma of pose/drift uncertainty under the footprint; 0 = off",
+        default=None,
+        help="routing charge per sigma short of z_charge; default: the robot's (planner_config)",
     )
     p.add_argument("--n-theta", type=int, default=None)
     p.add_argument("--horizon", type=int, default=None)

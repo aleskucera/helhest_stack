@@ -71,6 +71,8 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         robust_margin_deg=p["plan_robust_margin_deg"],
         obstacle_step_m=p["plan_obstacle_step_m"],
         pivot_cost=p["plan_pivot_cost"],
+        z_veto=p["plan_z_veto"],
+        charge_per_sigma=p["plan_charge_per_sigma"],
     )
     if p["plan_clear_t_react"] > 0.0:  # added after the move: the route priced in travel time
         ctg["clearance"] = _clearance(p)

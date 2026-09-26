@@ -185,6 +185,8 @@ _PLAN_BUILD = frozenset(
         "plan_saturation",
         "plan_wall_veto",
         "plan_pivot_cost",
+        "plan_z_veto",
+        "plan_charge_per_sigma",
         "plan_clear_t_react",
         "plan_clear_v_cruise",
         "plan_clear_v_min",
@@ -761,6 +763,10 @@ class ElevationNode(Node):
         # primitive -- which is why plan_n_theta above is chosen as if this were 0. Connectivity
         # must not depend on a price someone may reasonably set to zero.
         d("plan_pivot_cost", PLAN_DEFAULTS["plan_pivot_cost"])
+        # the cost-to-go's sigma path (helhest.planner_config); needs map_source "belief" to have
+        # a sigma to act on
+        d("plan_z_veto", PLAN_DEFAULTS["plan_z_veto"])
+        d("plan_charge_per_sigma", PLAN_DEFAULTS["plan_charge_per_sigma"])
         # The clearance law (helhest/planning/clearance.py); see helhest.planner_config.
         d("plan_clear_t_react", PLAN_DEFAULTS["plan_clear_t_react"])
         d("plan_clear_v_cruise", PLAN_DEFAULTS["plan_clear_v_cruise"])
@@ -1051,6 +1057,8 @@ class ElevationNode(Node):
         self.plan_wmin: float = g("plan_wmin")
         self.plan_reverse_clear_m: float = g("plan_reverse_clear_m")
         self.plan_pivot_cost: float = g("plan_pivot_cost")
+        self.plan_z_veto: float = g("plan_z_veto")
+        self.plan_charge_per_sigma: float = g("plan_charge_per_sigma")
         self.plan_clear_t_react: float = g("plan_clear_t_react")
         self.plan_clear_v_cruise: float = g("plan_clear_v_cruise")
         self.plan_clear_v_min: float = g("plan_clear_v_min")

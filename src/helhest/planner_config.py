@@ -57,6 +57,12 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_robust_margin_deg": 0.0,
     "plan_obstacle_step_m": 0.0,
     "plan_pivot_cost": 0.0,
+    # The sigma path of the cost-to-go (planning/settle_producer.py): veto a pose holding fewer than
+    # z_veto sigmas of room, and charge charge_per_sigma per sigma short of CostToGo's z_charge. One
+    # setting for the node and the simulator -- the node used to run CostToGo's own 0.5 while
+    # drive_sim passed 0. Both 0 = the hard thresholds alone, the sigma has no say.
+    "plan_z_veto": 0.0,
+    "plan_charge_per_sigma": 0.0,
     # THE CLEARANCE LAW (planning/clearance.py): near walls the robot is slowed, not kept out.
     # plan_clear_t_react > 0 turns it on and replaces the spatial tube's veto; 0 = the tube vetoes.
     "plan_clear_t_react": 0.0,  # [s] error per unit speed of the fastest body point
@@ -160,6 +166,8 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             robust_margin_deg=float(p["plan_robust_margin_deg"]),
             obstacle_step_m=float(p["plan_obstacle_step_m"]),
             pivot_cost=float(p["plan_pivot_cost"]),
+            z_veto=float(p["plan_z_veto"]),
+            charge_per_sigma=float(p["plan_charge_per_sigma"]),
             **({"clearance": clearance} if clearance is not None else {}),
         ),
         n_theta=int(p["plan_n_theta"]),
