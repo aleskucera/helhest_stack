@@ -331,30 +331,6 @@ def _goal_cell_kernel(
     goal_rc[1] = wp.clamp(c, 0, cols - 1)
 
 
-def _omni_no_corner_cutting(resolution: float) -> tuple:
-    """`omni_control_set`, but a diagonal move also sweeps its two orthogonal cells.
-
-    A single-cell step cannot straddle a wall, and the stock set sweeps only the destination. A
-    diagonal step passes BETWEEN its two orthogonal neighbours, though, and when both are vetoed
-    that is the corner where two walls meet: on false_door the field crossed the room's far
-    corners this way with every wall block sealed. Requiring both orthogonals free is the usual
-    8-connected corner rule; a doorway one block wide is still crossed straight through.
-    """
-    n, prim_dr, prim_dc, prim_heading, prim_cost, _, _, _, _ = omni_control_set(resolution)
-    sweep_dr = np.zeros((1, n, 3), np.int32)
-    sweep_dc = np.zeros((1, n, 3), np.int32)
-    sweep_dt = np.zeros((1, n, 3), np.int32)  # one heading bin: nothing to offset
-    sweep_n = np.ones((1, n), np.int32)
-    for p in range(n):
-        dr, dc = int(prim_dr[0, p]), int(prim_dc[0, p])
-        sweep_dr[0, p, 0], sweep_dc[0, p, 0] = dr, dc
-        if dr != 0 and dc != 0:
-            sweep_dr[0, p, 1], sweep_dc[0, p, 1] = dr, 0
-            sweep_dr[0, p, 2], sweep_dc[0, p, 2] = 0, dc
-            sweep_n[0, p] = 3
-    return n, prim_dr, prim_dc, prim_heading, prim_cost, sweep_dr, sweep_dc, sweep_dt, sweep_n
-
-
 class CoarseRouter:
     """A heading-free cost-to-go over the whole window, at a cell size where coverage is good.
 
@@ -459,7 +435,7 @@ class CoarseRouter:
             cy,
             cx,
             n_theta=1,
-            control_set=_omni_no_corner_cutting(self.grid.cell_size),
+            control_set=omni_control_set(self.grid.cell_size),
             device=self.device,
         )
         self.V = wp.zeros((cy, cx, 1), dtype=wp.float32, device=self.device)

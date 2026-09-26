@@ -7,10 +7,12 @@ import warnings
 
 import numpy as np
 import pytest
+import warp as wp
 
 from helhest.planning.terrain_value_field import arc_control_set
 from helhest.planning.terrain_value_field import closing_step
 from helhest.planning.terrain_value_field import DEFAULT_PIVOT_ARCS
+from helhest.planning.terrain_value_field import omni_control_set
 from helhest.planning.terrain_value_field.solver import ValueSolver
 
 RES = 0.1
@@ -330,3 +332,46 @@ def test_sweep_spacing_thins_the_swept_cells_but_keeps_the_endpoint(spacing, exp
 def test_a_non_positive_sweep_spacing_is_rejected():
     with pytest.raises(ValueError, match="sweep_spacing"):
         arc_control_set(16, RES, closing_step(16, 0.6, 2), 0.6, 40, 64, sweep_spacing=0.0)
+
+
+# ------------------------------------------------------------------- omni: the corner rule
+
+
+def _destination_only(resolution: float) -> tuple:
+    """`omni_control_set` without the corner rule: each move sweeps only where it lands."""
+    n, dr, dc, heading, cost, sweep_dr, sweep_dc, sweep_dt, _ = omni_control_set(resolution)
+    return n, dr, dc, heading, cost, sweep_dr, sweep_dc, sweep_dt, np.ones((1, n), np.int32)
+
+
+def _omni_solve(control_set, cost: np.ndarray) -> np.ndarray:
+    n = cost.shape[0]
+    solver = ValueSolver(1.0, n, n, n_theta=1, control_set=control_set(1.0), device="cuda")
+    seeds = np.full((n, n, 1), solver._inf, np.float32)
+    seeds[n - 1, n - 1, 0] = 0.0
+    pose_cost = wp.array(np.ascontiguousarray(cost[:, :, None]), dtype=wp.float32)
+    return solver.value_iterate(pose_cost, wp.array(seeds, dtype=wp.float32), 1.0).numpy()[:, :, 0]
+
+
+def test_a_diagonal_does_not_cut_the_corner_where_two_walls_meet():
+    """An L of vetoed cells closes the top-left room, except that the corner cell itself is
+    free -- as false_door's far corners were. A destination-only set steps from the room to the
+    corner cell and out, between two vetoed cells; `omni_control_set` does not."""
+    cost = np.zeros((5, 5), np.float32)
+    cost[2, 0:2] = -1.0  # the row of wall ...
+    cost[0:2, 2] = -1.0  # ... the column of wall, and (2, 2) where they meet is free
+    leaky = _omni_solve(_destination_only, cost)
+    sealed = _omni_solve(omni_control_set, cost)
+    assert leaky[1, 1] < 100.0, "the destination-only set should leak here, or this proves nothing"
+    assert sealed[1, 1] >= 1.0e5, "omni_control_set cut the corner"
+    assert sealed[3, 3] < 100.0, "outside the room the field is untouched"
+
+
+def test_a_doorway_one_cell_wide_is_still_crossed():
+    cost = np.zeros((5, 5), np.float32)
+    cost[:, 2] = -1.0
+    cost[2, 2] = 0.0  # the doorway
+    v = _omni_solve(omni_control_set, cost)
+    assert v[2, 0] < 100.0, "the doorway must connect the two sides"
+    # 2 across to the doorway, 1 more straight -- leaving it, the diagonal along the wall would
+    # cut the corner of the wall cell beside it -- then a diagonal and a last straight step
+    np.testing.assert_allclose(v[2, 0], 4.0 + np.sqrt(2.0), rtol=1e-5)

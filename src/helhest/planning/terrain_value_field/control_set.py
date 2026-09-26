@@ -303,6 +303,11 @@ def omni_control_set(
 
     For a robot whose feasibility does not depend on which way it faces. Diagonals cost
     sqrt(2) so the field approximates Euclidean distance rather than Chebyshev.
+
+    A diagonal step also sweeps its two orthogonal cells. It passes BETWEEN them, and when both
+    are vetoed that is the corner where two walls meet: on false_door a coarse layer crossed the
+    room's far corners this way with every wall block sealed. Requiring both orthogonals free is
+    the usual 8-connected corner rule; a doorway one cell wide is still crossed straight through.
     """
     moves = [(dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0)]
     n_prim = len(moves)
@@ -310,16 +315,19 @@ def omni_control_set(
     prim_dc = np.zeros((1, n_prim), np.int32)
     prim_heading = np.zeros((1, n_prim), np.int32)
     prim_cost = np.zeros((1, n_prim), np.float32)
-    sweep_dr = np.zeros((1, n_prim, 1), np.int32)
-    sweep_dc = np.zeros((1, n_prim, 1), np.int32)
-    sweep_dt = np.zeros((1, n_prim, 1), np.int32)  # one heading bin: nothing to offset
+    sweep_dr = np.zeros((1, n_prim, 3), np.int32)
+    sweep_dc = np.zeros((1, n_prim, 3), np.int32)
+    sweep_dt = np.zeros((1, n_prim, 3), np.int32)  # one heading bin: nothing to offset
     sweep_n = np.ones((1, n_prim), np.int32)
     for p, (dr, dc) in enumerate(moves):
         prim_dr[0, p], prim_dc[0, p] = dr, dc
         diagonal = dr != 0 and dc != 0
         prim_cost[0, p] = resolution * (diagonal_cost_scale if diagonal else 1.0)
-        # One swept cell -- the destination. A single-cell step cannot straddle anything.
         sweep_dr[0, p, 0], sweep_dc[0, p, 0] = dr, dc
+        if diagonal:
+            sweep_dr[0, p, 1], sweep_dc[0, p, 1] = dr, 0
+            sweep_dr[0, p, 2], sweep_dc[0, p, 2] = 0, dc
+            sweep_n[0, p] = 3
     return (
         n_prim,
         prim_dr,

@@ -3,7 +3,8 @@
 A wall seen from one side is a flat strip of measured cells on top with the ground at its foot
 in shadow, and a block holding only such cells pools as crossable. And with every wall block
 sealed, a diagonal move still passed between two vetoed orthogonal neighbours: through the
-corner where two walls meet.
+corner where two walls meet -- that rule now lives in `omni_control_set`, and its tests in
+tests/planning/terrain_value_field/test_control_set.py.
 """
 
 from __future__ import annotations
@@ -12,10 +13,7 @@ import numpy as np
 import warp as wp
 
 from helhest.engine import GridParams
-from helhest.planning.coarse import _omni_no_corner_cutting
 from helhest.planning.coarse import CoarseRouter
-from helhest.planning.terrain_value_field import omni_control_set
-from helhest.planning.terrain_value_field.solver import ValueSolver
 
 CELL = 0.2
 FACTOR = 3
@@ -59,39 +57,6 @@ def test_ground_is_read_from_the_blocks_around_not_the_block_alone():
     r = _router()
     r.solve(_dev(h), _dev(m), (11.0, 6.0))
     assert (r.passable.numpy()[:, c // FACTOR] < 0.5).all()
-
-
-def _solve(control_set, cost: np.ndarray) -> np.ndarray:
-    n = cost.shape[0]
-    solver = ValueSolver(1.0, n, n, n_theta=1, control_set=control_set(1.0), device="cuda")
-    seeds = np.full((n, n, 1), solver._inf, np.float32)
-    seeds[n - 1, n - 1, 0] = 0.0
-    return solver.value_iterate(_dev(cost[:, :, None]), _dev(seeds), 1.0).numpy()[:, :, 0]
-
-
-def test_a_diagonal_does_not_cut_the_corner_where_two_walls_meet():
-    """An L of vetoed cells closes the top-left room, except that the corner cell itself is
-    free -- as false_door's far corners were. The stock set steps from the room to the corner
-    cell and out, between two vetoed cells; the corner-safe set does not."""
-    cost = np.zeros((5, 5), np.float32)
-    cost[2, 0:2] = -1.0  # the row of wall ...
-    cost[0:2, 2] = -1.0  # ... the column of wall, and (2, 2) where they meet is free
-    leaky = _solve(omni_control_set, cost)
-    sealed = _solve(_omni_no_corner_cutting, cost)
-    assert leaky[1, 1] < 100.0, "the stock set should leak here, or this test proves nothing"
-    assert sealed[1, 1] >= 1.0e5, "the corner-safe set cut the corner"
-    assert sealed[3, 3] < 100.0, "outside the room the field is untouched"
-
-
-def test_a_doorway_one_cell_wide_is_still_crossed():
-    cost = np.zeros((5, 5), np.float32)
-    cost[:, 2] = -1.0
-    cost[2, 2] = 0.0  # the doorway
-    v = _solve(_omni_no_corner_cutting, cost)
-    assert v[2, 0] < 100.0, "the doorway must connect the two sides"
-    # 2 across to the doorway, 1 more straight -- leaving it, the diagonal along the wall would
-    # cut the corner of the wall cell beside it -- then a diagonal and a last straight step
-    np.testing.assert_allclose(v[2, 0], 4.0 + np.sqrt(2.0), rtol=1e-5)
 
 
 # ------------------------------------------------------------------------------------- memory
