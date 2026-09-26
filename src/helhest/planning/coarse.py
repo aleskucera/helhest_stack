@@ -63,9 +63,9 @@ import warp as wp
 
 from ..engine import GridParams
 from .terrain_value_field import omni_control_set
+from .terrain_value_field import TerrainValueField
 from .terrain_value_field.hierarchical import goal_cell_kernel
 from .terrain_value_field.hierarchical import seed_goal_kernel
-from .terrain_value_field.solver import ValueSolver
 
 
 @wp.kernel
@@ -279,7 +279,7 @@ def _cost_kernel(
 ):
     """Pack passability into the one signed field the solver reads.
 
-    Sign convention is the solver's, shared with `costtogo._pose_cost_kernel`: the veto rides in
+    Sign convention is the solver's (terrain_value_field.margin, POSE COST): the veto rides in
     the sign, so a free cell is `+penalty` and a vetoed one `-1 - penalty`. Measured ground is
     free or vetoed outright. Unmeasured ground is free near the frontier and priced beyond it,
     never vetoed -- a goal in terrain nobody has seen has to stay reachable, or the robot will
@@ -400,18 +400,23 @@ class CoarseRouter:
             self.coverage = wp.zeros((cy, cx), dtype=wp.float32)
             self.bridged = wp.zeros((cy, cx), dtype=wp.float32)
             self.floor = wp.full((cy, cx), 1.0e30, dtype=wp.float32)
-            self._pose_cost = wp.zeros((cy, cx, 1), dtype=wp.float32)
-            self._seeds = wp.zeros((cy, cx, 1), dtype=wp.float32)
             self._goal_rc = wp.zeros(2, dtype=wp.int32)
             self._goal_xy = wp.zeros(2, dtype=wp.float32)
-        self.solver = ValueSolver(
-            self.grid.cell_size,
+        # heading-free, and fed a pose cost directly: this layer's passability is its own pooling
+        # rule, not a margin. penalty_scale 1.0: the void penalty is already in metres, so it
+        # adds to the move's own length as itself rather than being weighted a second time.
+        self.field = TerrainValueField(
             cy,
             cx,
+            self.grid.cell_size,
             n_theta=1,
+            penalty_scale=1.0,
             control_set=omni_control_set(self.grid.cell_size),
             device=self.device,
         )
+        self.solver = self.field.solver
+        self._pose_cost = self.field.pose_cost
+        self._seeds = self.field.seeds
         self.V = wp.zeros((cy, cx, 1), dtype=wp.float32, device=self.device)
 
     def solve(
@@ -511,7 +516,5 @@ class CoarseRouter:
             outputs=[self._seeds],
             device=self.device,
         )
-        # penalty_scale 1.0: the void penalty is already in metres, so it adds to the move's own
-        # length as itself rather than being weighted a second time
-        self.V = self.solver.value_iterate(self._pose_cost, self._seeds, 1.0)
+        self.V = self.field.iterate()
         return self.V
