@@ -43,7 +43,7 @@ packages = ["src/helhest"]
 
 [tool.uv.sources]
 elevation-belief = { git = "ssh://git@github.com/aleskucera/elevation_belief.git", rev = "f2afa95" }
-terrain-value-field = { git = "ssh://git@github.com/aleskucera/terrain_value_field.git", rev = "07ac277" }
+terrain-value-field = { git = "ssh://git@github.com/aleskucera/terrain_value_field.git", rev = "9675a00" }
 
 [dependency-groups]
 dev = ["matplotlib>=3.8", "pillow>=10.0", "h5py>=3.0", "plotly>=6.7.0", "pytest>=7.0", "black>=24.0"]
