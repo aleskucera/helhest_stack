@@ -41,27 +41,24 @@ import pathlib
 
 import numpy as np
 import warp as wp
-from elevation_belief import DriftRates
-from elevation_belief import ElevationBelief
-from elevation_belief import NoiseModel
 from examples.helhest_junior.odin_sim.sensor import OdinSensor
 from examples.helhest_junior.odin_sim.sim import build_sim
 from examples.helhest_junior.odin_sim.sim import ODIN_MOUNT_XYZ
 
 from helhest import dynamics
-from helhest.control.mppi import MppiGpu
-from helhest.control.terminal import dock_control
-from helhest.engine import ForwardSimulator
-from helhest.engine import GridParams
-from helhest.perception import multigrid_inpaint
-from helhest.perception import ScanPreprocessor
-from helhest.perception import transform_points
-from helhest.planner_config import planner_config
-from helhest.planner_config import resolve
 from helhest.control.command import condition_command
 from helhest.control.command import to_engine_order
 from helhest.control.command import turn_first
 from helhest.control.governor import ClearanceGovernor
+from helhest.control.mppi import MppiGpu
+from helhest.control.terminal import dock_control
+from helhest.engine import ForwardSimulator
+from helhest.engine import GridParams
+from helhest.perception import ScanPreprocessor
+from helhest.perception import transform_points
+from helhest.perception.belief_frame import BeliefFrame
+from helhest.planner_config import planner_config
+from helhest.planner_config import resolve
 from helhest.planning.coarse import CoarseRouter
 from helhest.planning.costtogo import CostToGo
 from helhest.planning.lattice_solver import trace_optimal
@@ -144,26 +141,6 @@ def _v_here(v: np.ndarray, x: float, y: float, yaw: float, cell: float, n_theta:
         return float("nan")
     t = int(round((yaw % (2.0 * np.pi)) / (2.0 * np.pi / n_theta))) % n_theta
     return float(v[r, c, t])
-
-
-@wp.kernel
-def measured_kernel(
-    valid: wp.array2d(dtype=wp.int32),
-    out: wp.array2d(dtype=wp.float32),
-):
-    """The belief's validity flag as the float mask the planner takes."""
-    i, j = wp.tid()
-    out[i, j] = wp.where(valid[i, j] != 0, 1.0, 0.0)
-
-
-@wp.kernel
-def sd_kernel(
-    var: wp.array2d(dtype=wp.float32),
-    out: wp.array2d(dtype=wp.float32),
-):
-    """Measurement variance -> sd. Clamped at 0: a fused variance can land a hair below it."""
-    i, j = wp.tid()
-    out[i, j] = wp.sqrt(wp.max(var[i, j], 0.0))
 
 
 @wp.kernel
@@ -264,14 +241,14 @@ def drive(a: argparse.Namespace) -> dict:
         a.turn_first_reach = a.cfg.turn_first["reach_m"]
     span = a.window
     n = int(round(span / a.cell))
-    belief = ElevationBelief(
+    # the robot's own belief-frame helper: the same update and layers the node plans on
+    frame = BeliefFrame(
         (rx - span / 2, rx + span / 2, ry - span / 2, ry + span / 2),
         a.cell,
-        # a = 0.012 + 0.004/m: studies/calib/fit_drift.py put Odin's measured near-field
-        # var_meas at 1.75 cm, and the range term is the dToF's own growth
-        noise=NoiseModel("linear", a=0.012, b=0.004),
-        rates=DriftRates.odin_slam(),  # on-device SLAM, 100x below the dead-reckoning default
+        carve_range=a.carve,
+        device=a.device,
     )
+    belief = frame.belief
 
     # Three windows, each a centred crop of the belief's, so every offset between them is a
     # constant the captured replan graph can hold. n // 2 - k // 2 rather than (n - k) // 2: the
@@ -375,15 +352,13 @@ def drive(a: argparse.Namespace) -> dict:
             GridParams(coarse.grid.cells_x, coarse.grid.cells_y, coarse.grid.cell_size, 0.0, 0.0)
         )
 
-    # Preallocated so the per-frame path allocates nothing and touches no host memory. `scratch`
-    # exists because `multigrid_inpaint` fills IN PLACE, and the array it would fill is the
-    # belief's own height layer.
+    # Preallocated so the per-frame path allocates nothing and touches no host memory.
     zeros2d = lambda k: wp.zeros((k, k), dtype=wp.float32, device=a.device)  # noqa: E731
-    scratch, measured_d, sd_d = zeros2d(n), zeros2d(n), zeros2d(n)
+    measured_d, sd_d = frame.measured, frame.sd
     h_r, m_r, sd_r, drift_r = zeros2d(nr), zeros2d(nr), zeros2d(nr), zeros2d(nr)
     fine_d = zeros2d(nw)
     fine_m = zeros2d(nw)  # the belief's measured mask on the MPPI crop, for the governor
-    height_d = scratch  # so a run that arrives before its first frame can still dump
+    height_d = frame.height  # so a run that arrives before its first frame can still dump
 
     def crop(src: wp.array, off: int, out: wp.array) -> wp.array:
         wp.launch(crop_kernel, dim=out.shape, inputs=[src, off], outputs=[out], device=a.device)
@@ -453,29 +428,9 @@ def drive(a: argparse.Namespace) -> dict:
         world_T_base[:3, :3] = R
         world_T_base[:3, 3] = body[0:3]
         pts = transform_points(base, count, world_T_base)
-        belief.recenter((rx, ry))
-        if f:
-            belief.motion_update(dt, (rx, ry))
-        if a.carve > 0.0:
-            belief.carve(pts, origin, max_range=a.carve)
-        belief.measure_scan(pts, origin)
-
-        # BELIEF -> PLANNER, entirely on device. `raw_h` carries NaN where nothing was ever
-        # measured, which is exactly the inpaint's unknown set, so the fill is referenced to the
-        # surrounding GROUND rather than to zero -- a zero fill reads as flat terrain wherever
-        # the robot has not looked, and where the ground sits below zero that phantom plateau
-        # closes a ring around the routing window and the goal goes unreachable.
-        lay = belief.layers()
-        wp.copy(scratch, lay["raw_h"])
-        height_d = multigrid_inpaint(scratch)
-        wp.launch(
-            measured_kernel,
-            dim=(n, n),
-            inputs=[lay["valid"]],
-            outputs=[measured_d],
-            device=a.device,
-        )
-        wp.launch(sd_kernel, dim=(n, n), inputs=[lay["meas_var"]], outputs=[sd_d], device=a.device)
+        frame.update(pts, origin, (rx, ry), dt)
+        # BELIEF -> PLANNER, entirely on device (perception/belief_frame.py)
+        height_d, measured_d, sd_d, drift_d = frame.layers()
 
         # WHICH WAY -- the coarse layer over the whole belief window, which is the only layer
         # that can see far enough to choose a side. Its value prices the routing window's border.
@@ -499,7 +454,7 @@ def drive(a: argparse.Namespace) -> dict:
             (goal[0] - r0, goal[1] - s0),
             measured=crop(measured_d, off_r, m_r),
             sigma=crop(sd_d, off_r, sd_r),
-            drift=crop(belief.drift(), off_r, drift_r),
+            drift=crop(drift_d, off_r, drift_r),
             coarse_value=vc,
             coarse_origin=None if coarse is None else (cx0 - r0, cy0 - s0),
         )
