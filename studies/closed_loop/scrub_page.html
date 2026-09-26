@@ -147,7 +147,10 @@
   <p class="sub">
     The <b>deployed stack</b> as committed: <b>ostrich</b> physics as the robot, the measured Odin dToF ray table as
     the sensor, a probabilistic belief map as the only thing the planner sees, the robot's own controller read from its
-    params file, the world-anchored coarse map, the turn-first brake and the shadow bridge. Near walls the robot is not
+    params file, the world-anchored coarse map, the turn-first brake and the shadow bridge. The route now runs entirely
+    on <b>terrain_value_field</b>: the robot's settle at every pose is read as margins (roll, pitch, belly, with the
+    settle residual and step gate as hard tests), the library classifies and value-iterates them, and the coarse map's
+    ring is read under each routing cell's centre. Near walls the robot is not
     kept out but slowed, by one law: speed = (clearance &minus; 0.15 m) / 0.125 s for the body's fastest point, tail
     included. It prices the route in time, steers MPPI's choice and brakes the plan it drives; the route also charges
     turning near walls for the tail swing, and the robot crawls while its tail is about to sweep ground the sensor has
