@@ -21,7 +21,6 @@ One law, used in three places so they agree: the route prices poses in travel ti
 from __future__ import annotations
 
 import math
-import warnings
 from dataclasses import dataclass
 
 import warp as wp
@@ -219,12 +218,6 @@ class ClearanceRoute:
         self.reach_time = self._reach(params.v_cruise)
         lever = params.turn_ratio * (robot.rear_offset + robot.wheel_radius)
         if not params.route_turn:
-            lever = 0.0
-        elif not hasattr(solver, "set_turn_price"):
-            warnings.warn(
-                "terrain_value_field has no ValueSolver.set_turn_price: the route's turn price "
-                "is OFF -- update the terrain_value_field pin"
-            )
             lever = 0.0
         self.lever = lever
         # the sharpest turn slows the tail at clearances where driving straight is not slowed

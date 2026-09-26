@@ -19,5 +19,5 @@ export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 # hs_tvf FIRST so it can never be shadowed by the main-branch checkout on the venv's path.
 export PYTHONPATH="/local/kuceral4/projects/hs_tvf/src\
 :/local/kuceral4/projects/elevation_belief/src\
-:/local/kuceral4/projects/terrain_value_field/src\
+:/local/kuceral4/projects/hs_tvf/packages/terrain_value_field/src\
 :$_SIM/src:$_SIM:$_SIM/third_party/newton:$_VENV_SITE${PYTHONPATH:+:$PYTHONPATH}"

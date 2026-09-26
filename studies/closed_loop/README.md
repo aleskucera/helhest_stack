@@ -28,7 +28,6 @@ once:
 cd /local/kuceral4/projects/helhest_stack
 git worktree add /local/kuceral4/projects/hs_tvf study/tvf-migration
 cd /local/kuceral4/projects && git clone ssh://git@github.com/aleskucera/elevation_belief.git
-git clone ssh://git@github.com/aleskucera/terrain_value_field.git
 ```
 
 `env.sh` puts that worktree first on `PYTHONPATH`, so the main-branch checkout can never shadow
