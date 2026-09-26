@@ -223,6 +223,8 @@ class _MapFrame:
     lymin: float
     rxmin: float
     rymin: float
+    # the belief path's device-resident planner inputs (map_source "belief"); None otherwise
+    dev: dict | None = None
 
 
 def _dilate_bool(mask: np.ndarray, k: int) -> np.ndarray:
@@ -269,6 +271,9 @@ class ElevationNode(Node):
         self.map_wp: wp.array | None = None  # accumulated device cloud (world frame)
         self.map_ages: wp.array | None = None  # per-map-point last-seen frame (recency pruning)
         self.map_streak: wp.array | None = None  # per-map-point seen-through streak (persist carve)
+        self._bframe = None  # BeliefFrame, created on the first scan when map_source is "belief"
+        self._bframe_t: float | None = None  # stamp of the last scan folded into it [s]
+        self._bbuf: dict[str, wp.array] = {}  # the belief path's preallocated crops and pools
         self._frame: int = 0  # monotonic frame counter for recency stamps
         self._rec: dict[str, list] | None = (
             {k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "meta", "goal", "t", "trail")}
@@ -458,6 +463,12 @@ class ElevationNode(Node):
         d("resolution", 0.08)
         d("win_m", 12.0)  # single-scan / MPPI window (robot-centered)
         d("route_m", 16.0)  # accumulated / planning window (robot-centered)
+        # What the planner's three maps are built from. "accumulator": max-height rasters of the
+        # accumulated cloud (the MPPI one from the single scan). "belief": elevation_belief, fed
+        # with the ICP-corrected scan -- the path drive_sim plans on (perception/belief_frame.py),
+        # which also hands the cost-to-go its sigma and drift. Launch-time only.
+        d("map_source", "accumulator")
+        d("belief_carve_m", 6.0)  # [m] the belief's visibility carve reach; 0 disables it
         d("local_support", 2)  # min points/cell to trust the single scan
         d("local_max_gap_m", 0.4)  # trust the inpaint this far from a real return
         d("inpaint_iters_per_level", 50)
@@ -955,6 +966,12 @@ class ElevationNode(Node):
         self.resolution: float = g("resolution")
         self.win_m: float = g("win_m")
         self.route_m: float = g("route_m")
+        self.map_source: str = g("map_source")
+        if self.map_source not in ("accumulator", "belief"):
+            raise ValueError(
+                f"map_source must be 'accumulator' or 'belief', got {self.map_source!r}"
+            )
+        self.belief_carve_m: float = g("belief_carve_m")
         self.local_support: int = g("local_support")
         self.local_max_gap_m: float = g("local_max_gap_m")
         self.inpaint_iters_per_level: int = g("inpaint_iters_per_level")
@@ -1413,6 +1430,7 @@ class ElevationNode(Node):
                 self._build_planner()  # (re)build on structural change or first enable
             if "device" in names:  # device moved -> device-resident state is stale
                 self.map_wp = None
+                self._bframe, self._bbuf = None, {}
                 self.map_ages = None
                 self.map_streak = None
                 self._preproc = None  # buffers live on the old device
@@ -1531,6 +1549,7 @@ class ElevationNode(Node):
                 self._consecutive_rejects = 0
             if self.reset_map_on_reject and self._consecutive_rejects >= self.reset_after_rejects:
                 self.map_wp = None
+                self._bframe = None  # the belief was fused under the same diverged pose
                 self.map_ages = None
                 self.map_streak = None
                 self._preproc = None  # buffers live on the old device
@@ -1634,6 +1653,10 @@ class ElevationNode(Node):
             self.map_ages = None
             self.map_streak = None
         self._ck("accumulate")
+        if self.map_source == "belief":
+            stamp = cloud_msg.header.stamp.sec + cloud_msg.header.stamp.nanosec * 1e-9
+            self._belief_update(world_scan, world_T_base @ base_T_sensor, stamp)
+            self._ck("belief_update")
         mf = self._build_maps(world_T_base, world_scan)
         self._ck("build_maps")
         if mf is not None:
@@ -1713,8 +1736,80 @@ class ElevationNode(Node):
         fp.apply(primary, plane)
         conf[fp.i0 : fp.i1, fp.j0 : fp.j1] = True
 
+    def _belief_update(
+        self, world_scan: wp.array, world_T_sensor: np.ndarray, stamp: float
+    ) -> None:
+        """Fold this frame's ICP-corrected scan into the belief (created on the first scan)."""
+        ex, ey = float(world_T_sensor[0, 3]), float(world_T_sensor[1, 3])
+        if self._bframe is None:
+            from helhest.perception.belief_frame import BeliefFrame  # needs the `belief` extra
+
+            cell = self.resolution
+            span = max(self.route_m, self.plan_coarse_win_m)
+            # On the world lattice the anchored coarse memory uses (origin -memory/2, whole cells),
+            # so its raster pools into the memory's blocks exactly; both recenter in whole cells.
+            lat0 = 0.0
+            coarse = getattr(self, "coarse", None)
+            if coarse is not None and coarse.persistent:
+                lat0 = float(coarse.grid.origin_x)
+            x0 = lat0 + round((ex - 0.5 * span - lat0) / cell) * cell
+            y0 = lat0 + round((ey - 0.5 * span - lat0) / cell) * cell
+            n = int(round(span / cell))
+            self._bframe = BeliefFrame(
+                (x0, x0 + n * cell, y0, y0 + n * cell),
+                cell,
+                carve_range=self.belief_carve_m,
+                device=self.device,
+            )
+            self._bframe_t = None
+        dt = 0.0 if self._bframe_t is None else max(0.0, stamp - self._bframe_t)
+        self._bframe_t = stamp
+        self._bframe.update(world_scan, world_T_sensor[:3, 3].copy(), (ex, ey), dt)
+
+    def _belief_buf(self, name: str, n: int) -> wp.array:
+        b = self._bbuf.get(name)
+        if b is None or b.shape[0] != n:
+            b = self._bbuf[name] = wp.zeros((n, n), dtype=wp.float32, device=self.device)
+        return b
+
+    def _build_belief_maps(self, world_T_base: np.ndarray) -> _MapFrame:
+        """The belief path: every planning map is a crop of the one belief window, on its lattice.
+        The device crops are what the planner reads; the numpy views are for RViz and recording."""
+        bf = self._bframe
+        h, m, _, _ = bf.layers()
+        n = bf.measured.shape[0]
+        cell = self.resolution
+        rww = int(round(self.route_m / cell))
+        lww = int(round(self.win_m / cell))
+        off_r, off_l = n // 2 - rww // 2, n // 2 - lww // 2
+        route_h = bf.crop(h, off_r, off_r, self._belief_buf("route_h", rww))
+        route_m = bf.crop(m, off_r, off_r, self._belief_buf("route_m", rww))
+        local_h = bf.crop(h, off_l, off_l, self._belief_buf("local_h", lww))
+        local_m = bf.crop(m, off_l, off_l, self._belief_buf("local_m", lww))
+        relev_mem = route_h.numpy()
+        rmeasured = route_m.numpy() > 0.5
+        elev_local = local_h.numpy()
+        lmeasured = local_m.numpy() > 0.5
+        return _MapFrame(
+            elev_local=elev_local,
+            elev_local_view=np.where(lmeasured, elev_local, np.nan).astype(np.float32),
+            relev_view=np.where(rmeasured, relev_mem, np.nan).astype(np.float32),
+            relev_mem=relev_mem,
+            relev_measured=rmeasured,
+            cell=cell,
+            ex=float(world_T_base[0, 3]),
+            ey=float(world_T_base[1, 3]),
+            lxmin=bf.xmin + off_l * cell,
+            lymin=bf.ymin + off_l * cell,
+            rxmin=bf.xmin + off_r * cell,
+            rymin=bf.ymin + off_r * cell,
+            dev={"local_h": local_h, "local_m": local_m, "off_r": off_r},
+        )
+
     def _build_maps(self, world_T_base: np.ndarray, world_scan: wp.array) -> _MapFrame | None:
         """Build the local (single-scan/MPPI) and global (routing) elevation maps for this frame."""
+        if self.map_source == "belief":
+            return None if self._bframe is None else self._build_belief_maps(world_T_base)
         if self.map_wp is None or len(self.map_wp) == 0:
             return None
         cell = self.resolution
@@ -2082,9 +2177,14 @@ class ElevationNode(Node):
                 self._publish_cmd(cmd)
             return
         with wp.ScopedDevice(self.device):
-            self.plan_sim.set_terrain(
-                wp.array(np.ascontiguousarray(mf.elev_local), dtype=wp.float32, device=self.device)
-            )
+            if mf.dev is not None:
+                self.plan_sim.set_terrain(mf.dev["local_h"])
+            else:
+                self.plan_sim.set_terrain(
+                    wp.array(
+                        np.ascontiguousarray(mf.elev_local), dtype=wp.float32, device=self.device
+                    )
+                )
             self._ck("plan:set_terrain")
             # Seed the rollouts' REALIZED initial state -- without this every replan planned from
             # wheels-at-rest and zero body twist (command_history only covers in-flight COMMANDS).
@@ -2110,11 +2210,16 @@ class ElevationNode(Node):
             # map -- no rear sensor, so reverse may only use REMEMBERED ground.
             # the governor needs the same mask: it slows the robot over ground nobody has measured
             if self.plan_wmin < 0.0 or self.governor is not None:
-                ww, wh, rww, rwh, _, _ = self._plan_dims
-                oy, ox = (rwh - wh) // 2, (rww - ww) // 2
-                self.planner.set_measured(
-                    np.ascontiguousarray(mf.relev_measured[oy : oy + wh, ox : ox + ww], np.float32)
-                )
+                if mf.dev is not None:
+                    self.planner.set_measured(mf.dev["local_m"])
+                else:
+                    ww, wh, rww, rwh, _, _ = self._plan_dims
+                    oy, ox = (rwh - wh) // 2, (rww - ww) // 2
+                    self.planner.set_measured(
+                        np.ascontiguousarray(
+                            mf.relev_measured[oy : oy + wh, ox : ox + ww], np.float32
+                        )
+                    )
             if self.plan_wmin < 0.0:
                 rev_open = self._reverse_clear(mf, eyaw)
                 self.planner.set_wmin(self.plan_wmin if rev_open else 0.0)
@@ -2126,7 +2231,16 @@ class ElevationNode(Node):
                 self._rev_open = rev_open
             relev = mf.relev_mem  # (rwh, rww), blind cells inpainted from measured neighbours
             rmeas = mf.relev_measured
-            if kr > 1:
+            route_sd = route_drift = None
+            if mf.dev is not None:
+                # the same pooling rule, on the device, with the sigma and drift pooled beside it
+                bf, off_r = self._bframe, mf.dev["off_r"]
+                Hc = self._belief_buf("pool_h", rcny)
+                Mc = self._belief_buf("pool_m", rcny)
+                route_sd = self._belief_buf("pool_sd", rcny)
+                route_drift = self._belief_buf("pool_drift", rcny)
+                bf.pool(off_r, off_r, kr, Hc, Mc, route_sd, route_drift)
+            elif kr > 1:
                 # Reduce over MEASURED cells only: a plain .max() would let the inpainted fill
                 # outvote real ground wherever the fill sits higher, so one unobserved fine cell
                 # would speak for the whole coarse cell. -inf drops blind cells out of the max; a
@@ -2158,25 +2272,51 @@ class ElevationNode(Node):
                 else:
                     cxmin, cymin = mf.ex - 0.5 * cw * cell, mf.ey - 0.5 * cw * cell
                     cx0, cy0 = cxmin, cymin
-                lay = HeightMapBuilder(
-                    cell, (cxmin, cxmin + cw * cell, cymin, cymin + cw * cell), device=self.device
-                ).build(self.map_wp)
-                mask_from_count(lay.count, self._coarse_mask)
-                if self.coarse.persistent:
-                    vc = self.coarse.solve(lay.max, self._coarse_mask, (gx, gy), (cxmin, cymin))
+                if mf.dev is not None:
+                    # the belief window's centred cw x cw crop, on its (and the memory's) lattice
+                    bf = self._bframe
+                    off_c = bf.measured.shape[0] // 2 - cw // 2
+                    cxmin, cymin = bf.xmin + off_c * cell, bf.ymin + off_c * cell
+                    if not self.coarse.persistent:
+                        cx0, cy0 = cxmin, cymin
+                    c_h = bf.crop(bf.height, off_c, off_c, self._belief_buf("coarse_h", cw))
+                    c_m = bf.crop(bf.measured, off_c, off_c, self._coarse_mask)
                 else:
-                    vc = self.coarse.solve(lay.max, self._coarse_mask, (gx - cxmin, gy - cymin))
+                    lay = HeightMapBuilder(
+                        cell,
+                        (cxmin, cxmin + cw * cell, cymin, cymin + cw * cell),
+                        device=self.device,
+                    ).build(self.map_wp)
+                    mask_from_count(lay.count, self._coarse_mask)
+                    c_h, c_m = lay.max, self._coarse_mask
+                if self.coarse.persistent:
+                    vc = self.coarse.solve(c_h, c_m, (gx, gy), (cxmin, cymin))
+                else:
+                    vc = self.coarse.solve(c_h, c_m, (gx - cxmin, gy - cymin))
                 coarse_origin = (cx0 - mf.rxmin, cy0 - mf.rymin)
                 self._ck("plan:coarse")
-            V = self.ctg.compute(
-                wp.array(np.ascontiguousarray(Hc), dtype=wp.float32, device=self.device),
-                goal_r,
-                measured=wp.array(
-                    np.ascontiguousarray(Mc, dtype=np.float32), dtype=wp.float32, device=self.device
-                ),
-                coarse_value=vc,
-                coarse_origin=coarse_origin,
-            )
+            if mf.dev is not None:
+                V = self.ctg.compute(
+                    Hc,
+                    goal_r,
+                    measured=Mc,
+                    sigma=route_sd,
+                    drift=route_drift,
+                    coarse_value=vc,
+                    coarse_origin=coarse_origin,
+                )
+            else:
+                V = self.ctg.compute(
+                    wp.array(np.ascontiguousarray(Hc), dtype=wp.float32, device=self.device),
+                    goal_r,
+                    measured=wp.array(
+                        np.ascontiguousarray(Mc, dtype=np.float32),
+                        dtype=wp.float32,
+                        device=self.device,
+                    ),
+                    coarse_value=vc,
+                    coarse_origin=coarse_origin,
+                )
             self._ck("plan:ctg")
             if vc is not None:
                 # for RViz: the coarse cost-to-go as a height grid, unreachable blocks left out
@@ -2203,8 +2343,10 @@ class ElevationNode(Node):
                 try:
                     np.savez_compressed(
                         "/tmp/plan_dump.npz",
-                        elevation=Hc,
-                        measured=np.asarray(Mc, np.float32),
+                        elevation=Hc.numpy() if isinstance(Hc, wp.array) else Hc,
+                        measured=np.asarray(
+                            Mc.numpy() if isinstance(Mc, wp.array) else Mc, np.float32
+                        ),
                         V=V.numpy(),
                         goal_r=np.asarray(goal_r, np.float32),
                         # MPPI's own frame: the rollouts start at state_l and chase goal_l, and V
