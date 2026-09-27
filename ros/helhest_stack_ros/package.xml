@@ -4,9 +4,8 @@
   <name>helhest_stack_ros</name>
   <version>0.1.0</version>
   <description>
-    ROS 2 Kilted wrapper for the terrain_toolkit library — bridges a LiDAR
-    PointCloud2 stream to the GPU pipeline and republishes the resulting
-    grid as a PointCloud2 with one float32 field per TerrainMap layer.
+    Odin's on-robot stack: elevation_node localises with ICP, maps with the
+    elevation belief and plans with the cost-to-go and MPPI (the helhest library).
   </description>
 
   <maintainer email="kuceral4@fel.cvut.cz">Ales Kucera</maintainer>
