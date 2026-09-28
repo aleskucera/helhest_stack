@@ -1,8 +1,8 @@
-# Odin1 elevation_node params. Run the node directly; override ANY param inline with -p
+# Odin1 navigation_node params. Run the node directly; override ANY param inline with -p
 # (inline -p wins over this file):
 #
-#   ros2 run helhest_stack_ros elevation_node --ros-args \
-#     --params-file <repo>/ros/odin/odin_elevation.params.yaml \
+#   ros2 run helhest_stack_ros navigation_node --ros-args \
+#     --params-file <repo>/ros/odin/odin.params.yaml \
 #     -p plan_wmax:=5.0 -p k_turn:=0.6 -p plan_turn:=0.08
 #
 # SAFETY: plan_actuate is TRUE here (operator choice) -> a /goal_pose DRIVES the robot.
@@ -192,8 +192,8 @@
 
     # --- TURN BRAKE: slow into a corner, then accelerate out (both knobs 0 = off) ---
     # Live-tunable, no node restart:
-    #   ros2 param set /elevation plan_turn_brake_a_max 0.8
-    #   ros2 param set /elevation plan_turn_brake_lookahead_s 1.0
+    #   ros2 param set /navigation plan_turn_brake_a_max 0.8
+    #   ros2 param set /navigation plan_turn_brake_lookahead_s 1.0
     # a_max caps lateral acceleration [m/s^2]; forward speed and turn differential are scaled
     # TOGETHER so the planned arc is unchanged, only slower. At plan_wmax 6 / k_turn 1 the
     # hardest arc the planner can command is ~1.5 m/s^2, so start around 0.6-1.2.

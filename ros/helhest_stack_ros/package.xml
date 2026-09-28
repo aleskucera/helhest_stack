@@ -4,7 +4,7 @@
   <name>helhest_stack_ros</name>
   <version>0.1.0</version>
   <description>
-    Odin's on-robot stack: elevation_node localises with ICP, maps with the
+    Odin's on-robot stack: navigation_node localises with ICP, maps with the
     elevation belief and plans with the cost-to-go and MPPI (the helhest library).
   </description>
 

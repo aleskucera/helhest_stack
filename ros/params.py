@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Print elevation_node's ROS parameters -- defaults and what each one does.
+"""Print navigation_node's ROS parameters -- defaults and what each one does.
 
 WHY a source parser instead of `ros2 param describe`: the node declares ~120 parameters with no
 ParameterDescriptor text, so `ros2 param` can only ever show you a name and a value. The real
-documentation is the WHY comments wrapped around each declaration in elevation_node.py. Reading
+documentation is the WHY comments wrapped around each declaration in navigation_node.py. Reading
 those straight out of the source means this reference can never drift from the code, and it works
 with no node running.
 
@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
 
-NODE = Path(__file__).resolve().parent / "helhest_stack_ros/helhest_stack_ros/elevation_node.py"
+NODE = Path(__file__).resolve().parent / "helhest_stack_ros/helhest_stack_ros/navigation_node.py"
 
 # `d("name", default)` with an optional trailing `# note`. The non-greedy default stops at the
 # first `)`, which is enough: no declared default contains one.
@@ -169,9 +169,9 @@ def main() -> int:
     _print(hits)
     count = sum(len(g.params) for g in hits)
     print(f"\n{count} parameters. Set one at launch:")
-    print("  ros2 run helhest_stack_ros elevation_node --ros-args -p goal_source:=follow")
+    print("  ros2 run helhest_stack_ros navigation_node --ros-args -p goal_source:=follow")
     print("...or live on the running node (a [rebuilds ...] one costs a rebuild, but still works):")
-    print("  ros2 param set /elevation_node follow_standoff 2.0")
+    print("  ros2 param set /navigation follow_standoff 2.0")
     return 0
 
 

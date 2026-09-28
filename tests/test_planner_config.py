@@ -1,6 +1,6 @@
 """`planner_config` must reproduce what the node built inline, field for field.
 
-The golden below is a transcription of `elevation_node._build_planner` as it stood before the
+The golden below is a transcription of `navigation_node._build_planner` as it stood before the
 mapping moved into `helhest.planner_config`. If the two ever disagree on a field, the node and the
 simulator have started running different controllers again -- which is the bug this module exists
 to end: four configurations, and a simulator validating one the robot never ran.
@@ -21,8 +21,8 @@ from helhest.planning.clearance import ClearanceParams
 from helhest.planner_config import planner_config
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
-NODE = REPO / "ros/helhest_stack_ros/helhest_stack_ros/elevation_node.py"
-PARAMS = REPO / "ros/odin/odin_elevation.params.yaml"
+NODE = REPO / "ros/helhest_stack_ros/helhest_stack_ros/navigation_node.py"
+PARAMS = REPO / "ros/odin/odin.params.yaml"
 
 
 def _clearance(p: dict) -> ClearanceParams | None:

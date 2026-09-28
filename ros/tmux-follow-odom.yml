@@ -1,6 +1,6 @@
 # Radio follower with the ROTATION-FIX locator, standalone on the robot (helhest-jr-robot).
 # Mirrors tmux-adam.yml. This is the ONLY config run on the robot; the Jetson runs `helhest-stack`
-# (Ouster + driver + elevation_node, which supplies `odom` over /tf).
+# (Ouster + driver + navigation_node, which supplies `odom` over /tf).
 #
 # Brings up EVERYTHING the follower needs on the robot side:
 #   * zenoh router (peers with the Jetson's router)
@@ -10,7 +10,7 @@
 #                           frame (kills the "follow point swings when the robot turns" lag)
 #
 # This replaces follow_me's radio.launch.py -- do NOT also run that (its radio_locator would
-# fight this fork on /radio/estimate_pose). Needs `odom` over /tf from elevation_node (Jetson).
+# fight this fork on /radio/estimate_pose). Needs `odom` over /tf from navigation_node (Jetson).
 #
 # Start it:  tmuxinator start tmux-follow-odom      (or: mux start tmux-follow-odom)
 name: follow-odom

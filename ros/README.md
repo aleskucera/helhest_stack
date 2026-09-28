@@ -1,6 +1,6 @@
 # helhest_stack ROS
 
-The `elevation_node` (localization + belief mapping + cost-to-go / MPPI planning) and the
+The `navigation_node` (localization + belief mapping + cost-to-go / MPPI planning) and the
 `elevation-demo` tmuxinator. Run via the apptainer container + `dev-shell.sh` (see the
 tmuxinator header). This file records **deployment gotchas** that are easy to lose hours to.
 
@@ -53,7 +53,7 @@ echo -e "net.core.rmem_max=134217728\nnet.core.rmem_default=8388608" \
 
 ## KNOWN ISSUE: node runs but publishes nothing — cloud stamped in sensor time
 
-**Symptom:** the node starts (Warp init + the `ElevationNode:` banner) but never publishes
+**Symptom:** the node starts (Warp init + the `NavigationNode:` banner) but never publishes
 `elevation_local`/`elevation_global`; RViz stays empty. `/odom_2d` and `/imu/data` are live.
 
 **Cause:** the cloud↔odom `ApproximateTimeSynchronizer` never matches a pair because the
@@ -81,7 +81,7 @@ matching `/odom_2d`.
   PLANNER's moving-object handling is the belief's own carve (`belief_carve_m`, 6 m), which has not
   yet been checked on a real bag with people in it (studies/belief_mapping/STEP0.md).
 - **Rotation prior = integrated gyro**, not the fused `/imu/data` orientation (its yaw is
-  wrong-sign on this hardware — AHRS ENU/NED bug). See `elevation_node._gyro_orientation_base`.
+  wrong-sign on this hardware — AHRS ENU/NED bug). See `navigation_node._gyro_orientation_base`.
 - **Gyro glitch guard (`max_gyro_rate_dps`, 600):** this robot's `/imu/data` angular_velocity
   spikes to 1000–8000 deg/s for a SINGLE sample (real motion peaks ~300); `/ouster/imu` is the
   same signal without the spikes. The deskew and the integrated rotation prior both read the gyro,

@@ -11,7 +11,7 @@ WHY THIS EXISTS
 
     This fork changes ONE thing: after the (unchanged) body-frame trilateration, it transforms the
     point into a fixed, non-rotating frame (`filter_frame`, default `odom`, published by
-    elevation_node) and runs the Kalman filter THERE. A pure spin now moves the person 0 in odom ->
+    navigation_node) and runs the Kalman filter THERE. A pure spin now moves the person 0 in odom ->
     zero innovation -> no lag. Real walking is still real motion and gets smoothed as before.
 
     Everything else -- trilateration, AoA fusion, range Butterworth LPF, weighting -- is copied
@@ -29,9 +29,9 @@ DEPLOYMENT
     Run it INSTEAD of follow_me's radio_locator (same node/topic). It self-loads follow_me's own
     twr.yaml + radio.yaml from the installed share dir, so no separate params file is needed.
 
-    Dependency: `odom` is published by elevation_node (Jetson) over shared /tf. If that TF isn't
+    Dependency: `odom` is published by navigation_node (Jetson) over shared /tf. If that TF isn't
     reaching the robot the node logs `no TF odom<-locator` and skips -- same failure mode as
-    elevation_node's own follow callback.
+    navigation_node's own follow callback.
 """
 
 from __future__ import annotations
@@ -218,7 +218,7 @@ class Locator(Node):
         self.declare_parameter("human_frame", radio_cfg["human_frame"])
         # CHANGED: the NON-ROTATING frame the estimate is filtered and published in -- the whole
         # point of this fork. `fixed_frame` stays the body frame the anchors are defined in.
-        # NB: on this robot elevation_node names the odom frame "odom_2d" (it inherits /odom_2d's
+        # NB: on this robot navigation_node names the odom frame "odom_2d" (it inherits /odom_2d's
         # header.frame_id), NOT "odom" -- so map->odom_2d->base_link is the live chain.
         self.declare_parameter("filter_frame", "odom_2d")
         self.declare_parameter("use_3d", radio_cfg.get("use_3d", False))

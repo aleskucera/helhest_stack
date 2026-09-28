@@ -1,6 +1,6 @@
 """Audit the coarse "which way" map the node built on a real bag.
 
-Reads a node recording (elevation_node `plan_debug_record`, see run_bag.sh) and answers, per
+Reads a node recording (navigation_node `plan_debug_record`, see run_bag.sh) and answers, per
 bag, the questions that decide whether the coarse layer can be trusted on the robot:
 
   - how much of the map it sealed, and whether the robot's own path ran through sealed blocks

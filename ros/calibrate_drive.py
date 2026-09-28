@@ -13,7 +13,7 @@ mean speed every repeat, which is exactly the noise the fit cannot absorb.
 Start the bag first, then this. Two safety points that are not optional:
 
   * The planner must NOT be publishing at the same time. Set `plan_actuate:=false` (or do not run
-    elevation_node); two publishers on /cmd_joints fight and neither manoeuvre is what you think.
+    navigation_node); two publishers on /cmd_joints fight and neither manoeuvre is what you think.
   * Nothing publishes until `--go`. Ctrl-C, or any exit, sends zeros.
 """
 

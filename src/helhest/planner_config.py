@@ -9,7 +9,7 @@ because it lived in a value the simulation never set.
 
 Now the node declares its parameters with these defaults and builds its planner through
 `planner_config`, and so does `drive_sim`, reading the same params file the robot does. Rationale
-for individual values stays beside their declarations in `elevation_node.py`; only the numbers live
+for individual values stays beside their declarations in `navigation_node.py`; only the numbers live
 here, so there is one of each.
 
 No ROS and no YAML here: the node passes its cached values, `drive_sim` parses the file itself.

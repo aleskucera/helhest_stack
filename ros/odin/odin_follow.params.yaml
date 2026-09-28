@@ -1,8 +1,8 @@
-# Follow-me OVERLAY for the Odin elevation_node. Not standalone -- layer it OVER the base file,
+# Follow-me OVERLAY for the Odin navigation_node. Not standalone -- layer it OVER the base file,
 # and this one wins on the keys it sets (later --params-file takes precedence):
 #
-#   ros2 run helhest_stack_ros elevation_node --ros-args \
-#     --params-file <repo>/ros/odin/odin_elevation.params.yaml \
+#   ros2 run helhest_stack_ros navigation_node --ros-args \
+#     --params-file <repo>/ros/odin/odin.params.yaml \
 #     --params-file <repo>/ros/odin/odin_follow.params.yaml
 #
 # The base file stays click-default; this flips it to follow-me only when you add it.

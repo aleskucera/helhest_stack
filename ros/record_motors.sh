@@ -37,7 +37,7 @@ is what separates the motor model from the traction model. Neither run alone set
 
 BEFORE EITHER: plan_actuate must be OFF, or the planner and calibrate_drive both publish on
 /cmd_joints and the manoeuvre is not what you drove:
-    ros2 param set /elevation plan_actuate false
+    ros2 param set /navigation plan_actuate false
     ros2 topic hz /joint_states      # must be live, or nothing is fittable
 EOF
 }

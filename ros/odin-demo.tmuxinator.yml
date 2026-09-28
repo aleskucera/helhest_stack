@@ -1,6 +1,6 @@
-# tmuxinator project for the helhest_stack_ros elevation_node driven by Odin
+# tmuxinator project for the helhest_stack_ros navigation_node driven by Odin
 # (Odin dTOF cloud + on-device SLAM pose, no ICP, no EKF -- see
-# ros/odin/odin_elevation.params.yaml).
+# ros/odin/odin.params.yaml).
 #
 # Symlinked into ~/.config/tmuxinator/odin-demo.yml so it can be launched
 # from anywhere with:
@@ -16,13 +16,13 @@
 # Default replays ONLY the bag's sensor/odom inputs so the live node regenerates
 # all outputs (no duplicate /frame_marker etc.). FULL_REPLAY=1 replays every topic.
 #
-# The node pane runs `python3 -m helhest_stack_ros.elevation_node` directly so no
+# The node pane runs `python3 -m helhest_stack_ros.navigation_node` directly so no
 # colcon-built/installed workspace is required -- same PYTHONPATH-only pattern as
 # elevation-demo/ekf-demo. It loads the SAME params file the robot runs, so a replay
 # reproduces the live tuning instead of drifting from it; EXTRA overrides on top.
 #
 # Panes: bag (start-paused -- hit <space> to play once the node is up),
-# elevation_node, rviz2 (odin_elevation.rviz), traj_logger.
+# navigation_node, rviz2 (odin_elevation.rviz), traj_logger.
 #
 # Each pane runs inside the helhest Apptainer via exec.sh. The node is run as a
 # module with PYTHONPATH set (no colcon workspace needed). Every pane forces
@@ -43,7 +43,7 @@
   # The robot's own params file is the single source of truth -- an inline copy of these
   # values silently went stale (footprint height, and every tuned planner knob).
   # EXTRA='-p k:=v ...' overrides it; inline -p wins over --params-file.
-  params = "#{repo}/ros/odin/odin_elevation.params.yaml"
+  params = "#{repo}/ros/odin/odin.params.yaml"
   args   = "--ros-args --params-file #{params} #{ENV['EXTRA']}".strip
 
   full_replay = ENV['FULL_REPLAY'] && !ENV['FULL_REPLAY'].empty?
@@ -76,7 +76,7 @@ windows:
         - bag:
           - <%= exec_sh %> bash -c '<%= ros %> && echo BAG=<%= bag %> RATE=<%= rate %> && ros2 bag play "<%= bag %>" --rate <%= rate %> --loop --start-paused<%= play_topics %>; exec bash'
         - node:
-          - <%= exec_sh %> bash -c '<%= dev %> && python3 -m helhest_stack_ros.elevation_node <%= args %>; exec bash'
+          - <%= exec_sh %> bash -c '<%= dev %> && python3 -m helhest_stack_ros.navigation_node <%= args %>; exec bash'
         - rviz:
           - <%= exec_sh %> bash -c '<%= ros %> && rviz2 -d "<%= repo %>/ros/helhest_stack_ros/rviz/odin_elevation.rviz"; exec bash'
         - traj:

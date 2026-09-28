@@ -3,7 +3,7 @@
 ## What we're doing and why
 
 We're about to close the loop on the MPPI + terminal-dock controller (it currently runs in
-`elevation_node` in **visualization-only** mode — it plans and publishes `planned_path`/`mppi_fan`
+`navigation_node` in **visualization-only** mode — it plans and publishes `planned_path`/`mppi_fan`
 but emits **no motor commands**). Before we ever energize motors under the controller, we want to
 characterize the **real robot** from **manually driven** rosbags, at zero motor risk.
 

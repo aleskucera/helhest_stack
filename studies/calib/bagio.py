@@ -4,7 +4,7 @@ The only host-side numpy in this pipeline, and it is the boundary CLAUDE.md sect
 allows: parsing an incoming ROS payload plus small host-side control values (4x4 poses).
 Clouds go to the device in `mapbuild.py` and stay there.
 
-Odin specifics (ros/odin/odin_elevation.params.yaml): the cloud is already in
+Odin specifics (ros/odin/odin.params.yaml): the cloud is already in
 `odin1_base_link`, so the sensor TF is identity; `/odin1/odometry` IS the on-device SLAM
 pose, so there is no ICP in this path.
 """
@@ -21,7 +21,7 @@ from mcap_ros2.reader import read_ros2_messages
 CLOUD_TOPIC = "/odin1/cloud_raw"
 ODOM_TOPIC = "/odin1/odometry"
 
-# Robot self-filter box in base_link [m], measured for the Odin mount (odin_elevation.params.yaml).
+# Robot self-filter box in base_link [m], measured for the Odin mount (odin.params.yaml).
 SELF_X = (-0.05, 0.55)
 SELF_Y = (-0.75, 0.75)
 

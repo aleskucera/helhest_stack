@@ -44,7 +44,7 @@ CELL = 0.08  # the node's `resolution` default
 # ~18 cm at 5.8 m, closer to linear in range than to the quadratic such sensors usually get.
 DTOF_NOISE = NoiseModel("linear", a=0.027, b=0.023)
 # Height crop about the sensor [m]. The mount sits ~0.45 m above the floor
-# (odin_elevation.params.yaml), so +1.0 keeps walls and torsos to ~1.45 m above ground while
+# (odin.params.yaml), so +1.0 keeps walls and torsos to ~1.45 m above ground while
 # excluding the roof; -1.5 keeps any drop-off the robot could drive into.
 Z_ABOVE = 1.0
 Z_BELOW = 1.5

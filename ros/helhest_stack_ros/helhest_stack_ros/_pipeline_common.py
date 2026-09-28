@@ -1,4 +1,4 @@
-"""ROS <-> numpy plumbing for elevation_node: a quaternion, a timed cloud, a grid as a cloud.
+"""ROS <-> numpy plumbing for navigation_node: a quaternion, a timed cloud, a grid as a cloud.
 
 What is left of the helpers the terrain_toolkit nodes shared (they were removed on 2026-09-27; they
 live on in the standalone terrain_toolkit repo).

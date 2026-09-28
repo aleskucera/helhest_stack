@@ -1,6 +1,6 @@
 """One frame of the elevation belief, and the layers the planner reads from it.
 
-The single place the robot (`elevation_node`) and the simulator (`drive_sim`) turn a scan into the
+The single place the robot (`navigation_node`) and the simulator (`drive_sim`) turn a scan into the
 map they plan on, so the two cannot drift apart. Needs the `belief` extra (`elevation_belief`),
 which is why nothing imports this module unless it plans on the belief.
 

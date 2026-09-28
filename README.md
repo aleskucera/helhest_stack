@@ -7,14 +7,14 @@
 
 The on-robot navigation stack for the **Helhest Junior** skid-steer robot with the **Odin** dToF
 sensor: it localises, maps and plans on the GPU, built on [NVIDIA Warp](https://github.com/NVIDIA/warp).
-One importable package, `helhest`, plus one ROS 2 node, `elevation_node`, that runs it on the robot.
+One importable package, `helhest`, plus one ROS 2 node, `navigation_node`, that runs it on the robot.
 
 Everything is **device-resident by default**: point clouds, grids and rollouts live on the GPU, and
 host-device round trips are the exception, not the rule (see `CLAUDE.md`).
 
 ## One frame on the robot
 
-`ros/helhest_stack_ros/helhest_stack_ros/elevation_node.py`, `_process` then `_plan`:
+`ros/helhest_stack_ros/helhest_stack_ros/navigation_node.py`, `_process` then `_plan`:
 
 | step | what | where |
 |---|---|---|
@@ -26,7 +26,7 @@ host-device round trips are the exception, not the rule (see `CLAUDE.md`).
 | drive | GPU MPPI following the cost-to-go, then a speed governor and the command chain | `control/mppi.py`, `control/governor.py`, `control/command.py` |
 
 All planner settings come from one place, `helhest.planner_config`, for the node and the simulator
-alike; the robot's values are in `ros/odin/odin_elevation.params.yaml`.
+alike; the robot's values are in `ros/odin/odin.params.yaml`.
 
 ## Layout
 
@@ -37,7 +37,7 @@ alike; the robot's values are in `ros/odin/odin_elevation.params.yaml`.
 | `src/helhest/control/` | MPPI, the clearance governor, the command chain, the terminal dock |
 | `src/helhest/engine/` | the robot model the planner rolls out and settles (below) |
 | `src/helhest/grid.py`, `dynamics.py`, `planner_config.py`, `worlds.py` | the shared grid, the canonical robot/solver params, the plan config, the stress worlds |
-| `ros/` | the ROS package (`elevation_node`), the robot's params, tmuxinator sessions, recording and calibration tools; deployment gotchas in `ros/README.md` |
+| `ros/` | the ROS package (`navigation_node`), the robot's params, tmuxinator sessions, recording and calibration tools; deployment gotchas in `ros/README.md` |
 | `studies/` | measured work: `closed_loop/` (drive_sim, the sim harness), `bag_replay/` (node on real bags + audit), `clearance/`, `planning_refactor/` (golden-field harness), `belief_mapping/`, `calib/`, `dynamic/`, ... each with its README or PLAN |
 | `tests/` | pytest suite; `tests/engine/*.py` also hold standalone parity oracles |
 | `docs/` | `field/` (calibration runbook and results), `incidents/`, `engine/` (Chrono pre-registrations, engine report), `design/`, `research/`, and the mkdocs perception reference |

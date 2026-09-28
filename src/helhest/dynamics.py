@@ -30,9 +30,9 @@ DT = 0.1  # control timestep -- the plan horizon step AND the driver frame step 
 # docs/field/CALIBRATION_RESULTS.md. Neither preset is changed by this: 0.6 gives 1.48 and is
 # CONFIRMED, and the outdoor 1.0 was calibrated on grass/dirt, which this is not. What it does
 # mean is that
-# "outdoor" is about the SURFACE, not about being out of doors -- ros/odin/odin_elevation.params
-# .yaml pins k_turn 1.0, which over-predicts turn resistance by 20% on tarmac, so the robot yaws
-# more than the planner expects and overshoots turns.
+# "outdoor" is about the SURFACE, not about being out of doors -- ros/odin/odin.params.yaml pins
+# k_turn 1.0, which over-predicts turn resistance by 20% on tarmac, so the robot yaws more than
+# the planner expects and overshoots turns.
 # Pick per environment via k_turn_for(); a single constant can't be right for both. (Forward gain
 # measured ~0.95-0.97 both -> wheel_radius unchanged; /cmd_joints is all-positive-forward, no flip.
 # The 2026-08-10 bags put forward gain at 0.932, consistent with the 0.906-0.925 on record.)

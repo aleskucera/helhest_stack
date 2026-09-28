@@ -47,8 +47,8 @@ ros2 topic hz /imu/data          # or /ouster/imu -- the yaw ground truth
 **`plan_actuate` must be OFF** for any scripted or manual drive:
 
 ```bash
-# either don't run elevation_node at all, or
-ros2 run ... elevation_node --ros-args -p plan_actuate:=false
+# either don't run navigation_node at all, or
+ros2 run ... navigation_node --ros-args -p plan_actuate:=false
 ```
 
 Two publishers on `/cmd_joints` fight and the manoeuvre is not what you think it is. This is the
@@ -123,10 +123,10 @@ script captures the elevation pipeline's inputs, which means `/odin1/cloud_raw` 
 drivetrain topics only and a 98 s run lands in tens of MB.
 
 **Before either run:** `plan_actuate` must be OFF, or the planner and the script both publish on
-`/cmd_joints` and the manoeuvre is not what you drove. Either do not run elevation_node, or:
+`/cmd_joints` and the manoeuvre is not what you drove. Either do not run navigation_node, or:
 
 ```bash
-ros2 param set /elevation plan_actuate false
+ros2 param set /navigation plan_actuate false
 ros2 topic hz /joint_states     # must be live -- with no measured wheels nothing is fittable
 ```
 

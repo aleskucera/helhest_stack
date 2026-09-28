@@ -1,6 +1,6 @@
 """Odin1 sensor bring-up: raw dTOF cloud + fused SLAM odometry (+ IMU frame TF).
 
-Sensor side of the Odin pipeline, split from the consumer so elevation_node can be
+Sensor side of the Odin pipeline, split from the consumer so navigation_node can be
 restarted (param tuning / map reset) without the ~7 s USB + SLAM re-init here:
 
   * host_sdk_sample (odin_ros_driver) publishes the RAW dTOF cloud (/odin1/cloud_raw)
@@ -11,7 +11,7 @@ restarted (param tuning / map reset) without the ~7 s USB + SLAM re-init here:
     consumer's IMU->base lookup does not flood warnings. It lives here (sensor mount)
     so it persists across elevation restarts.
 
-We deliberately do NOT run the cras odom_to_tf node -- elevation_node owns the
+We deliberately do NOT run the cras odom_to_tf node -- navigation_node owns the
 map -> odom_odin -> odin1_base_link chain; odom_to_tf would publish the inverse edge
 and split the tree.
 

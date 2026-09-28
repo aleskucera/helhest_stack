@@ -19,12 +19,12 @@ setup(
     zip_safe=True,
     maintainer="Ales Kucera",
     maintainer_email="kuceral4@fel.cvut.cz",
-    description="Odin's on-robot mapper and planner (elevation_node), ROS 2.",
+    description="Odin's on-robot mapper and planner (navigation_node), ROS 2.",
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "elevation_node = helhest_stack_ros.elevation_node:main",
+            "navigation_node = helhest_stack_ros.navigation_node:main",
         ],
     },
 )

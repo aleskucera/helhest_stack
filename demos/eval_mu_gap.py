@@ -6,7 +6,7 @@ robot lives on different ground. Compares three planner configs per (world, real
   robust  -- cert + 4 mu replicas ranked by worst case + the ONLINE TurnGainEstimator closing
              the loop on realized yaw (the shipped odin config)
 
-All configs run the production-tuned base (elevation_node defaults): turn penalty, straight
+All configs run the production-tuned base (navigation_node defaults): turn penalty, straight
 prior, peaky elite, plan-consistency EMA, routing tube 0.15 m, tall-step gate 0.2 m. Without
 the gate the settle STRADDLES tall thin obstacles (1 m pillars read as drivable terrain) and
 every config drives onto them -- margins can't fix a contact that happens on TOP.

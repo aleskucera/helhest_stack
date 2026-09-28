@@ -238,11 +238,11 @@ def _same_manoeuvre(a: np.ndarray, b: np.ndarray, spin_th: float = 0.25) -> bool
     return not (da * db < 0.0 and min(abs(da), abs(db)) > 0.3)  # opposite turn sides
 
 
-class ElevationNode(Node):
+class NavigationNode(Node):
     """Map with the elevation belief, localise with ICP, plan with the cost-to-go and MPPI."""
 
     def __init__(self) -> None:
-        super().__init__("elevation")
+        super().__init__("navigation")
 
         self._declare_parameters()
         self._cache_params()
@@ -382,7 +382,7 @@ class ElevationNode(Node):
         self.add_post_set_parameters_callback(self._on_parameters_applied)  # apply (post-set)
 
         self.get_logger().info(
-            f"ElevationNode: cloud={self.lidar_topic} odom={self.odom_topic} imu={self.imu_topic} "
+            f"NavigationNode: cloud={self.lidar_topic} odom={self.odom_topic} imu={self.imu_topic} "
             f"map_frame={self.map_frame} win_m={self.win_m} route_m={self.route_m} "
             f"gravity={'on' if self.gravity_enable else 'off'} device={self.device}"
         )
@@ -586,7 +586,7 @@ class ElevationNode(Node):
         # follow_topic, a live pose (e.g. the radio locator) continuously chased -- every update
         # re-targets and the reach latch never sticks, so a MOVING tag is tracked. The follow pose
         # is transformed into map_frame via TF, so it may arrive in any frame (e.g. 'locator').
-        # Runtime-switchable: `ros2 param set /elevation_node goal_source follow` (no rebuild).
+        # Runtime-switchable: `ros2 param set /navigation goal_source follow` (no rebuild).
         d("goal_source", "click")
         d("follow_topic", "/radio/estimate_pose")  # PoseStamped to chase in "follow" mode
         # FOLLOW STANDOFF: in "follow" mode, aim this far SHORT of the tag (m), back along the
@@ -614,7 +614,7 @@ class ElevationNode(Node):
         # See docs/incidents/incident_2026-09-22_lattice-heading-connectivity.md.
         #
         # 24 bins on a 0.24 m cell (coarsen 3) is connected at bins=2: closing_step = 0.2618 m
-        # clears the cell and gcd(1, 24) = 1. That is what ros/odin/odin_elevation.params.yaml
+        # clears the cell and gcd(1, 24) = 1. That is what ros/odin/odin.params.yaml
         # has always run, so the DEPLOYED robot was never affected by the split ring -- the
         # defaults here were, at coarsen 4 (0.32 m), which no closing step under a quarter turn
         # both clears and keeps connected. The defaults now match the params file rather than
@@ -2806,7 +2806,7 @@ class ElevationNode(Node):
 
 def main(args=None) -> None:
     rclpy.init(args=args)
-    node = ElevationNode()
+    node = NavigationNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

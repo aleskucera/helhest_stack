@@ -9,7 +9,7 @@
 
      FIX: a 64 MB SHM segment lets clouds transfer via shared memory (no UDP fragmentation,
      no dependence on net.core.rmem_max). Bare subscriber then received 325/325; the full
-     elevation_node went from 136/325 processed (58% dropped, ICP rejects) to 318/325 (2%,
+     navigation_node went from 136/325 processed (58% dropped, ICP rejects) to 318/325 (2%,
      0 rejects). Same-host only (bag+node on one machine); for multi-host, raise
      net.core.rmem_max above the cloud size instead (needs root).
 

@@ -5,7 +5,7 @@
 # running the colcon process (colcon_core/task/python/build.py: `_PYTHON_CMD = [sys.executable, ...]`).
 # The system `colcon` (/usr/bin/colcon) runs under /usr/bin/python3, so setuptools stamps
 # `#!/usr/bin/python3` into every console-script wrapper. That interpreter has no `warp`, so
-# `ros2 run helhest_stack_ros elevation_node` then dies with:
+# `ros2 run helhest_stack_ros navigation_node` then dies with:
 #     ModuleNotFoundError: No module named 'warp'
 # Running colcon under <repo>/.venv/bin/python instead makes the generated shebang point at the
 # venv (which has warp/numpy). The .venv is --system-site-packages, so colcon itself imports fine.

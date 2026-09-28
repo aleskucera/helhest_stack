@@ -98,7 +98,7 @@ def pose_of(body_q: np.ndarray) -> tuple[float, float, float, np.ndarray]:
     return float(body_q[0]), float(body_q[1]), float(np.arctan2(R[1, 0], R[0, 0])), R
 
 
-_ROBOT_PARAMS = pathlib.Path(__file__).resolve().parents[2] / "ros/odin/odin_elevation.params.yaml"
+_ROBOT_PARAMS = pathlib.Path(__file__).resolve().parents[2] / "ros/odin/odin.params.yaml"
 
 
 def _plan_params(a: argparse.Namespace) -> dict:

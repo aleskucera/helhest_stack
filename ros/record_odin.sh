@@ -1,6 +1,6 @@
 #!/bin/bash
 # Record the Odin1 elevation pipeline's INPUT topics for offline replay / param tuning.
-# The recorder for the Odin stack (odin_driver.launch.py + elevation_node):
+# The recorder for the Odin stack (odin_driver.launch.py + navigation_node):
 # the Odin SLAM pose + raw dTOF cloud replace /odom_2d + /ouster/points.
 #
 # Usage:  ./record_odin.sh <scenario>     (do the maneuver, then Ctrl-C to stop)
@@ -11,7 +11,7 @@
 # to the ros2 command below for smaller (slower) bags on long runs.
 set -e
 
-# Topics: the inputs elevation_node consumes, plus frames and the planning I/O. Recording
+# Topics: the inputs navigation_node consumes, plus frames and the planning I/O. Recording
 # INPUTS (not /elevation_* outputs) lets a live node regenerate the map/plan on replay.
 TOPICS=(
   # --- sensor inputs (what elevation consumes) ---

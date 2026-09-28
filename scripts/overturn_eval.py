@@ -54,7 +54,7 @@ from helhest.perception.lidar import MultiScanMap
 from helhest.planning.costtogo import CostToGo
 
 # The deployed odin configuration, so a number measured here means something on the robot.
-# Mirrors ros/odin/odin_elevation.params.yaml; keep the two in step. `lat_coarsen` is chosen to
+# Mirrors ros/odin/odin.params.yaml; keep the two in step. `lat_coarsen` is chosen to
 # reproduce the deployed routing CELL (0.24 m), not the deployed integer -- the stress worlds are
 # built at 0.06 m where the node's map is 0.08 m.
 DEPLOYED = dict(
