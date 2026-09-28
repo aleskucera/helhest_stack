@@ -6,7 +6,7 @@ It also decides whether the optimistic/pessimistic two-solve gap of section 4.3 
 for exploration and the automatic diagnosis of an ignorance-blocked goal -- is affordable at
 all, since that scheme pays for a second solve every cycle.
 
-Deployed settings, from ros/odin/odin.params.yaml and the node's own defaults:
+Deployed settings, from ros/config/odin.params.yaml and the node's own defaults:
 resolution 0.08 m, plan_lat_coarsen 3 (the params file overrides the node's 4), so a 0.24 m
 routing cell; plan_n_theta 24; a 16 m window. The sensor frame is 69 ms at 14.5 Hz.
 """

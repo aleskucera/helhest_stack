@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Drive a scripted calibration manoeuvre, so the steps are clean and the holds are exact.
 
-    ros2 run ... / python3 ros/calibrate_drive.py relax --go
-    python3 ros/calibrate_drive.py relax            # dry run: print the program, publish nothing
+    ros2 run ... / python3 ros/tools/calibrate_drive.py relax --go
+    python3 ros/tools/calibrate_drive.py relax        # dry run: print the program, publish nothing
 
 `record_odin.sh` only RECORDS; the manoeuvre was a description for a human on the sticks. That is
 good enough for steady-state turning, where all that matters is holding a command for a few

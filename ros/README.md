@@ -1,8 +1,18 @@
 # helhest_stack ROS
 
-The `navigation_node` (localization + belief mapping + cost-to-go / MPPI planning) and the
-`odin-demo` tmuxinator. Run via the apptainer container + `dev-shell.sh` (see the tmuxinator
-header). This file records **deployment gotchas** that are easy to lose hours to.
+Odin's on-robot stack: the `navigation_node` (belief mapping + cost-to-go / MPPI planning +
+driving) and what runs around it. Run via the apptainer container + `tools/dev-shell.sh` (see the
+`odin-demo` session's header). This file records **deployment gotchas** that are easy to lose hours
+to.
+
+```
+helhest_stack_ros/   the package: navigation_node, launch/odin_driver.launch.py, rviz/
+config/              odin.params.yaml (the robot), odin_follow.params.yaml (follow-me overlay),
+                     control_command_raw.yaml (driver), rosbag2_qos.yaml, fastdds_shm.xml
+sessions/            tmuxinator: odin-demo (a bag + node + RViz), bag-view, tmux-follow-odom
+tools/               record_odin.sh, record_motors.sh, calibrate_drive.py, traj_logger.py,
+                     radio_locator_odom.py, params.py, rviz.sh, dev-shell.sh, colcon-build.sh
+```
 
 ## KNOWN ISSUE: large LiDAR clouds silently dropped by DDS
 
@@ -25,12 +35,12 @@ dropped** — per message, regardless of playback rate. Defaults are far too sma
 segment is ~512 KB, so it silently falls back to the broken UDP path.
 
 **Fix (same machine — lidar driver + node + rviz on one host):** use the shared-memory
-transport profile `ros/fastdds_shm.xml` (64 MB SHM segment; SHM has no fragmentation and
+transport profile `ros/config/fastdds_shm.xml` (64 MB SHM segment; SHM has no fragmentation and
 ignores `rmem_max`). Point **every** participant at it:
 
 ```bash
-export FASTRTPS_DEFAULT_PROFILES_FILE="$REPO/ros/fastdds_shm.xml"
-export FASTDDS_DEFAULT_PROFILES_FILE="$REPO/ros/fastdds_shm.xml"
+export FASTRTPS_DEFAULT_PROFILES_FILE="$REPO/ros/config/fastdds_shm.xml"
+export FASTDDS_DEFAULT_PROFILES_FILE="$REPO/ros/config/fastdds_shm.xml"
 ```
 
 The `odin-demo` tmuxinator already sets this in every pane. For any other launcher

@@ -10,12 +10,12 @@
 # Running colcon under <repo>/.venv/bin/python instead makes the generated shebang point at the
 # venv (which has warp/numpy). The .venv is --system-site-packages, so colcon itself imports fine.
 #
-# Usage:  ros/colcon-build.sh                         # builds helhest_stack_ros (default)
-#         ros/colcon-build.sh --packages-select foo   # any colcon build args pass straight through
+# Usage:  ros/tools/colcon-build.sh                         # builds helhest_stack_ros (default)
+#         ros/tools/colcon-build.sh --packages-select foo   # any colcon args pass straight through
 # NB: no `-u` -- ROS setup.bash references unbound vars (AMENT_TRACE_SETUP_FILES) and would abort.
 set -eo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VENVPY="$REPO/.venv/bin/python"
 WS="$(cd "$REPO/../.." && pwd)"  # <ws>/src/helhest_stack -> <ws>
 

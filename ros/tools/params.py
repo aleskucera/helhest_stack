@@ -8,9 +8,9 @@ those straight out of the source means this reference can never drift from the c
 with no node running.
 
 Usage:
-    ros/params.py                 # every parameter, grouped exactly as the source groups them
-    ros/params.py plan            # only parameters (or groups) matching a substring
-    ros/params.py speed wmax      # several needles -> match any
+    ros/tools/params.py                 # every parameter, grouped exactly as the source groups them
+    ros/tools/params.py plan            # only parameters (or groups) matching a substring
+    ros/tools/params.py speed wmax      # several needles -> match any
 """
 from __future__ import annotations
 
@@ -22,7 +22,9 @@ from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
 
-NODE = Path(__file__).resolve().parent / "helhest_stack_ros/helhest_stack_ros/navigation_node.py"
+NODE = (
+    Path(__file__).resolve().parents[1] / "helhest_stack_ros/helhest_stack_ros/navigation_node.py"
+)
 
 # `d("name", default)` with an optional trailing `# note`. The non-greedy default stops at the
 # first `)`, which is enough: no declared default contains one.

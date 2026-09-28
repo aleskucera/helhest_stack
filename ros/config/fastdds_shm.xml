@@ -14,7 +14,7 @@
      net.core.rmem_max above the cloud size instead (needs root).
 
      USE: point EVERY participant (publisher AND subscriber) at this file:
-       export FASTRTPS_DEFAULT_PROFILES_FILE=<repo>/ros/fastdds_shm.xml
+       export FASTRTPS_DEFAULT_PROFILES_FILE=<repo>/ros/config/fastdds_shm.xml
      The odin-demo tmuxinator sets this in every pane. -->
 <dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
   <profiles>

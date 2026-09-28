@@ -42,7 +42,7 @@ WHEEL_RADIUS_M = 0.35
 # `odin1_base_link` is NOT the engine's body origin. The engine puts the origin at the FRONT
 # AXLE (RobotParams.build), while base_link sits at the Odin device; the node itself records the
 # gap as unresolved ("Plan is device-centered (offset from the real base_link) until a mount TF
-# exists", ros/odin/odin.params.yaml). Left at zero the front wheels land on the
+# exists", ros/config/odin.params.yaml). Left at zero the front wheels land on the
 # sensor origin, whose ground is inside the near blind zone -- ground returns start at 0.36 m --
 # so their contact disks are unobservable by construction. `mount_dx` is that offset along the
 # robot's own +x, fitted in `sweep_mount_offset`.

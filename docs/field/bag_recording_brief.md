@@ -31,7 +31,7 @@ only. This is pure open-loop data collection.
   missed. (If `-a` is too heavy, at minimum: the wheel-omega command/setpoint topic that
   `helhest_llc` uses, `/imu/data` **and** `/ouster/imu`, the Ouster point cloud, wheel/2D odom
   `/odom_2d`, and `/tf` + `/tf_static`.)
-- **DDS + isolation:** set the SHM Fast-DDS profile (`FASTRTPS_DEFAULT_PROFILES_FILE=ros/fastdds_shm.xml`)
+- **DDS + isolation:** set the SHM Fast-DDS profile (`FASTRTPS_DEFAULT_PROFILES_FILE=ros/config/fastdds_shm.xml`)
   and a private `ROS_DOMAIN_ID` so the 6 MB Ouster clouds aren't silently dropped and we don't collide
   with anything else on the network.
 - **One bag per maneuver**, named clearly (e.g. `arc_diff0.5_slow`, `stop_from_fast`,

@@ -6,7 +6,7 @@ Polls at 10 Hz (matching the node's cloud rate). On Ctrl-C: flushes the CSV and
 opens a 3-panel matplotlib figure showing x(t), y(t), ψ(t), and the x-y track.
 
 Usage:
-    python3 ros/traj_logger.py [--map-frame map] [--base-frame base_link]
+    python3 ros/tools/traj_logger.py [--map-frame map] [--base-frame base_link]
                                [--rate 10] [--out data/traj_TIMESTAMP.csv]
 """
 
@@ -153,10 +153,9 @@ def main() -> None:
     # parse_known_args so any leftover ROS args (--ros-args ...) pass through to rclpy
     args, ros_args = parser.parse_known_args()
 
-    out = pathlib.Path(
-        args.out
-        or pathlib.Path(__file__).parent.parent / "data" / f"traj_{datetime.datetime.now():%Y%m%d_%H%M%S}.csv"
-    ).expanduser()
+    stamp = f"{datetime.datetime.now():%Y%m%d_%H%M%S}"
+    repo = pathlib.Path(__file__).resolve().parents[2]
+    out = pathlib.Path(args.out or repo / "data" / f"traj_{stamp}.csv").expanduser()
 
     rclpy.init(args=ros_args or None)
     node = TrajLogger(

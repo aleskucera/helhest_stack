@@ -30,7 +30,7 @@ DT = 0.1  # control timestep -- the plan horizon step AND the driver frame step 
 # docs/field/CALIBRATION_RESULTS.md. Neither preset is changed by this: 0.6 gives 1.48 and is
 # CONFIRMED, and the outdoor 1.0 was calibrated on grass/dirt, which this is not. What it does
 # mean is that
-# "outdoor" is about the SURFACE, not about being out of doors -- ros/odin/odin.params.yaml pins
+# "outdoor" is about the SURFACE, not about being out of doors -- ros/config/odin.params.yaml pins
 # k_turn 1.0, which over-predicts turn resistance by 20% on tarmac, so the robot yaws more than
 # the planner expects and overshoots turns.
 # Pick per environment via k_turn_for(); a single constant can't be right for both. (Forward gain

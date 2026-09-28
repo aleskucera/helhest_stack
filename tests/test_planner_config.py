@@ -22,7 +22,7 @@ from helhest.planner_config import planner_config
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 NODE = REPO / "ros/helhest_stack_ros/helhest_stack_ros/navigation_node.py"
-PARAMS = REPO / "ros/odin/odin.params.yaml"
+PARAMS = REPO / "ros/config/odin.params.yaml"
 
 
 def _clearance(p: dict) -> ClearanceParams | None:

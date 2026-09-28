@@ -10,7 +10,7 @@
 # by the motor fit, which wants the command, what the wheels did, and the gyro. This records those
 # and nothing else, so a 98 s run is tens of MB.
 #
-# Drive the manoeuvre with:  python3 ros/calibrate_drive.py steps --go
+# Drive the manoeuvre with:  python3 ros/tools/calibrate_drive.py steps --go
 # Fit it with:               python scripts/fit_motor_steps.py ~/bags/steps_air ~/bags/steps_ground
 set -e
 
@@ -60,7 +60,7 @@ source ~/workspaces/helhest_ws/install/setup.bash >/dev/null 2>&1
 mkdir -p ~/bags
 
 # QoS override so the 400 Hz /odin1/imu is not silently dropped on the recorder side.
-QOS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/odin/rosbag2_qos.yaml"
+QOS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../config" && pwd)/rosbag2_qos.yaml"
 
 case "$NAME" in
   steps_air)    echo "AIR run -- is the robot chocked or strapped down?" ;;

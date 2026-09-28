@@ -2,7 +2,7 @@
 # Source this file (do NOT execute it) to get a shell set up for building and
 # running the helhest_stack_ros package:
 #
-#   source <repo>/ros/dev-shell.sh
+#   source <repo>/ros/tools/dev-shell.sh
 #
 # It activates the uv-created .venv at the repo root, sources ROS 2 Kilted,
 # and — if the repo sits inside a colcon workspace (<ws>/src/terrain_toolkit) —
@@ -10,7 +10,7 @@
 
 _dev_shell_path="${BASH_SOURCE[0]:-$0}"
 _dev_shell_dir="$(cd "$(dirname "$_dev_shell_path")" && pwd)"
-_dev_shell_repo="$(cd "$_dev_shell_dir/.." && pwd)"
+_dev_shell_repo="$(cd "$_dev_shell_dir/../.." && pwd)"
 
 if [[ -f "$_dev_shell_repo/.venv/bin/activate" ]]; then
     # Activate the venv ONLY on the host. Inside the Apptainer container, the

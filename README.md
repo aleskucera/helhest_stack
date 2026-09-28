@@ -26,7 +26,7 @@ host-device round trips are the exception, not the rule (see `CLAUDE.md`).
 | drive | GPU MPPI following the cost-to-go, then a speed governor and the command chain | `control/mppi.py`, `control/governor.py`, `control/command.py` |
 
 All planner settings come from one place, `helhest.planner_config`, for the node and the simulator
-alike; the robot's values are in `ros/odin/odin.params.yaml`.
+alike; the robot's values are in `ros/config/odin.params.yaml`.
 
 ## Layout
 
@@ -37,7 +37,7 @@ alike; the robot's values are in `ros/odin/odin.params.yaml`.
 | `src/helhest/control/` | MPPI, the clearance governor, the command chain, the terminal dock |
 | `src/helhest/engine/` | the robot model the planner rolls out and settles (below) |
 | `src/helhest/grid.py`, `dynamics.py`, `planner_config.py`, `worlds.py` | the shared grid, the canonical robot/solver params, the plan config, the stress worlds |
-| `ros/` | the ROS package (`navigation_node`), the robot's params, tmuxinator sessions, recording and calibration tools; deployment gotchas in `ros/README.md` |
+| `ros/` | `helhest_stack_ros/` (the package: `navigation_node`, the Odin driver launch, RViz configs), `config/` (the robot's params, the follow-me overlay, driver config, recording QoS, the Fast DDS profile), `sessions/` (tmuxinator), `tools/` (recording, calibration, loggers, the dev shell); deployment gotchas in `ros/README.md` |
 | `studies/` | measured work: `closed_loop/` (drive_sim, the sim harness), `bag_replay/` (node on real bags + audit), `clearance/`, `planning_refactor/` (golden-field harness), `belief_mapping/`, `calib/`, `dynamic/`, ... each with its README or PLAN |
 | `tests/` | pytest suite; `tests/engine/*.py` also hold standalone parity oracles |
 | `docs/` | `field/` (calibration runbook and results), `incidents/`, `engine/` (Chrono pre-registrations, engine report), `design/`, `research/`, and the mkdocs perception reference |
@@ -64,7 +64,7 @@ uv sync                              # core: numpy, warp-lang, elevation-belief 
 uv sync --extra viz --extra data     # + viewers and the rosbag loader
 ```
 
-ROS runs inside the helhest Apptainer container (`exec.sh` + `ros/dev-shell.sh`), with no colcon
+ROS runs inside the helhest Apptainer container (`exec.sh` + `ros/tools/dev-shell.sh`), with no colcon
 workspace needed; see `ros/README.md`.
 
 ## Run

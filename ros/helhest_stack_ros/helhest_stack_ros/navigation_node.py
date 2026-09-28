@@ -413,7 +413,7 @@ class NavigationNode(Node):
         # See docs/incidents/incident_2026-09-22_lattice-heading-connectivity.md.
         #
         # 24 bins on a 0.24 m cell (coarsen 3) is connected at bins=2: closing_step = 0.2618 m
-        # clears the cell and gcd(1, 24) = 1. That is what ros/odin/odin.params.yaml
+        # clears the cell and gcd(1, 24) = 1. That is what ros/config/odin.params.yaml
         # has always run, so the DEPLOYED robot was never affected by the split ring -- the
         # defaults here were, at coarsen 4 (0.32 m), which no closing step under a quarter turn
         # both clears and keeps connected. The defaults now match the params file rather than

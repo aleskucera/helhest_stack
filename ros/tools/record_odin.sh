@@ -60,7 +60,7 @@ is the measurement that confirms or kills it on the real robot."
   [compact]="the relaxation sweep for a SMALL site: spins in place at four wheel speeds instead
 of driving arcs. Same measurement, 1.9 x 1.8 m instead of 41 x 29 m, because what sets a tyre's
 relaxation is the speed the CONTACT travels over the ground and that is nonzero in a spin. Drive
-it with ros/calibrate_drive.py compact --go."
+it with ros/tools/calibrate_drive.py compact --go."
   [slope]="drive a slope of 10 deg or more: straight up, straight down, and ACROSS it in both
 directions, 4-5 s each, plus a turn while on the cross-slope. Nothing in the archive exceeds 5.4
 deg of tilt, so the load-transfer fix (normal_loads, validated only against Chrono) has never been
@@ -102,7 +102,7 @@ source ~/workspaces/helhest_ws/install/setup.bash >/dev/null 2>&1
 mkdir -p ~/bags
 
 # QoS override so the 400 Hz /odin1/imu is not silently dropped on the recorder side.
-QOS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/odin/rosbag2_qos.yaml"
+QOS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../config" && pwd)/rosbag2_qos.yaml"
 
 echo "recording -> ~/bags/$NAME   (Ctrl-C to stop)"
 exec ros2 bag record -o "$DEST" --qos-profile-overrides-path "$QOS" "${TOPICS[@]}" --regex "$TOPIC_REGEX"

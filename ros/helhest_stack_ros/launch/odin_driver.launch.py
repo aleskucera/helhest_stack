@@ -17,7 +17,7 @@ and split the tree.
 
 Run (source ~/.rosrc, the helhest install, and the odin_ws install; zenoh router up):
 
-    ros2 launch <repo>/ros/odin/odin_driver.launch.py
+    ros2 launch <repo>/ros/helhest_stack_ros/launch/odin_driver.launch.py
 """
 
 from __future__ import annotations
@@ -29,7 +29,9 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_ODIN_CONFIG = os.path.join(_HERE, "control_command_raw.yaml")
+# run by path from the checkout (ros2 launch <repo>/ros/helhest_stack_ros/launch/...): the
+# driver config sits in ros/config
+_ODIN_CONFIG = os.path.join(_HERE, "..", "..", "config", "control_command_raw.yaml")
 # The cras yaml-patch lets host_sdk_sample load a custom config via env (its own
 # `config_file` param is ignored upstream). Same mechanism as cras_odin_driver.
 _YAML_PATCH = os.path.join(

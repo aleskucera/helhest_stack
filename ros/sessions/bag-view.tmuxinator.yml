@@ -11,13 +11,13 @@
   # tmuxinator renders this through Erubis inside Project.load(path), so the local `path`
   # (the ~/.config/tmuxinator symlink) is in scope; realpath follows it back into the repo.
   # REPO is the escape hatch if a future tmuxinator renames that local.
-  repo    = ENV['REPO'] || File.expand_path('..', File.dirname(File.realpath(path)))
+  repo    = ENV['REPO'] || File.expand_path('../..', File.dirname(File.realpath(path)))
   exec_sh = ENV['EXEC_SH'] || "#{home}/projects/helhest-singularity/exec.sh"
   bag     = ENV['BAG'] or abort(
     'ERROR: BAG env var is required. Usage: BAG=/path/to/bag tmuxinator start bag-view'
   )
   rate    = ENV['RATE'] || '1.0'
-  dds     = "export FASTRTPS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\" && export FASTDDS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\""
+  dds     = "export FASTRTPS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/config/fastdds_shm.xml\" && export FASTDDS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/config/fastdds_shm.xml\""
   ros     = "source /opt/ros/jazzy/setup.bash && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"
 %>
 

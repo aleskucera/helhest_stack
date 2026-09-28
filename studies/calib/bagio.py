@@ -4,7 +4,7 @@ The only host-side numpy in this pipeline, and it is the boundary CLAUDE.md sect
 allows: parsing an incoming ROS payload plus small host-side control values (4x4 poses).
 Clouds go to the device in `mapbuild.py` and stay there.
 
-Odin specifics (ros/odin/odin.params.yaml): the cloud is already in
+Odin specifics (ros/config/odin.params.yaml): the cloud is already in
 `odin1_base_link`, so the sensor TF is identity; `/odin1/odometry` IS the on-device SLAM
 pose, so there is no ICP in this path.
 """

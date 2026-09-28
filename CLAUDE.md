@@ -80,7 +80,7 @@ This is a Warp/CUDA codebase. Data-parallel work runs on-device; **host↔device
 
 ## 7. Deployment gotchas (ROS) — read `ros/README.md`
 
-Before debugging "the node drops LiDAR frames / the map is sparse / ICP rejects a lot," check the transport. **6 MB Ouster clouds are silently dropped by Fast DDS** when the socket buffer can't hold one (default `rmem_max` 4 MB < one cloud) — it looks like a compute/ICP/rate problem but is not (a bare subscriber drops them too). Fix: point every participant at `ros/fastdds_shm.xml` via `FASTRTPS_DEFAULT_PROFILES_FILE` (same-host), or raise `net.core.rmem_max` above the cloud size (multi-host). Full symptom→cause→fix→verify, plus the other non-obvious defaults (gyro rotation prior, world-snapped accumulator grid, recency off), are in `ros/README.md`.
+Before debugging "the node drops LiDAR frames / the map is sparse / ICP rejects a lot," check the transport. **6 MB Ouster clouds are silently dropped by Fast DDS** when the socket buffer can't hold one (default `rmem_max` 4 MB < one cloud) — it looks like a compute/ICP/rate problem but is not (a bare subscriber drops them too). Fix: point every participant at `ros/config/fastdds_shm.xml` via `FASTRTPS_DEFAULT_PROFILES_FILE` (same-host), or raise `net.core.rmem_max` above the cloud size (multi-host). Full symptom→cause→fix→verify, plus the other non-obvious defaults, are in `ros/README.md`.
 
 ---
 

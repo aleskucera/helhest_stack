@@ -1,6 +1,6 @@
 # tmuxinator project for the helhest_stack_ros navigation_node driven by Odin
 # (Odin dTOF cloud + on-device SLAM pose, no ICP, no EKF -- see
-# ros/odin/odin.params.yaml).
+# ros/config/odin.params.yaml).
 #
 # Symlinked into ~/.config/tmuxinator/odin-demo.yml so it can be launched
 # from anywhere with:
@@ -32,7 +32,7 @@
   # tmuxinator renders this through Erubis inside Project.load(path), so the local `path`
   # (the ~/.config/tmuxinator symlink) is in scope; realpath follows it back into the repo.
   # REPO is the escape hatch if a future tmuxinator renames that local.
-  repo    = ENV['REPO'] || File.expand_path('..', File.dirname(File.realpath(path)))
+  repo    = ENV['REPO'] || File.expand_path('../..', File.dirname(File.realpath(path)))
   exec_sh = ENV['EXEC_SH'] || "#{home}/projects/helhest-singularity/exec.sh"
   bag     = ENV['BAG'] or abort(
     'ERROR: BAG env var is required. Usage: BAG=/path/to/bag tmuxinator start odin-demo'
@@ -42,7 +42,7 @@
   # The robot's own params file is the single source of truth -- an inline copy of these
   # values silently went stale (footprint height, and every tuned planner knob).
   # EXTRA='-p k:=v ...' overrides it; inline -p wins over --params-file.
-  params = "#{repo}/ros/odin/odin.params.yaml"
+  params = "#{repo}/ros/config/odin.params.yaml"
   args   = "--ros-args --params-file #{params} #{ENV['EXTRA']}".strip
 
   full_replay = ENV['FULL_REPLAY'] && !ENV['FULL_REPLAY'].empty?
@@ -55,14 +55,14 @@
 
   # Large-SHM Fast DDS profile so large clouds transfer via shared memory instead of dropping on
   # UDP. MUST be set on every participant (bag publisher, node, rviz) or clouds are lost. See
-  # ros/fastdds_shm.xml.
-  dds     = "export FASTRTPS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\" && export FASTDDS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/fastdds_shm.xml\""
+  # ros/config/fastdds_shm.xml.
+  dds     = "export FASTRTPS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/config/fastdds_shm.xml\" && export FASTDDS_DEFAULT_PROFILES_FILE=\"#{repo}/ros/config/fastdds_shm.xml\""
 
   # Plain ROS + localhost discovery (for bag / rviz / rqt panes).
   ros     = "source /opt/ros/jazzy/setup.bash && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"
 
   # Full dev env: dev-shell (venv + src + ROS) plus the ros package on PYTHONPATH.
-  dev     = "source \"#{repo}/ros/dev-shell.sh\" && export PYTHONPATH=\"#{repo}/ros/helhest_stack_ros:$PYTHONPATH\" && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"
+  dev     = "source \"#{repo}/ros/tools/dev-shell.sh\" && export PYTHONPATH=\"#{repo}/ros/helhest_stack_ros:$PYTHONPATH\" && export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST && #{dds}"
 %>
 
 name: odin-demo
@@ -79,7 +79,7 @@ windows:
         - rviz:
           - <%= exec_sh %> bash -c '<%= ros %> && rviz2 -d "<%= repo %>/ros/helhest_stack_ros/rviz/odin_elevation.rviz"; exec bash'
         - traj:
-          - <%= exec_sh %> bash -c '<%= ros %> && python3 "<%= repo %>/ros/traj_logger.py" --base-frame odin1_base_link; exec bash'
+          - <%= exec_sh %> bash -c '<%= ros %> && python3 "<%= repo %>/ros/tools/traj_logger.py" --base-frame odin1_base_link; exec bash'
   # Scratch shell — same Apptainer + ROS + helhest env, ready for `ros2 topic ...`,
   # `python3 -c "import helhest"`, etc.
   - shell:

@@ -71,9 +71,9 @@ Do them in that order: `compact` is safest and shakes out any plumbing problem b
 ### 3.1 `compact` — the one a human cannot do
 
 ```bash
-./ros/record_odin.sh compact              # terminal 1
-python3 ros/calibrate_drive.py compact    # terminal 2: DRY RUN first, prints the program
-python3 ros/calibrate_drive.py compact --go
+./ros/tools/record_odin.sh compact              # terminal 1
+python3 ros/tools/calibrate_drive.py compact    # terminal 2: DRY RUN first, prints the program
+python3 ros/tools/calibrate_drive.py compact --go
 ```
 
 Spins in place at three wheel speeds (2/3/4 — **the robot will not break loose below ~2 rad/s**,
@@ -88,7 +88,7 @@ instead, whose arcs span 7x. **If you need a speed sweep, drive it — do not sp
 ### 3.2 `calibrate` — drive it yourself
 
 ```bash
-./ros/record_odin.sh calibrate            # then drive
+./ros/tools/record_odin.sh calibrate            # then drive
 ```
 
 Manual is fine. The fits read measured wheel speeds, so they do not care whether a human or a
@@ -134,10 +134,10 @@ ros2 topic hz /joint_states     # must be live -- with no measured wheels nothin
 
 ```bash
 # terminal 1
-./ros/record_motors.sh steps_air
+./ros/tools/record_motors.sh steps_air
 # terminal 2
-python3 ros/calibrate_drive.py steps        # DRY RUN first -- prints the program, publishes nothing
-python3 ros/calibrate_drive.py steps --go   # 98 s, then Ctrl-C terminal 1
+python3 ros/tools/calibrate_drive.py steps        # DRY RUN first -- prints the program, publishes nothing
+python3 ros/tools/calibrate_drive.py steps --go   # 98 s, then Ctrl-C terminal 1
 ```
 
 **Run 2, the same program on the ground.** Needs ~4.2 m of run-out; the steps alternate
@@ -145,9 +145,9 @@ forward/reverse so it nets to zero displacement and finishes where it started.
 
 ```bash
 # terminal 1
-./ros/record_motors.sh steps_ground
+./ros/tools/record_motors.sh steps_ground
 # terminal 2
-python3 ros/calibrate_drive.py steps --go   # 98 s, then Ctrl-C terminal 1
+python3 ros/tools/calibrate_drive.py steps --go   # 98 s, then Ctrl-C terminal 1
 ```
 
 Note the surface in your notes -- mu changes the ground run and nothing else.
@@ -187,7 +187,7 @@ dynamics, and where breakaway actually sits.
 ### 3.4 `slope` — if you can find one
 
 ```bash
-./ros/record_odin.sh slope
+./ros/tools/record_odin.sh slope
 ```
 
 ≥10° of tilt. Straight up, straight down, and **ACROSS in both directions**, plus a turn while on

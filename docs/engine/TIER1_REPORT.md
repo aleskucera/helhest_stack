@@ -255,7 +255,7 @@ see them.
 
 ## 6. What to do next
 
-1. **Drive the `calibrate` scenario** (added to `ros/record_odin.sh`, which now also records
+1. **Drive the `calibrate` scenario** (added to `ros/tools/record_odin.sh`, which now also records
    `/joint_states` and `/joint_setpoints`). Five minutes settles: whether Odin realises the forward
    channel 1:1 — the soft side of the traction conflict — plus the steady turn gain, whether α
    depends on speed, the delay's step count, and the standing-start prediction.

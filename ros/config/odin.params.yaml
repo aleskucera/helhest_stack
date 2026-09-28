@@ -2,7 +2,7 @@
 # (inline -p wins over this file):
 #
 #   ros2 run helhest_stack_ros navigation_node --ros-args \
-#     --params-file <repo>/ros/odin/odin.params.yaml \
+#     --params-file <repo>/ros/config/odin.params.yaml \
 #     -p plan_wmax:=5.0 -p k_turn:=0.6 -p plan_turn:=0.08
 #
 # SAFETY: plan_actuate is TRUE here (operator choice) -> a /goal_pose DRIVES the robot.
