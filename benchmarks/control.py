@@ -1,58 +1,65 @@
-"""Timing benchmark for the control/ stack: MPPI `replan` (one control tick).
+"""Timing benchmark for the control/ stack: one MPPI frame, as the robot runs it.
 
-`MppiGpu.replan` (control/mppi.py) is sample/rollout/cost/reweight over n_refine iterations,
-CUDA-graph-captured. B is the total rollouts. It needs a cost-to-go
-field to route toward the goal, so each planner is armed with one (built via _common.build_routing;
-the solve itself is timed in benchmarks.planning).
+Per frame the node puts the MPPI window's terrain into the rollout simulator (`set_terrain`, which
+dilates one wheel envelope per yaw bin for the cylinder wheel), hands MPPI the routing field and
+the wall veto, rebuilds the clearance map, and runs `replan` -- sample, roll out, cost, reweight,
+`plan_n_refine` times, CUDA-graph-captured. Everything is the robot's configuration from
+`ros/config/odin.params.yaml` through `helhest.planner_config` (see `_common`): batch, horizon,
+friction replicas, cost weights, sampler, cylinder wheel, window sizes.
 
-Headline metric: ctrl_RTF = dt / replan -- how much faster than the real robot the controller plans
-(dt is the control step, DT=0.1s); >1 means it keeps up. Also reports Hz. CUDA-only; skips without a GPU.
+The first row of each sweep is the robot's point. Compare with the node's `plan:replan` /
+`plan:clear_map` stages (`profile_stages`, over a bag replay). ctrl_RTF = dt / replan: how much
+faster than real time the controller plans. CUDA-only; skips without a GPU.
 
 Run from the repo root:  python -m benchmarks.control [--world slalom]
 """
 
+from __future__ import annotations
+
 import argparse
 
-import numpy as np
 import warp as wp
 from helhest import dynamics
 from helhest import worlds as W
-from helhest.control.mppi import CostParams
 from helhest.control.mppi import MppiGpu
-from helhest.engine import ForwardSimulator
-from helhest.engine import GridParams
 
-from ._common import build_routing
-from ._common import build_scene
+from ._common import build_costtogo
+from ._common import build_rollout_sim
+from ._common import robot_scene
+from ._common import route_inputs
+from ._common import RobotScene
 from ._common import time_fn
 
 DT = dynamics.DT  # control timestep [s]
 
 
-def _planner(scene, mu, B, T, n_theta, V, grid, device):
-    sim_grid = GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0)
-    sim = ForwardSimulator(
-        dynamics.robot_params(), dynamics.planning_solver(), sim_grid, B, T, device
+def _planner(rs: RobotScene, batch: int, device: str) -> tuple[MppiGpu, object]:
+    """The node's planner, armed with a solved routing field; returns (planner, rollout sim)."""
+    sim = build_rollout_sim(rs, device, batch, rs.cfg.horizon)
+    planner = MppiGpu(sim, rs.cfg.cost, sampling=rs.cfg.sampling, n_theta=rs.cfg.n_theta)
+    planner.reset_nominal(rs.cfg.nominal_reset)
+    planner.set_mu_band(1.0, rs.cfg.mu_span)
+    ctg = build_costtogo(rs, device)
+    ctg.compute(goal_xy=rs.goal_route, **route_inputs(rs, device))
+    planner.cw.lattice_cap = ctg._vcap
+    sgrid = rs.sgrid.build()
+    planner.set_lattice(ctg.V_escape, sgrid)
+    if planner.cw.veto > 0.0:
+        planner.set_veto(ctg.hazard, sgrid)
+    if planner.cw.clear_time > 0.0:
+        planner.update_clearance()
+    return planner, sim
+
+
+def _row(label: str, batch: int, n_refine: int, t: float, robot: bool) -> None:
+    mark = "  <- robot" if robot else ""
+    print(
+        f"    {label:>10} {batch:>6} {n_refine:>6} {t * 1e3:>10.2f} {1.0 / t:>7.0f} "
+        f"{DT / t:>8.1f}x{mark}"
     )
-    sim.set_terrain(
-        wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
-    )
-    sim.set_friction(mu)
-    p = MppiGpu(sim, CostParams(), n_theta=n_theta)
-    p.reset_nominal(1.5)
-    p.set_lattice(V, grid.build())
-    return p
 
 
-def _header():
-    print(f"    {'B':>6} {'n_ref':>6} {'replan_ms':>10} {'Hz':>7} {'ctrl_RTF':>9}")
-
-
-def _row(B, n_ref, t):
-    print(f"    {B:>6} {n_ref:>6} {t*1e3:>10.2f} {1.0/t:>7.0f} {DT/t:>8.1f}x")
-
-
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--world", default="slalom", choices=list(W.WORLDS))
     args = ap.parse_args()
@@ -62,30 +69,37 @@ def main():
         print("CUDA not available -- MPPI is GPU-only (CUDA graph capture). Skipping.")
         return
     device = "cuda"
-    scene, mu, start, goal = build_scene(args.world)
-    B0, T0, ntheta0, nref0, reps = 4096, 70, 24, 3, 10
-
+    rs = robot_scene(args.world)
+    reps = 10
+    batch0, refine0, n_mu = rs.cfg.batch, int(rs.params["plan_n_refine"]), rs.cfg.sampling.n_mu
+    g = rs.win_grid
     print(
-        f"\n=== MPPI replan  device={device}  world={args.world}  grid={scene.ny}x{scene.nx}  "
-        f"dt={DT:.2f}  T={T0}  n_theta={ntheta0} ==="
+        f"\n=== MPPI frame  world={args.world}  window {g.cells_y}x{g.cells_x} at "
+        f"{g.cell_size:.2f} m  T={rs.cfg.horizon}  n_theta={rs.cfg.n_theta}  n_mu={n_mu} ==="
     )
+    header = f"    {'':>10} {'B':>6} {'n_ref':>6} {'ms':>10} {'Hz':>7} {'ctrl_RTF':>9}"
 
-    # one routing field (full-res) arms the planner for every sweep
-    _, V, grid, _ = build_routing(scene, ntheta0, 1, goal, device)
+    planner, sim = _planner(rs, batch0, device)
+    terrain = wp.array(rs.win, dtype=wp.float32, device=device)
+    print("  per-frame inputs (robot point):")
+    print(header)
+    _row("terrain", batch0, 0, time_fn(lambda: sim.set_terrain(terrain), reps, device), True)
+    if planner.cw.clear_time > 0.0:
+        t = time_fn(planner.update_clearance, reps, device)
+        _row("clear_map", batch0, 0, t, True)
 
-    def bench(B, nref):
-        p = _planner(scene, mu, B, T0, ntheta0, V, grid, device)
-        return time_fn(lambda: p.replan(start, goal, nref), reps, device)
+    print("  replan, n_refine sweep:")
+    print(header)
+    for n_refine in sorted({refine0, 1, 5}):
+        t = time_fn(lambda: planner.replan(rs.state, rs.goal, n_refine), reps, device)
+        _row("replan", batch0, n_refine, t, n_refine == refine0)
 
-    print(f"  n_refine sweep (B={B0}):")
-    _header()
-    for nref in [1, 3, 5, 10]:
-        _row(B0, nref, bench(B0, nref))
-
-    print(f"  B (rollouts) sweep (n_refine={nref0}):")
-    _header()
-    for B in [1024, 4096, 8192]:
-        _row(B, nref0, bench(B, nref0))
+    print("  replan, batch sweep (multiples of the friction replicas):")
+    print(header)
+    for batch in sorted({batch0, batch0 // 2 - (batch0 // 2) % n_mu, 2 * batch0}):
+        p, _ = (planner, sim) if batch == batch0 else _planner(rs, batch, device)
+        t = time_fn(lambda: p.replan(rs.state, rs.goal, refine0), reps, device)
+        _row("replan", batch, refine0, t, batch == batch0)
 
 
 if __name__ == "__main__":

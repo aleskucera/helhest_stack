@@ -4,6 +4,8 @@ One fused `rollout_kernel` over B rollouts x T steps. Reports ms/rollout, the re
 (simulated seconds per wall-second = B*T*dt / wall), and throughput (M wheel-steps/s). Sweeps batch
 B and horizon T at planner scale, on CPU and (if present) CUDA.
 
+The wheel is the planner's 0.10 m cylinder (`plan_wheel_width`), not the old sphere.
+
 Wall-clock is independent of `dt` (it only scales the integrated velocities), so the timings hold
 for any `dt`; only the real-time factor moves with it -- set it with `--dt` (default 0.1).
 
@@ -21,6 +23,9 @@ from helhest import heightmap as hmmod
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 
+# the planner's cylinder wheel (plan_wheel_width): 32 yaw-binned envelopes, one read per step
+WHEEL_WIDTH = 0.10
+
 
 def _time(fn, reps, device):
     """Mean wall-clock of `fn` over `reps`, with a warmup + device syncs around the timed loop."""
@@ -35,7 +40,7 @@ def _time(fn, reps, device):
 
 def _build(scene, mu, B, T, device, dt):
     sim = ForwardSimulator(
-        dynamics.robot_params(),
+        dynamics.robot_params(WHEEL_WIDTH),
         dynamics.planning_solver(dt),
         GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
         B,
@@ -83,7 +88,8 @@ def main():
             batch_sweep, fixed_T = [512, 2048, 8192], 40
             horizon_sweep, fixed_B, reps = [20, 40, 80, 160], 2048, 20
         print(
-            f"\n=== ForwardSimulator  device={device}  dt={dt:.2f}  grid={scene.ny}x{scene.nx}  reps={reps} ==="
+            f"\n=== ForwardSimulator  device={device}  dt={dt:.2f}  grid={scene.ny}x{scene.nx}  "
+            f"cylinder {WHEEL_WIDTH} m  reps={reps} ==="
         )
         print(f"  batch sweep (T={fixed_T}):")
         _header()
