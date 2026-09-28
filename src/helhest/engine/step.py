@@ -501,8 +501,8 @@ def normal_loads(
     and the moment it contributes is LINEAR in N_i, so this stays a 3x3 solve at the same cost.
     Resolving the force balance along n_bar instead of vertically is what makes S right: friction
     has a vertical component on a slope, so the normals alone do not carry the full weight. The
-    old row gave Sum N_i = m g / (cos pitch cos roll), a 10% overshoot at 25 deg, where the truth
-    is m g cos(tilt) -- which Chrono confirms to 1e-4.
+    old row gave Sum N_i = m g / (cos pitch cos roll), where the truth is m g cos(tilt) -- which
+    Chrono confirms to 1e-4. At 25 deg of pitch that is 22% over the truth (10% over m g).
 
     On FLAT ground n_bar = z, S = m g and F_t = 0, so every coefficient reduces to the previous
     one and the result is bit-identical. Only sloped terrain moves.
