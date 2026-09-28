@@ -48,7 +48,6 @@ from helhest.perception import ScanPreprocessor
 from helhest.perception.belief_frame import BeliefFrame
 from helhest.perception import OutlierFilterConfig
 from helhest.perception import StatisticalOutlierFilter
-from helhest.perception import TerrainMap
 from helhest.perception import transform_points
 from helhest.planning.coarse import CoarseRouter
 from helhest import dynamics
@@ -75,7 +74,7 @@ from tf2_geometry_msgs import do_transform_pose
 from tf2_ros import TransformBroadcaster
 from tf2_ros import TransformException
 
-from ._pipeline_common import grid_to_cloud
+from ._pipeline_common import elevation_to_cloud
 from ._pipeline_common import pointcloud2_to_xyz_time_array
 from ._pipeline_common import quaternion_to_matrix
 
@@ -1412,20 +1411,7 @@ class NavigationNode(Node):
         return super().destroy_node()
 
     def _publish_grid(self, pub, elev: np.ndarray, xmin: float, ymin: float, cell: float, stamp):
-        ny, nx = elev.shape
-        tm = TerrainMap(resolution=cell, bounds=(xmin, xmin + nx * cell, ymin, ymin + ny * cell))
-        tm.elevation = elev
-        cloud = grid_to_cloud(
-            terrain_map=tm,
-            x_min=xmin,
-            y_min=ymin,
-            resolution=cell,
-            stamp=stamp,
-            frame_id=self.map_frame,
-            logger=self.get_logger(),
-        )
-        if cloud is not None:
-            pub.publish(cloud)
+        pub.publish(elevation_to_cloud(elev, xmin, ymin, cell, stamp, self.map_frame))
 
     # ------------------------------------------------------------------
     # MPPI planning (visualization only)

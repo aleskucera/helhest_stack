@@ -12,8 +12,6 @@ from sensor_msgs.msg import PointField
 from sensor_msgs_py import point_cloud2 as pc2
 from std_msgs.msg import Header
 
-from helhest.perception import TerrainMap
-
 
 def quaternion_to_matrix(x: float, y: float, z: float, w: float) -> np.ndarray:
     n = x * x + y * y + z * z + w * w
@@ -56,80 +54,42 @@ def pointcloud2_to_xyz_time_array(
     return xyz, times
 
 
-def grid_to_cloud(
-    terrain_map: TerrainMap,
+def elevation_to_cloud(
+    elevation: np.ndarray,
     x_min: float,
     y_min: float,
     resolution: float,
     stamp,
     frame_id: str,
-    *,
-    z_offset: float = 0.0,
-    logger=None,
-) -> PointCloud2 | None:
-    """Convert a TerrainMap into a PointCloud2 with one float32 field per layer.
+) -> PointCloud2:
+    """An elevation grid [rows, cols] as a PointCloud2: one point per finite cell, at the cell
+    centre, with fields x, y, z and `elevation` (= z). `x_min`/`y_min` are the grid's min corner
+    in `frame_id`. NaN cells -- never measured -- are left out."""
+    rows, cols = elevation.shape
+    row_grid, col_grid = np.meshgrid(
+        np.arange(rows, dtype=np.float32), np.arange(cols, dtype=np.float32), indexing="ij"
+    )
+    valid = np.isfinite(elevation)
+    x = (x_min + (col_grid + 0.5) * resolution).astype(np.float32)[valid]
+    y = (y_min + (row_grid + 0.5) * resolution).astype(np.float32)[valid]
+    z = elevation[valid].astype(np.float32)
+    points = np.column_stack([x, y, z, z])
 
-    `x_min`/`y_min` place the grid origin (min corner) in `frame_id`. `z_offset`
-    is added to every elevation so a grid built in a robot-shifted frame can be
-    republished at its true world height (see the accumulator node).
-    """
-    if terrain_map.elevation is None:
-        if logger is not None:
-            logger.warning("TerrainMap.elevation is None — skipping publish.")
-        return None
-
-    rows, cols = terrain_map.elevation.shape  # (ny, nx)
-
-    row_idx = np.arange(rows, dtype=np.float32)
-    col_idx = np.arange(cols, dtype=np.float32)
-    row_grid, col_grid = np.meshgrid(row_idx, col_idx, indexing="ij")
-
-    x_coords = (x_min + (col_grid + 0.5) * resolution).astype(np.float32)
-    y_coords = (y_min + (row_grid + 0.5) * resolution).astype(np.float32)
-
-    # as_dict() already skips layers that were not downloaded (None).
-    layer_dict = terrain_map.as_dict()
-    layer_names = sorted(layer_dict.keys())
-
-    # Drop cells the SupportRatioMask flagged as too far from any real
-    # measurement: those have NaN traversability (and NaN slope/step/roughness)
-    # even though inpaint filled their elevation. Publishing them would make
-    # the heightmap look complete in regions where we actually have no data.
-    # When the filter chain is disabled (no traversability layer at all),
-    # fall back to elevation finiteness — there's no support signal to use.
-    valid = np.isfinite(terrain_map.elevation)
-    if terrain_map.traversability is not None:
-        valid &= np.isfinite(terrain_map.traversability)
-
-    x_valid = x_coords[valid]
-    y_valid = y_coords[valid]
-    z_valid = (terrain_map.elevation[valid] + z_offset).astype(np.float32)
-    layers_valid = [layer_dict[k][valid].astype(np.float32) for k in layer_names]
-
-    n_pts = x_valid.shape[0]
-    point_data = np.column_stack([x_valid, y_valid, z_valid] + layers_valid)
-
-    fields: list[PointField] = []
-    offset = 0
-    for name in ("x", "y", "z"):
-        fields.append(PointField(name=name, offset=offset, datatype=PointField.FLOAT32, count=1))
-        offset += 4
-    for name in layer_names:
-        fields.append(PointField(name=name, offset=offset, datatype=PointField.FLOAT32, count=1))
-        offset += 4
-
+    fields = [
+        PointField(name=name, offset=4 * i, datatype=PointField.FLOAT32, count=1)
+        for i, name in enumerate(("x", "y", "z", "elevation"))
+    ]
     header = Header()
     header.stamp = stamp
     header.frame_id = frame_id
-
-    cloud_msg = PointCloud2()
-    cloud_msg.header = header
-    cloud_msg.height = 1
-    cloud_msg.width = n_pts
-    cloud_msg.fields = fields
-    cloud_msg.is_bigendian = False
-    cloud_msg.point_step = offset
-    cloud_msg.row_step = offset * n_pts
-    cloud_msg.is_dense = False
-    cloud_msg.data = point_data.astype(np.float32).tobytes()
-    return cloud_msg
+    cloud = PointCloud2()
+    cloud.header = header
+    cloud.height = 1
+    cloud.width = int(points.shape[0])
+    cloud.fields = fields
+    cloud.is_bigendian = False
+    cloud.point_step = 16
+    cloud.row_step = 16 * cloud.width
+    cloud.is_dense = False
+    cloud.data = points.astype(np.float32).tobytes()
+    return cloud

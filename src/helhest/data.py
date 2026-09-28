@@ -7,7 +7,6 @@ See that file and the project memory for why each reconciliation is needed.
 
 import pathlib
 
-import h5py
 import numpy as np
 
 SYNCED_DIR = pathlib.Path.home().joinpath("rosbags_experiment", "synced")
@@ -31,6 +30,8 @@ def load_setpoints(h5_path, drive, dt, duration):
 
     Returns (setpoints[T, 3] in sim order+sign [L,R,rear], real dict, run_id, t_grid).
     """
+    import h5py  # the `data` extra, imported here so the rest of this module needs no h5py
+
     with h5py.File(h5_path, "r") as f:
         src = "/joint_setpoints/velocity" if drive == "setpoint" else "/joint_states/velocity"
         t_src = "/joint_setpoints/t" if drive == "setpoint" else "/joint_states/t"
