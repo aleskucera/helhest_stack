@@ -55,16 +55,15 @@ def _sorted_rows(a: np.ndarray) -> np.ndarray:
 
 def _run(
     points: np.ndarray,
-    times: np.ndarray | None = None,
     z_range: tuple[float, float] | None = Z_RANGE,
     self_box: tuple[float, float, float, float] | None = SELF_BOX,
     max_range: float = MAX_RANGE,
-) -> tuple[np.ndarray, float, float]:
+) -> np.ndarray:
     pre = ScanPreprocessor(len(points))
-    buf, count, _, t_min, t_span = pre.run(
-        points, times, _base_T_sensor(), z_range=z_range, self_box=self_box, max_range=max_range
+    buf, count = pre.run(
+        points, _base_T_sensor(), z_range=z_range, self_box=self_box, max_range=max_range
     )
-    return buf.numpy()[:count], t_min, t_span
+    return buf.numpy()[:count]
 
 
 def test_each_gate_rejects_exactly_its_own_point() -> None:
@@ -81,14 +80,14 @@ def test_each_gate_rejects_exactly_its_own_point() -> None:
     )
     T = _base_T_sensor()
     sensor = (base - T[:3, 3]) @ T[:3, :3]
-    got, _, _ = _run(sensor)
+    got = _run(sensor)
     np.testing.assert_allclose(_sorted_rows(got), _sorted_rows(base[[0, 5]]), atol=1e-5)
 
 
 def test_a_random_sweep_matches_numpy() -> None:
     rng = np.random.default_rng(0)
     sensor = rng.uniform((-10.0, -10.0, -2.0), (10.0, 10.0, 2.0), (20000, 3))
-    got, _, _ = _run(sensor)
+    got = _run(sensor)
     want = _reference(sensor, _base_T_sensor(), Z_RANGE, SELF_BOX, MAX_RANGE)
     assert 0 < len(want) < len(sensor)  # every gate has something to do
     assert len(got) == len(want)
@@ -98,29 +97,13 @@ def test_a_random_sweep_matches_numpy() -> None:
 def test_disabled_gates_keep_everything() -> None:
     rng = np.random.default_rng(1)
     sensor = rng.uniform(-12.0, 12.0, (5000, 3))
-    got, _, _ = _run(sensor, z_range=None, self_box=None, max_range=0.0)
+    got = _run(sensor, z_range=None, self_box=None, max_range=0.0)
     want = sensor @ _base_T_sensor()[:3, :3].T + _base_T_sensor()[:3, 3]
     np.testing.assert_allclose(_sorted_rows(got), _sorted_rows(want), atol=1e-5)
 
 
-def test_sweep_time_bounds_come_from_the_survivors_only() -> None:
-    """The deskew's alpha is normalised over what survives, so a rejected point's stamp must not
-    widen the span."""
-    base = np.array([[2.0, 1.0, 0.0], [3.0, -1.0, 0.2], [0.3, 0.0, 0.0], [2.0, 1.0, 5.0]])
-    times = np.array([0.02, 0.07, 0.0, 0.1])  # the extremes sit on the two rejected points
-    T = _base_T_sensor()
-    _, t_min, t_span = _run((base - T[:3, 3]) @ T[:3, :3], times)
-    assert abs(t_min - 0.02) < 1e-7 and abs(t_span - 0.05) < 1e-6
-
-
-def test_no_times_reports_a_zero_span() -> None:
-    _, t_min, t_span = _run(np.array([[1.0, 2.0, 0.0], [2.0, 3.0, 0.0]]))
-    assert t_min == 0.0 and t_span == 0.0
-
-
 def test_an_empty_sweep_returns_nothing() -> None:
-    got, _, t_span = _run(np.zeros((0, 3)))
-    assert len(got) == 0 and t_span == 0.0
+    assert len(_run(np.zeros((0, 3)))) == 0
 
 
 def test_transform_points_matches_numpy() -> None:

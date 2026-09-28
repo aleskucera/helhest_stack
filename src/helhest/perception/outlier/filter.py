@@ -8,7 +8,6 @@ import warp as wp
 
 from .kernels import compact_inliers_kernel
 from .kernels import mean_dist_in_radius_kernel
-from .kernels import radius_outlier_filter_kernel
 
 
 @dataclass
@@ -199,106 +198,6 @@ class StatisticalOutlierFilter:
                 return self._out_pts.numpy()[:n_out].astype(points.dtype, copy=True)
 
             # GPU path: allocate a right-sized output and copy from the compact buffer.
-            out = wp.empty(n_out, dtype=wp.vec3, device=self.device)
-            if n_out > 0:
-                wp.copy(out, self._out_pts, 0, 0, n_out)
-            return out
-
-
-@dataclass
-class RadiusOutlierFilterConfig:
-    """Configuration for `RadiusOutlierFilter`."""
-
-    # Search radius (meters) for neighbor lookup.
-    search_radius_m: float = 0.25
-    # A point is kept iff at least this many other points lie within the radius.
-    min_neighbors: int = 10
-
-
-class RadiusOutlierFilter:
-    """GPU-native Radius Outlier Removal (ROR).
-
-    Keeps points with at least `min_neighbors` other points inside `search_radius_m`.
-    Single fused kernel — counts neighbors, early-exits once the threshold is hit,
-    and writes survivors straight into a compact output. No per-point distance
-    statistics, no global μ/σ, no second launch. Accepts numpy or `wp.array` input
-    and returns the matching type.
-    """
-
-    def __init__(
-        self,
-        config: RadiusOutlierFilterConfig | None = None,
-        *,
-        bounds: tuple[float, float, float, float, float, float] | None = None,
-        device: wp.context.Device | None = None,
-    ):
-        self.config = config or RadiusOutlierFilterConfig()
-        self.device = wp.get_device(device)
-        self._grid: wp.HashGrid | None = None
-
-        if bounds is not None:
-            dims = _hashgrid_dims_from_bounds(bounds, self.config.search_radius_m)
-            with wp.ScopedDevice(self.device):
-                self._grid = wp.HashGrid(*dims, device=self.device)
-
-        self._out_pts: wp.array | None = None
-        self._capacity: int = 0
-        with wp.ScopedDevice(self.device):
-            self._out_counter = wp.zeros(1, dtype=wp.int32)
-
-    def _ensure_grid(self, radius: float, pts_wp: wp.array) -> wp.HashGrid:
-        if self._grid is None or self._grid.device != self.device:
-            dims = _hashgrid_dims_from_points(pts_wp.numpy(), radius)
-            self._grid = wp.HashGrid(*dims, device=self.device)
-        return self._grid
-
-    def _ensure_buffers(self, n: int) -> None:
-        if self._capacity >= n and self._out_pts is not None:
-            return
-        with wp.ScopedDevice(self.device):
-            self._out_pts = wp.empty(n, dtype=wp.vec3)
-        self._capacity = n
-
-    def apply(self, points: np.ndarray | wp.array) -> np.ndarray | wp.array:
-        """Return `points` with outliers removed. Input and output types match."""
-        cfg = self.config
-        return_numpy = isinstance(points, np.ndarray)
-
-        if return_numpy:
-            if points.ndim != 2 or points.shape[1] != 3:
-                raise ValueError(f"points must be (N, 3); got {points.shape}")
-            n = len(points)
-            pts_np_f32 = np.ascontiguousarray(points, dtype=np.float32)
-            pts_wp = wp.array(pts_np_f32, dtype=wp.vec3, device=self.device)
-        else:
-            n = len(points)
-            pts_wp = points
-
-        if n <= cfg.min_neighbors:
-            return points
-
-        with wp.ScopedDevice(self.device):
-            grid = self._ensure_grid(cfg.search_radius_m, pts_wp)
-            grid.build(points=pts_wp, radius=float(cfg.search_radius_m))
-
-            self._ensure_buffers(n)
-            self._out_counter.zero_()
-            wp.launch(
-                radius_outlier_filter_kernel,
-                dim=n,
-                inputs=[
-                    grid.id,
-                    pts_wp,
-                    float(cfg.search_radius_m),
-                    int(cfg.min_neighbors),
-                ],
-                outputs=[self._out_counter, self._out_pts],
-            )
-            wp.synchronize()
-            n_out = int(self._out_counter.numpy()[0])
-
-            if return_numpy:
-                return self._out_pts.numpy()[:n_out].astype(points.dtype, copy=True)
             out = wp.empty(n_out, dtype=wp.vec3, device=self.device)
             if n_out > 0:
                 wp.copy(out, self._out_pts, 0, 0, n_out)

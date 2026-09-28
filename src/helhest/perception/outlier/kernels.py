@@ -67,42 +67,6 @@ def mean_dist_in_radius_kernel(
 
 
 @wp.kernel
-def radius_outlier_filter_kernel(
-    grid: wp.uint64,
-    points: wp.array(dtype=wp.vec3),
-    search_radius: wp.float32,
-    min_neighbors: wp.int32,
-    out_counter: wp.array(dtype=wp.int32),
-    out_points: wp.array(dtype=wp.vec3),
-):
-    """Radius Outlier Removal: keep points with ≥ `min_neighbors` inside `search_radius`.
-
-    Single-pass fused kernel — counts neighbors, early-exits once the threshold is
-    hit, and writes survivors straight into a compact output via atomic. No sqrt,
-    no global μ/σ reduction, no second launch.
-    """
-    i = wp.tid()
-    p = points[i]
-    r2 = search_radius * search_radius
-    count = int(0)
-
-    neighbors = wp.hash_grid_query(grid, p, search_radius)
-    for index in neighbors:
-        if index == i:
-            continue
-        q = points[index]
-        diff = q - p
-        if wp.dot(diff, diff) <= r2:
-            count += 1
-            if count >= min_neighbors:
-                break
-
-    if count >= min_neighbors:
-        slot = wp.atomic_add(out_counter, 0, 1)
-        out_points[slot] = p
-
-
-@wp.kernel
 def compact_inliers_kernel(
     points: wp.array(dtype=wp.vec3),
     mean_dist: wp.array(dtype=wp.float32),

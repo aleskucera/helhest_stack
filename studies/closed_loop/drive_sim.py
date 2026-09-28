@@ -417,9 +417,8 @@ def drive(a: argparse.Namespace) -> dict:
         # PERCEPTION -- the sim's own ray table, self-filtered and rotated to world on device
         origin = body[0:3] + R @ ODIN_MOUNT_XYZ
         raw = sensor.scan(sim.current_state)
-        base, count, _, _, _ = pre.run(
+        base, count = pre.run(
             raw,
-            None,
             base_T_sensor,
             z_range=None,
             self_box=box,

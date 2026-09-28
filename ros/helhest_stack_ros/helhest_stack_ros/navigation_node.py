@@ -2034,9 +2034,8 @@ class NavigationNode(Node):
         """
         if self._preproc is None or self._preproc.max_points < points_sensor.shape[0]:
             self._preproc = ScanPreprocessor(int(points_sensor.shape[0]), device=self.device)
-        buf, count, _, _, _ = self._preproc.run(
+        buf, count = self._preproc.run(
             points_sensor,
-            None,
             base_T_sensor,
             z_range=(self.z_crop_min, self.z_crop_max) if self.z_crop_enable else None,
             self_box=(
