@@ -42,7 +42,6 @@ def audit(npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
     ccell = float(d["coarse_cell"])
     fac = int(round(ccell / cell))
     cx0, cy0 = (float(x) for x in d["coarse_bounds"])
-    h, seen_f = d["final_h"], d["final_seen"] > 0
     seen = d["coarse_seen"] > 0.5
     passable = d["coarse_passable"]
     bridged = d["coarse_bridged"] > 0.5
@@ -52,11 +51,22 @@ def audit(npz: pathlib.Path, out_dir: pathlib.Path) -> dict:
     cap = float(cv.max())
     unreach = cv >= 0.9 * cap
 
+    if "final_h" in d.files:
+        h, seen_f = d["final_h"], d["final_seen"] > 0
+    else:
+        # Recordings since 2026-09-28 carry no whole-run map (the node keeps no accumulated
+        # cloud); the coarse memory's own block floors stand in for the picture, and the
+        # tall-structure count is not available.
+        blocks = seen & (floor < 1.0e29)
+        h = np.kron(np.where(blocks, floor, np.nan), np.ones((fac, fac))).astype(np.float32)
+        seen_f = np.kron(blocks, np.ones((fac, fac), bool))
     # tall structure: fine cells well above their block's floor, in blocks the router has seen
     fr = np.minimum(np.arange(h.shape[0]) // fac, floor.shape[0] - 1)
     fc = np.minimum(np.arange(h.shape[1]) // fac, floor.shape[1] - 1)
     floor_f = floor[fr[:, None], fc[None, :]]
     tall = seen_f & (h - floor_f > ELEVATED_M) & seen[fr[:, None], fc[None, :]]
+    if "final_h" not in d.files:
+        tall = np.zeros_like(tall)
     tall_sealed = tall & sealed[fr[:, None], fc[None, :]]
 
     # the path, block by block
@@ -211,9 +221,14 @@ def main() -> None:
     print("|---|---|---|---|---|---|---|---|---|---|")
     for s in rows:
         b, pa, nr = s["blocks"], s["path"], s["no_route_frames"]
+        tall = (
+            "—"
+            if s["tall_in_sealed_frac"] is None
+            else f"{s['tall_in_sealed_frac']} of {s['tall_cells']}"
+        )
         print(
             f"| {s['bag']} | {s['bag_time_s']} | {s['path_m']} | {s['reached']}/{len(s['goals'])} | "
-            f"{b['seen']} | {b['sealed']} | {b['bridged']} | {s['tall_in_sealed_frac']} of {s['tall_cells']} | "
+            f"{b['seen']} | {b['sealed']} | {b['bridged']} | {tall} | "
             f"{pa['in_sealed']} / {pa['in_bridged']} / {pa['in_unseen']} of {pa['samples']} | "
             f"{nr['coarse']} / {nr['fine_own_heading']} of {s['frames_recorded']} |"
         )

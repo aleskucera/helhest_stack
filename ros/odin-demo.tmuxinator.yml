@@ -86,7 +86,7 @@ windows:
       panes:
         - <%= exec_sh %> bash -c '<%= dev %>; exec bash'
   # rqt_reconfigure GUI for live parameter tuning of the running node
-  # (icp_*, reset_after_rejects, imu_rotation_prior, dynamic_*, footprint_*, ...).
+  # (plan_*, belief_carve_m, the filters, ...).
   - rqt:
       panes:
         - <%= exec_sh %> bash -c '<%= ros %> && ros2 run rqt_reconfigure rqt_reconfigure; exec bash'

@@ -4,7 +4,6 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Global Options1
-        - /accumulated_map1
       Splitter Ratio: 0.5
   - Class: rviz_common/Views
     Name: Views
@@ -24,32 +23,7 @@ Visualization Manager:
       Show Names: true
       Marker Scale: 1
       Value: true
-    # The accumulated global map — the star of the show. Colored by height (Z).
-    - Alpha: 1
-      Autocompute Value Bounds:
-        Max Value: 3
-        Min Value: -1
-        Value: true
-      Axis: Z
-      Class: rviz_default_plugins/PointCloud2
-      Color Transformer: AxisColor
-      Decay Time: 0
-      Enabled: true
-      Name: accumulated_map
-      Position Transformer: XYZ
-      Selectable: true
-      Size (Pixels): 3
-      Size (m): 0.04
-      Style: Flat Squares
-      Topic:
-        Depth: 1
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /accumulated_map
-      Use Fixed Frame: true
-      Value: true
-    # Accumulated routing heightmap (16 m planning window).
+    # The belief map over the routing window (16 m) -- the planner's own map.
     - Alpha: 1
       Autocompute Value Bounds:
         Max Value: 3

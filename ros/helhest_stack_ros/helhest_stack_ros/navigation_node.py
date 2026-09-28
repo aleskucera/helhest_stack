@@ -1,23 +1,17 @@
 #!/usr/bin/env python3
-"""Elevation mapper and planner for ROS 2 Kilted — Odin's on-robot stack.
+"""Odin's on-robot navigation node for ROS 2: map, plan, drive.
 
-Every planning map comes from one probabilistic elevation belief (elevation_belief, through
-helhest.perception.belief_frame -- the same path the closed-loop sim plans on), fed with the
-ICP-corrected scan. Published, elevation-only (no traversability):
+The pose is Odin's on-device SLAM (`odom_topic`), trusted as is. Each dToF scan is filtered and
+folded into one probabilistic elevation belief (elevation_belief, through
+helhest.perception.belief_frame -- the same path the closed-loop sim plans on), and every planning
+map is a crop of it. Published, elevation-only (no traversability):
 
   * `elevation_local`  — the MPPI window (`win_m`, robot-centred crop of the belief), NaN where the
     belief never measured.
   * `elevation_global` — the routing window (`route_m`), likewise.
-  * `accumulated_map` — the raw accumulated device cloud (up to the `map_max_radius_m` crop): ICP's
-    scan-to-submap target, and the topic to watch to confirm the map is persisting.
 
-Pose comes from odometry (`nav_msgs/Odometry`) refined by scan-to-submap 6-DOF
-point-to-plane ICP. When `gravity_enable`, the IMU's gravity vector anchors the
-ICP roll/pitch each scan (see IcpConfig.gravity_weight), so geometry-only tilt
-cannot drift the map off level.
-
-Frames: sensor -> base (base_frame, static TF) -> odom -> world == map_frame. The
-world frame is bootstrapped to odom at the first scan.
+Frames: sensor -> base (base_frame, static TF) -> odom == map_frame; the node publishes the
+identity map -> odom and odom -> base itself.
 """
 
 from __future__ import annotations
@@ -47,24 +41,15 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu
 from sensor_msgs.msg import JointState
 from sensor_msgs.msg import PointCloud2
-from sensor_msgs.msg import PointField
-from sensor_msgs_py.point_cloud2 import read_points_numpy
 from std_msgs.msg import ColorRGBA
 from std_msgs.msg import Float32
 from visualization_msgs.msg import Marker
-from helhest.perception import DeviceMapAccumulator
-from helhest.perception import DynamicFilterConfig
-from helhest.perception import DynamicPointFilter
-from helhest.perception import HeightMapBuilder
-from helhest.perception import IcpAligner
-from helhest.perception import IcpConfig
 from helhest.perception import ScanPreprocessor
 from helhest.perception.belief_frame import BeliefFrame
 from helhest.perception import OutlierFilterConfig
 from helhest.perception import StatisticalOutlierFilter
 from helhest.perception import TerrainMap
 from helhest.perception import transform_points
-from helhest.perception.dynamic.frontier import frontier_from_organized
 from helhest.planning.coarse import CoarseRouter
 from helhest import dynamics
 from helhest.control.command import condition_command
@@ -82,9 +67,6 @@ from helhest.control.yaw_track import YawRateTracker
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 from helhest.planning.costtogo import CostToGo
-from helhest.localization import Localizer
-from helhest.localization import LocalizerConfig
-from helhest.localization import RegistrationOutcome
 from helhest.localization.pose_math import invert_pose
 from helhest.localization.pose_math import matrix_to_quaternion
 from helhest.planner_config import PLAN_DEFAULTS
@@ -103,45 +85,7 @@ _IMU_BUFFER_LEN = 500  # ~5 s of 100 Hz IMU — enough to bracket any cloud stam
 _IMU_MAX_EXTRAP_S = 0.05  # fall back to odom if no IMU sample within this of the cloud stamp
 
 
-def _rodrigues(omega: np.ndarray) -> np.ndarray:
-    """Rotation matrix for the axis-angle vector `omega` (‖omega‖ = angle in rad)."""
-    theta = float(np.linalg.norm(omega))
-    if theta < 1.0e-9:
-        return np.eye(3)
-    k = omega / theta
-    kx = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
-    return np.eye(3) + np.sin(theta) * kx + (1.0 - np.cos(theta)) * (kx @ kx)
-
-
 # Construction-time params: a change to any rebuilds the owning object.
-_ICP_BUILD = frozenset(
-    {
-        "icp_max_iters",
-        "icp_max_corr_dist_m",
-        "icp_trim_residual_m",
-        "icp_normal_radius_m",
-        "icp_voxel_size_m",
-        "icp_voxel_target",
-        "gravity_enable",
-        "gravity_weight",
-        "device",
-    }
-)
-_ACC_BUILD = frozenset(
-    {"accumulation_voxel_m", "map_max_radius_m", "map_z_min_m", "map_z_max_m", "device"}
-)
-_DYN_BUILD = frozenset(
-    {
-        "dynamic_az_bins",
-        "dynamic_el_bins",
-        "dynamic_el_min_deg",
-        "dynamic_el_max_deg",
-        "dynamic_margin_m",
-        "dynamic_margin_rel",
-        "dynamic_min_range_m",
-        "device",
-    }
-)
 _OUTLIER_BUILD = frozenset(
     {"outlier_search_radius_m", "outlier_min_neighbors", "outlier_std_mult", "device"}
 )
@@ -211,7 +155,7 @@ class _MapFrame:
     elev_local_view: np.ndarray  # (wh, ww) NaN in unknown cells — for RViz
     relev_view: np.ndarray  # (rwh, rww) NaN in unknown cells — for RViz
     relev_mem: np.ndarray  # (rwh, rww) blind cells inpainted — cost-to-go routing terrain
-    relev_measured: np.ndarray  # (rwh, rww) bool: True where the accumulated map has data
+    relev_measured: np.ndarray  # (rwh, rww) bool: True where the belief has a measurement
     cell: float
     ex: float
     ey: float
@@ -239,7 +183,7 @@ def _same_manoeuvre(a: np.ndarray, b: np.ndarray, spin_th: float = 0.25) -> bool
 
 
 class NavigationNode(Node):
-    """Map with the elevation belief, localise with ICP, plan with the cost-to-go and MPPI."""
+    """Map with the elevation belief, plan with the cost-to-go and MPPI, drive the robot."""
 
     def __init__(self) -> None:
         super().__init__("navigation")
@@ -251,13 +195,10 @@ class NavigationNode(Node):
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         self.tf_broadcaster = TransformBroadcaster(self)
 
-        self.map_wp: wp.array | None = None  # accumulated device cloud (world frame)
-        self.map_ages: wp.array | None = None  # per-map-point last-seen frame (recency pruning)
-        self.map_streak: wp.array | None = None  # per-map-point seen-through streak (persist carve)
         self._bframe = None  # BeliefFrame, created on the first scan
         self._bframe_t: float | None = None  # stamp of the last scan folded into it [s]
         self._bbuf: dict[str, wp.array] = {}  # the belief path's preallocated crops and pools
-        self._frame: int = 0  # monotonic frame counter for recency stamps
+        self._frame: int = 0  # monotonic processed-frame counter (RViz label, debugging)
         self._rec: dict[str, list] | None = (
             {k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "meta", "goal", "t", "trail")}
             if self.plan_debug_record
@@ -267,7 +208,6 @@ class NavigationNode(Node):
         # Latest map->odom correction, cached from the last processed cloud and re-broadcast
         # at the full odom rate (see _odom_tf_callback) so base_link stays dense for TF lookups.
         self._map_T_odom: np.ndarray | None = None
-        self._beam_dirs: np.ndarray | None = None  # per-beam unit dirs, built once for the frontier
         self.goal_xy: tuple[float, float] | None = None  # planning goal in map frame
         self._prev_cmd = np.zeros(
             3, np.float32
@@ -298,38 +238,24 @@ class NavigationNode(Node):
         self.sgrid = None  # routing lattice grid (built)
         self._plan_kr: int = 1
         self._plan_dims: tuple[int, int, int, int, int, int] | None = None
-        self.localizer: Localizer | None = None
-        self._latest_imu: Imu | None = None
-        # (t_sec, quaternion xyzw, angular_velocity xyz) history so the deskew and the
-        # rotation prior can read the gyro rate at the *cloud* stamp (not whatever arrived
-        # last). The quaternion is buffered for gravity/debug only — the prior uses the gyro.
+        # (t_sec, quaternion xyzw, angular_velocity xyz in base) -- the yaw-rate loop, the
+        # turn-boost adapter and the mu estimate read the latest gyro sample from here.
         self._imu_buffer: deque[tuple[float, np.ndarray, np.ndarray]] = deque(
             maxlen=_IMU_BUFFER_LEN
         )
-        # Running gyro-integrated world_R_base + the stamp it is integrated to (rotation prior).
-        self._gyro_R_base: np.ndarray | None = None
-        self._gyro_t: float | None = None
         self._base_R_gyro: np.ndarray | None = None  # cached static base<-imu rotation for the gyro
-        self._consecutive_rejects = 0  # for reset-on-sustained-divergence
         self._prof: dict[str, float] = {}  # per-stage cumulative seconds (profile_stages)
         self._prof_n = 0
         self._prof_t = 0.0
-        self._deskew_warned = False
         self._preproc: ScanPreprocessor | None = None  # device scan entry path
-        self._imu_warned = False
 
         self.device = self._resolve_device(self.get_parameter("device").value)
-        self._build_aligner()
-        self._build_localizer()
-        self._build_accumulator()
-        self._build_dynamic_filter()
         self._build_outlier_filter()
         if self.plan_enable:
             self._build_planner()
 
-        # Sensor QoS (best-effort): a best-effort sub receives from BOTH a reliable publisher
-        # (`/imu/data`) and a best-effort one (`/ouster/imu`); a reliable sub gets nothing from
-        # the latter.
+        # Sensor QoS (best-effort): a best-effort sub receives from reliable and best-effort
+        # publishers alike; a reliable one gets nothing from the latter.
         self.create_subscription(Imu, self.imu_topic, self._imu_callback, qos_profile_sensor_data)
         self._wheel_meas: np.ndarray | None = None  # measured [wL, wR, w_rear], model convention
         self._wheel_meas_t: float = 0.0  # node-clock seconds of the last measurement
@@ -366,7 +292,6 @@ class NavigationNode(Node):
         self.pub_global = self.create_publisher(PointCloud2, "elevation_global", 10)
         # the coarse layer's cost-to-go [m], as a height grid: unreachable blocks are left out
         self.pub_coarse = self.create_publisher(PointCloud2, "coarse_value", 10)
-        self.pub_accum = self.create_publisher(PointCloud2, "accumulated_map", 1)
         self.pub_path = self.create_publisher(Path, "planned_path", 10)
         self.pub_path_marker = self.create_publisher(Marker, "planned_path_marker", 10)
         self.pub_frame = self.create_publisher(Marker, "frame_marker", 1)
@@ -384,7 +309,7 @@ class NavigationNode(Node):
         self.get_logger().info(
             f"NavigationNode: cloud={self.lidar_topic} odom={self.odom_topic} imu={self.imu_topic} "
             f"map_frame={self.map_frame} win_m={self.win_m} route_m={self.route_m} "
-            f"gravity={'on' if self.gravity_enable else 'off'} device={self.device}"
+            f"device={self.device}"
         )
 
     # ------------------------------------------------------------------
@@ -393,15 +318,8 @@ class NavigationNode(Node):
 
     def _declare_parameters(self) -> None:
         d = self.declare_parameter
-        # ROS / sensors. The defaults are the ODIN robot -- the deployed configuration -- so the
-        # node comes up right with no params file. The Ouster path (the robot's sensor before Odin)
-        # is the same node driven the other way and must be asked for explicitly:
-        #   -p lidar_topic:=/ouster/points -p odom_topic:=/odom_2d -p imu_topic:=/imu/data
-        #   -p base_frame:=base_link -p icp_enable:=true -p deskew_enable:=true
-        #   -p imu_rotation_prior:=true
-        # Those three booleans below travel WITH the sensor choice: Odin publishes its own SLAM
-        # pose, so ICP, deskew and the gyro rotation prior are all off on that path and all on
-        # for Ouster. Getting the pair out of step is silent -- the node runs and maps nothing.
+        # ROS / sensors: Odin, the robot's only sensor stack. The pose is Odin's on-device SLAM
+        # (odom_topic), trusted as is; the cloud arrives already in odin1_base_link.
         d("lidar_topic", "/odin1/cloud_raw")
         d("odom_topic", "/odin1/odometry")
         d("imu_topic", "/odin1/imu")
@@ -410,30 +328,24 @@ class NavigationNode(Node):
         d("sync_slop_s", 0.05)
         d("sync_queue", 30)
         d("device", "auto")
-        # Scan deskew. OFF by default: Odin's per-point time is in seconds and the deskew assumes
-        # nanoseconds. Ouster needs it on.
-        d("deskew_enable", False)
-        d("deskew_time_field", "t")
         # Height crop on the input scan, in base_frame (robot-relative). Drops ceiling /
-        # sub-floor noise before it reaches ICP and both maps. Bounds are metres in z.
+        # sub-floor noise before it reaches the map. Bounds are metres in z.
         d("z_crop_enable", True)
         d("z_crop_min", -1.0)
         d("z_crop_max", 0.5)
         # Horizontal range crop on the input scan: drop returns past this xy-distance from the
-        # robot. Far Ouster returns are sparse grazing-angle ground — noise that only pollutes
-        # ICP and the map. Cropped per SCAN so it never enters any stage. 0 disables.
+        # robot. Far returns are sparse grazing-angle ground -- noise that only pollutes the map.
+        # Cropped per SCAN so it never enters any stage. 0 disables.
         d("scan_max_range_m", 15.0)
-        # Robot self-filter: drop the robot's own returns (wheels/body) — a base_frame
-        # box. Measured from rotate (robot self-returns stay fixed in base while the scene
-        # rotates): the sensor sees the front body/wheels as a bar at x[0.15,0.5] y[-0.5,0.5];
-        # box has margin so the rim doesn't leak and trace rings in the rotating map.
+        # Robot self-filter: drop the robot's own returns (wheels/body) -- a base_frame box,
+        # measured for the Odin mount (self-returns stay fixed in base while the scene moves).
         d("self_filter_enable", True)
-        d("self_x_min", 0.10)
-        d("self_x_max", 0.60)
-        d("self_y_min", -0.55)
-        d("self_y_max", 0.55)
+        d("self_x_min", -0.05)
+        d("self_x_max", 0.55)
+        d("self_y_min", -0.75)
+        d("self_y_max", 0.75)
         # Statistical outlier removal on the input scan (GPU, range-normalized k-NN):
-        # drops sparse specks/noise before ICP and both maps. Range-normalized against
+        # drops sparse specks/noise before they reach the map. Range-normalized against
         # the sensor origin so it spares legitimately sparse distant ground; the
         # min_neighbors gate is an absolute count (6 is safe out to the routing window).
         d("outlier_enable", True)
@@ -445,130 +357,18 @@ class NavigationNode(Node):
         # 36%->8% vs the old 0.15/8) -- see the Tier-B planner analysis.
         d("resolution", 0.08)
         d("win_m", 12.0)  # MPPI window (robot-centered)
-        d("route_m", 16.0)  # accumulated / planning window (robot-centered)
+        d("route_m", 16.0)  # routing window (robot-centered)
         # The planner's three maps (routing, MPPI, coarse) are crops of one elevation_belief
-        # window, fed with the ICP-corrected scan -- the path drive_sim plans on
-        # (perception/belief_frame.py), which also hands the cost-to-go its sigma and drift. The
-        # accumulated cloud is ICP's target and the point-cloud topic, nothing more.
+        # window, fed with the scan placed by Odin's SLAM pose -- the path drive_sim plans on
+        # (perception/belief_frame.py), which also hands the cost-to-go its sigma and drift.
         d("belief_carve_m", 6.0)  # [m] the belief's visibility carve reach; 0 disables it
-        # Accumulator
-        d("accumulation_voxel_m", 0.10)
-        # RADIUS (half-extent) of the robot-centered accumulated map: 15 m reaches 15 m in
-        # every direction (15 ahead, 15 behind), matching the scan_max_range_m crop so the
-        # trailing history stays as tight as the per-scan reach.
-        d("map_max_radius_m", 15.0)
-        d("map_z_min_m", -50.0)
-        d("map_z_max_m", 50.0)
-        # Dynamic-obstacle carving: remove accumulated points the current scan sees
-        # through (moving things). Visibility ray-carve against the new scan.
-        d("dynamic_enable", True)
-        # Consecutive-free carve: only drop a point seen-through for this many frames IN A ROW, so one
-        # grazing/dark/dropped-beam no-return can't delete static geometry. <=1 = instantaneous carve.
-        # A moving obstacle's vacated spot is seen-through CONSECUTIVELY (open ground, never re-hit) so
-        # its trail clears in ~this many frames; a static wall grazed while driving reads free only
-        # INTERMITTENTLY (the 360° scan re-hits it) so the counter resets and it survives.
-        # AGGRESSIVE default 5 (2026-07-15): the follow-me person's trail must clear fast (~0.5 s) or it
-        # walls off the moving goal. Cost: a corridor wall grazed while driving erodes more than at 25
-        # (~43% vs ~24% measured). Accepted -- we don't split follow/click. Raise toward 25 for
-        # map fidelity if you're not following.
-        d("carve_persist_frames", 5)
-        # Age out a BETWEEN-BEAM speck: a map point on a bearing no beam reached, but whose
-        # NEIGHBOURS were scanned, is dropped after this many frames (0 disables). Gated to NEAR +
-        # IN-FRONT space (the two params below): ungated, the coarse-elevation gap test erased 37%
-        # of the map (72% of structure past 8 m) — a distant real point lands in an empty el-bin
-        # (128 bins / 180° = 1.4°/bin vs the ~0.35° beam pitch) and reads as a gap — plus the
-        # wheel-occlusion shadows off to the sides. Near+front confines it to the path specks.
-        # 4 (was 8): age out the trail's between-beam specks faster, matching the aggressive persist=5.
-        d("carve_gap_frames", 4)
-        d(
-            "carve_gap_max_range_m", 10.0
-        )  # only gap-carve within this range (0 = no range gate); 10 (was
-        #                                   2.5) ages out the person's between-beam specks further out
-        # Only gap-carve within this half-cone (deg) of the robot heading; excludes the wheel
-        # shadows (~55-87° off heading) and the rear. 0 = no forward gate (carve all around).
-        d("carve_gap_fwd_deg", 45.0)
-        d("dynamic_az_bins", 1024)  # range-image resolution; match the sensor (Ouster 1024x128)
-        d("dynamic_el_bins", 128)
-        d("dynamic_el_min_deg", -90.0)  # full hemisphere (world-frame binning, robust to mount)
-        d("dynamic_el_max_deg", 90.0)
-        # carve only if the scan is farther by this + range*margin_rel. 0.1 (was 0.3) = smaller slack ->
-        # more aggressive visibility carve (clears the person's trail faster; also erodes more static).
-        d("dynamic_margin_m", 0.1)
-        d("dynamic_margin_rel", 0.05)  # range-proportional slack; absorbs angular-bin quantization
-        #                                on slanted/radial walls that else reads as seen-through
-        d("dynamic_min_range_m", 0.5)
-        # Ray-carve against the free-space FRONTIER (organized cloud: miss beams -> far point),
-        # not just returns. ON: needed to carve a moving person's TRAIL on open ground — where
-        # the beam past a vacated spot hits nothing solid (a no-return), which only the frontier
-        # treats as free. A lone no-return is ambiguous and used to over-carve static, but the
-        # consecutive-free counter (carve_persist_frames above) now makes it safe: a static
-        # surface that briefly no-returns is re-confirmed within `persist` frames and survives.
-        d("dynamic_frontier_enable", True)
-        d("dynamic_frontier_max_range_m", 100.0)  # range a no-return beam is treated as free to
-        # Recency pruning: forget a cell that is OBSERVABLE this frame (a beam reached its
-        # range) yet has gone unconfirmed for this many frames — the moving-object trail the
-        # instantaneous carve leaves behind. Visibility-gated: cells the sensor cannot see
-        # now (blind rear, occluded) are kept, so mapped history survives behind the robot
-        # until it leaves the map radius or odometry breaks. At 10 Hz, 10 frames ~= 1 s.
-        # OFF by default: this time-based age-out also erases legit STATIC structure seen at
-        # grazing/sparse angles. The visibility ray-carve (dynamic_enable) still removes moving
-        # obstacles the moment a beam passes through them; recency only cleaned up the residual
-        # trail. Enable it if you need that trail removed and can accept eroding static cells.
-        d("dynamic_recency_enable", False)
-        d("dynamic_max_unseen_frames", 10)
-        # ICP. OFF by default: on the Odin path /odin1/odometry IS the on-device SLAM pose and the
-        # pipeline trusts it outright. Ouster has no such pose and needs this on.
-        d("icp_enable", False)
-        d("icp_submap_radius_m", 15.0)
-        # 30 was well past the plateau: measured on rotate_fast + out_experiment_goal_unreachable1,
-        # the RMS residual is FLAT from 30 down to 8 iterations (outdoor 0.0200 vs 0.0201) with zero
-        # rejects at every level, even though the 30-cap was being hit on 27% of outdoor frames --
-        # those extra Gauss-Newton steps were plateau iterations that did not improve the fit. 10
-        # keeps the fit (rms unchanged on both bags) and cuts the ICP stage 15.5 -> 9.8 ms outdoors.
-        # Agreement with the (independent) gyro yaw rate improved slightly rather than degrading.
-        d("icp_max_iters", 10)
-        d("icp_max_corr_dist_m", 0.5)
-        d("icp_trim_residual_m", 0.0)  # reject correspondences past this p2plane residual; 0=off
-        d("icp_normal_radius_m", 0.3)
-        d("icp_voxel_size_m", 0.1)
-        d("icp_voxel_target", True)
-        d("icp_min_inliers", 500)
-        d("icp_max_corr_trans_m", 1.0)
-        # Correction caps are loose divergence rails; the RMS fit below is the real quality
-        # gate. A fast in-place rotation legitimately needs a >15° per-frame correction when
-        # the odom/IMU prior lags, so 25° admits those (good-fit) while rms rejects aliased fits.
-        d("icp_max_corr_rot_deg", 25.0)
-        d("icp_min_submap_points", 2000)
-        # Point-to-plane RMS fit (m) above which a registration is rejected — the fitness
-        # signal that lets the rot cap relax safely. Good rotate fits ~0.03-0.055, aliased/
-        # diverged ones >=0.086, so 0.08 separates them. 0 = off (library default).
-        d("icp_max_rms_residual_m", 0.08)
-        # Yaw multi-start: run this many ICPs from headings spread over icp_yaw_search_deg about
-        # the prediction and keep the best fit — escapes the wrong rotational basin under fast
-        # skid-steer yaw. 1 = single ICP (off). GPU-parallel-friendly; costs ~N ICP launches.
-        d("icp_yaw_restarts", 1)
-        d("icp_yaw_search_deg", 30.0)
-        # On a REJECTED registration the pose fell back to raw odom, so the old
-        # accumulated map would smear against it — drop it and re-seed from this scan.
-        d("reset_map_on_reject", True)
-        d(
-            "reset_after_rejects", 5
-        )  # wipe only after this many CONSECUTIVE rejects (sustained loss)
-        d("debug_frames", False)  # INFO-log each frame's registration metrics (debugging)
+        d("debug_frames", False)  # INFO-log per-frame diagnostics (debugging)
         d(
             "profile_stages", False
         )  # GPU-synced per-stage timing, logged every 30 frames (debugging)
-        # Gravity prior (IMU anchors ICP roll/pitch)
-        d("gravity_enable", True)
-        d("gravity_weight", 2000.0)
-        d("gravity_use_accel", False)  # force accel gravity even if orientation is present
-        # Motion prior: take rotation from the IMU orientation (slip-immune), keeping only
-        # translation from wheel odom — wheel odom yaw is wrong under skid (in-place rotation).
-        # OFF by default: with Odin's identity IMU TF the gyro prior rolls the map ~40 deg.
-        d("imu_rotation_prior", False)
-        # Reject single-sample gyro glitches before they reach the deskew / integrated rotation
-        # prior: this robot's /imu/data spikes to >1000 deg/s for one sample (real motion peaks
-        # ~300), and one such sample injects tens of degrees of phantom yaw. 0 disables.
+        # Reject single-sample gyro glitches before they reach the yaw-rate loop and the turn
+        # adapter: the Ouster-era /imu/data spiked to >1000 deg/s for one sample (real motion
+        # peaks ~300). Cheap insurance on any IMU. 0 disables.
         d("max_gyro_rate_dps", 600.0)
         # Viz
         d("publish_map_tf", True)
@@ -576,7 +376,6 @@ class NavigationNode(Node):
         # broadcasts no TF, so without this base_link is disconnected from map. Default on
         # here; set false if the odom source ever starts publishing it, or TF double-publishes.
         d("publish_odom_tf", True)
-        d("publish_accumulated", True)  # republish the raw accumulated cloud on accumulated_map
         # MPPI planning. Consumes the maps this node already builds: elevation_local as the
         # rollout terrain, elevation_global for the cost-to-go routing field. Goal comes from RViz "2D Nav Goal" on goal_topic. Publishes
         # the intended path (nav_msgs/Path + a thick LINE_STRIP marker).
@@ -715,8 +514,8 @@ class NavigationNode(Node):
         # on the real robot, verify the LLC drives a small NEGATIVE /cmd_joints backward -- only
         # all-positive-forward has been verified live (control/command.py header).
         d("plan_wmin", PLAN_DEFAULTS["plan_wmin"])
-        # Reverse gate: this much ground straight behind base_link (m) must be MEASURED (accumulated
-        # map) for reverse to unlock this frame. Checked over a robot-width strip each frame.
+        # Reverse gate: this much ground straight behind base_link (m) must be MEASURED (in the
+        # belief) for reverse to unlock this frame. Checked over a robot-width strip each frame.
         d("plan_reverse_clear_m", 1.5)
         # POINT-TURN routing: cost-to-go pivot primitive cost [m-equivalent per heading bin]; > 0
         # lets the router plan pivot-then-drive for goals behind/beside the robot (a skid-steer can
@@ -766,8 +565,8 @@ class NavigationNode(Node):
         # charge, which cannot help once every candidate already touches: the robot pressed
         # into walls toward the goal. 0 = off.
         d("plan_wall_veto", PLAN_DEFAULTS["plan_wall_veto"])
-        # COARSE "which way" layer (planning/coarse.py). Each frame a plan_coarse_win_m raster of
-        # the accumulated map is pooled into plan_coarse_block_m blocks, kept in a map anchored to
+        # COARSE "which way" layer (planning/coarse.py). Each frame a plan_coarse_win_m crop of
+        # the belief is pooled into plan_coarse_block_m blocks, kept in a map anchored to
         # the WORLD (plan_coarse_memory_m across, centred on the map origin) so a dead end the
         # robot drove away from is still there when it matters, and solved to the goal; that value
         # prices the routing window's border. Measured on false_door (a room whose only door faces
@@ -849,8 +648,8 @@ class NavigationNode(Node):
         # 2 = the first frame planned toward the NEXT goal (what you want for "why didn't it turn").
         d("plan_debug_dump", 0)
         # Frame-history recording for the replay page (studies/closed_loop/build_scrub.py): the
-        # routing maps, the coarse map and the pose of every Nth planned frame, plus the final
-        # accumulated map, written as one npz to this path when the node shuts down. "" = off.
+        # routing maps, the coarse map and the pose of every Nth planned frame, plus the coarse
+        # memory's final layers, written as one npz to this path when the node shuts down. "" = off.
         d("plan_debug_record", "")
         d("plan_debug_record_every", 4)
         # deceleration cap [rad/s^2] -- separate from accel so stops can be firmer than the gentle
@@ -920,8 +719,6 @@ class NavigationNode(Node):
         self.imu_topic: str = g("imu_topic")
         self.base_frame: str = g("base_frame")
         self.map_frame: str = g("map_frame")
-        self.deskew_enable: bool = g("deskew_enable")
-        self.deskew_time_field: str = g("deskew_time_field")
         self.z_crop_enable: bool = g("z_crop_enable")
         self.z_crop_min: float = g("z_crop_min")
         self.z_crop_max: float = g("z_crop_max")
@@ -936,39 +733,15 @@ class NavigationNode(Node):
         self.win_m: float = g("win_m")
         self.route_m: float = g("route_m")
         self.belief_carve_m: float = g("belief_carve_m")
-        self.icp_enable: bool = g("icp_enable")
-        self.icp_submap_radius_m: float = g("icp_submap_radius_m")
-        self.icp_min_inliers: int = g("icp_min_inliers")
-        self.icp_max_corr_trans_m: float = g("icp_max_corr_trans_m")
-        self.icp_max_corr_rot_rad: float = float(np.deg2rad(g("icp_max_corr_rot_deg")))
-        self.icp_min_submap_points: int = g("icp_min_submap_points")
-        self.icp_max_rms_residual_m: float = g("icp_max_rms_residual_m")
-        self.icp_yaw_restarts: int = g("icp_yaw_restarts")
-        self.icp_yaw_search_deg: float = g("icp_yaw_search_deg")
-        self.dynamic_enable: bool = g("dynamic_enable")
-        self.carve_persist_frames: int = g("carve_persist_frames")
-        self.carve_gap_frames: int = g("carve_gap_frames")
-        self.carve_gap_max_range_m: float = g("carve_gap_max_range_m")
-        self.carve_gap_fwd_rad: float = np.deg2rad(g("carve_gap_fwd_deg"))
-        self.dynamic_frontier_enable: bool = g("dynamic_frontier_enable")
-        self.dynamic_frontier_max_range_m: float = g("dynamic_frontier_max_range_m")
-        self.dynamic_recency_enable: bool = g("dynamic_recency_enable")
-        self.dynamic_max_unseen_frames: int = g("dynamic_max_unseen_frames")
-        self.gravity_enable: bool = g("gravity_enable")
-        self.gravity_use_accel: bool = g("gravity_use_accel")
-        self.imu_rotation_prior: bool = g("imu_rotation_prior")
         _max_gyro_dps: float = g("max_gyro_rate_dps")
         # squared rad/s gate, or inf when disabled (0) — compared against |omega|^2 per sample
         self._max_gyro_rate_sq: float = (
             np.deg2rad(_max_gyro_dps) ** 2 if _max_gyro_dps > 0.0 else np.inf
         )
-        self.reset_map_on_reject: bool = g("reset_map_on_reject")
-        self.reset_after_rejects: int = g("reset_after_rejects")
         self.debug_frames: bool = g("debug_frames")
         self.profile_stages: bool = g("profile_stages")
         self.publish_map_tf: bool = g("publish_map_tf")
         self.publish_odom_tf: bool = g("publish_odom_tf")
-        self.publish_accumulated: bool = g("publish_accumulated")
         self.plan_enable: bool = g("plan_enable")
         self.goal_source: str = g("goal_source")  # "click" | "follow" -- live-switchable
         self.follow_standoff: float = g("follow_standoff")  # stop this far short of the tag (m)
@@ -1058,59 +831,6 @@ class NavigationNode(Node):
     # ------------------------------------------------------------------
     # Heavy-object construction
     # ------------------------------------------------------------------
-
-    def _build_aligner(self) -> None:
-        g = lambda k: self.get_parameter(k).value  # noqa: E731
-        cfg = IcpConfig(
-            max_iters=g("icp_max_iters"),
-            max_correspondence_dist_m=g("icp_max_corr_dist_m"),
-            normal_radius_m=g("icp_normal_radius_m"),
-            voxel_size_m=g("icp_voxel_size_m") or None,
-            voxel_target=g("icp_voxel_target"),
-            trim_residual_m=g("icp_trim_residual_m"),
-            gravity_weight=(g("gravity_weight") if self.gravity_enable else 0.0),
-        )
-        self.aligner = IcpAligner(cfg, device=self.device)
-        if self.localizer is not None:
-            self.localizer.aligner = self.aligner
-
-    def _localizer_config(self) -> LocalizerConfig:
-        return LocalizerConfig(
-            enable=self.icp_enable,
-            submap_radius_m=self.icp_submap_radius_m,
-            min_submap_points=self.icp_min_submap_points,
-            min_inliers=self.icp_min_inliers,
-            max_correction_trans_m=self.icp_max_corr_trans_m,
-            max_correction_rot_rad=self.icp_max_corr_rot_rad,
-            max_rms_residual_m=self.icp_max_rms_residual_m,
-            yaw_restarts=self.icp_yaw_restarts,
-            yaw_search_deg=self.icp_yaw_search_deg,
-        )
-
-    def _build_localizer(self) -> None:
-        self.localizer = Localizer(self.aligner, self._localizer_config())
-
-    def _build_accumulator(self) -> None:
-        g = lambda k: self.get_parameter(k).value  # noqa: E731
-        self.acc = DeviceMapAccumulator(
-            g("accumulation_voxel_m"),
-            g("map_max_radius_m"),
-            z_bounds=(g("map_z_min_m"), g("map_z_max_m")),
-            device=self.device,
-        )
-
-    def _build_dynamic_filter(self) -> None:
-        g = lambda k: self.get_parameter(k).value  # noqa: E731
-        cfg = DynamicFilterConfig(
-            az_bins=g("dynamic_az_bins"),
-            el_bins=g("dynamic_el_bins"),
-            el_min_deg=g("dynamic_el_min_deg"),
-            el_max_deg=g("dynamic_el_max_deg"),
-            margin_m=g("dynamic_margin_m"),
-            margin_rel=g("dynamic_margin_rel"),
-            min_range_m=g("dynamic_min_range_m"),
-        )
-        self.dynamic_filter = DynamicPointFilter(cfg, device=self.device)
 
     def _build_outlier_filter(self) -> None:
         g = lambda k: self.get_parameter(k).value  # noqa: E731
@@ -1372,28 +1092,18 @@ class NavigationNode(Node):
         names = {p.name for p in params}
         try:
             self._cache_params()
-            if names & _ICP_BUILD:
+            if "device" in names:
                 self.device = self._resolve_device(self.get_parameter("device").value)
-                self._build_aligner()
-            if names & _ACC_BUILD:
-                self._build_accumulator()
-            if names & _DYN_BUILD:
-                self._build_dynamic_filter()
             if names & _OUTLIER_BUILD:
                 self._build_outlier_filter()
             if self.plan_enable and (names & _PLAN_BUILD or self.planner is None):
                 self._build_planner()  # (re)build on structural change or first enable
             if "device" in names:  # device moved -> device-resident state is stale
-                self.map_wp = None
                 self._bframe, self._bbuf = None, {}
-                self.map_ages = None
-                self.map_streak = None
                 self._preproc = None  # buffers live on the old device
-                self._build_localizer()  # fresh pose state; re-bootstraps on the next scan
         except Exception as exc:  # a bad value must not kill the node
             self.get_logger().error(f"applying parameters failed: {exc}")
             return
-        self.localizer.config = self._localizer_config()
 
     # ------------------------------------------------------------------
     # Callbacks
@@ -1407,13 +1117,11 @@ class NavigationNode(Node):
             self._wheel_meas_t = self.get_clock().now().nanoseconds * 1e-9
 
     def _imu_callback(self, msg: Imu) -> None:
-        self._latest_imu = msg
         q = msg.orientation
         if q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w > 0.5:  # buffer valid fused orientations
             w = msg.angular_velocity
-            # Drop a single-sample gyro glitch: the deskew and the integrated rotation prior both
-            # read this buffer, and one 8000 deg/s spike sample injects ~80 deg of phantom yaw. The
-            # integrator then bridges the missing sample with its good neighbours.
+            # Drop a single-sample gyro glitch: the yaw-rate loop and the turn adapter read this
+            # buffer, and one 8000 deg/s spike sample is a phantom 80 deg of yaw.
             if w.x * w.x + w.y * w.y + w.z * w.z > self._max_gyro_rate_sq:
                 return
             base_R_imu = self._gyro_base_rotation(msg.header.frame_id)
@@ -1451,163 +1159,20 @@ class NavigationNode(Node):
         if scan is None or scan[0].shape[0] == 0:
             self.get_logger().warning("Empty / untransformable scan — skipping.")
             return
-        points_sensor, point_times, base_T_sensor = scan
+        points_sensor, base_T_sensor = scan
         # Sensor->base transform, z / self-footprint / range rejection and compaction, all on
         # device in ONE pass. Done on the host these were four full-cloud numpy copies (~9.6 ms
         # for a 131k-point sweep); the cloud now crosses to the GPU once and stays there.
-        scan_buf, n_scan, t_min, t_span = self._scan_preproc(
-            points_sensor, point_times, base_T_sensor
-        )
+        scan_buf, n_scan = self._scan_preproc(points_sensor, base_T_sensor)
         if n_scan == 0:
             self.get_logger().warning("crop/self-filter removed all points — check bounds.")
             return
-        gravity_up = self._gravity_up_base(cloud_msg.header.stamp)
-        imu_R_base = self._gyro_orientation_base(cloud_msg.header.stamp)
-        self._ck("preproc+prior")
-
-        if not self.localizer.initialized:
-            world_T_base = odom_T_base
-            self.localizer.bootstrap(odom_T_base, world_T_base, imu_R_base)
-            scan_wp = self._denoise(scan_buf[:n_scan], base_T_sensor)
-        else:
-            world_T_base_pred, sweep_delta = self.localizer.predict(odom_T_base, imu_R_base)
-            if self.deskew_enable:
-                self._deskew(
-                    n_scan, t_min, t_span, point_times, sweep_delta, cloud_msg.header.stamp
-                )
-            scan_wp = self._denoise(scan_buf[:n_scan], base_T_sensor)
-            self._ck("deskew+denoise")
-            outcome = self.localizer.update(
-                scan_wp,
-                world_T_base_pred,
-                self.map_wp,
-                odom_T_base,
-                imu_R_base_curr=imu_R_base,
-                gravity_up=gravity_up,
-            )
-            self._ck("icp")
-            self._log_registration(outcome)
-            if self.debug_frames:
-                self.get_logger().info(
-                    f"F{self._frame} {outcome.status} "
-                    f"rot={np.rad2deg(outcome.correction_rot_rad):.1f} "
-                    f"trans={outcome.correction_trans_m:.2f} rms={outcome.rms_residual_m:.3f} "
-                    f"inl={outcome.num_inliers} sub={outcome.submap_points} scan={n_scan}"
-                )
-            world_T_base = outcome.pose
-            # A single reject just uses the fallback pose (the map keeps accumulating). Only
-            # SUSTAINED divergence — tracking genuinely lost — wipes the map and re-seeds from
-            # this scan, so one bad frame no longer starves the ICP submap into a reset spiral.
-            if outcome.status == "rejected":
-                self._consecutive_rejects += 1
-            elif outcome.status == "ok":
-                self._consecutive_rejects = 0
-            if self.reset_map_on_reject and self._consecutive_rejects >= self.reset_after_rejects:
-                self.map_wp = None
-                self._bframe = None  # the belief was fused under the same diverged pose
-                self.map_ages = None
-                self.map_streak = None
-                self._preproc = None  # buffers live on the old device
-                self._consecutive_rejects = 0
-                self.get_logger().warning(
-                    f"{self.reset_after_rejects} consecutive ICP rejects -> resetting global map."
-                )
-
+        self._ck("preproc")
+        # The pose is Odin's on-device SLAM, trusted as is: the map frame is the odometry frame.
+        world_T_base = odom_T_base
+        scan_wp = self._denoise(scan_buf[:n_scan], base_T_sensor)
+        self._ck("denoise")
         world_scan = transform_points(scan_wp, len(scan_wp), world_T_base)
-        valid = wp.full(len(scan_wp), 1, dtype=wp.int32, device=self.device)
-        # Dynamic-obstacle carving: drop accumulated points this scan saw THROUGH (moving
-        # things). Carve the previous map by visibility against the fresh scan.
-        carve = None
-        streak_out = None
-        persist = self.carve_persist_frames
-        streak_mode = self.dynamic_enable and persist > 1
-        if self.dynamic_enable and self.map_wp is not None and len(self.map_wp) > 0:
-            world_T_sensor = world_T_base @ base_T_sensor
-            sensor_origin = world_T_sensor[:3, 3].copy()
-            # Carve against the free-space frontier (no-return beams = free space) so ghosts
-            # with no background behind them are removed; returns-only if unavailable.
-            carve_scan = (
-                self._frontier_world(cloud_msg, world_T_sensor)
-                if self.dynamic_frontier_enable
-                else None
-            )
-            if carve_scan is None:
-                carve_scan = world_scan
-            if streak_mode:
-                # Consecutive-free carve: only drop a point the scan saw PAST for `persist`
-                # frames in a row, so a single ambiguous no-return can't delete static geometry.
-                n_map = len(self.map_wp)
-                streak_in = (
-                    self.map_streak
-                    if self.map_streak is not None and len(self.map_streak) == n_map
-                    else wp.zeros(n_map, dtype=wp.int32, device=self.device)
-                )
-                # Robot heading in world (base +x azimuth) — confines the gap age-out to the cone
-                # in front of the robot, so it can't erode the wheel shadows off to the sides.
-                fwd_az = float(np.arctan2(world_T_base[1, 0], world_T_base[0, 0]))
-                carve, streak_out = self.dynamic_filter.carve_streak(
-                    self.map_wp,
-                    carve_scan,
-                    sensor_origin,
-                    streak_in,
-                    persist,
-                    self.carve_gap_frames,
-                    self.carve_gap_max_range_m,
-                    fwd_az,
-                    self.carve_gap_fwd_rad,
-                )
-            elif self.dynamic_recency_enable and self.map_ages is not None:
-                # Carve + visibility-gated recency: also forget cells that are OBSERVABLE now
-                # but went unconfirmed for max_unseen frames. Cells the sensor can't currently
-                # see (blind rear, occluded) are kept, so history survives behind the robot.
-                carve = self.dynamic_filter.carve_recency(
-                    self.map_wp,
-                    carve_scan,
-                    sensor_origin,
-                    self.map_ages,
-                    self._frame,
-                    self.dynamic_max_unseen_frames,
-                )
-            else:
-                carve = self.dynamic_filter.carve(self.map_wp, carve_scan, sensor_origin)
-        if self.debug_frames and carve is not None:  # host readback — debugging only
-            nmap = len(self.map_wp)
-            ncarved = nmap - int(carve.numpy().sum())
-            self.get_logger().info(f"F{self._frame} carved={ncarved}/{nmap} map points")
-        self._ck("worldscan+carve")
-        center = (world_T_base[0, 3], world_T_base[1, 3])
-        if streak_mode:
-            # Seed streaks at 0 on frames with no prior map (bootstrap / just reset).
-            streak_arg = (
-                streak_out
-                if streak_out is not None
-                else wp.zeros(0, dtype=wp.int32, device=self.device)
-            )
-            self.map_wp, self.map_streak = self.acc.step(
-                self.map_wp,
-                carve,
-                world_scan,
-                valid,
-                center,
-                map_streak=streak_arg,
-            )
-            self.map_ages = None
-        elif self.dynamic_recency_enable:
-            self.map_wp, self.map_ages = self.acc.step(
-                self.map_wp,
-                carve,
-                world_scan,
-                valid,
-                center,
-                map_ages=self.map_ages,
-                frame=self._frame,
-            )
-            self.map_streak = None
-        else:
-            self.map_wp = self.acc.step(self.map_wp, carve, world_scan, valid, center)
-            self.map_ages = None
-            self.map_streak = None
-        self._ck("accumulate")
         stamp = cloud_msg.header.stamp.sec + cloud_msg.header.stamp.nanosec * 1e-9
         self._belief_update(world_scan, world_T_base @ base_T_sensor, stamp)
         self._ck("belief_update")
@@ -1639,7 +1204,7 @@ class NavigationNode(Node):
     def _belief_update(
         self, world_scan: wp.array, world_T_sensor: np.ndarray, stamp: float
     ) -> None:
-        """Fold this frame's ICP-corrected scan into the belief (created on the first scan)."""
+        """Fold this frame's scan into the belief (created on the first scan)."""
         ex, ey = float(world_T_sensor[0, 3]), float(world_T_sensor[1, 3])
         if self._bframe is None:
             cell = self.resolution
@@ -1711,8 +1276,6 @@ class NavigationNode(Node):
     def _publish_maps(self, mf: _MapFrame, stamp) -> None:
         self._publish_grid(self.pub_local, mf.elev_local_view, mf.lxmin, mf.lymin, mf.cell, stamp)
         self._publish_grid(self.pub_global, mf.relev_view, mf.rxmin, mf.rymin, mf.cell, stamp)
-        if self.publish_accumulated:
-            self._publish_accumulated(stamp)
         self._publish_frame_marker(mf, stamp)
 
     def _publish_frame_marker(self, mf: _MapFrame, stamp) -> None:
@@ -1733,32 +1296,6 @@ class NavigationNode(Node):
         m.color = ColorRGBA(r=1.0, g=1.0, b=0.2, a=1.0)
         m.text = f"#{self._frame}"
         self.pub_frame.publish(m)
-
-    def _publish_accumulated(self, stamp) -> None:
-        """Republish the raw accumulated device cloud (`self.map_wp`) as a PointCloud2.
-
-        The one unavoidable host round-trip: the map lives on-device, ROS needs it on
-        the host. Packed straight to bytes (no per-point Python loop), in map_frame.
-        """
-        if self.map_wp is None or len(self.map_wp) == 0:
-            return
-        pts = np.ascontiguousarray(self.map_wp.numpy(), dtype=np.float32)  # (N, 3)
-        n = pts.shape[0]
-        cloud = PointCloud2()
-        cloud.header.stamp = stamp
-        cloud.header.frame_id = self.map_frame
-        cloud.height = 1
-        cloud.width = n
-        cloud.fields = [
-            PointField(name=name, offset=4 * i, datatype=PointField.FLOAT32, count=1)
-            for i, name in enumerate(("x", "y", "z"))
-        ]
-        cloud.is_bigendian = False
-        cloud.point_step = 12
-        cloud.row_step = 12 * n
-        cloud.is_dense = True
-        cloud.data = pts.tobytes()
-        self.pub_accum.publish(cloud)
 
     def _record_frame(
         self,
@@ -1832,8 +1369,8 @@ class NavigationNode(Node):
         rec["t"].append(stamp.sec + stamp.nanosec * 1e-9)
 
     def _record_save(self) -> None:
-        """Write the recording, plus the final accumulated map over the coarse memory's extent
-        and the coarse map's own layers, so the sealing can be audited offline."""
+        """Write the recording, plus the coarse map's own layers, so its sealing can be audited
+        offline."""
         rec = self._rec
         if rec is None or not rec["meta"]:
             return
@@ -1857,20 +1394,7 @@ class NavigationNode(Node):
             ),
             **{f"hist_{k}": np.asarray(v) for k, v in rec.items() if k != "trail"},
         )
-        if self.coarse is not None and self.map_wp is not None and len(self.map_wp):
-            g = self.coarse.grid
-            fine_cell = g.cell_size / self.coarse.factor  # the map's own cell; blocks are whole
-            bounds = (
-                g.origin_x,
-                g.origin_x + g.cells_x * g.cell_size,
-                g.origin_y,
-                g.origin_y + g.cells_y * g.cell_size,
-            )
-            with wp.ScopedDevice(self.device):
-                lay = HeightMapBuilder(fine_cell, bounds, device=self.device).build(self.map_wp)
-                out["final_h"] = lay.max.numpy().astype(np.float32)
-                out["final_seen"] = (lay.count.numpy() > 0).astype(np.uint8)
-            out["final_bounds"] = np.array([bounds[0], bounds[2]], np.float64)
+        if self.coarse is not None:
             for k in ("passable", "seen", "coverage", "bridged", "floor"):
                 out[f"coarse_{k}"] = getattr(self.coarse, k).numpy()
             out["coarse_V"] = self.coarse.V.numpy()[:, :, 0]
@@ -1909,7 +1433,7 @@ class NavigationNode(Node):
 
     def _reverse_clear(self, mf: _MapFrame, yaw: float) -> bool:
         """True when a robot-width strip straight behind base_link (0.3 .. plan_reverse_clear_m)
-        is >= 95% MEASURED in the accumulated map -- the map-knowledge gate for reverse driving.
+        is >= 95% MEASURED in the belief -- the map-knowledge gate for reverse driving.
         Out-of-window samples count as blind."""
         cell = mf.cell
         meas = mf.relev_measured
@@ -2021,8 +1545,8 @@ class NavigationNode(Node):
             self._ck("plan:seed_state")
             # REVERSE gate (only when plan_wmin < 0): give the cost kernel this frame's observed-
             # cell mask (reversing over blind cells is penalized) and unlock the negative sampling
-            # floor only while a robot-width strip behind base_link is measured in the accumulated
-            # map -- no rear sensor, so reverse may only use REMEMBERED ground.
+            # floor only while a robot-width strip behind base_link is measured in the belief --
+            # no rear sensor, so reverse may only use REMEMBERED ground.
             # the governor needs the same mask: it slows the robot over ground nobody has measured
             if self.plan_wmin < 0.0 or self.governor is not None:
                 self.planner.set_measured(mf.dev["local_m"])
@@ -2453,99 +1977,11 @@ class NavigationNode(Node):
     # IMU gravity vector -> up-in-base
     # ------------------------------------------------------------------
 
-    def _gravity_up_base(self, stamp) -> np.ndarray | None:
-        """Up-direction in base_frame from the latest IMU: orientation if valid, else accel.
-
-        Returns None when gravity is disabled or no usable IMU/TF is available (the ICP
-        then just runs geometry-only). Uses the IMU frame's static TF into base_frame, so
-        it works whether the IMU is `imu` (== base) or `os_imu`.
-        """
-        if not self.gravity_enable or self._latest_imu is None:
-            return None
-        imu = self._latest_imu
-        q = imu.orientation
-        have_orientation = (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w) > 0.5
-        if have_orientation and not self.gravity_use_accel:
-            # world_R_imu -> up expressed in the imu frame = R^T · ẑ (third row of R).
-            r_imu = quaternion_to_matrix(q.x, q.y, q.z, q.w)[:3, :3]
-            up_imu = r_imu.T @ _EZ
-        else:
-            a = np.array(
-                [imu.linear_acceleration.x, imu.linear_acceleration.y, imu.linear_acceleration.z]
-            )
-            n = float(np.linalg.norm(a))
-            if n < 1e-6:  # no accel either -> give up gracefully
-                if not self._imu_warned:
-                    self.get_logger().warning("IMU has no orientation and no accel — gravity off.")
-                    self._imu_warned = True
-                return None
-            up_imu = a / n  # accelerometer measures -g -> points up when static
-        try:
-            tf = self.tf_buffer.lookup_transform(self.base_frame, imu.header.frame_id, stamp)
-        except TransformException:
-            try:  # fall back to the latest available IMU->base transform
-                tf = self.tf_buffer.lookup_transform(
-                    self.base_frame, imu.header.frame_id, rclpy.time.Time()
-                )
-            except TransformException as exc:
-                self.get_logger().warning(f"IMU->base TF failed: {exc}")
-                return None
-        r = tf.transform.rotation
-        base_R_imu = quaternion_to_matrix(r.x, r.y, r.z, r.w)[:3, :3]
-        up_base = base_R_imu @ up_imu
-        n = float(np.linalg.norm(up_base))
-        return (up_base / n).astype(np.float64) if n > 1e-9 else None
-
-    def _gyro_orientation_base(self, stamp) -> np.ndarray | None:
-        """world_R_base (3x3) from INTEGRATING the base-frame gyro up to the cloud `stamp`.
-
-        The motion prior's rotation source. We do NOT use the fused orientation quaternion:
-        on this robot /imu/data's AHRS reports yaw with the wrong sign and attenuated (an
-        ENU/NED handedness bug, with no magnetometer to anchor yaw), which drove the
-        localization yaw the WRONG way and rotated the accumulated map ~20° over a spin.
-        The gyro angular_velocity is correct and slip-immune — it matches wheel odom, which
-        the fused orientation contradicts — so we integrate it instead.
-
-        Only the frame-to-frame delta is consumed by predict(), so the arbitrary integration
-        origin and any slow roll/pitch drift cancel: ICP's gravity prior re-anchors roll/pitch
-        each frame, and yaw has no other source anyway. Advanced once per cloud (from the last
-        cloud stamp to this one, piecewise over the buffered samples), so it stays correct even
-        when a frame is rejected — the delta still spans the true inter-cloud rotation.
-
-        The buffered gyro is already rotated into base_frame (see `_gyro_base_rotation`); returns
-        None when the prior is disabled so predict() falls back to the pure odom delta.
-        """
-        if not self.imu_rotation_prior:
-            return None
-        t = stamp.sec + stamp.nanosec * 1e-9
-        if self._gyro_R_base is None:  # seed at identity — only deltas matter downstream
-            self._gyro_R_base = np.eye(3)
-            self._gyro_t = t
-            return self._gyro_R_base.copy()
-        # Integrate omega across each buffered sample in (t_prev, t]; tail to the exact stamp.
-        R = self._gyro_R_base
-        tk = self._gyro_t
-        for ts, _q, w in self._imu_buffer:
-            if ts <= tk:
-                continue
-            if ts > t:
-                break
-            R = R @ _rodrigues(w * (ts - tk))  # body-frame rate -> right-multiply
-            tk = ts
-        if t > tk:
-            w = self._imu_omega_at(t)
-            if w is not None:
-                R = R @ _rodrigues(w * (t - tk))
-        self._gyro_R_base = R
-        self._gyro_t = t
-        return R.copy()
-
     def _gyro_base_rotation(self, frame_id: str) -> np.ndarray | None:
         """Cached base_R_imu (rotation only) from the static IMU mount TF, or None if not ready yet.
 
-        The gyro angular_velocity arrives in the IMU frame — identity for `/imu/data` (imu == base)
-        but a real rotation for `/ouster/imu` (os_imu). Rotating it into base_frame keeps the yaw
-        axis correct for any IMU source. The mount is static, so we look it up once and cache it.
+        The gyro angular_velocity arrives in the IMU frame; rotating it into base_frame keeps the
+        yaw axis correct whatever the mount. It is static, so it is looked up once and cached.
         """
         if self._base_R_gyro is not None:
             return self._base_R_gyro
@@ -2557,32 +1993,6 @@ class NavigationNode(Node):
         self._base_R_gyro = quaternion_to_matrix(r.x, r.y, r.z, r.w)[:3, :3]
         return self._base_R_gyro
 
-    def _imu_omega_at(self, t: float) -> np.ndarray | None:
-        """IMU angular_velocity (rad/s, base frame) linearly interpolated to time `t`, or None.
-
-        The gyro rate is smooth, so this is far less timing-sensitive than the orientation —
-        it's what the deskew needs: the rotation rate during the sweep, no absolute-window
-        integration and no dependence on the cloud header's start/end convention.
-        """
-        buf = self._imu_buffer
-        if not buf:
-            return None
-        if t <= buf[0][0]:
-            return buf[0][2] if buf[0][0] - t <= _IMU_MAX_EXTRAP_S else None
-        if t >= buf[-1][0]:
-            return buf[-1][2] if t - buf[-1][0] <= _IMU_MAX_EXTRAP_S else None
-        for i in range(len(buf) - 1, 0, -1):
-            t0, w0 = buf[i - 1][0], buf[i - 1][2]
-            t1, w1 = buf[i][0], buf[i][2]
-            if t0 <= t <= t1:
-                a = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
-                return (1.0 - a) * w0 + a * w1
-        return None
-
-    # ------------------------------------------------------------------
-    # Scan / odom / deskew / TF (shared shape with terrain_accumulator_node)
-    # ------------------------------------------------------------------
-
     def _odom_to_matrix(self, odom_msg: Odometry) -> np.ndarray:
         p = odom_msg.pose.pose.position
         q = odom_msg.pose.pose.orientation
@@ -2590,9 +2000,7 @@ class NavigationNode(Node):
         T[0, 3], T[1, 3], T[2, 3] = p.x, p.y, p.z
         return T
 
-    def _scan_in_base(
-        self, cloud_msg: PointCloud2
-    ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray] | None:
+    def _scan_in_base(self, cloud_msg: PointCloud2) -> tuple[np.ndarray, np.ndarray] | None:
         try:
             transform = self.tf_buffer.lookup_transform(
                 self.base_frame,
@@ -2607,12 +2015,12 @@ class NavigationNode(Node):
         r = transform.transform.rotation
         base_T_sensor = quaternion_to_matrix(r.x, r.y, r.z, r.w)
         base_T_sensor[0, 3], base_T_sensor[1, 3], base_T_sensor[2, 3] = t.x, t.y, t.z
-        points, point_times = pointcloud2_to_xyz_time_array(cloud_msg, self.deskew_time_field)
+        points, _ = pointcloud2_to_xyz_time_array(cloud_msg)
         if points.size == 0:
-            return np.empty((0, 3), dtype=np.float32), None, base_T_sensor
+            return np.empty((0, 3), dtype=np.float32), base_T_sensor
         # Points stay in the SENSOR frame and in float32: the transform is fused into the
         # device gate kernel, so casting to float64 here would only double the upload.
-        return np.ascontiguousarray(points, dtype=np.float32), point_times, base_T_sensor
+        return np.ascontiguousarray(points, dtype=np.float32), base_T_sensor
 
     def _denoise(self, scan_wp: wp.array, base_T_sensor: np.ndarray) -> wp.array:
         """GPU-native statistical outlier removal on the base-frame scan (device in/out).
@@ -2630,80 +2038,19 @@ class NavigationNode(Node):
         )
         return self.outlier_filter.apply(scan_wp)
 
-    def _ensure_beam_dirs(self, height: int, width: int, xyz: np.ndarray) -> np.ndarray:
-        """Per-beam unit directions (sensor frame) for the organized cloud, built once.
-
-        The beam geometry is fixed, so reconstruct azimuth-per-column and altitude-per-row
-        from one frame's hits (median), interpolate beams that never returned, and cache.
-        Miss beams then get a valid direction for the free-space frontier.
-        """
-        n = height * width
-        if self._beam_dirs is not None and len(self._beam_dirs) == n:
-            return self._beam_dirs
-        r = np.linalg.norm(xyz, axis=1)
-        hit = np.isfinite(r) & (r > 1e-3)
-        d = np.zeros((n, 3))
-        d[hit] = xyz[hit] / r[hit, None]
-        g = d.reshape(height, width, 3)
-        hg = hit.reshape(height, width)
-        az = np.arctan2(g[..., 1], g[..., 0])
-        alt = np.arctan2(g[..., 2], np.hypot(g[..., 0], g[..., 1]))
-        az_col = np.array(
-            [np.median(az[:, c][hg[:, c]]) if hg[:, c].any() else np.nan for c in range(width)]
-        )
-        alt_row = np.array(
-            [np.median(alt[i, :][hg[i, :]]) if hg[i, :].any() else np.nan for i in range(height)]
-        )
-        # Interpolate never-returned beams; unwrap azimuth first so the +/-pi seam doesn't
-        # corrupt the fill. Rows (altitude) are monotone, no wrap.
-        cv = ~np.isnan(az_col)
-        az_col = np.interp(np.arange(width), np.where(cv)[0], np.unwrap(az_col[cv]))
-        rv = ~np.isnan(alt_row)
-        alt_row = np.interp(np.arange(height), np.where(rv)[0], alt_row[rv])
-        AZ, ALT = np.meshgrid(az_col, alt_row)
-        ca = np.cos(ALT)
-        beam = np.stack([ca * np.cos(AZ), ca * np.sin(AZ), np.sin(ALT)], axis=-1)
-        self._beam_dirs = beam.reshape(n, 3).astype(np.float32)
-        return self._beam_dirs
-
-    def _frontier_world(
-        self, cloud_msg: PointCloud2, world_T_sensor: np.ndarray
-    ) -> wp.array | None:
-        """Free-space frontier as a device cloud in the world frame, for ray-carving.
-
-        Hits keep their measured point; no-return beams become a far point along the beam
-        (dynamic/frontier.py). Returns None when the cloud isn't organized (no per-beam miss
-        info, e.g. Livox) so the caller falls back to carving against returns only.
-        """
-        height, width = cloud_msg.height, cloud_msg.width
-        if height <= 1:
-            return None
-        xyz = (
-            read_points_numpy(cloud_msg, field_names=("x", "y", "z"), reshape_organized_cloud=True)
-            .reshape(height * width, 3)
-            .astype(np.float64)
-        )
-        beam = self._ensure_beam_dirs(height, width, xyz)
-        frontier = frontier_from_organized(
-            xyz.astype(np.float32), beam, self.dynamic_frontier_max_range_m
-        )
-        fr_wp = wp.array(np.ascontiguousarray(frontier), dtype=wp.vec3, device=self.device)
-        return transform_points(fr_wp, len(fr_wp), world_T_sensor)
-
     def _scan_preproc(
-        self, points_sensor: np.ndarray, point_times: np.ndarray | None, base_T_sensor: np.ndarray
-    ) -> tuple[wp.array, int, float, float]:
+        self, points_sensor: np.ndarray, base_T_sensor: np.ndarray
+    ) -> tuple[wp.array, int]:
         """Sensor->base transform + z / self / range gates + compaction, on device.
 
-        Returns `(buffer, count, t_min, t_span)`; the buffer is owned by the preprocessor and is
-        valid only until the next call. `t_span` is 0 when the cloud has no per-point times.
+        Returns `(buffer, count)`; the buffer is owned by the preprocessor and is valid only until
+        the next call.
         """
         if self._preproc is None or self._preproc.max_points < points_sensor.shape[0]:
             self._preproc = ScanPreprocessor(int(points_sensor.shape[0]), device=self.device)
-        # the per-point times stay on device -- only the deskew kernel reads them
-        buf, count, _times, t_min, t_span = self._preproc.run(
+        buf, count, _, _, _ = self._preproc.run(
             points_sensor,
-            point_times,
+            None,
             base_T_sensor,
             z_range=(self.z_crop_min, self.z_crop_max) if self.z_crop_enable else None,
             self_box=(
@@ -2713,51 +2060,7 @@ class NavigationNode(Node):
             ),
             max_range=self.scan_max_range_m,
         )
-        return buf, count, t_min, t_span
-
-    def _deskew(
-        self,
-        n_scan: int,
-        t_min: float,
-        t_span: float,
-        point_times: np.ndarray | None,
-        delta: np.ndarray,
-        stamp,
-    ) -> None:
-        """Motion-compensate the compacted device scan IN PLACE (no-op without per-point times)."""
-        if point_times is None:
-            if not self._deskew_warned:
-                self.get_logger().warning(
-                    f"deskew on but cloud has no '{self.deskew_time_field}' field — skipping."
-                )
-                self._deskew_warned = True
-            return
-        if t_span <= 0.0:
-            return
-        # Sweep rotation from the GYRO RATE: omega * sweep_duration. Uses only the per-point `t`
-        # (for both the fractions and the duration) and the instantaneous angular velocity — the
-        # rate is smooth, so this needs no absolute-window integration and doesn't depend on
-        # whether the cloud stamp marks the sweep start or end. Keeps delta's odom translation;
-        # falls back to delta's rotation if the gyro is unavailable.
-        omega = self._imu_omega_at(stamp.sec + stamp.nanosec * 1e-9)
-        if omega is not None:
-            delta = delta.copy()
-            delta[:3, :3] = _rodrigues(omega * (t_span * 1e-9))  # base_start_R_base_end
-        self._preproc.deskew(n_scan, t_min, t_span, delta)
-
-    def _log_registration(self, outcome: RegistrationOutcome) -> None:
-        if outcome.status == "sparse":
-            self.get_logger().debug(
-                f"submap too sparse ({outcome.submap_points} pts) — using odom prediction."
-            )
-        elif outcome.status == "rejected":
-            self.get_logger().warning(
-                f"ICP rejected (inliers={outcome.num_inliers} "
-                f"Δrot={np.rad2deg(outcome.correction_rot_rad):.1f}° "
-                f"Δtrans={outcome.correction_trans_m:.2f}m "
-                f"rms={outcome.rms_residual_m:.3f}m converged={outcome.converged}) "
-                "— using odom prediction."
-            )
+        return buf, count
 
     def _make_tf(self, mat: np.ndarray, parent: str, child: str, stamp) -> TransformStamped:
         """Marshal a 4x4 parent_T_child pose into a stamped TF message."""

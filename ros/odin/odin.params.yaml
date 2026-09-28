@@ -10,23 +10,13 @@
 # plan_max_omega here have plenty of headroom -- raise plan_wmax for more speed.)
 /**:
   ros__parameters:
-    # --- sources (topics / frames) ---
-    lidar_topic: /odin1/cloud_raw       # raw dTOF cloud replaces Ouster
-    odom_topic: /odin1/odometry         # Odin SLAM pose replaces /odom_2d + ICP/EKF
+    # --- sources (topics / frames): Odin's dToF cloud and its on-device SLAM pose ---
+    lidar_topic: /odin1/cloud_raw
+    odom_topic: /odin1/odometry         # the pose, trusted as is
     imu_topic: /odin1/imu
     base_frame: odin1_base_link         # cloud already in this frame -> sensor TF = identity
     map_frame: map
-
-    # --- Odin pipeline: no ICP, no EKF, no deskew, no gyro prior ---
-    icp_enable: false                   # trust the Odin pose directly (dead-reckoning)
-    deskew_enable: false                # Odin per-point time is seconds; deskew assumes ns
-    # Odin names the per-point time field 'offset_time', not the Ouster's 't'. Set here so
-    # flipping deskew_enable actually finds it -- on a name miss the parse silently returns
-    # times=None and the deskew is skipped. Measured on in_speed_odin0/out_odin0: the field
-    # runs 0 .. 0.0668 s, i.e. SECONDS over one 14.5 Hz sweep (the ns assumption above).
-    deskew_time_field: offset_time
-    imu_rotation_prior: false           # gyro prior + identity IMU TF rolls the map ~40 deg
-    publish_map_tf: true                # elevation owns map -> odom_odin ...
+    publish_map_tf: true                # the node owns map -> odom_odin (identity) ...
     publish_odom_tf: true               # ... and odom_odin -> odin1_base_link
 
     # --- robot self-filter box (measured for the Odin mount) ---
@@ -35,7 +25,7 @@
     self_x_max: 0.55
     self_y_min: -0.75
     self_y_max: 0.75
-    footprint_robot_height: 0.45        # odin1_base_link sits ~0.45 m above the floor (measured from floor plane)
+    # (odin1_base_link sits ~0.45 m above the floor, measured from the floor plane)
 
     # --- ACTUATION: ARMED by default (operator choice) -- a /goal_pose DRIVES the robot.
     #     Run viz-only with -p plan_actuate:=false. Plan is device-centered (offset from the
@@ -173,8 +163,8 @@
     # pivot-then-drive instead of a wide loop. [m-equivalent per heading bin; half-turn = 12 bins]
     plan_pivot_cost: 0.3
     # Reverse driving: set plan_wmin negative (e.g. -2.5) to let MPPI back up / pivot -- gated per
-    # frame: unlocks ONLY while a robot-width strip behind base_link is measured in the accumulated
-    # map (plan_reverse_clear_m), and reversing over blind cells is heavily penalized regardless.
+    # frame: unlocks ONLY while a robot-width strip behind base_link is measured in the belief
+    # (plan_reverse_clear_m), and reversing over blind cells is heavily penalized regardless.
     # !! SAFETY: before first enabling, verify the LLC drives a small NEGATIVE /cmd_joints
     # backward -- only all-positive-forward has been verified on the robot (control/command.py).
     plan_wmin: 0.0
