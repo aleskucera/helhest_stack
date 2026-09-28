@@ -18,8 +18,8 @@ dependencies = [
 [project.optional-dependencies]
 # Interactive viewers (viz/) + figure/GIF export.
 viz = ["matplotlib>=3.8", "glfw>=2.6", "PyOpenGL>=3.1", "pillow>=10.0"]
-# Rosbag loading for calibration / eval (data.py).
-data = ["h5py>=3.0"]
+# Rosbag loading for calibration / eval (data.py, scripts/fit_*.py).
+data = ["h5py>=3.0", "rosbags>=0.10"]
 # Map-uncertainty calibration harness (studies/calib): reads Odin .mcap bags directly, so no
 # ROS install is needed to replay them.
 calib = ["elevation-belief", "mcap>=1.2", "mcap-ros2-support>=0.5"]

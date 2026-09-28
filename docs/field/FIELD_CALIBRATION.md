@@ -215,7 +215,7 @@ predicts 0.405 m g. Measure the slope angle with a phone and write it down.
 ```bash
 bags/fetch_bag.sh <name>                            # pull from the robot
 
-./ros/calibrate_turn.sh fit ~/bags/<name>           # alpha -- standalone, no GPU or lidar needed
+python scripts/fit_turn_gain.py  ~/bags/<name>     # alpha -- standalone, no GPU or lidar needed
 python scripts/fit_actuator_lag.py ~/bags/<name>    # tau_motor
 python scripts/fit_traction.py    ~/bags/<name>     # L/K
 python scripts/replay_traction.py ~/bags/<name>     # trajectory scoring against the gyro

@@ -634,7 +634,7 @@ class ElevationNode(Node):
         d("terrain", "outdoor")
         d(
             "k_turn", -1.0
-        )  # explicit turn-gain override (e.g. from calibrate_turn.sh); <0 = use terrain
+        )  # explicit turn-gain override (e.g. from scripts/fit_turn_gain.py); <0 = use terrain
         d(
             "plan_robust_margin_m", PLAN_DEFAULTS["plan_robust_margin_m"]
         )  # cost-to-go safety tube: lateral (m) ~ robot half-width;
