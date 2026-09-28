@@ -11,7 +11,7 @@ machinery.
 Section 6 is the list of things to settle first, and it is the most important section.
 
 **Status 2026-09-17.** Step 1 of section 7 (the sigma calibration harness) is BUILT and RUN --
-`studies/calib/`, results in `studies/calib/RESULTS.md`, numbers in `studies/out/calib/*.json`.
+`studies/calib/`, results in `studies/calib/RESULTS.md`, numbers in `studies/calib/out/*.json`.
 It measured three things that revise this document: the map error is *not* drift-dominated
 (section 2(b) below is wrong for this sensor), the deployed per-cell `max` reduction costs ~35%
 of attitude accuracy, and self-occlusion is not a blocker (section 6.5 closes). Corrections are

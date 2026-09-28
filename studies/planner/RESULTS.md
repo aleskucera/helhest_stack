@@ -2,7 +2,7 @@
 
 Step 2 of `docs/design/PROBABILISTIC_PLANNING_PLAN.md` section 7: the two cheap measurements that the plan
 flags as each able to invalidate a design choice in Part A. Run 2026-09-18, RTX A500.
-Scripts: `studies/planner/{settle_sensitivity,lattice_timing}.py`; JSON in `studies/out/planner/`.
+Scripts: `studies/planner/{settle_sensitivity,lattice_timing}.py`; JSON in `studies/planner/out/`.
 
 ---
 

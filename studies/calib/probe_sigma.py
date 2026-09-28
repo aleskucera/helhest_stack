@@ -213,7 +213,7 @@ def main() -> None:
     ap.add_argument("bags", nargs="+")
     ap.add_argument("--stat", default="mean", choices=("max", "mean"))
     ap.add_argument("--min-obs", type=int, default=4)
-    ap.add_argument("--out", default="studies/out/calib")
+    ap.add_argument("--out", default="studies/calib/out")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)

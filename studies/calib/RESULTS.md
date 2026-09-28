@@ -11,7 +11,7 @@ PYTHONPATH=studies:src .venv/bin/python studies/calib/probe_attitude.py $(cd bag
 PYTHONPATH=studies:src .venv/bin/python studies/calib/probe_sigma.py ostrich0 ostrich1 ostrich2 ostrich3 ostrich4 ostrich6 ostrich8 ostrich10 ostrich11 --stat mean
 ```
 
-Outputs land in `studies/out/calib/*.json`; every number below is read from those.
+Outputs land in `studies/calib/out/*.json`; every number below is read from those.
 
 ---
 
@@ -198,7 +198,7 @@ headings that fill in the ground the robot is about to put its wheels on.
 tuning, where `max_range = 2.5 m` was fitted against 0.35 deg beams binned at 1.4 deg. The Odin
 dToF is a 137 x 88 deg sensor returning ground from 0.36 m, so the gates were structurally right
 and the numbers were not evidence. Re-fitted on `ostrich0/2/4/8/10` with
-`studies/calib/fit_carve.py`; numbers in `studies/out/calib/fit_carve.json`.
+`studies/calib/fit_carve.py`; numbers in `studies/calib/out/fit_carve.json`.
 
 ## 0. A precondition the harness got wrong first
 

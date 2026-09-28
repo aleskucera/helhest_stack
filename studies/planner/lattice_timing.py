@@ -64,7 +64,7 @@ def time_solve(window_m: float, routing_cell: float, n_theta: int, reps: int = 1
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", default="studies/out/planner")
+    ap.add_argument("--out", default="studies/planner/out")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 

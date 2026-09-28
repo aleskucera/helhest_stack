@@ -308,7 +308,7 @@ def main() -> None:
     ap.add_argument("bags", nargs="+")
     ap.add_argument("--lead", type=float, nargs="+", default=[2.0], help="foresight [s]")
     ap.add_argument("--root", default="bags")
-    ap.add_argument("--out", default="studies/out/calib")
+    ap.add_argument("--out", default="studies/calib/out")
     ap.add_argument("--mount-dx", type=float, default=0.0)
     args = ap.parse_args()
 

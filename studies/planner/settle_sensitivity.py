@@ -64,7 +64,7 @@ def settle_at(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", default="studies/out/planner")
+    ap.add_argument("--out", default="studies/planner/out")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
