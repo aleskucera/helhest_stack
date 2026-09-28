@@ -222,6 +222,20 @@
     # docs/field/turn_differential_hotfix.md calls this a stopgap for a drivetrain defect, and it
     # still is -- but it is now a MEASURED stopgap on the right quantity rather than a hand-picked
     # one.
+    #
+    # PROBABLY TOO HIGH (2026-09-28, not yet changed -- field A/B first). 0.74 is reproduced by a
+    # regression of measured on commanded differential that does NOT align the ~0.25-0.3 s
+    # command-to-wheel lag, and the misalignment biases the slope low. Aligned (lag by
+    # cross-correlation, |commanded diff| > 0.5 rad/s):
+    #
+    #     bag                lag      aligned   unaligned
+    #     motors0            287 ms   0.830     0.756
+    #     fast_experiment0   249 ms   0.718     0.676
+    #     fast_experiment1   302 ms   0.837     0.793
+    #     compact            227 ms   0.862     0.804
+    #
+    # scripts/fit_turn_gain.py's ratio of alphas agrees on motors0 (2.01 / 2.36 = 0.85). The
+    # candidate is ~1.20 (1 / 0.83); try it against 1.36 on the same turns before switching.
     plan_turn_boost: 1.36
     # Pre-apply the tightest cap found this far ahead along the committed plan, so the robot is
     # already slow when it enters the corner. 0 = react to the current command only.
