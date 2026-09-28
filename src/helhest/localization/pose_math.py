@@ -1,8 +1,8 @@
-"""Pose algebra and cloud geometry for the accumulating terrain mapper.
+"""Pose algebra for the node and the scan deskew.
 
-Pure numpy, **no rclpy** — so the trajectory/accumulation core is unit-testable
-without a ROS install. Poses are 4x4 homogeneous SE(3) matrices `T` such that a
-point in the source frame maps to the target frame as `T @ [x, y, z, 1]`.
+Pure numpy, **no rclpy** — so it is unit-testable without a ROS install. Poses are 4x4
+homogeneous SE(3) matrices `T` such that a point in the source frame maps to the target frame as
+`T @ [x, y, z, 1]`.
 """
 
 from __future__ import annotations
@@ -18,48 +18,6 @@ def invert_pose(T: np.ndarray) -> np.ndarray:
     out[:3, :3] = R.T
     out[:3, 3] = -R.T @ t
     return out
-
-
-def compose_pose(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Compose two poses: the pose `a` followed by `b`, i.e. `a @ b`."""
-    return a @ b
-
-
-def odom_delta(prev: np.ndarray, curr: np.ndarray) -> np.ndarray:
-    """Frame-to-frame motion `prev_T_curr = inv(odom_T_prev) @ odom_T_curr`.
-
-    Using the delta (not the absolute odom pose) makes the trajectory robust to
-    odom's slowly-drifting global origin.
-    """
-    return invert_pose(prev) @ curr
-
-
-def transform_points_xyz(T: np.ndarray, points: np.ndarray) -> np.ndarray:
-    """Apply pose `T` to an (N, 3) cloud, returning (N, 3) in `T`'s target frame."""
-    if points.shape[0] == 0:
-        return points.reshape(0, 3)
-    R = T[:3, :3]
-    t = T[:3, 3]
-    return points @ R.T + t
-
-
-def crop_box(
-    points: np.ndarray,
-    center: np.ndarray,
-    radius: float | tuple[float, float],
-) -> np.ndarray:
-    """Keep points inside an axis-aligned xy box (inclusive) around `center`.
-
-    `radius` is a single half-extent or `(half_x, half_y)`. Only x and y are
-    tested; z is unbounded. Boundary points are kept.
-    """
-    if points.shape[0] == 0:
-        return points.reshape(0, 3)
-    half_x, half_y = (radius, radius) if np.isscalar(radius) else radius
-    dx = np.abs(points[:, 0] - center[0])
-    dy = np.abs(points[:, 1] - center[1])
-    inside = (dx <= half_x) & (dy <= half_y)
-    return points[inside]
 
 
 def matrix_to_quaternion(R: np.ndarray) -> tuple[float, float, float, float]:
@@ -142,16 +100,3 @@ def deskew_scan(points: np.ndarray, alphas: np.ndarray, sweep_delta: np.ndarray)
         rotated = points + np.sin(angle) * cross1 + (1.0 - np.cos(angle)) * cross2
     shifted = rotated + (alphas[:, None] - 1.0) * t_delta
     return shifted @ R_delta  # right-multiply by R_delta ≡ apply R_deltaᵀ per row
-
-
-def pose_correction_magnitude(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
-    """How far pose `b` is from pose `a`, as `(rotation_rad, translation_m)`.
-
-    Translation is the Euclidean distance between origins; rotation is the angle
-    of the relative rotation `R_a^T R_b` (clamped before arccos for numerics).
-    """
-    trans = float(np.linalg.norm(b[:3, 3] - a[:3, 3]))
-    R_rel = a[:3, :3].T @ b[:3, :3]
-    cos_theta = (np.trace(R_rel) - 1.0) / 2.0
-    rot = float(np.arccos(np.clip(cos_theta, -1.0, 1.0)))
-    return rot, trans
