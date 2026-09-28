@@ -13,7 +13,7 @@ The audit repeats. Steady-state stage times do not: outdoor `total` 94.7 vs 146.
 runs of the same tree (every stage scaled together, i.e. the laptop, not the code). Step 4 must
 interleave the two map sources in one session and compare within it.
 
-Recordings: `out0/*.npz` (gitignored).
+Recordings: `out0/*.npz` (gitignored; not kept after 2026-09-28).
 
 ## A bag with moving objects: none found
 

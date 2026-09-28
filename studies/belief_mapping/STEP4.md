@@ -1,8 +1,8 @@
 # Step 4 -- accumulator vs belief, simultaneous on dasenka (2026-09-26, 286bed9 + f105713)
 
 Two rounds; in each, both map sources replay the same bag at the same time, one per RTX 3090,
-GPUs swapped between rounds (`ab_dasenka.sh`). Charge and z_veto 0 (step 3). Recordings in
-`out4/` (gitignored).
+GPUs swapped between rounds (`ab_dasenka.sh`, deleted after 5c7fabb: the node no longer has an
+accumulator arm). Charge and z_veto 0 (step 3). The recordings (`out4/`) were not kept.
 
 ## Audit -- identical between rounds for both arms
 
