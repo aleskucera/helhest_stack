@@ -99,11 +99,11 @@
     # have matched the combined figure -- would model a transmission defect as turn resistance,
     # and the MPPI rollouts use this same constant as physics, so the plan itself would go wrong.
     k_turn: 1.27
-    # Wheel-differential penalty. THE knob for how willing the planner is to turn, and 0.8 was
-    # far too high: measured closed-loop on flat open ground (scripts/turn_eval.py), a goal at 90
-    # or 180 deg was NEVER REACHED in 70 s, because a differential of 2 rad/s costs 0.8*25*4 = 80
-    # against a progress pull of only 0.3*V^2 -- 10.8 at 6 m to go. Turning lost by 7x, so the
-    # robot drove almost straight and orbited.
+    # Wheel-differential penalty. THE knob for how willing the planner is to turn, and 0.8 was far
+    # too high: measured closed-loop on flat open ground (scripts/turn_eval.py, deleted after
+    # 3fda195), a goal at 90 or 180 deg was NEVER REACHED in 70 s, because a differential of 2 rad/s
+    # costs 0.8*25*4 = 80 against a progress pull of only 0.3*V^2 -- 10.8 at 6 m to go. Turning lost
+    # by 7x, so the robot drove almost straight and orbited.
     #
     #   plan_turn   goal at 90 deg      goal at 180 deg
     #   0.8         never (70 s)        never (70 s)
@@ -190,7 +190,8 @@
     #
     # 1.1 -> 0.4 after the field report of an abrupt evasive turn near obstacles. It scales mean
     # and differential TOGETHER, so the robot tracks the same arc slower rather than turning less
-    # -- which is why it costs no clearance. scripts/overturn_eval.py at the deployed config:
+    # -- which is why it costs no clearance. scripts/overturn_eval.py (deleted after 3fda195) at
+    # the deployed config:
     #
     #            yaw at closest approach      clearance        travel time
     #   slalom   0.98 -> 0.53 rad/s           1.07 -> 1.03 m   +13%
