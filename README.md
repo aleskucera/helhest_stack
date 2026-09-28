@@ -39,7 +39,7 @@ alike; the robot's values are in `ros/config/odin.params.yaml`.
 | `src/helhest/grid.py`, `dynamics.py`, `planner_config.py`, `worlds.py` | the shared grid, the canonical robot/solver params, the plan config, the stress worlds |
 | `ros/` | `helhest_stack_ros/` (the package: `navigation_node`, the Odin driver launch, RViz configs), `config/` (the robot's params, the follow-me overlay, driver config, recording QoS, the Fast DDS profile), `sessions/` (tmuxinator), `tools/` (recording, calibration, loggers, the dev shell); deployment gotchas in `ros/README.md` |
 | `studies/` | measured work: `closed_loop/` (drive_sim, the sim harness), `bag_replay/` (node on real bags + audit), `clearance/`, `planning_refactor/` (golden-field harness), `belief_mapping/`, `calib/`, `dynamic/`, ... each with its README or PLAN |
-| `tests/` | pytest suite; `tests/engine/*.py` also hold standalone parity oracles |
+| `tests/` | pytest suite; `tests/engine/*.py` also hold standalone parity oracles, which `tests/engine/test_selftests.py` runs |
 | `docs/` | `field/` (calibration runbook and results), `incidents/`, `engine/` (Chrono pre-registrations, engine report), `design/`, `research/`, and standalone notes |
 | `demos/`, `scripts/`, `benchmarks/` | older demos, one-off scripts, timing benchmarks |
 
