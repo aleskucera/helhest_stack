@@ -1,9 +1,9 @@
 """Part B: the doubt field and the optimistic/pessimistic gap.
 
-PROBABILISTIC_PLANNING_PLAN.md sections 4.2 and 4.3. A pessimistic planner never explores,
-because not knowing is expensive; an optimistic one always does, because not knowing is free.
-Solving both and taking the difference is what makes exploration purposeful, and it is the only
-one of the three that gives a threshold in the plan cost's own units.
+docs/design/PROBABILISTIC_PLANNING_PLAN.md sections 4.2 and 4.3. A pessimistic planner never
+explores, because not knowing is expensive; an optimistic one always does, because not knowing is
+free. Solving both and taking the difference is what makes exploration purposeful, and it is the
+only one of the three that gives a threshold in the plan cost's own units.
 """
 
 from __future__ import annotations

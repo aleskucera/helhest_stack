@@ -1,7 +1,7 @@
 #!/bin/bash
 # Record a MANUAL-DRIVE characterization bag (open-loop, human on the remote).
 # Pairs commanded wheel omegas -> actual wheel speeds -> gyro/odom so we can fit the
-# real turn gain, stopping distance, and localization sanity. See bag_recording_brief.md.
+# real turn gain, stopping distance, and localization sanity. See docs/field/bag_recording_brief.md.
 #
 # Usage:  ./record_drive.sh <maneuver_surface>   (drive it, then Ctrl-C to stop)
 #         ./record_drive.sh                       (list the standard maneuvers)

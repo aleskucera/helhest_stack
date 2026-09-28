@@ -148,7 +148,7 @@ held. No simulator, no controller: "was there a plan from here" is the planner's
 
 **These numbers were measured on the disconnected heading ring and are retained only as
 history.** Half of every cell's headings held the "no route" cap, and this table read that as a
-planner that could not find routes. See `incident_2026-09-22_lattice-heading-connectivity.md`.
+planner that could not find routes. See `docs/incidents/incident_2026-09-22_lattice-heading-connectivity.md`.
 
 | world | no routing layer | with it | what MPPI did | *re-measured, connected ring* |
 |---|---|---|---|---|

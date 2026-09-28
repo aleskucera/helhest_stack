@@ -446,10 +446,10 @@ class ElevationNode(Node):
         d("resolution", 0.08)
         d("win_m", 12.0)  # MPPI window (robot-centered)
         d("route_m", 16.0)  # accumulated / planning window (robot-centered)
-        # The planner's three maps (routing, MPPI, coarse) are crops of one elevation_belief window,
-        # fed with the ICP-corrected scan -- the path drive_sim plans on (perception/belief_frame.py),
-        # which also hands the cost-to-go its sigma and drift. The accumulated cloud is ICP's target
-        # and the point-cloud topic, nothing more.
+        # The planner's three maps (routing, MPPI, coarse) are crops of one elevation_belief
+        # window, fed with the ICP-corrected scan -- the path drive_sim plans on
+        # (perception/belief_frame.py), which also hands the cost-to-go its sigma and drift. The
+        # accumulated cloud is ICP's target and the point-cloud topic, nothing more.
         d("belief_carve_m", 6.0)  # [m] the belief's visibility carve reach; 0 disables it
         # Accumulator
         d("accumulation_voxel_m", 0.10)
@@ -611,7 +611,7 @@ class ElevationNode(Node):
         # heading only when gcd(bins/2, n_theta) == 1, while the step also has to clear one
         # routing cell (= resolution * plan_lat_coarsen). Get the pair wrong and the planner
         # either refuses to build or, before 4dae1be, silently served a heading ring in pieces.
-        # See incident_2026-09-22_lattice-heading-connectivity.md.
+        # See docs/incidents/incident_2026-09-22_lattice-heading-connectivity.md.
         #
         # 24 bins on a 0.24 m cell (coarsen 3) is connected at bins=2: closing_step = 0.2618 m
         # clears the cell and gcd(1, 24) = 1. That is what ros/odin/odin_elevation.params.yaml

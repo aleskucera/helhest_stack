@@ -1,8 +1,8 @@
 """The z-margin field: feasibility measured in sigmas rather than in raw thresholds.
 
-Part A of PROBABILISTIC_PLANNING_PLAN.md. Each test is asked how much room is left in units of
-its own uncertainty, the binding one sets the pose's margin, and one knob -- `z_veto` -- says
-how many sigmas the robot insists on. The graded penalty comes off the same number, so
+Part A of docs/design/PROBABILISTIC_PLANNING_PLAN.md. Each test is asked how much room is left in
+units of its own uncertainty, the binding one sets the pose's margin, and one knob -- `z_veto` --
+says how many sigmas the robot insists on. The graded penalty comes off the same number, so
 pessimism and proximity-to-bad are not two separately-tuned things.
 """
 

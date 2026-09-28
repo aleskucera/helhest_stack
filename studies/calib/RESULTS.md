@@ -1,6 +1,6 @@
 # Map-uncertainty calibration — results
 
-Step 1 of `PROBABILISTIC_PLANNING_PLAN.md` section 7. Run 2026-09-17 on the newest bags
+Step 1 of `docs/design/PROBABILISTIC_PLANNING_PLAN.md` section 7. Run 2026-09-17 on the newest bags
 (`bags/ostrich0..13`, recorded 2026-08-17), against the **current** mapper path: Odin SLAM
 pose (`/odin1/odometry`), raw dTOF cloud (`/odin1/cloud_raw`), no ICP.
 

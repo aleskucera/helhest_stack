@@ -36,3 +36,8 @@ site/
 studies/dynamic/out/
 studies/bag_replay/out/
 studies/bag_replay/out2/
+
+# test output (tests/pipeline/test_synthetic.py)
+/heightmap.html
+# prior-art reports: large binaries, kept local
+docs/research/*.pdf

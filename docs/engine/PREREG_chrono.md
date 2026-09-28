@@ -43,7 +43,7 @@ Stated as falsifiable claims, with the reason each is expected.
 
    while a real solve should show it FALL. Bar: at 25 deg of pitch the two must differ by more
    than **5%** of `m g`, and Chrono's `min N` must be the smaller. If instead they agree, the
-   `stability_margin` finding in TIER1_REPORT.md section 1 is wrong and the margin was a usable
+   `stability_margin` finding in docs/engine/TIER1_REPORT.md section 1 is wrong and the margin was a usable
    tip-over test after all.
 
 4. **The sum is the diagnostic.** The engine's loads sum to `m g / (cos p cos r)` rather than the

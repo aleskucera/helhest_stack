@@ -581,12 +581,12 @@ def drive(a: argparse.Namespace) -> dict:
             vh = V.numpy()
             hist["blk"].append(ctg.blocked.numpy().mean(2))
             hist["v"].append(vh.min(2))
-            # Fraction of HEADINGS with a route, which is the one thing `v` above cannot show.
-            # `min` over headings calls a cell reachable when any single heading is, and `blk`
-            # is about feasibility, not reachability -- so a lattice that had lost half its
-            # heading ring read as perfectly healthy in both. It did, for months
-            # (incident_2026-09-22_lattice-heading-connectivity.md). On open ground this should
-            # be ~1; the split ring made it exactly 0.5.
+            # Fraction of HEADINGS with a route, which is the one thing `v` above cannot show. `min`
+            # over headings calls a cell reachable when any single heading is, and `blk` is about
+            # feasibility, not reachability -- so a lattice that had lost half its heading ring read
+            # as perfectly healthy in both. It did, for months
+            # (docs/incidents/incident_2026-09-22_lattice-heading-connectivity.md). On open ground
+            # this should be ~1; the split ring made it exactly 0.5.
             hist["route"].append((vh < 0.9 * ctg._vcap).mean(2).astype(np.float32))
             hist["cv"].append(
                 np.zeros((1, 1), np.float32) if coarse is None else coarse.V.numpy()[:, :, 0]

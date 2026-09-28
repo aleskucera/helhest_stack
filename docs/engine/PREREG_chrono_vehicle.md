@@ -1,6 +1,6 @@
 # Pre-registration — the Chrono vehicle model, and the two numbers it has to reproduce
 
-Written before the model was built. Follows PREREG_chrono.md, whose rigid statics gate passed
+Written before the model was built. Follows docs/engine/PREREG_chrono.md, whose rigid statics gate passed
 (geometry to 0.1 mm, flat loads to 3e-4 m g) and which found the engine's slope loads wrong by
 0.249 m g.
 
@@ -21,7 +21,7 @@ the build.
 ## Parameters, and where each one comes from
 
 Three provenance classes, kept separate on purpose: MODEL (from `RobotParams`, exact), BAG
-(measured on the robot, recorded in TIER1_REPORT.md section 3), ASSUMED (neither -- flagged, and
+(measured on the robot, recorded in docs/engine/TIER1_REPORT.md section 3), ASSUMED (neither -- flagged, and
 no conclusion may rest on one).
 
 | quantity | value | provenance |
@@ -54,7 +54,7 @@ the one the comparison is about.
 ## The two predictions
 
 The point of this model is not to reproduce our engine. It is to be an INDEPENDENT instrument for
-the one thing our engine could not do: fit both channels at once. TIER1_REPORT.md section 2 records
+the one thing our engine could not do: fit both channels at once. docs/engine/TIER1_REPORT.md section 2 records
 the conflict -- a single isotropic `(L/K, mu_roll)` gives either the measured turn gain or the
 measured forward gain, never both. Chrono is not party to that fit, so it can arbitrate.
 
@@ -137,7 +137,7 @@ Soil stiffness swept; everything else fixed, Janosi = our own 0.0125 m.
 ### What it says
 
 **The conflict is NOT an artefact of our isotropic |slip| treatment.** That was the leading suspect
-in TIER1_REPORT.md section 2, and it is now much less likely: with a fixed rear axle the two
+in docs/engine/TIER1_REPORT.md section 2, and it is now much less likely: with a fixed rear axle the two
 channels move MONOTONICALLY AND IN OPPOSITE DIRECTIONS with soil stiffness. Soft soil lands the
 forward gain squarely in the measured band (0.9226 at Kphi 0.05 MPa) and pushes alpha to 4.56;
 stiff soil pulls alpha toward 2.20 and drives the forward gain to 1.0. An independent simulator,

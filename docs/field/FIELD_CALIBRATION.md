@@ -1,6 +1,6 @@
 # Field calibration — what to do with the robot outside
 
-Branch: **`engine/exact-arc-integration`** (not `tier1-certificates` — see TIER1_REPORT.md §0).
+Branch: **`engine/exact-arc-integration`** (not `tier1-certificates` — see docs/engine/TIER1_REPORT.md §0).
 
 Everything below exists to settle parameters that are currently fitted against a SIMULATOR
 (Project Chrono) rather than measured on the robot. Chrono is an independent instrument, not
@@ -231,7 +231,7 @@ What each should come out at, and what it decides:
 | σ (relaxation length) | **0 — refuted** | 2026-08-10, 7x speed range | no yaw lag beyond the actuator's; do not reintroduce without evidence |
 | L/K | 8–15 | bags, quasi-static samples only | still conflicted with the forward gain |
 
-**σ was settled on the first trip and the answer was zero** (CALIBRATION_RESULTS.md). What remains
+**σ was settled on the first trip and the answer was zero** (docs/field/CALIBRATION_RESULTS.md). What remains
 unmeasured is α on other SURFACES, and anything at all on a slope.
 
 `replay_traction.py` currently scores legacy / shear / shear+momentum. It should gain the two yaw-lag

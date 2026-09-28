@@ -9,7 +9,7 @@ steady second half, and report
     alpha         = ideal differential-drive yaw rate / realised yaw rate
 
 so the three-way table -- bags, engine, Chrono -- is like for like. The bag targets are 0.906-0.925
-and 2.20 (TIER1_REPORT.md section 3).
+and 2.20 (docs/engine/TIER1_REPORT.md section 3).
 
 Both traction models are run. The legacy one is analytic here and worth stating up front: forward
 gain is 1.000 BY CONSTRUCTION (the commanded speed is always achieved) and alpha is

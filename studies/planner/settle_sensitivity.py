@@ -1,7 +1,7 @@
 """Plan section 6.2: does the settle's clamping mask the sensitivity sigma has to travel through?
 
 The z-margin design rests on `J^-1`, the settle's own analytic Jacobian, carrying map
-uncertainty into attitude uncertainty (PROBABILISTIC_PLANNING_PLAN.md section 3.1). But
+uncertainty into attitude uncertainty (docs/design/PROBABILISTIC_PLANNING_PLAN.md section 3.1). But
 `settle()` runs a DAMPED Newton -- `solver.max_step` caps each iteration and `solver.tilt_clamp`
 bounds the angles every pass -- so the question is whether the attitude response to a terrain
 perturbation is the true sensitivity or a clipped one, especially at a contested contact where

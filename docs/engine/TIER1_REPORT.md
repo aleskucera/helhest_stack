@@ -25,7 +25,7 @@ outputs on purpose and are validated against Chrono.
 
 ## 1. Tier 1 — complete
 
-The four commissioned items, in the order IMPROVEMENTS.md recommends. Each verified against a
+The four commissioned items, in the order docs/research/IMPROVEMENTS.md recommends. Each verified against a
 closed-form answer rather than eyeballed. `tests/engine/golden.py` pins every simulator output for
 a seeded batch and passed at every commit on this branch.
 
@@ -71,7 +71,7 @@ was worth. Measured at B=4096, T=25 on this machine:
 | this branch, with certificates | 2.60 | |
 | this branch, without them | **1.55** | **1.05 ms, 40%** |
 
-IMPROVEMENTS.md §1 estimated "<1%". The gap is ~40x. It splits 0.41 ms for `contact_grip` and
+docs/research/IMPROVEMENTS.md §1 estimated "<1%". The gap is ~40x. It splits 0.41 ms for `contact_grip` and
 0.65 ms for the saturation/stall arithmetic; the tip-over margin was genuinely free (one `min`
 over registers) and was removed only because it does not measure what its name says.
 
@@ -207,7 +207,7 @@ bags; binding needs `tan θ = μ`, i.e. 31° at μ=0.6. That is a lower bound �
 the robot drove and survived — and it says nothing about terrain you have not recorded.
 
 **Torque never binds either.** 105 Nm/wheel is 900 N of traction, 0.86 × weight, so friction
-saturates first for any μ < 0.86. IMPROVEMENTS.md §2's "you stall before you slip" does not hold
+saturates first for any μ < 0.86. docs/research/IMPROVEMENTS.md §2's "you stall before you slip" does not hold
 here; it reasoned from a placeholder an order of magnitude too small.
 
 ---

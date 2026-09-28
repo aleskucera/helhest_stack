@@ -1,6 +1,6 @@
 # Planner gating measurements
 
-Step 2 of `PROBABILISTIC_PLANNING_PLAN.md` section 7: the two cheap measurements that the plan
+Step 2 of `docs/design/PROBABILISTIC_PLANNING_PLAN.md` section 7: the two cheap measurements that the plan
 flags as each able to invalidate a design choice in Part A. Run 2026-09-18, RTX A500.
 Scripts: `studies/planner/{settle_sensitivity,lattice_timing}.py`; JSON in `studies/out/planner/`.
 
@@ -228,7 +228,7 @@ resolving them buys nothing. Only the gap knows that.
 `doubt_targets` follows the OPTIMISTIC policy greedily from the robot and collects the doubtful
 poses along it — the cells whose resolution would unlock the better route. On a frontier-shaped
 map (0.01 m behind the robot, 0.06 m ahead), every target returned lies in the uncertain half,
-ranked by doubt. That is the cheap form of `SENSITIVITY_PLAN.md`'s C4: a policy rollout rather
+ranked by doubt. That is the cheap form of `docs/research/SENSITIVITY_PLAN.md`'s C4: a policy rollout rather
 than an adjoint.
 
 ## Timing, and a correction to section 6.7

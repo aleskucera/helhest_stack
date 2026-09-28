@@ -298,7 +298,7 @@ things:
 - **A target.** Roll out the *optimistic* policy from the robot's pose and
   collect the high-doubt poses along it. Those are the cells whose resolution
   would unlock the better route — decision-focused sensing by policy rollout,
-  no adjoint required (the cheap version of C4 in `SENSITIVITY_PLAN.md`).
+  no adjoint required (the cheap version of C4 in `docs/research/SENSITIVITY_PLAN.md`).
 - **A safety net.** `V_pess[robot] = +inf` while `V_opt[robot] < inf` means the
   goal is unreachable *purely because of ignorance* — `blind_fill_goal_unreachable`
   diagnosed automatically, with a defined response (relax `k`, or go look) instead

@@ -6,9 +6,9 @@ The map therefore always predicts ground it has not yet driven on, which is the 
 condition the planner works under.
 
 The residual's spread is sigma_pitch / sigma_roll directly -- the quantity the z-margin field
-divides by (PROBABILISTIC_PLANNING_PLAN.md section 3) -- so this needs no sigma model of its
-own to be useful. Attitude is compared, never z: the engine's body origin and
-`odin1_base_link` differ by a fixed mount offset, which cancels in pitch/roll but not height.
+divides by (docs/design/PROBABILISTIC_PLANNING_PLAN.md section 3) -- so this needs no sigma model of
+its own to be useful. Attitude is compared, never z: the engine's body origin and `odin1_base_link`
+differ by a fixed mount offset, which cancels in pitch/roll but not height.
 """
 
 from __future__ import annotations

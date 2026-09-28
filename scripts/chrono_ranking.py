@@ -1,10 +1,11 @@
-"""Score a fixed candidate population in Chrono -- the Level-3 reference IMPROVEMENTS.md wants.
+"""Score a fixed candidate population in Chrono -- the Level-3 reference
+docs/research/IMPROVEMENTS.md wants.
 
     scripts/chrono_env.sh scripts/chrono_ranking.py --n 150 --out /tmp/chrono_rank.npz
 
-IMPROVEMENTS.md section 10 asks whether the cheap quasi-static model ORDERS candidate trajectories
-the way an expensive one does; it was never run because no expensive reference existed. Chrono is
-now that reference.
+docs/research/IMPROVEMENTS.md section 10 asks whether the cheap quasi-static model ORDERS candidate
+trajectories the way an expensive one does; it was never run because no expensive reference existed.
+Chrono is now that reference.
 
 Flat rigid ground on purpose. It removes the two unvalidated things -- soil parameters and the
 terrain-dependent cost terms -- so what remains is a clean test of the dynamics: same controls,

@@ -5,7 +5,7 @@
 Runs in Chrono's own conda environment (`pychrono` has no pip distribution and this build has no
 `pychrono.vehicle`, so no SCM -- rigid contact only). It therefore imports NO helhest code and
 writes a plain JSON; `scripts/chrono_compare.py` reads that back in the project venv and puts it
-next to the engine's answer. See PREREG_chrono.md for what this is supposed to show.
+next to the engine's answer. See docs/engine/PREREG_chrono.md for what this is supposed to show.
 
 The robot is one rigid body with three cylinder collision shapes, which is what the engine models:
 no suspension, no articulation, wheels rigidly fixed to the chassis. `ChSystemNSC` is the

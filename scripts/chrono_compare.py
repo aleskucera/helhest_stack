@@ -1,4 +1,4 @@
-"""Put the engine's statics next to Chrono's and score the PREREG_chrono.md predictions.
+"""Put the engine's statics next to Chrono's and score the docs/engine/PREREG_chrono.md predictions.
 
     python scripts/chrono_compare.py /tmp/engine_statics.json /tmp/chrono_sphere.json
 

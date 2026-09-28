@@ -1,7 +1,7 @@
 """Probe B: the per-cell sigma the mapping node has to publish, and its correlation length.
 
 Two numbers the planner needs and the current mapper does not provide
-(PROBABILISTIC_PLANNING_PLAN.md section 5):
+(docs/design/PROBABILISTIC_PLANNING_PLAN.md section 5):
 
   sigma(range)  each sweep is one independent estimate of a cell's surface, so the spread
                 ACROSS sweeps is the per-cell uncertainty -- sensor noise plus registration,

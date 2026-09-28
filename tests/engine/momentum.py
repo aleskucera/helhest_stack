@@ -9,8 +9,8 @@ separate integration.
 
 Implicit is not a stylistic choice. Near zero slip the shear curve is stiff -- force rises over a
 slip scale of R*omega/(L/K), so dF/dv reaches ~1700 N per m/s per contact and m / sum(dF/dv) is
-around 20 ms. An explicit step would need dt well under that, i.e. a 20x longer horizon for the
-same 2.5 s, which is the timestep wall in IMPROVEMENTS.md section 9(a). Implicit Euler is
+around 20 ms. An explicit step would need dt well under that, i.e. a 20x longer horizon for the same
+2.5 s, which is the timestep wall in docs/research/IMPROVEMENTS.md section 9(a). Implicit Euler is
 unconditionally stable on a dissipative system and costs three extra terms in a residual that is
 evaluated anyway; `selftest_stability` confirms it holds at dt up to 0.5 s, 25x that scale.
 
