@@ -17,8 +17,7 @@
 # all outputs (no duplicate /frame_marker etc.). FULL_REPLAY=1 replays every topic.
 #
 # The node pane runs `python3 -m helhest_stack_ros.navigation_node` directly so no
-# colcon-built/installed workspace is required -- same PYTHONPATH-only pattern as
-# elevation-demo/ekf-demo. It loads the SAME params file the robot runs, so a replay
+# colcon-built/installed workspace is required. It loads the SAME params file the robot runs, so a replay
 # reproduces the live tuning instead of drifting from it; EXTRA overrides on top.
 #
 # Panes: bag (start-paused -- hit <space> to play once the node is up),

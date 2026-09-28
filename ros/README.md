@@ -1,8 +1,8 @@
 # helhest_stack ROS
 
 The `navigation_node` (localization + belief mapping + cost-to-go / MPPI planning) and the
-`elevation-demo` tmuxinator. Run via the apptainer container + `dev-shell.sh` (see the
-tmuxinator header). This file records **deployment gotchas** that are easy to lose hours to.
+`odin-demo` tmuxinator. Run via the apptainer container + `dev-shell.sh` (see the tmuxinator
+header). This file records **deployment gotchas** that are easy to lose hours to.
 
 ## KNOWN ISSUE: large LiDAR clouds silently dropped by DDS
 
@@ -33,7 +33,7 @@ export FASTRTPS_DEFAULT_PROFILES_FILE="$REPO/ros/fastdds_shm.xml"
 export FASTDDS_DEFAULT_PROFILES_FILE="$REPO/ros/fastdds_shm.xml"
 ```
 
-The `elevation-demo` tmuxinator already sets this in every pane. For any other launcher
+The `odin-demo` tmuxinator already sets this in every pane. For any other launcher
 (launch files, systemd, a robot bringup script) you must set it too, or clouds drop.
 
 **Fix (multi-host — lidar and node on different machines over the network):** SHM is

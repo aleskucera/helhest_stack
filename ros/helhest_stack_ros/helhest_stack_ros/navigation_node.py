@@ -394,8 +394,8 @@ class NavigationNode(Node):
     def _declare_parameters(self) -> None:
         d = self.declare_parameter
         # ROS / sensors. The defaults are the ODIN robot -- the deployed configuration -- so the
-        # node comes up right with no params file. The Ouster path is the same node driven the
-        # other way and must now be asked for explicitly (ros/elevation-demo.tmuxinator.yml does):
+        # node comes up right with no params file. The Ouster path (the robot's sensor before Odin)
+        # is the same node driven the other way and must be asked for explicitly:
         #   -p lidar_topic:=/ouster/points -p odom_topic:=/odom_2d -p imu_topic:=/imu/data
         #   -p base_frame:=base_link -p icp_enable:=true -p deskew_enable:=true
         #   -p imu_rotation_prior:=true

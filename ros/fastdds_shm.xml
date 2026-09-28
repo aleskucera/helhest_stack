@@ -15,7 +15,7 @@
 
      USE: point EVERY participant (publisher AND subscriber) at this file:
        export FASTRTPS_DEFAULT_PROFILES_FILE=<repo>/ros/fastdds_shm.xml
-     The elevation-demo tmuxinator sets this in every pane. -->
+     The odin-demo tmuxinator sets this in every pane. -->
 <dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
   <profiles>
     <transport_descriptors>
