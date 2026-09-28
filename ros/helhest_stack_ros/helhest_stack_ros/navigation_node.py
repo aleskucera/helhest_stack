@@ -658,7 +658,7 @@ class NavigationNode(Node):
         # the differential is realized ~1:1 below the motor ceiling -- the earlier "~half" was SATURATION
         # (over-commanded wheels), not a real drivetrain gain. So boosting over-turns below the limit and
         # worsens saturation at it. Keep at 1.0 while plan_wmax leaves turning headroom (see that
-        # param); the fixed-2.0 story in docs/turn_differential_hotfix.md is superseded.
+        # param); the fixed-2.0 story in docs/field/turn_differential_hotfix.md is superseded.
         # Transport delay [s] between publishing /cmd_joints and the wheels acting on it. MEASURED
         # at 149-199 ms (scripts/fit_actuator_lag.py); the rollout then plans against commands that
         # land ~2 ticks late instead of instantly. 0.0 = off. Note this makes the planner turn

@@ -1,4 +1,4 @@
-# NumPy implementation (`src/kinematic_helhest/reference/`)
+# NumPy implementation (`src/helhest/reference/`)
 
 Single-threaded, pure NumPy. Entry points: `state.make_state` (init) and `state.step` (advance).
 
@@ -12,7 +12,7 @@ Each step follows **predict → project**:
 6. **Normal loads**: quasi-static 3×3 linear solve (vertical force balance + torque about CoM) → `N_i` [N] per wheel.
 7. **Chassis clearance**: sample raw terrain under the body grid → minimum belly gap; negative → `valid = False` (high-centred).
 
-# Warp implementation (`src/kinematic_helhest/engine/`)
+# Warp implementation (`src/helhest/engine/`)
 
 GPU-parallel, batched. Runs thousands of rollouts simultaneously (MPPI). The same physics as the reference pipeline is split across a set of Warp kernels and inlined device functions.
 

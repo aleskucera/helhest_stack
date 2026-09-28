@@ -1,7 +1,5 @@
 # Field calibration — what to do with the robot outside
 
-Branch: **`engine/exact-arc-integration`** (not `tier1-certificates` — see docs/engine/TIER1_REPORT.md §0).
-
 Everything below exists to settle parameters that are currently fitted against a SIMULATOR
 (Project Chrono) rather than measured on the robot. Chrono is an independent instrument, not
 ground truth; these bags are the arbiter. Where a number below has a "target", that is what the
@@ -23,7 +21,7 @@ fixed, the robot (α 1.50), converged Chrono (1.60) and our engine at the shippe
 
 ## 1. Before you leave
 
-- [ ] Robot is on the branch above, or at least publishing `/joint_states`.
+- [ ] Robot is publishing `/joint_states`.
 - [ ] Laptop can reach the robot (`bags/fetch_bag.sh` uses `robot@192.168.18.5`).
 - [ ] Space in mind: see the footprint table in §3. `compact` needs almost nothing; `calibrate`
       driven manually needs room to hold a straight line for five seconds at a time.
@@ -41,7 +39,7 @@ commanded ones.
 ```bash
 ros2 topic hz /joint_states      # steady rate, and velocity non-zero when you turn a wheel by hand
 ros2 topic hz /joint_setpoints
-ros2 topic hz /imu/data          # or /ouster/imu -- the yaw ground truth
+ros2 topic hz /odin1/imu         # or /imu/data -- the yaw ground truth
 ```
 
 **`plan_actuate` must be OFF** for any scripted or manual drive:

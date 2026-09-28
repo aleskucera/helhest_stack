@@ -1,5 +1,17 @@
 # HOTFIX: turn-differential compensation (`plan_turn_boost`)
 
+> **Current state (2026-09-28) -- read this first; the body below is the 2026-07 record.**
+> The numbers in this note (differential realized at ~0.49, boost 2.0) were superseded twice:
+> - 2026-07-15: most of the "~half" was motor SATURATION (over-commanded wheels), and 2026-07-27:
+>   `/cmd_joints` was read in the wrong units (fixed in f056dcc). Bags recorded before 2026-07-27
+>   need the x0.279 conversion.
+> - 2026-08-11 (`motors0`, separating the two losses): the drivetrain realizes **0.74x** the
+>   commanded differential -> **`plan_turn_boost` 1.36**, and the vehicle's own turn resistance
+>   is `k_turn` 1.27. The derivation and the live values are in `ros/config/odin.params.yaml`.
+>
+> The boost is still a stopgap over a drivetrain loss, now a measured one. Re-measure with
+> `ros/tools/record_motors.sh` + `scripts/fit_turn_gain.py` (see `docs/field/FIELD_CALIBRATION.md`).
+
 > **Status: HOTFIX / stopgap.** `plan_turn_boost` (in `control/command.py`, exposed as the
 > `elevation_node` param `plan_turn_boost`) is a band-aid over a **drivetrain / motor-control
 > defect**, not a real fix. It compensates for a symptom. Read this before you change it, remove
@@ -90,11 +102,11 @@ matches what MPPI intended, so the robot turns as planned.
 
 The measurement that produced the numbers above (no node/GPU needed — gyro + wheels only):
 
-- Record: `/joint_setpoints`, `/joint_states`, `/ouster/imu`, `/imu/data`, `/odom_2d` (see
-  `ros/calibrate_turn.sh` for a lean recorder).
+- Record: `/joint_setpoints`, `/joint_states`, `/ouster/imu`, `/imu/data`, `/odom_2d` (today:
+  `ros/tools/record_motors.sh`).
 - Realization factor: bin `/joint_setpoints` `(R+L)` and `(R−L)` and plot the mean `/joint_states`
   response per bin — forward should be slope ~1, turn is the number to watch (was ~0.49).
 - After enabling the boost, record a drive and re-run this: the realized differential should move
   toward 1:1, and the actual yaw should track the MPPI-intended yaw.
-- Related tooling: `ros/calibrate_turn.sh` (turn-gain fit), the `wheel_sign_convention_calibration`
-  memory.
+- Related tooling: `scripts/fit_turn_gain.py` (turn-gain fit), the
+  `wheel_sign_convention_calibration` memory.

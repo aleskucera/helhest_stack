@@ -144,8 +144,9 @@ def condition_command(
     # outdoor bags). turn_boost amplifies the commanded differential to compensate so the wheels
     # actually deliver the yaw MPPI intended -- forward speed (mean) is untouched. 1.0 = no boost;
     # ~2.0 recovers the measured ~0.5 realization. Tune in the field.
-    # *** HOTFIX / stopgap for a drivetrain defect -- NOT a real fix. Read docs/turn_differential_hotfix.md
-    #     before changing/removing this: what it papers over, and what to actually fix. ***
+    # *** HOTFIX / stopgap for a drivetrain defect -- NOT a real fix. Read
+    #     docs/field/turn_differential_hotfix.md before changing/removing this: what it papers
+    #     over, and what to actually fix. ***
     mean = 0.5 * (wl + wr)  # forward speed; also the rear follower target (rear = mean of L/R)
     # GOAL BRAKE: the robot is forward-only (wmin=0) -- it cannot pivot in place to re-aim, so if it
     # arrives fast and slightly off it flies PAST the goal and orbits (a hard stop-radius misses an

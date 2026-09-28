@@ -219,8 +219,9 @@
     # cancelled from the error. With that fixed the reference is the UNBOOSTED planned
     # differential and this knob does what it says.
     #
-    # docs/turn_differential_hotfix.md calls this a stopgap for a drivetrain defect, and it still
-    # is -- but it is now a MEASURED stopgap on the right quantity rather than a hand-picked one.
+    # docs/field/turn_differential_hotfix.md calls this a stopgap for a drivetrain defect, and it
+    # still is -- but it is now a MEASURED stopgap on the right quantity rather than a hand-picked
+    # one.
     plan_turn_boost: 1.36
     # Pre-apply the tightest cap found this far ahead along the committed plan, so the robot is
     # already slow when it enters the corner. 0 = react to the current command only.
