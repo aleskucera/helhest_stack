@@ -5,7 +5,6 @@ Layout:
   engine/      The Warp/CUDA runtime — the main code path (import the API from here).
   reference/   Numpy finite-difference oracle — verification only, never the runtime.
   planning/    MPPI planner on the engine.
-  viz/         glfw/OpenGL viewers + shared rendering toolkit.
   model, data, heightmap, friction   Shared geometry / scenes / fields.
 
 The root package stays import-light on purpose: importing `helhest`

@@ -6,7 +6,7 @@
 </p>
 
 The on-robot navigation stack for the **Helhest Junior** skid-steer robot with the **Odin** dToF
-sensor: it localises, maps and plans on the GPU, built on [NVIDIA Warp](https://github.com/NVIDIA/warp).
+sensor: it maps and plans on the GPU, built on [NVIDIA Warp](https://github.com/NVIDIA/warp).
 One importable package, `helhest`, plus one ROS 2 node, `navigation_node`, that runs it on the robot.
 
 Everything is **device-resident by default**: point clouds, grids and rollouts live on the GPU, and
@@ -18,9 +18,9 @@ host-device round trips are the exception, not the rule (see `CLAUDE.md`).
 
 | step | what | where |
 |---|---|---|
-| scan in | self-filter, deskew | `perception/cloud_ops.py` (`ScanPreprocessor`) |
-| localise | scan-to-submap ICP against the accumulated cloud | `perception/icp/`, `perception/mapping/accumulate.py` |
-| map | the ICP-corrected scan folded into a probabilistic elevation belief (height, measurement sd, pose drift) | `perception/belief_frame.py` over [`elevation_belief`](https://github.com/aleskucera/elevation_belief) |
+| scan in | self-filter, outlier filter | `perception/cloud_ops.py` (`ScanPreprocessor`), `perception/outlier/` |
+| localise | Odin's on-device SLAM pose, taken as is | `/odin1/odometry` |
+| map | the scan folded into a probabilistic elevation belief (height, measurement sd, pose drift) | `perception/belief_frame.py` over [`elevation_belief`](https://github.com/aleskucera/elevation_belief) |
 | which way | a coarse, world-anchored cost-to-go over pooled blocks | `planning/coarse.py` |
 | how | the robot's settle at every pose, read as margins in sigmas, classified and value-iterated; near walls a clearance speed law prices the route in time | `planning/settle_producer.py`, `planning/terrain_value_field/`, `planning/costtogo.py`, `planning/clearance.py` |
 | drive | GPU MPPI following the cost-to-go, then a speed governor and the command chain | `control/mppi.py`, `control/governor.py`, `control/command.py` |
@@ -32,7 +32,7 @@ alike; the robot's values are in `ros/config/odin.params.yaml`.
 
 | path | what |
 |---|---|
-| `src/helhest/perception/` | scan preprocessing, ICP, the point accumulator, the belief frame, plus the vendored terrain_toolkit pipeline (heightmap, traversability, filters) |
+| `src/helhest/perception/` | scan preprocessing, the outlier filter, inpainting, the belief frame |
 | `src/helhest/planning/` | `terrain_value_field/` (the cost-to-go library: margins, control sets, value iteration, two-layer seeding), `settle_producer.py`, `costtogo.py`, `coarse.py`, `clearance.py` |
 | `src/helhest/control/` | MPPI, the clearance governor, the command chain, the terminal dock |
 | `src/helhest/engine/` | the robot model the planner rolls out and settles (below) |
@@ -40,7 +40,7 @@ alike; the robot's values are in `ros/config/odin.params.yaml`.
 | `ros/` | `helhest_stack_ros/` (the package: `navigation_node`, the Odin driver launch, RViz configs), `config/` (the robot's params, the follow-me overlay, driver config, recording QoS, the Fast DDS profile), `sessions/` (tmuxinator), `tools/` (recording, calibration, loggers, the dev shell); deployment gotchas in `ros/README.md` |
 | `studies/` | measured work: `closed_loop/` (drive_sim, the sim harness), `bag_replay/` (node on real bags + audit), `clearance/`, `planning_refactor/` (golden-field harness), `belief_mapping/`, `calib/`, `dynamic/`, ... each with its README or PLAN |
 | `tests/` | pytest suite; `tests/engine/*.py` also hold standalone parity oracles |
-| `docs/` | `field/` (calibration runbook and results), `incidents/`, `engine/` (Chrono pre-registrations, engine report), `design/`, `research/`, and the mkdocs perception reference |
+| `docs/` | `field/` (calibration runbook and results), `incidents/`, `engine/` (Chrono pre-registrations, engine report), `design/`, `research/`, and standalone notes |
 | `demos/`, `scripts/`, `benchmarks/` | older demos, one-off scripts, timing benchmarks |
 
 ## The engine: a differentiable robot twin
@@ -89,22 +89,6 @@ python -m tests.engine.step
 python -m tests.engine.gradients
 python -m benchmarks.planning
 ```
-
-## Blender visualization
-
-Export a rollout to a self-contained `.npz`, then animate it in Blender -- the heightmap becomes a
-mesh and the robot's 6-DOF pose and per-wheel spin are keyframed.
-
-```bash
-python -m helhest.viz.blender_export rollout.npz
-blender --python src/helhest/viz/blender_import.py -- --data rollout.npz
-blender --background --python src/helhest/viz/blender_import.py -- --data rollout.npz --render out.mp4
-blender --python src/helhest/viz/blender_import.py -- --data rollout.npz \
-    --robot robot.blend --wheel-left WheelL --wheel-right WheelR --wheel-rear WheelRear
-```
-
-Frames are the sim's: X-forward, Y-left, Z-up, metres and radians. `scripts/render_dasenka.sh`
-renders headless on a remote GPU and copies the MP4 back.
 
 ## License
 

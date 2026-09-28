@@ -52,7 +52,7 @@ MOTOR_TAU = 0.19  # [s] first-order actuator lag; blend = dt/tau = 0.53 at DT = 
 # joint fit leaves 0-50 ms of dead time on top. Quantised to whole rollout steps it rounds to 0 at
 # DT = 0.1, so it only bites if dt is shortened.
 COMMAND_DELAY = 0.04
-K_TURN = K_TURN_INDOOR  # module default (used by WarpDriver / demos when not overridden)
+K_TURN = K_TURN_INDOOR  # module default when not overridden
 
 
 def k_turn_for(terrain: str) -> float:

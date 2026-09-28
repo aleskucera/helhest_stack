@@ -15,6 +15,8 @@ from __future__ import annotations
 import numpy as np
 import warp as wp
 
+from ..localization.pose_math import _so3_log
+
 wp.init()
 
 _Z_UNBOUNDED = 1.0e30  # sentinel "no z cutoff" (float32-safe)
@@ -291,11 +293,6 @@ class ScanPreprocessor:
         """Deskew the compacted buffer IN PLACE. No-op for an empty or zero-length sweep."""
         if count == 0 or t_span <= 0.0:
             return
-        # Deferred import: `localization.localizer` imports THIS module, so pulling pose_math in at
-        # module scope would close the cycle. Reused rather than reimplemented so the screw-axis
-        # decomposition can't drift away from the host `deskew_scan` this kernel mirrors.
-        from ..localization.pose_math import _so3_log
-
         d = np.asarray(sweep_delta, dtype=np.float64)
         r_delta = d[:3, :3]
         omega = _so3_log(r_delta)
