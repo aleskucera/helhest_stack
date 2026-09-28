@@ -330,6 +330,9 @@ class ForwardSimulator(BaseSimulator):
             # (encoder), not at rest -- otherwise a rollout starting already in motion would brake
             # from a phantom v=0 on its first step. vy/yaw_rate start at 0 (unknown without a
             # measured turn rate); only vx is recoverable from the wheel speeds alone.
+            init_wheel_omega_np = np.broadcast_to(
+                np.asarray(init_wheel_omega, np.float32), (self.batch_size, 3)
+            )
             vx0 = self.wheel_radius * (init_wheel_omega_np[:, 0] + init_wheel_omega_np[:, 1]) / 2.0
             init_twist_np = np.zeros((self.batch_size, 3), np.float32)
             init_twist_np[:, 0] = vx0
