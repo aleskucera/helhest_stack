@@ -102,7 +102,8 @@ def margin_to_fields_kernel(
     Fusing them is worth doing for one reason, and it is measurable: `classify` reads exactly
     what the reduction just wrote, so splitting the two sends `z` and `z_certain` out to DRAM
     and straight back in for nothing. On 2.56 M states with two constraints that is 1.31 ms
-    against 1.10 ms, a 1.20x saving (`dev/bench_margin.py`).
+    against 1.10 ms, a 1.20x saving (`studies/terrain_value_field/bench_margin.py`,
+    deleted after 6953419).
 
     `z_veto` is an array rather than a float so a captured CUDA graph can be retuned
     without re-recording it.

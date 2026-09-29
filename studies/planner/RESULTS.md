@@ -2,7 +2,8 @@
 
 Step 2 of `docs/design/PROBABILISTIC_PLANNING_PLAN.md` section 7: the two cheap measurements that the plan
 flags as each able to invalidate a design choice in Part A. Run 2026-09-18, RTX A500.
-Scripts: `studies/planner/{settle_sensitivity,lattice_timing}.py`; JSON in `studies/planner/out/`.
+Scripts: `studies/planner/settle_sensitivity.py` (and `lattice_timing.py`, deleted after
+6953419 -- see 6.7); JSON in `studies/planner/out/`.
 
 ---
 
@@ -61,6 +62,13 @@ width, and measured exactly nothing.
 ---
 
 ## 6.7 Lattice solve time, and whether two solves fit. **7.9 ms; yes.**
+
+> **Superseded (2026-09-29).** These timings were taken with an explicit arc step of three cells,
+> which splits the 24-heading lattice into three disconnected rings (the connectivity bug fixed on
+> 2026-09-22, docs/incidents/incident_2026-09-22_lattice-heading-connectivity.md); `CostToGo` now
+> refuses that step and uses the closing one. `python -m benchmarks.planning` times the solve with
+> the robot's real configuration: 19.5 ms at n_theta 24 on a laptop RTX A500 (2026-09-28). The
+> conclusions below were drawn from the numbers below and have not been re-checked.
 
 Frame budget 69 ms at 14.5 Hz. Deployed settings: 16 m window, 0.24 m routing cell
 (`plan_lat_coarsen` 3), `plan_n_theta` 24.
