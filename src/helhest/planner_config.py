@@ -44,6 +44,7 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_straight_frac": 0.2,
     "plan_spin_frac": 0.12,
     "plan_spin_min": 2.0,
+    "plan_spin_max": 0.0,  # [rad/s] ceiling on a spin's wheel speed; 0 = plan_wmax
     "plan_elite_frac": 0.01,
     "plan_n_mu": 1,
     # MPPI run
@@ -156,6 +157,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             # not conditioned on wmin: the spin band is exempt from the wmin clamp on purpose
             spin_frac=float(p["plan_spin_frac"]),
             spin_min=float(p["plan_spin_min"]),
+            spin_max=float(p["plan_spin_max"]),
             pivot_frac=0.05 if wmin < 0.0 else 0.0,
             elite_frac=float(p["plan_elite_frac"]),
             n_mu=n_mu,

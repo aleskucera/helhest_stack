@@ -61,6 +61,7 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         straight_frac=p["plan_straight_frac"],
         spin_frac=p["plan_spin_frac"],
         spin_min=p["plan_spin_min"],
+        spin_max=p["plan_spin_max"],
         pivot_frac=0.05 if p["plan_wmin"] < 0.0 else 0.0,
         elite_frac=p["plan_elite_frac"],
         n_mu=max(1, int(p["plan_n_mu"])),

@@ -112,6 +112,7 @@ _PLAN_BUILD = frozenset(
         "plan_straight_frac",
         "plan_spin_frac",
         "plan_spin_min",
+        "plan_spin_max",
         "plan_elite_frac",
         "plan_n_mu",
         "plan_mu_adapt",
@@ -616,6 +617,8 @@ class NavigationNode(Node):
         # [rad/s] floor on a spin candidate's wheel speed. MEASURED on the robot 2026-08-10: below
         # about 2 the wheels will not break loose on the spot and a smaller command only strains.
         d("plan_spin_min", PLAN_DEFAULTS["plan_spin_min"])
+        # [rad/s] ceiling on a spin candidate's wheel speed; 0 = plan_wmax. Before the turn boost.
+        d("plan_spin_max", PLAN_DEFAULTS["plan_spin_max"])
         # CEM elite fraction: MPPI commits the MEAN of the top-k lowest-cost candidates. Because the
         # goal heading is free, small turns near the goal barely change cost -> the elite fills with
         # near-equal micro-turn candidates and their mean WOBBLES. A PEAKIER elite (smaller frac ->
@@ -773,6 +776,7 @@ class NavigationNode(Node):
         self.plan_debug_record_every: int = max(1, int(g("plan_debug_record_every")))
         self.plan_spin_frac: float = g("plan_spin_frac")
         self.plan_spin_min: float = g("plan_spin_min")
+        self.plan_spin_max: float = g("plan_spin_max")
         self.plan_elite_frac: float = g("plan_elite_frac")
         self.plan_wmax: float = g("plan_wmax")
         self.plan_wmin: float = g("plan_wmin")

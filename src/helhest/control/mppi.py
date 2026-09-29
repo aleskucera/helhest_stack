@@ -64,6 +64,11 @@ class SamplingConfig:
     # Minimum |wheel speed| for a spin candidate. MEASURED on the robot 2026-08-10: below about
     # 2 rad/s it will not break loose on the spot at all, so a smaller command just strains.
     spin_min: float = 2.0
+    # Ceiling on a spin candidate's wheel speed [rad/s]; 0 = wmax. The fastest spin reaches the new
+    # heading soonest, so the elite sits near the top of the band, and the output chain then boosts
+    # the differential (plan_turn_boost) -- at wmax 6 the robot spun at the 7.5 rad/s clamp. With
+    # wmin >= 0 only the spin band can reverse a wheel, so this caps every spin MPPI can choose.
+    spin_max: float = 0.0
     # fraction drawn from the PIVOT prior (wl == -wr, turn in place). Only useful with reverse
     # enabled (effective wmin < 0); with wmin >= 0 the clamp degrades these to sharp arcs. 0 = off.
     pivot_frac: float = 0.0
@@ -350,6 +355,7 @@ def _sample_target_wheel_omega_kernel(
     n_straight: int,
     n_spin: int,
     spin_min: float,
+    spin_max: float,  # 0 = wmax
     n_pivot: int,
     n_knots: int,
     seed: wp.array(dtype=int),
@@ -390,7 +396,8 @@ def _sample_target_wheel_omega_kernel(
         # held across the horizon, because a spin that changes its mind mid-rollout is not a spin.
         # Magnitude is floored at spin_min: the real robot will not break loose below ~2 rad/s.
         u_spin = wp.randf(wp.rand_init(seed[0] + 5150, b))
-        mag = spin_min + (wmax - spin_min) * u_spin
+        top = wp.where(spin_max > 0.0, wp.min(spin_max, wmax), wmax)
+        mag = spin_min + (wp.max(top, spin_min) - spin_min) * u_spin
         if wp.randf(wp.rand_init(seed[0] + 6271, b)) < 0.5:
             mag = -mag
         wheel_l = -mag
@@ -1027,6 +1034,7 @@ class MppiGpu:
                 self.n_straight,
                 self.n_spin,
                 self.sampling.spin_min,
+                self.sampling.spin_max,
                 self.n_pivot,
                 self.sampling.n_knots,
                 self.seed,
