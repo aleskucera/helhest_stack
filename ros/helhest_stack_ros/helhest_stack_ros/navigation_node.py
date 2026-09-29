@@ -133,6 +133,10 @@ _PLAN_BUILD = frozenset(
         "plan_clear_c0",
         "plan_clear_t_turn",
         "plan_clear_route_turn",
+        # the rollouts model the output tracker (planner_config), so its limits are baked in too
+        "plan_max_slew",
+        "plan_max_decel",
+        "plan_max_jerk",
         "plan_clear_v_blind",
         "plan_coarse_block_m",
         "plan_coarse_memory_m",
@@ -211,6 +215,8 @@ class NavigationNode(Node):
         self._prev_cmd = np.zeros(
             3, np.float32
         )  # last published /cmd_joints [L, rear, R] (slew ref)
+        # its acceleration [rad/s^2], (cmd - previous) / dt: where the jerk limit continues from
+        self._prev_accel = np.zeros(3, np.float32)
         # Commands already in flight, ENGINE order (wL, wR, w_rear), oldest first. Length = the
         # delay in whole rollout steps; empty (and unused) when plan_command_delay is 0.
         self._cmd_in_flight: deque[np.ndarray] = deque(maxlen=1)
@@ -656,7 +662,13 @@ class NavigationNode(Node):
         # hard cap on |d(cmd)/dt| per wheel [rad/s^2]. At DT=0.1s the command may change by
         # max_slew*0.1 per step; 50 let it jump 0->cruise in ONE step (harsh launch, ~5 m/s^2). 6.0
         # ramps 0->~1.3 m/s cruise over ~0.65s (ground ~2.1 m/s^2) -- softer start/stop, still responsive.
-        d("plan_max_slew", 6.0)
+        d("plan_max_slew", PLAN_DEFAULTS["plan_max_slew"])
+        # [rad/s^3] cap on how fast each wheel's ACCELERATION may change; 0 = off. Without it the
+        # rate limit lets the acceleration flip from +max to -max in one tick, which is what
+        # replanning asks for: the `turns` bag (2026-09-29) reversed each front wheel's
+        # acceleration 2.7 times a second, half the time at the cap. The rollouts run the same
+        # tracker, so the planner only commits to what these limits let the wheels do.
+        d("plan_max_jerk", PLAN_DEFAULTS["plan_max_jerk"])
         # Log the RAW MPPI command next to the conditioned one every Nth planned frame. 0 = off.
         d("plan_debug_cmd", 0)
         # Planner-input dump to /tmp/plan_dump.npz, one-shot. 1 = the next planned frame;
@@ -669,7 +681,7 @@ class NavigationNode(Node):
         d("plan_debug_record_every", 4)
         # deceleration cap [rad/s^2] -- separate from accel so stops can be firmer than the gentle
         # launch. 12.0 = ground ~4.2 m/s^2, stops from cruise in ~0.32s. None/<=0 would mean symmetric.
-        d("plan_max_decel", 12.0)
+        d("plan_max_decel", PLAN_DEFAULTS["plan_max_decel"])
         # amplify the commanded turn differential. 1.0 = off. REVISED 2026-07-15: post-fix bags showed
         # the differential is realized ~1:1 below the motor ceiling -- the earlier "~half" was SATURATION
         # (over-commanded wheels), not a real drivetrain gain. So boosting over-turns below the limit and
@@ -824,6 +836,7 @@ class NavigationNode(Node):
         self.plan_max_omega: float = g("plan_max_omega")
         self.plan_max_slew: float = g("plan_max_slew")
         self.plan_max_decel: float = g("plan_max_decel")
+        self.plan_max_jerk: float = g("plan_max_jerk")
         self.plan_command_delay: float = g("plan_command_delay")
         self.plan_turn_boost: float = g("plan_turn_boost")
         self.plan_turn_boost_adapt: bool = g("plan_turn_boost_adapt")
@@ -1529,6 +1542,7 @@ class NavigationNode(Node):
             if self._yaw_track is not None:
                 self._yaw_track.reset()  # at rest: a held integrator is a lurch on the next goal
             if self.plan_actuate:
+                cmd_dt = self._command_dt(dynamics.DT)
                 cmd = condition_command(
                     0.0,
                     0.0,
@@ -1536,11 +1550,12 @@ class NavigationNode(Node):
                     max_omega=self.plan_max_omega,
                     max_slew=self.plan_max_slew,
                     max_decel=self.plan_max_decel,
-                    dt=self._command_dt(dynamics.DT),
+                    dt=cmd_dt,
+                    prev_accel=self._prev_accel,
+                    max_jerk=self.plan_max_jerk,
                     turn_boost=1.0 if self.cmd_output == "twist" else self.plan_turn_boost,
                 )
-                self._prev_cmd = cmd
-                self._publish_cmd(cmd)
+                self._commit_cmd(cmd, cmd_dt)
             return
         with wp.ScopedDevice(self.device):
             self.plan_sim.set_terrain(mf.dev["local_h"])
@@ -1556,6 +1571,26 @@ class NavigationNode(Node):
             else:
                 wheel_seed = to_engine_order(self._prev_cmd)
             self.plan_sim.set_initial_wheel_omega(wheel_seed)
+            # Where the output tracker continues from, for the rollouts' copy of it. The published
+            # differential carries the turn boost; the planner's does not.
+            boost = (
+                self._turn_adapt.turn_boost
+                if self._turn_adapt is not None
+                else self.plan_turn_boost
+            )
+            if self.cmd_output == "twist":
+                boost = 1.0
+            wheels, accel = self._prev_cmd, self._prev_accel
+            self.planner.set_command_state(
+                (
+                    wheels[1] - 0.5 * (wheels[2] - wheels[0]) / boost,
+                    wheels[1] + 0.5 * (wheels[2] - wheels[0]) / boost,
+                ),
+                (
+                    accel[1] - 0.5 * (accel[2] - accel[0]) / boost,
+                    accel[1] + 0.5 * (accel[2] - accel[0]) / boost,
+                ),
+            )
             if self._twist_meas is not None and now_s - self._twist_meas_t < 0.3:
                 twist_seed = self._twist_meas
             else:
@@ -1796,6 +1831,7 @@ class NavigationNode(Node):
                     f"cmd: mppi ({wl_raw:+.2f},{wr_raw:+.2f}) d={wr_raw - wl_raw:+.2f}"
                     f" -> yaw-loop ({wl:+.2f},{wr:+.2f}) -> goal {d:.2f} m"
                 )
+        cmd_dt = self._command_dt(dynamics.DT)
         cmd = condition_command(
             wl,
             wr,
@@ -1803,7 +1839,9 @@ class NavigationNode(Node):
             max_omega=self.plan_max_omega,
             max_slew=self.plan_max_slew,
             max_decel=self.plan_max_decel,
-            dt=self._command_dt(dynamics.DT),
+            dt=cmd_dt,
+            prev_accel=self._prev_accel,
+            max_jerk=self.plan_max_jerk,
             turn_boost=turn_boost,
             goal_dist=d,
             brake_dist=self.plan_goal_brake_dist,
@@ -1811,8 +1849,7 @@ class NavigationNode(Node):
             lat_gain=self._lat_gain,
             turn_brake_scale=self._turn_brake_lookahead(turn_boost),
         )
-        self._prev_cmd = cmd
-        self._publish_cmd(cmd)
+        self._commit_cmd(cmd, cmd_dt)
         if ref_cmd is not None:
             self._yaw_track_update(ref_cmd, cmd, turn_boost)
         self.pub_turn_boost.publish(
@@ -1846,6 +1883,8 @@ class NavigationNode(Node):
             max_slew=self.plan_max_slew,
             max_decel=self.plan_max_decel,
             dt=self._command_dt(dynamics.DT),
+            prev_accel=self._prev_accel,
+            max_jerk=self.plan_max_jerk,
             turn_boost=turn_boost,
             goal_dist=goal_dist,
             brake_dist=self.plan_goal_brake_dist,
@@ -1911,6 +1950,13 @@ class NavigationNode(Node):
         self.plan_sim.command_history.assign(
             in_flight_history(self._cmd_in_flight, n, int(self.plan_sim.batch_size))
         )
+
+    def _commit_cmd(self, cmd: np.ndarray, dt: float) -> None:
+        """Publish a conditioned command and keep the tracker's state: the command and the
+        acceleration it took to get there, over the dt the conditioner was given."""
+        self._prev_accel = (cmd - self._prev_cmd) / dt
+        self._prev_cmd = cmd
+        self._publish_cmd(cmd)
 
     def _command_dt(self, expected: float) -> float:
         """Seconds since the last /cmd_joints publish, for the rate limiter.

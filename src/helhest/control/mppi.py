@@ -89,6 +89,15 @@ class SamplingConfig:
     # pulled below `spin_min`, which is the one speed floor that exists because the wheels will
     # not break loose under it. Three-way -- reverse / SPIN / forward -- keeps them apart.
     spin_mode_th: float = 0.25
+    # The output chain's acceleration and jerk limits (control.command.condition_command), so the
+    # rollouts drive the command the wheels will actually get rather than the raw sample: each
+    # candidate's targets pass through the same jerk-limited tracker, starting from the command
+    # last published (MppiGpu.set_command_state). The sample stays the decision -- the elite
+    # averages raw targets and the node's output tracker does the smoothing -- so nothing is
+    # filtered twice. max_accel 0 = off: rollouts take the samples as they are.
+    max_accel: float = 0.0  # [rad/s^2]
+    max_decel: float = 0.0  # [rad/s^2] toward rest; 0 = max_accel
+    max_jerk: float = 0.0  # [rad/s^3]; 0 = a plain rate limit
 
 
 @wp.struct
@@ -449,6 +458,63 @@ def _sample_target_wheel_omega_kernel(
     target_wheel_omega[t, r] = wp.vec3(
         wp.clamp(wheel_l, lo, wmax), wp.clamp(wheel_r, lo, wmax), 0.0
     )
+
+
+@wp.func
+def _jerk_limited_step(
+    target: float,
+    prev: float,
+    accel: float,
+    max_accel: float,
+    max_decel: float,
+    max_jerk: float,
+    dt: float,
+):
+    """control.command.jerk_limited_step for one joint; returns (command, its acceleration).
+    Keep the two identical: this is how the rollouts know what the output tracker will send."""
+    error = target - prev
+    lim = max_decel
+    if wp.abs(target) >= wp.abs(prev):
+        lim = max_accel
+    if max_jerk <= 0.0:
+        step = wp.clamp(error, -lim * dt, lim * dt)
+        return wp.vec2(prev + step, step / dt)
+    reach = max_jerk * (wp.sqrt(0.25 * dt * dt + 2.0 * wp.abs(error) / max_jerk) - 0.5 * dt)
+    wanted = wp.sign(error) * wp.min(lim, reach)
+    if error == 0.0:
+        wanted = 0.0
+    new_accel = wp.clamp(wanted, accel - max_jerk * dt, accel + max_jerk * dt)
+    land = error / dt
+    if wp.abs(land - accel) <= max_jerk * dt and wp.abs(land) <= max_jerk * dt:
+        new_accel = land
+    return wp.vec2(prev + new_accel * dt, new_accel)
+
+
+@wp.kernel
+def _rate_limit_kernel(
+    raw: wp.array2d(dtype=wp.vec3),  # [T, B] sampled targets (wL, wR, -)
+    cmd_state: wp.array(dtype=wp.vec4),  # [1] last published (wL, wR) and their accelerations
+    max_accel: float,
+    max_decel: float,
+    max_jerk: float,
+    dt: float,
+    target_wheel_omega: wp.array2d(dtype=wp.vec3),  # [T, B] what the rollouts drive
+):
+    r = wp.tid()
+    s = cmd_state[0]
+    wl = s[0]
+    wr = s[1]
+    al = s[2]
+    ar = s[3]
+    for t in range(raw.shape[0]):
+        u = raw[t, r]
+        left = _jerk_limited_step(u[0], wl, al, max_accel, max_decel, max_jerk, dt)
+        right = _jerk_limited_step(u[1], wr, ar, max_accel, max_decel, max_jerk, dt)
+        wl = left[0]
+        al = left[1]
+        wr = right[0]
+        ar = right[1]
+        target_wheel_omega[t, r] = wp.vec3(wl, wr, u[2])
 
 
 @wp.kernel
@@ -913,6 +979,15 @@ class MppiGpu:
             # observed-cell mask on the sim grid (1 = real data); all-measured by default so the
             # unknown-cell penalty is inert until a perception mask is supplied (set_measured)
             self.measured = wp.full((ny, nx), 1.0, dtype=wp.float32)
+            # the output chain's limits armed: samples land here and the rollouts drive their
+            # rate-limited version (see SamplingConfig.max_accel); otherwise no extra buffer
+            self.rate_limited = sampling.max_accel > 0.0
+            self.raw_target = (
+                wp.zeros((self.horizon, self.n_rollouts), dtype=wp.vec3)
+                if self.rate_limited
+                else sim.target_wheel_omega
+            )
+            self.cmd_state = wp.zeros(1, dtype=wp.vec4)  # set_command_state; zeros = at rest
         self.set_mu_band()  # nominal mu (fills sim.mu_scale for the replica layout)
 
         # the grid the cost kernel samples the lattice field on: defaults to the sim grid, but a COARSER
@@ -945,6 +1020,14 @@ class MppiGpu:
 
     def set_nominal(self, U_host):
         self.U.assign(np.ascontiguousarray(U_host, np.float32))
+
+    def set_command_state(self, wheels: np.ndarray, accel: np.ndarray) -> None:
+        """The last PUBLISHED (wL, wR) command and its acceleration [rad/s^2], in the planner's
+        convention -- where the output tracker continues from. Only read with the rate limit
+        armed (SamplingConfig.max_accel > 0); graph-safe, call before every replan."""
+        self.cmd_state.assign(
+            np.array([[wheels[0], wheels[1], accel[0], accel[1]]], dtype=np.float32)
+        )
 
     def set_mu_band(self, center=1.0, span=0.0):
         """Friction-uncertainty band for the robust replicas: replica k of every candidate rolls
@@ -1039,9 +1122,24 @@ class MppiGpu:
                 self.sampling.n_knots,
                 self.seed,
             ],
-            outputs=[self.sim.target_wheel_omega],
+            outputs=[self.raw_target],
             device=self.device,
         )
+        if self.rate_limited:
+            wp.launch(
+                _rate_limit_kernel,
+                self.n_rollouts,
+                inputs=[
+                    self.raw_target,
+                    self.cmd_state,
+                    self.sampling.max_accel,
+                    self.sampling.max_decel or self.sampling.max_accel,
+                    self.sampling.max_jerk,
+                    float(self.sim.solver.dt),
+                ],
+                outputs=[self.sim.target_wheel_omega],
+                device=self.device,
+            )
         self._prof.mark(1)  # sample done
         self.sim.rollout_launch()
         self._prof.mark(2)  # rollout done
@@ -1132,7 +1230,7 @@ class MppiGpu:
             _cand_dir_kernel,
             self.n_cand,
             inputs=[
-                self.sim.target_wheel_omega,
+                self.raw_target,
                 self.horizon,
                 self.sampling.turn_mode_th * float(self.horizon),
                 self.sampling.spin_mode_th * float(self.horizon),
@@ -1157,7 +1255,7 @@ class MppiGpu:
                 self.turns,
                 self.best_dir,
                 self.best_turn,
-                self.sim.target_wheel_omega,
+                self.raw_target,  # the decision; the rollouts drove its rate-limited version
                 self.wlo,
                 self.sampling.wmax,
                 self.n_cand,

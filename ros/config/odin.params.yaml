@@ -85,6 +85,8 @@
     # 55 of 79 frames). t_react 0.125 s and plan_clear_c0 0.15 m are sim-tuned; check them in a real
     # corridor. 0 = the old veto. The other plan_clear_* keep their helhest.planner_config defaults.
     plan_clear_t_react: 0.125
+    # [m/s^2] braking the governor counts on: plan_max_decel 3 rad/s^2 x 0.35 m wheel = 1.05
+    plan_clear_decel: 1.0
     plan_wheel_width: 0.10
     # 0.6 -> 1.0 (alpha 1.80) from fast_experiment0/1, 2026-08-10. Regressing the MEASURED gyro
     # on the MEASURED wheel differential gives alpha 1.68-2.27 across both bags, against the 1.48
@@ -148,8 +150,16 @@
     # 76% jerkier. If it does, come back here rather than to plan_smooth -- raising plan_smooth to
     # compensate was measured and BACKFIRES (0.06 doubles the turn-direction flips to 0.89/s and
     # costs 2 s on a 90 deg turn).
-    plan_max_slew: 6.0
-    plan_max_decel: 8.0       # decel cap d(cmd)/dt [rad/s^2] -> softer slow-down (also the stop ramp)
+    #
+    # It did feel it (field 2026-09-29, `turns` bag): the command sat at the 6 rad/s^2 cap half the
+    # time and reversed each front wheel's acceleration 2.7 times a second, with the effort
+    # hitting the LLC's ~70 ceiling in spins. Now 3 rad/s^2 both ways (about what straight
+    # driving already sees, 3-5 rad/s^2 measured on /joint_states) plus a 5 rad/s^3 jerk limit:
+    # 0 -> 4 rad/s takes ~1.9 s. A judgement call, not a motor rating -- there are no specs.
+    # The rollouts run the same tracker, so the planner plans with these limits.
+    plan_max_slew: 3.0
+    plan_max_decel: 3.0       # decel cap d(cmd)/dt [rad/s^2] (also the stop ramp)
+    plan_max_jerk: 5.0        # [rad/s^3] how fast the acceleration itself may change
     plan_goal_running: 0.3    # progress pull -> higher = faster toward goal
     plan_effort: 0.001        # wheel-speed^2 penalty -> lower = faster
 

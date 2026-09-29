@@ -65,6 +65,10 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         pivot_frac=0.05 if p["plan_wmin"] < 0.0 else 0.0,
         elite_frac=p["plan_elite_frac"],
         n_mu=max(1, int(p["plan_n_mu"])),
+        # added after the move: the output tracker's limits, modelled in the rollouts
+        max_accel=p["plan_max_slew"],
+        max_decel=p["plan_max_decel"],
+        max_jerk=p["plan_max_jerk"],
     )
     ctg = dict(
         n_theta=int(p["plan_n_theta"]),

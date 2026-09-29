@@ -57,6 +57,7 @@ from helhest.engine import GridParams
 from helhest.perception import ScanPreprocessor
 from helhest.perception import transform_points
 from helhest.perception.belief_frame import BeliefFrame
+from helhest.planner_config import PLAN_DEFAULTS
 from helhest.planner_config import planner_config
 from helhest.planner_config import resolve
 from helhest.planning.coarse import CoarseRouter
@@ -394,9 +395,11 @@ def drive(a: argparse.Namespace) -> dict:
     # rollouts are seeded from (the node seeds from the encoders when fresh, else from this).
     chain = not a.no_chain
     prev_lrr = np.zeros(3, np.float32)
+    prev_accel = np.zeros(3, np.float32)  # its acceleration, where the jerk limit continues from
     max_omega = float(a.plan_params.get("plan_max_omega", 7.5))
-    max_slew = float(a.plan_params.get("plan_max_slew", 6.0))
-    max_decel = float(a.plan_params.get("plan_max_decel", 8.0))
+    max_slew = float(a.plan_params.get("plan_max_slew", PLAN_DEFAULTS["plan_max_slew"]))
+    max_decel = float(a.plan_params.get("plan_max_decel", PLAN_DEFAULTS["plan_max_decel"]))
+    max_jerk = float(a.plan_params.get("plan_max_jerk", PLAN_DEFAULTS["plan_max_jerk"]))
     turn_boost = float(a.plan_params.get("plan_turn_boost", 1.0))
     prev_pose = None
     prev_xy = None  # last frame's position: the brake stops before it spins while still moving
@@ -475,6 +478,13 @@ def drive(a: argparse.Namespace) -> dict:
                 # the rollouts start from the REALIZED state: the last conditioned command as the
                 # wheel seed, the true body twist from the pose delta (the node's odometry twist)
                 plan_sim.set_initial_wheel_omega(to_engine_order(prev_lrr))
+                # the output tracker's state, in the planner's (unboosted) convention
+                half_diff = 0.5 * (prev_lrr[2] - prev_lrr[0]) / turn_boost
+                half_acc = 0.5 * (prev_accel[2] - prev_accel[0]) / turn_boost
+                planner.set_command_state(
+                    (prev_lrr[1] - half_diff, prev_lrr[1] + half_diff),
+                    (prev_accel[1] - half_acc, prev_accel[1] + half_acc),
+                )
                 if prev_pose is not None:
                     dyaw = (yaw - prev_pose[2] + np.pi) % (2.0 * np.pi) - np.pi
                     vx = (
@@ -549,10 +559,14 @@ def drive(a: argparse.Namespace) -> dict:
                 max_decel=max_decel,
                 dt=dt,
                 turn_boost=turn_boost,
+                prev_accel=prev_accel,
+                max_jerk=max_jerk,
             )
+            prev_accel = (lrr - prev_lrr) / dt
             prev_lrr = lrr
             cmd = to_engine_order(lrr).astype(np.float32)
-        cmd = np.clip(cmd, -a.wmax, a.wmax)
+        else:  # the chain clamps at plan_max_omega itself; clipping its output here is a jerk spike
+            cmd = np.clip(cmd, -a.wmax, a.wmax)
         prev_pose = (rx, ry, yaw)
 
         sim.set_wheel_command(cmd)

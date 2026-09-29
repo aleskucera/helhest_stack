@@ -26,8 +26,9 @@ from helhest.control.mppi import SamplingConfig
 from helhest.planning.clearance import ClearanceParams
 
 # Everything the planner reads that the node and the simulator must agree on. Grid geometry and the
-# command chain after MPPI (turn boost, goal brake, slew, yaw loop, consistency EMA) are NOT here:
-# the simulator deliberately uses its own windows, and it does not run the command chain at all.
+# command chain after MPPI (turn boost, goal brake, yaw loop, consistency EMA) are NOT here: the
+# simulator deliberately uses its own windows. The output's acceleration and jerk limits ARE,
+# because the rollouts drive the command through the same tracker.
 PLAN_DEFAULTS: dict[str, Any] = {
     # cost weights -> CostParams
     "plan_goal_running": 0.3,
@@ -47,6 +48,10 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_spin_max": 0.0,  # [rad/s] ceiling on a spin's wheel speed; 0 = plan_wmax
     "plan_elite_frac": 0.01,
     "plan_n_mu": 1,
+    # the output tracker (control.command.condition_command), modelled in the rollouts too
+    "plan_max_slew": 6.0,  # [rad/s^2] acceleration cap per wheel
+    "plan_max_decel": 12.0,  # [rad/s^2] toward rest
+    "plan_max_jerk": 0.0,  # [rad/s^3]; 0 = a plain rate limit
     # MPPI run
     "plan_n_theta": 24,
     "plan_horizon": 25,
@@ -161,6 +166,9 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             pivot_frac=0.05 if wmin < 0.0 else 0.0,
             elite_frac=float(p["plan_elite_frac"]),
             n_mu=n_mu,
+            max_accel=float(p["plan_max_slew"]),
+            max_decel=float(p["plan_max_decel"]),
+            max_jerk=float(p["plan_max_jerk"]),
         ),
         costtogo=dict(
             n_theta=int(p["plan_n_theta"]),

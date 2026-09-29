@@ -11,7 +11,8 @@ robot 2026-07-10 (an all-positive /cmd_joints drove straight forward).
 
 This is the single place all actuator-safety logic lives, so it is auditable and unit-tested:
   1. rear-as-follower                               (rear = mean(L, R); left/right pass through)
-  2. asymmetric accel/decel rate limit  (a jumpy MPPI step can't shock the drivetrain)
+  2. asymmetric accel/decel rate limit, optionally jerk-limited  (a jumpy MPPI step can't shock
+     the drivetrain; the planner's rollouts run the same `jerk_limited_step`)
   3. a hard per-joint magnitude clamp               (final backstop below the motor's safe max)
 """
 
@@ -118,6 +119,8 @@ def condition_command(
     turn_brake_a_max: float = 0.0,
     lat_gain: float = 0.0,
     turn_brake_scale: float = 1.0,
+    prev_accel: np.ndarray | None = None,
+    max_jerk: float = 0.0,
 ) -> np.ndarray:
     """Planner (wl, wr) -> conditioned [left, rear, right] wheel-velocity command for /cmd_joints.
 
@@ -136,6 +139,10 @@ def condition_command(
         = wheel_radius^2 / (2*half_track*alpha). Only read when turn_brake_a_max > 0.
     turn_brake_scale: extra speed scale in [0, 1] from the caller's LOOKAHEAD along the committed
         plan (1.0 = no anticipation). Applied the same way as the reactive brake.
+    prev_accel: [left, rear, right] acceleration of the previous command [rad/s^2], i.e.
+        (prev - the one before) / its dt. Only read when max_jerk > 0; None = at rest.
+    max_jerk: [rad/s^3] cap on how fast each joint's acceleration may change. 0 = off (plain
+        rate limit). With it on, max_slew and max_decel are the acceleration bounds.
     Returns [left, rear, right] velocities to publish. To STOP, call with wl = wr = 0 -- the slew
     limiter ramps the command down to rest.
     """
@@ -179,12 +186,58 @@ def condition_command(
     # Asymmetric rate limit: a joint speeding UP (|cmd| growing) is capped by max_slew (accel); a
     # joint slowing DOWN toward rest (|cmd| shrinking, incl. the stop ramp) by max_decel. Per-joint
     # because in a turn one wheel accelerates while the other decelerates. None = symmetric.
-    d_acc = float(max_slew) * float(dt)
-    d_dec = float(max_slew if max_decel is None else max_decel) * float(dt)
-    lim = np.where(np.abs(target) >= np.abs(prev), d_acc, d_dec)  # per joint: accel vs decel cap
-    cmd = prev + np.clip(target - prev, -lim, lim)  # rate limit
+    decel = float(max_slew if max_decel is None else max_decel)
+    if max_jerk > 0.0:
+        accel = np.zeros(3, np.float32) if prev_accel is None else prev_accel
+        # Clamp the TARGET, so the tracker ramps into the limit; the backstop below cutting a
+        # ramp off at max_omega would be a jerk spike of its own.
+        target = np.clip(target, -float(max_omega), float(max_omega))
+        cmd = jerk_limited_step(target, prev, accel, float(max_slew), decel, max_jerk, dt)
+    else:
+        d_acc = float(max_slew) * float(dt)
+        d_dec = decel * float(dt)
+        lim = np.where(np.abs(target) >= np.abs(prev), d_acc, d_dec)  # per joint: accel vs decel
+        cmd = prev + np.clip(target - prev, -lim, lim)  # rate limit
     cmd = np.clip(cmd, -float(max_omega), float(max_omega))  # hard magnitude backstop
     return cmd.astype(np.float32)
+
+
+def jerk_limited_step(
+    target: np.ndarray,
+    prev: np.ndarray,
+    prev_accel: np.ndarray,
+    max_accel: float,
+    max_decel: float,
+    max_jerk: float,
+    dt: float,
+) -> np.ndarray:
+    """One tick of a per-joint tracker whose acceleration is bounded and changes at most max_jerk.
+
+    A plain rate limit bounds the acceleration but lets it flip from +max to -max in one tick,
+    and MPPI replanning every frame asks for exactly that: the `turns` bag reversed each front
+    wheel's acceleration 2.7 times a second, half the time at the cap. Here the acceleration
+    itself ramps. Mirrored on device by mppi._jerk_limited_step, so the rollouts plan with the
+    command the wheels will get; keep the two identical.
+
+    Returns the new command. Its acceleration is (cmd - prev) / dt, the caller's next prev_accel.
+    """
+    target = np.asarray(target, np.float32)
+    prev = np.asarray(prev, np.float32)
+    accel = np.asarray(prev_accel, np.float32)
+    error = target - prev
+    lim = np.where(np.abs(target) >= np.abs(prev), max_accel, max_decel)
+    # The largest acceleration from which ramping down to zero at max_jerk still ends ON the
+    # target: the ramp a, a - j*dt, ... moves the command by a^2/(2j) + a*dt/2.
+    reach = max_jerk * (np.sqrt(0.25 * dt * dt + 2.0 * np.abs(error) / max_jerk) - 0.5 * dt)
+    wanted = np.sign(error) * np.minimum(lim, reach)
+    new_accel = np.clip(wanted, accel - max_jerk * dt, accel + max_jerk * dt)
+    # Land exactly when both the landing tick and the stop after it are within the jerk limit;
+    # snapping otherwise would be the unbounded jerk this exists to prevent, so it overshoots a
+    # little and comes back instead.
+    land = error / dt
+    can_land = (np.abs(land - accel) <= max_jerk * dt) & (np.abs(land) <= max_jerk * dt)
+    new_accel = np.where(can_land, land, new_accel)
+    return (prev + new_accel * dt).astype(np.float32)
 
 
 def to_engine_order(cmd: np.ndarray) -> np.ndarray:
