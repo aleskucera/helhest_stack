@@ -39,6 +39,8 @@ PLAN_DEFAULTS: dict[str, Any] = {
     # MPPI's hard veto on the cost-to-go's HAZARD field: actual wall contact, without the router's
     # margin, and never tilt. 1e6 is ten times the rollout-infeasibility weight. 0 = off.
     "plan_wall_veto": 1e6,
+    # first-target charge for leaving last frame's plan (CostParams.commit). 0 = off.
+    "plan_commit": 0.0,
     # sampler -> SamplingConfig
     "plan_wmax": 4.0,
     "plan_wmin": 0.0,
@@ -151,6 +153,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             smoothness=float(p["plan_smooth"]),
             saturation=float(p["plan_saturation"]),
             veto=float(p["plan_wall_veto"]),
+            commit=float(p["plan_commit"]),
             clearance=clearance,
         ),
         sampling=SamplingConfig(

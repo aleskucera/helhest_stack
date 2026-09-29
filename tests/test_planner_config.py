@@ -52,6 +52,8 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         saturation=p["plan_saturation"],
         # added after the move: the wall veto, which the node now sets from the table
         veto=p["plan_wall_veto"],
+        # added after the move: the commitment charge
+        commit=p["plan_commit"],
         # added after the move: the clearance law, one object for MPPI, the route and the governor
         clearance=_clearance(p),
     )

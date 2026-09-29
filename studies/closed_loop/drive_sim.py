@@ -47,6 +47,7 @@ from examples.helhest_junior.odin_sim.sim import ODIN_MOUNT_XYZ
 
 from helhest import dynamics
 from helhest.control.command import condition_command
+from helhest.control.command import spin_side
 from helhest.control.command import to_engine_order
 from helhest.control.command import turn_first
 from helhest.control.governor import ClearanceGovernor
@@ -396,6 +397,7 @@ def drive(a: argparse.Namespace) -> dict:
     chain = not a.no_chain
     prev_lrr = np.zeros(3, np.float32)
     prev_accel = np.zeros(3, np.float32)  # its acceleration, where the jerk limit continues from
+    side = 0.0  # the committed spin direction (control.command.spin_side)
     max_omega = float(a.plan_params.get("plan_max_omega", 7.5))
     max_slew = float(a.plan_params.get("plan_max_slew", PLAN_DEFAULTS["plan_max_slew"]))
     max_decel = float(a.plan_params.get("plan_max_decel", PLAN_DEFAULTS["plan_max_decel"]))
@@ -481,6 +483,7 @@ def drive(a: argparse.Namespace) -> dict:
                 # the output tracker's state, in the planner's (unboosted) convention
                 half_diff = 0.5 * (prev_lrr[2] - prev_lrr[0]) / turn_boost
                 half_acc = 0.5 * (prev_accel[2] - prev_accel[0]) / turn_boost
+                planner.set_spin_side(side)
                 planner.set_command_state(
                     (prev_lrr[1] - half_diff, prev_lrr[1] + half_diff),
                     (prev_accel[1] - half_acc, prev_accel[1] + half_acc),
@@ -564,6 +567,7 @@ def drive(a: argparse.Namespace) -> dict:
             )
             prev_accel = (lrr - prev_lrr) / dt
             prev_lrr = lrr
+            side = spin_side(side, lrr)
             cmd = to_engine_order(lrr).astype(np.float32)
         else:  # the chain clamps at plan_max_omega itself; clipping its output here is a jerk spike
             cmd = np.clip(cmd, -a.wmax, a.wmax)

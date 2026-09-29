@@ -160,6 +160,11 @@
     plan_max_slew: 3.0
     plan_max_decel: 3.0       # decel cap d(cmd)/dt [rad/s^2] (also the stop ramp)
     plan_max_jerk: 5.0        # [rad/s^3] how fast the acceleration itself may change
+    # Charge on a candidate's first target for leaving last frame's plan. The top 1% of
+    # candidates sit within ~0.2 of the best cost (of ~240), so without it the winner is a coin
+    # flip every frame. drive_sim pocket, one run each: planner reversals 5.6 -> 2.3/s forward,
+    # 5.8 -> 2.9/s turning, left/right switches 21 -> 1 at 3.0. Rebuilds the planner on change.
+    plan_commit: 3.0
     plan_goal_running: 0.3    # progress pull -> higher = faster toward goal
     plan_effort: 0.001        # wheel-speed^2 penalty -> lower = faster
 

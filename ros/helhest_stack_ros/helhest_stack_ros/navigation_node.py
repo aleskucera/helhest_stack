@@ -58,6 +58,7 @@ from helhest.control.governor import ClearanceGovernor
 from helhest.control.command import in_flight_history
 from helhest.control.command import JOINT_NAMES
 from helhest.control.command import joint_states_to_model
+from helhest.control.command import spin_side
 from helhest.control.command import to_engine_order
 from helhest.control.mppi import MppiGpu
 from helhest.control.terminal import dock_control
@@ -121,6 +122,7 @@ _PLAN_BUILD = frozenset(
         "plan_mu_tau",
         "plan_saturation",
         "plan_wall_veto",
+        "plan_commit",
         "plan_pivot_cost",
         "plan_z_veto",
         "plan_charge_per_sigma",
@@ -217,6 +219,8 @@ class NavigationNode(Node):
         )  # last published /cmd_joints [L, rear, R] (slew ref)
         # its acceleration [rad/s^2], (cmd - previous) / dt: where the jerk limit continues from
         self._prev_accel = np.zeros(3, np.float32)
+        # +1 / -1 while a spin is under way (control.command.spin_side): MPPI finishes it that way
+        self._spin_side = 0.0
         # Commands already in flight, ENGINE order (wL, wR, w_rear), oldest first. Length = the
         # delay in whole rollout steps; empty (and unused) when plan_command_delay is 0.
         self._cmd_in_flight: deque[np.ndarray] = deque(maxlen=1)
@@ -574,6 +578,9 @@ class NavigationNode(Node):
         # charge, which cannot help once every candidate already touches: the robot pressed
         # into walls toward the goal. 0 = off.
         d("plan_wall_veto", PLAN_DEFAULTS["plan_wall_veto"])
+        # Charge on a candidate's first target for leaving last frame's plan (CostParams.commit):
+        # stops the elite re-picking faster/slower every frame. 0 = off.
+        d("plan_commit", PLAN_DEFAULTS["plan_commit"])
         # COARSE "which way" layer (planning/coarse.py). Each frame a plan_coarse_win_m crop of
         # the belief is pooled into plan_coarse_block_m blocks, kept in a map anchored to
         # the WORLD (plan_coarse_memory_m across, centred on the map origin) so a dead end the
@@ -824,6 +831,7 @@ class NavigationNode(Node):
         self.plan_mu_tau: float = g("plan_mu_tau")
         self.plan_saturation: float = g("plan_saturation")
         self.plan_wall_veto: float = g("plan_wall_veto")
+        self.plan_commit: float = g("plan_commit")
         self.plan_coarse_block_m: float = g("plan_coarse_block_m")
         self.plan_coarse_memory_m: float = g("plan_coarse_memory_m")
         self.plan_coarse_win_m: float = g("plan_coarse_win_m")
@@ -1056,6 +1064,7 @@ class NavigationNode(Node):
             )
         self.goal_xy = (msg.pose.position.x, msg.pose.position.y)
         self._prev_plan_U = None  # new goal -> don't smooth against the old goal's plan
+        self._spin_side = 0.0  # new goal -> the way round is decided afresh
         self._goal_reached = False  # new goal -> resume planning
         # plan_debug_dump 2 = "dump the first frame that plans toward the NEXT goal". Arming it
         # from outside and racing the goal in is unreliable: the node is usually still planning
@@ -1580,6 +1589,7 @@ class NavigationNode(Node):
             )
             if self.cmd_output == "twist":
                 boost = 1.0
+            self.planner.set_spin_side(self._spin_side)
             wheels, accel = self._prev_cmd, self._prev_accel
             self.planner.set_command_state(
                 (
@@ -1956,6 +1966,7 @@ class NavigationNode(Node):
         acceleration it took to get there, over the dt the conditioner was given."""
         self._prev_accel = (cmd - self._prev_cmd) / dt
         self._prev_cmd = cmd
+        self._spin_side = spin_side(self._spin_side, cmd)
         self._publish_cmd(cmd)
 
     def _command_dt(self, expected: float) -> float:

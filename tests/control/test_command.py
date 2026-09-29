@@ -136,3 +136,13 @@ def test_joint_states_missing_joint_is_none():
     from helhest.control.command import joint_states_to_model
 
     assert joint_states_to_model(["left_wheel_j"], [1.0]) is None
+
+
+def test_spin_side_holds_through_a_spin_and_releases_on_driving():
+    from helhest.control.command import spin_side
+
+    left_spin = np.array([-2.0, 0.0, 2.0], np.float32)
+    assert spin_side(0.0, left_spin) == 1.0
+    assert spin_side(1.0, np.array([2.0, 0.0, -2.0], np.float32)) == -1.0  # a new spin decides
+    assert spin_side(1.0, np.zeros(3, np.float32)) == 1.0  # stopped between frames: still left
+    assert spin_side(1.0, np.array([1.5, 1.5, 1.8], np.float32)) == 0.0  # drove off: released

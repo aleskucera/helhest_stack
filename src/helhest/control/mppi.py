@@ -138,6 +138,7 @@ class CostWeights:
     # one situation it is most needed. 71% of the frames where the robot left its envelope had V
     # capped at its own cell, against 21% of the frames where it did not.
     veto: float
+    commit: float  # first-target charge for leaving last frame's plan (CostParams.commit)
     # mild per-meter preference against reverse motion (forward keeps the sensor looking ahead).
     reverse: float
     # TIME LOST TO THE CLEARANCE LAW (planning/clearance.py), built from CostParams.clearance
@@ -211,6 +212,14 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # drive_sim now feed it the cost-to-go's HAZARD field only (`CostToGo.hazard`: contact, no tilt)
     # at `plan_wall_veto`, which is what makes it safe to enforce hard.
     veto: float = 0.0
+    # COMMITMENT: charge a candidate's FIRST target for leaving the plan committed last frame,
+    # commit * ((wL - wL_prev)^2 + (wR - wR_prev)^2). Candidates that differ only in noise cost
+    # nearly the same, so without it the elite re-picks faster/slower, left/right every frame and
+    # the command reverses its acceleration 2-3 times a second (`turns` bag, 2026-09-29). The
+    # plan changes when the gain beats the charge. Raw targets, not the rate-limited command: the
+    # executed first step is already tied to the current one by the tracker; the choice is not.
+    # 0 = off.
+    commit: float = 0.0
     # per-meter shaping against reverse -- sized so reverse is an ESCAPE, not a route. A pivot's
     # V-surcharge is small (the router blends turning into arcs) and a pi pivot eats most of the
     # horizon, so myopic backward progress outbids pivot-then-forward at low weights: measured, at
@@ -243,6 +252,7 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.tip = self.tip
         cw.unknown = self.unknown
         cw.veto = self.veto
+        cw.commit = self.commit
         cw.reverse = self.reverse
         c = self.clearance if self.clearance is not None else ClearanceParams()
         cw.clear_time = c.mppi_weight if self.clearance is not None else 0.0
@@ -368,6 +378,7 @@ def _sample_target_wheel_omega_kernel(
     n_pivot: int,
     n_knots: int,
     seed: wp.array(dtype=int),
+    spin_side: wp.array(dtype=float),  # [1] +1 left / -1 right: spin only that way; 0 = either
     target_wheel_omega: wp.array2d(dtype=wp.vec3),
 ):
     # Candidate index c keys ALL randomness, so the n_mu replicas of a candidate get identical
@@ -409,6 +420,10 @@ def _sample_target_wheel_omega_kernel(
         mag = spin_min + (wp.max(top, spin_min) - spin_min) * u_spin
         if wp.randf(wp.rand_init(seed[0] + 6271, b)) < 0.5:
             mag = -mag
+        # A spin under way keeps its direction (MppiGpu.set_spin_side): with the goal behind,
+        # left and right cost the same and the elite alternated every ~1.6 s on the robot.
+        if spin_side[0] != 0.0:
+            mag = wp.abs(mag) * spin_side[0]
         wheel_l = -mag
         wheel_r = mag
     elif b < n_wide + n_spin + n_straight:
@@ -694,6 +709,19 @@ def _cost_kernel(
         + cw.clear_time * time_sum
         + safe
     )
+
+
+@wp.kernel
+def _commit_cost_kernel(
+    raw: wp.array2d(dtype=wp.vec3),  # [T, B] sampled targets: the decision
+    U_ref: wp.array2d(dtype=float),  # [T, 2] the plan committed last frame
+    commit: float,
+    J: wp.array(dtype=float),
+):
+    r = wp.tid()
+    dl = raw[0, r][0] - U_ref[0, 0]
+    dr = raw[0, r][1] - U_ref[0, 1]
+    J[r] = J[r] + commit * (dl * dl + dr * dr)
 
 
 @wp.kernel
@@ -988,6 +1016,8 @@ class MppiGpu:
                 else sim.target_wheel_omega
             )
             self.cmd_state = wp.zeros(1, dtype=wp.vec4)  # set_command_state; zeros = at rest
+            self.U_ref = wp.zeros((self.horizon, 2), dtype=wp.float32)  # last frame's plan
+            self.spin_side = wp.zeros(1, dtype=wp.float32)  # set_spin_side; 0 = either way
         self.set_mu_band()  # nominal mu (fills sim.mu_scale for the replica layout)
 
         # the grid the cost kernel samples the lattice field on: defaults to the sim grid, but a COARSER
@@ -1028,6 +1058,11 @@ class MppiGpu:
         self.cmd_state.assign(
             np.array([[wheels[0], wheels[1], accel[0], accel[1]]], dtype=np.float32)
         )
+
+    def set_spin_side(self, side: float) -> None:
+        """+1 = spin candidates turn left only, -1 = right only, 0 = either. See
+        control.command.spin_side for when a spin counts as under way. Graph-safe."""
+        self.spin_side.assign(np.array([float(side)], dtype=np.float32))
 
     def set_mu_band(self, center=1.0, span=0.0):
         """Friction-uncertainty band for the robust replicas: replica k of every candidate rolls
@@ -1121,6 +1156,7 @@ class MppiGpu:
                 self.n_pivot,
                 self.sampling.n_knots,
                 self.seed,
+                self.spin_side,
             ],
             outputs=[self.raw_target],
             device=self.device,
@@ -1171,6 +1207,14 @@ class MppiGpu:
             outputs=[self.J, self.Jsafe],
             device=self.device,
         )
+        if self.cw.commit > 0.0:
+            wp.launch(
+                _commit_cost_kernel,
+                self.n_rollouts,
+                inputs=[self.raw_target, self.U_ref, self.cw.commit],
+                outputs=[self.J],
+                device=self.device,
+            )
         # collapse the mu replicas: worst-replica safety + mean-replica goal/shaping
         wp.launch(
             _robust_j_kernel,
@@ -1267,6 +1311,8 @@ class MppiGpu:
     def replan(self, state, goal_xy, n_refine):
         """Run n_refine GPU refines from `state` toward world `goal_xy`; updates U in place."""
         self.goal.assign(np.asarray(goal_xy[:2], np.float32))
+        # the plan committed last frame, before this frame's refines move U
+        wp.copy(self.U_ref, self.U)
         self.sim.start_pose.assign(
             np.ascontiguousarray(
                 np.tile(np.asarray(state, np.float32), (self.n_rollouts, 1)), np.float32

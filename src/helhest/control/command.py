@@ -104,6 +104,25 @@ def turn_first(
     return mean * scale - half_diff, mean * scale + half_diff
 
 
+def spin_side(prev_side: float, cmd: np.ndarray) -> float:
+    """Which way MPPI may spin next frame, from the command just published ([L, rear, R]).
+
+    A spin under way -- barely advancing, clearly turning -- fixes the side: +1 left, -1 right.
+    It holds while the robot stands or keeps spinning, and is released only once it drives off
+    (or the caller resets it for a new goal), so a spin finishes the way it started. With the
+    goal behind, left and right cost the same and the planner alternated every ~1.6 s on the
+    robot (`turns` bag, 2026-09-29). turn_first's commitment acts only on the published command
+    and only past commit_deg, so MPPI kept planning the other way and won once it let go.
+    """
+    mean = 0.5 * (float(cmd[0]) + float(cmd[2]))
+    diff = float(cmd[2]) - float(cmd[0])
+    if abs(mean) >= 0.5:  # [rad/s] driving: the turn is over
+        return 0.0
+    if abs(diff) > 1.0:  # [rad/s] a spin under way
+        return math.copysign(1.0, diff)
+    return prev_side
+
+
 def condition_command(
     wl: float,
     wr: float,
