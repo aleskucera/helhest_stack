@@ -14,7 +14,11 @@
     lidar_topic: /odin1/cloud_raw
     odom_topic: /odin1/odometry         # the pose, trusted as is
     imu_topic: /odin1/imu
-    base_frame: odin1_base_link         # cloud already in this frame -> sensor TF = identity
+    # The cloud is transformed into base_frame through TF, from its own frame_id. Vendor driver
+    # <= 0.13.0 published it already in odin1_base_link (identity); from 0.13.1 (cras_odin_driver
+    # 27c11d5, 2026-09-13) it is in odin1_lidar, and the static imu_link -> odin1_lidar carries the
+    # Odin's lidar calibration -- so older bags and live clouds both land in the same frame.
+    base_frame: odin1_base_link
     map_frame: map
     publish_map_tf: true                # the node owns map -> odom_odin (identity) ...
     publish_odom_tf: true               # ... and odom_odin -> odin1_base_link
