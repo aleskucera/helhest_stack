@@ -192,7 +192,7 @@ wheels = [
 [[package]]
 name = "elevation-belief"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=5600aa2#5600aa2eafd5b8521f57151876542e5d39d97818" }
+source = { git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=8177bbd#8177bbd704aca6e7f78ff31b10c8fe9724f86fba" }
 dependencies = [
     { name = "numpy" },
     { name = "warp-lang" },
@@ -320,8 +320,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "elevation-belief", git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=5600aa2" },
-    { name = "elevation-belief", marker = "extra == 'calib'", git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=5600aa2" },
+    { name = "elevation-belief", git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=8177bbd" },
+    { name = "elevation-belief", marker = "extra == 'calib'", git = "ssh://git@github.com/aleskucera/elevation_belief.git?rev=8177bbd" },
     { name = "h5py", marker = "extra == 'data'", specifier = ">=3.0" },
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.8" },
     { name = "mcap", marker = "extra == 'calib'", specifier = ">=1.2" },
