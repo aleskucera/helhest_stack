@@ -31,6 +31,7 @@ from geometry_msgs.msg import Point
 from geometry_msgs.msg import Vector3
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import TwistStamped
 from message_filters import ApproximateTimeSynchronizer
 from message_filters import Subscriber
 from nav_msgs.msg import Odometry
@@ -294,6 +295,7 @@ class NavigationNode(Node):
         self.pub_path_marker = self.create_publisher(Marker, "planned_path_marker", 10)
         self.pub_frame = self.create_publisher(Marker, "frame_marker", 1)
         self.pub_cmd = self.create_publisher(JointState, self.get_parameter("cmd_topic").value, 10)
+        self._pub_twist = None  # the /cmd_vel publisher, made on first use (cmd_output twist)
         self.pub_turn_boost = self.create_publisher(
             Float32, "turn_boost", 10
         )  # turn_boost in effect (debug)
@@ -631,6 +633,16 @@ class NavigationNode(Node):
         # left-wheel sign flip, rear-follower, magnitude clamp, slew limit) is in control/command.py.
         d("plan_actuate", True)  # publish /cmd_joints wheel commands
         d("cmd_topic", "/cmd_joints")  # JointState wheel-velocity command topic (to the LLC)
+        # WHICH LLC INPUT drives the wheels. "joints": per-wheel speeds on cmd_topic, passed straight
+        # through to the setpoints (checked on the turns/drive bags, 2026-09-29) -- the LLC closes no
+        # yaw loop there, so the turn boost and our yaw loop are the compensation. "twist": forward
+        # speed and yaw rate on cmd_vel_topic, where the LLC runs its OWN gyro yaw loop -- so the
+        # turn boost and our yaw loop are both skipped, or two loops would stack. The yaw rate sent is
+        # the planner's model of the conditioned command, alpha = 1 + k_turn*plan_friction. Never
+        # both: only the chosen topic is published. Switch it with the robot STOPPED -- the topic left
+        # behind is not sent a stop, so its last command is whatever the LLC does with a silent input.
+        d("cmd_output", "joints")
+        d("cmd_vel_topic", "/cmd_vel")  # TwistStamped (linear.x, angular.z), cmd_output twist only
         # WHEEL FEEDBACK: measured wheel velocities from the LLC, used to seed each replan's
         # realized wheel state (motor-lag + body-momentum initial condition). Without it the
         # rollouts plan from wheels-at-rest every frame. Convention/units verified on
@@ -807,6 +819,8 @@ class NavigationNode(Node):
         self.plan_turn_first_deg: float = g("plan_turn_first_deg")
         self.plan_turn_first_reach_m: float = g("plan_turn_first_reach_m")
         self.plan_actuate: bool = g("plan_actuate")
+        self.cmd_output: str = g("cmd_output")
+        self.cmd_vel_topic: str = g("cmd_vel_topic")
         self.plan_max_omega: float = g("plan_max_omega")
         self.plan_max_slew: float = g("plan_max_slew")
         self.plan_max_decel: float = g("plan_max_decel")
@@ -942,6 +956,7 @@ class NavigationNode(Node):
         # SAFETY cap and over-braking is harmless. A yaw REFERENCE has to be the planner's own
         # model, alpha = 1 + k_turn*plan_friction, or the loop would steer the robot away from
         # what MPPI actually planned -- about 8% less yaw at the deployed mu 0.8.
+        self._wheel_radius = _rp.wheel_radius  # [m] wheel rad/s -> body m/s, for cmd_output twist
         self._yaw_per_diff = _rp.wheel_radius / (
             2.0 * _rp.half_track * (1.0 + kt * self.plan_friction)
         )
@@ -1089,6 +1104,12 @@ class NavigationNode(Node):
         set. That is silent, and it wasted a measurement in this repo's own investigation: a live
         `plan_turn 0.03` was read back as 0.2 and the arm was scored as if it had applied.
         """
+        for p in params:
+            if p.name == "cmd_output" and p.value not in ("joints", "twist"):
+                return SetParametersResult(
+                    successful=False,
+                    reason=f"cmd_output must be 'joints' or 'twist', not {p.value!r}",
+                )
         return SetParametersResult(successful=True)
 
     def _on_parameters_applied(self, params) -> None:
@@ -1516,7 +1537,7 @@ class NavigationNode(Node):
                     max_slew=self.plan_max_slew,
                     max_decel=self.plan_max_decel,
                     dt=self._command_dt(dynamics.DT),
-                    turn_boost=self.plan_turn_boost,
+                    turn_boost=1.0 if self.cmd_output == "twist" else self.plan_turn_boost,
                 )
                 self._prev_cmd = cmd
                 self._publish_cmd(cmd)
@@ -1739,6 +1760,9 @@ class NavigationNode(Node):
         turn_boost = (
             self._turn_adapt.turn_boost if self._turn_adapt is not None else self.plan_turn_boost
         )
+        twist = self.cmd_output == "twist"
+        if twist:  # the LLC's own yaw loop compensates on /cmd_vel; see cmd_output
+            turn_boost = 1.0
         if from_plan:
             # The adaptive turn_boost pairs a commanded differential with the yaw it produced, so
             # it belongs on the PLAN cadence -- once per committed plan, not per publish.
@@ -1755,7 +1779,7 @@ class NavigationNode(Node):
         # error has no fixed point and the loop inflates the turn even at zero model error
         # (measured: peak yaw 0.517 -> 0.575 rad/s on correctly-modelled ground).
         ref_cmd = None
-        if self._yaw_track is not None and from_plan:
+        if self._yaw_track is not None and from_plan and not twist:
             ref_cmd = self._conditioned(wl, wr, d, turn_boost)
             half = 0.5 * self._yaw_track.correction  # differential only; the planner owns speed
             wl, wr = wl - half, wr + half
@@ -1927,7 +1951,8 @@ class NavigationNode(Node):
         self._turn_adapt.update(diff_cmd, yaw_meas, dt=dt)
 
     def _publish_cmd(self, cmd: np.ndarray) -> None:
-        """Publish the conditioned [left, rear, right] wheel command to /cmd_joints.
+        """Publish the conditioned [left, rear, right] wheel command: to /cmd_joints, or as a twist
+        to /cmd_vel when cmd_output is "twist".
 
         `cmd` is in WHEEL rad/s (the planner/model convention) and the LLC now consumes /cmd_joints
         as wheel rad/s directly, so we publish it as-is. (Before 2026-07-27 the LLC misread the
@@ -1938,11 +1963,22 @@ class NavigationNode(Node):
         command. VELOCITY ONLY: position/effort are left empty. Filling them with inf breaks
         serialization across the micro-ROS/XRCE bridge, so the LLC never receives the command
         (found live on the robot 2026-07-10)."""
-        m = JointState()
-        m.header.stamp = self.get_clock().now().to_msg()
-        m.name = list(JOINT_NAMES)
-        m.velocity = [float(v) for v in cmd]
-        self.pub_cmd.publish(m)
+        if self.cmd_output == "twist":
+            # [left, rear, right] wheel rad/s -> body forward speed and the planner's yaw rate
+            if self._pub_twist is None:  # created on first use, so "joints" never shows a publisher
+                self._pub_twist = self.create_publisher(TwistStamped, self.cmd_vel_topic, 10)
+            t = TwistStamped()
+            t.header.stamp = self.get_clock().now().to_msg()
+            t.header.frame_id = "base_link"
+            t.twist.linear.x = float(self._wheel_radius * 0.5 * (cmd[0] + cmd[2]))
+            t.twist.angular.z = float(self._yaw_per_diff * (cmd[2] - cmd[0]))
+            self._pub_twist.publish(t)
+        else:
+            m = JointState()
+            m.header.stamp = self.get_clock().now().to_msg()
+            m.name = list(JOINT_NAMES)
+            m.velocity = [float(v) for v in cmd]
+            self.pub_cmd.publish(m)
         self._cmd_in_flight.append(to_engine_order(cmd))
         self._last_cmd_time = float(self.get_clock().now().nanoseconds) * 1e-9
 

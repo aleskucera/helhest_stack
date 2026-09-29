@@ -28,6 +28,11 @@ TOPICS=(
   /goal_pose                # planning goal (the input)
   /planned_path             # what MPPI committed to, each frame
   /cmd_joints               # wheel command the node sends to the LLC (the drive output)
+  /cmd_vel                  # the other LLC input: (v, yaw rate), used when cmd_output:=twist
+  # --- the LLC's own yaw loop on /cmd_vel (its internals, as it publishes them) ---
+  /debug/angle
+  /debug/setpoint
+  /debug/error
   /yaw_track                # inner yaw loop (x=reference, y=gyro, z=correction) -- the
                             # correction is NOT recoverable from /cmd_joints, which
                             # already contains it

@@ -160,7 +160,12 @@
     # oversteer -- and its residual noise sizes the band. Rollouts are latency-bound, so the 3
     # replicas cost ~nothing; candidates drop 4096 -> 1365 (still plenty).
     plan_n_mu: 3
-    plan_mu_adapt: true
+    # OFF since 2026-09-29. The turns/drive bags: with it on, MPPI planned larger wheel differentials
+    # for the same turn, the yaw loop (whose reference keeps the fixed plan_friction) chased the
+    # inflated target to its 1.5 clamp, and the robot turned no more for it. Open loop, the fixed
+    # model already realised 0.95 of the intended yaw. Keep it off until its model and the loop's
+    # reference agree.
+    plan_mu_adapt: false
     plan_mu_span: 0.25        # band half-width until the estimator locks (fraction of plan_friction)
     # Friction-saturation certificate (speed governor): rollouts whose slope-hold + centripetal +
     # side-slope demand exceeds the grip budget are penalized -> slow into low-grip corners, full
