@@ -85,9 +85,7 @@ _IMU_MAX_EXTRAP_S = 0.05  # fall back to odom if no IMU sample within this of th
 
 
 # Construction-time params: a change to any rebuilds the owning object.
-_OUTLIER_BUILD = frozenset(
-    {"outlier_search_radius_m", "outlier_min_neighbors", "outlier_std_mult", "device"}
-)
+_OUTLIER_BUILD = frozenset({"outlier_search_radius_m", "outlier_min_neighbors", "device"})
 # Planner is sized to the windows + rollout shape; a change to any rebuilds it (and its
 # CUDA graphs), so keep it off the per-frame path.
 _PLAN_BUILD = frozenset(
@@ -336,6 +334,11 @@ class NavigationNode(Node):
         # robot. Far returns are sparse grazing-angle ground -- noise that only pollutes the map.
         # Cropped per SCAN so it never enters any stage. 0 disables.
         d("scan_max_range_m", 15.0)
+        # Near cut: drop returns closer than this to the sensor (3-D). The belief adopts a
+        # higher reading at once and ignores a lower one, and the dense near field feeds that
+        # rule ~14 sweeps a second: without the cut the ground under the robot ratchets up
+        # 5-7 cm and leaves a raised trail (Robotour drive, 2026-09-29). 0 disables.
+        d("scan_min_range_m", 1.0)
         # Robot self-filter: drop the robot's own returns (wheels/body) -- a base_frame box,
         # measured for the Odin mount (self-returns stay fixed in base while the scene moves).
         d("self_filter_enable", True)
@@ -343,14 +346,12 @@ class NavigationNode(Node):
         d("self_x_max", 0.55)
         d("self_y_min", -0.75)
         d("self_y_max", 0.75)
-        # Statistical outlier removal on the input scan (GPU, range-normalized k-NN):
-        # drops sparse specks/noise before they reach the map. Range-normalized against
-        # the sensor origin so it spares legitimately sparse distant ground; the
-        # min_neighbors gate is an absolute count (6 is safe out to the routing window).
+        # Isolated-point removal on the input scan (GPU): drops specks with fewer than
+        # min_neighbors returns within the radius before they reach the map. An absolute count
+        # (6 is safe out to the routing window).
         d("outlier_enable", True)
         d("outlier_search_radius_m", 0.25)
         d("outlier_min_neighbors", 6)
-        d("outlier_std_mult", 1.0)  # reject beyond mean + this*std of the neighbor distance
         # Heightmap (live-tunable). resolution/win_m validated on real bags: the finer 0.08 m cell
         # + 12 m fine window let the MPPI actually see berms across its plan (footprint violations
         # 36%->8% vs the old 0.15/8) -- see the Tier-B planner analysis.
@@ -722,6 +723,7 @@ class NavigationNode(Node):
         self.z_crop_min: float = g("z_crop_min")
         self.z_crop_max: float = g("z_crop_max")
         self.scan_max_range_m: float = g("scan_max_range_m")
+        self.scan_min_range_m: float = g("scan_min_range_m")
         self.self_filter_enable: bool = g("self_filter_enable")
         self.self_x_min: float = g("self_x_min")
         self.self_x_max: float = g("self_x_max")
@@ -836,7 +838,6 @@ class NavigationNode(Node):
         cfg = OutlierFilterConfig(
             search_radius_m=g("outlier_search_radius_m"),
             min_neighbors=g("outlier_min_neighbors"),
-            std_multiplier=g("outlier_std_mult"),
         )
         self.outlier_filter = StatisticalOutlierFilter(cfg, device=self.device)
 
@@ -1169,7 +1170,7 @@ class NavigationNode(Node):
         self._ck("preproc")
         # The pose is Odin's on-device SLAM, trusted as is: the map frame is the odometry frame.
         world_T_base = odom_T_base
-        scan_wp = self._denoise(scan_buf[:n_scan], base_T_sensor)
+        scan_wp = self._denoise(scan_buf[:n_scan])
         self._ck("denoise")
         world_scan = transform_points(scan_wp, len(scan_wp), world_T_base)
         stamp = cloud_msg.header.stamp.sec + cloud_msg.header.stamp.nanosec * 1e-9
@@ -2008,20 +2009,11 @@ class NavigationNode(Node):
         # device gate kernel, so casting to float64 here would only double the upload.
         return np.ascontiguousarray(points, dtype=np.float32), base_T_sensor
 
-    def _denoise(self, scan_wp: wp.array, base_T_sensor: np.ndarray) -> wp.array:
-        """GPU-native statistical outlier removal on the base-frame scan (device in/out).
-
-        Range-normalized k-NN (see StatisticalOutlierFilter): strips sparse specks
-        without punishing legitimately sparse distant ground. The sensor origin (the
-        static mount) is set per call so the range normalization is in the right frame.
-        """
+    def _denoise(self, scan_wp: wp.array) -> wp.array:
+        """GPU-native isolated-point removal on the base-frame scan (device in/out): strips
+        specks with too few neighbours (see StatisticalOutlierFilter)."""
         if not self.outlier_enable or len(scan_wp) == 0:
             return scan_wp
-        self.outlier_filter.config.sensor_origin = (
-            float(base_T_sensor[0, 3]),
-            float(base_T_sensor[1, 3]),
-            float(base_T_sensor[2, 3]),
-        )
         return self.outlier_filter.apply(scan_wp)
 
     def _scan_preproc(
@@ -2044,6 +2036,7 @@ class NavigationNode(Node):
                 else None
             ),
             max_range=self.scan_max_range_m,
+            min_range=self.scan_min_range_m,
         )
         return buf, count
 

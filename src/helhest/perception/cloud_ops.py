@@ -55,6 +55,7 @@ def _scan_gate_kernel(
     self_y_max: wp.float32,
     self_enable: wp.int32,
     range_max_sq: wp.float32,  # <= 0 disables the range crop
+    range_min_sq: wp.float32,  # <= 0 disables the near cut
     out_pts: wp.array(dtype=wp.vec3),
     counter: wp.array(dtype=wp.int32),
 ):
@@ -68,6 +69,8 @@ def _scan_gate_kernel(
     if i >= n:
         return
     p = src[i]
+    if range_min_sq > 0.0 and wp.dot(p, p) < range_min_sq:
+        return  # too close to the sensor, measured in the sensor frame
     x = m[0, 0] * p[0] + m[0, 1] * p[1] + m[0, 2] * p[2] + m[0, 3]
     y = m[1, 0] * p[0] + m[1, 1] * p[1] + m[1, 2] * p[2] + m[1, 3]
     z = m[2, 0] * p[0] + m[2, 1] * p[1] + m[2, 2] * p[2] + m[2, 3]
@@ -106,6 +109,10 @@ class ScanPreprocessor:
         z_range: tuple[float, float] | None,  # None disables the z crop
         self_box: tuple[float, float, float, float] | None,  # (x_min, x_max, y_min, y_max)
         max_range: float,  # <= 0 disables the range crop
+        # [m] <= 0 disables. 3-D distance from the sensor. Close returns are the densest and
+        # the most precise, so the belief's "adopt a higher reading at once" rule ratchets the
+        # ground under the robot upward on them: +5-7 cm within 1 m on the Robotour drive.
+        min_range: float,
     ) -> tuple[wp.array, int]:
         """Return `(points_device, count)`."""
         n = int(points.shape[0])
@@ -117,18 +124,29 @@ class ScanPreprocessor:
         zr = z_range if z_range is not None else (0.0, 0.0)
         sb = self_box if self_box is not None else (0.0, 0.0, 0.0, 0.0)
         with wp.ScopedDevice(self.device):
-            wp.copy(self._src, wp.array(np.ascontiguousarray(points, np.float32), dtype=wp.vec3),
-                    count=n)
+            wp.copy(
+                self._src,
+                wp.array(np.ascontiguousarray(points, np.float32), dtype=wp.vec3),
+                count=n,
+            )
             self._counter.zero_()
             wp.launch(
                 _scan_gate_kernel,
                 dim=n,
                 inputs=[
-                    self._src, n, m,
-                    float(zr[0]), float(zr[1]), int(z_range is not None),
-                    float(sb[0]), float(sb[1]), float(sb[2]), float(sb[3]),
+                    self._src,
+                    n,
+                    m,
+                    float(zr[0]),
+                    float(zr[1]),
+                    int(z_range is not None),
+                    float(sb[0]),
+                    float(sb[1]),
+                    float(sb[2]),
+                    float(sb[3]),
                     int(self_box is not None),
                     float(max_range * max_range) if max_range > 0.0 else 0.0,
+                    float(min_range * min_range) if min_range > 0.0 else 0.0,
                 ],
                 outputs=[self._out, self._counter],
             )

@@ -1,7 +1,7 @@
 """The node's scan entry path: `ScanPreprocessor.run` and `transform_points`.
 
 `run` is the first thing every sweep goes through on the robot -- sensor->base transform, the z
-crop, the self-footprint box and the range crop, fused into one kernel that compacts survivors in
+crop, the self-footprint box, the range crop and the near cut, fused into one kernel that compacts survivors in
 nondeterministic order. A gate that drops the wrong side of its bound, or a transform applied
 transposed, silently reshapes every map downstream, so each is checked here against the same
 arithmetic done in numpy. Outputs are compared as sorted row sets because the append order is
@@ -20,6 +20,7 @@ from helhest.perception import transform_points
 SELF_BOX = (-0.05, 0.55, -0.75, 0.75)  # (x_min, x_max, y_min, y_max) [m], base frame
 Z_RANGE = (-1.0, 1.5)  # [m], base frame
 MAX_RANGE = 8.0  # [m], xy distance in the base frame
+MIN_RANGE = 1.0  # [m], 3-D distance from the sensor
 
 
 def _base_T_sensor() -> np.ndarray:
@@ -36,6 +37,7 @@ def _reference(
     z_range: tuple[float, float] | None,
     self_box: tuple[float, float, float, float] | None,
     max_range: float,
+    min_range: float,
 ) -> np.ndarray:
     p = points_sensor @ base_T_sensor[:3, :3].T + base_T_sensor[:3, 3]
     keep = np.ones(len(p), bool)
@@ -46,6 +48,8 @@ def _reference(
         keep &= ~((p[:, 0] >= x0) & (p[:, 0] <= x1) & (p[:, 1] >= y0) & (p[:, 1] <= y1))
     if max_range > 0.0:
         keep &= p[:, 0] ** 2 + p[:, 1] ** 2 <= max_range**2
+    if min_range > 0.0:
+        keep &= np.linalg.norm(points_sensor, axis=1) >= min_range
     return p[keep]
 
 
@@ -58,10 +62,16 @@ def _run(
     z_range: tuple[float, float] | None = Z_RANGE,
     self_box: tuple[float, float, float, float] | None = SELF_BOX,
     max_range: float = MAX_RANGE,
+    min_range: float = MIN_RANGE,
 ) -> np.ndarray:
     pre = ScanPreprocessor(len(points))
     buf, count = pre.run(
-        points, _base_T_sensor(), z_range=z_range, self_box=self_box, max_range=max_range
+        points,
+        _base_T_sensor(),
+        z_range=z_range,
+        self_box=self_box,
+        max_range=max_range,
+        min_range=min_range,
     )
     return buf.numpy()[:count]
 
@@ -75,7 +85,8 @@ def test_each_gate_rejects_exactly_its_own_point() -> None:
             [2.0, 1.0, 1.7],  # above the z crop
             [0.3, 0.0, 0.0],  # on the robot's own body
             [9.0, 0.0, 0.0],  # beyond the range crop
-            [-0.3, 0.0, 0.0],  # just behind the self box: kept
+            [-0.3, 0.0, -0.6],  # just behind the self box, 1.3 m from the sensor: kept
+            [0.4, 0.8, 0.5],  # 0.93 m from the sensor, outside the self box: the near cut
         ]
     )
     T = _base_T_sensor()
@@ -88,7 +99,7 @@ def test_a_random_sweep_matches_numpy() -> None:
     rng = np.random.default_rng(0)
     sensor = rng.uniform((-10.0, -10.0, -2.0), (10.0, 10.0, 2.0), (20000, 3))
     got = _run(sensor)
-    want = _reference(sensor, _base_T_sensor(), Z_RANGE, SELF_BOX, MAX_RANGE)
+    want = _reference(sensor, _base_T_sensor(), Z_RANGE, SELF_BOX, MAX_RANGE, MIN_RANGE)
     assert 0 < len(want) < len(sensor)  # every gate has something to do
     assert len(got) == len(want)
     np.testing.assert_allclose(_sorted_rows(got), _sorted_rows(want), atol=1e-5)
@@ -97,7 +108,7 @@ def test_a_random_sweep_matches_numpy() -> None:
 def test_disabled_gates_keep_everything() -> None:
     rng = np.random.default_rng(1)
     sensor = rng.uniform(-12.0, 12.0, (5000, 3))
-    got = _run(sensor, z_range=None, self_box=None, max_range=0.0)
+    got = _run(sensor, z_range=None, self_box=None, max_range=0.0, min_range=0.0)
     want = sensor @ _base_T_sensor()[:3, :3].T + _base_T_sensor()[:3, 3]
     np.testing.assert_allclose(_sorted_rows(got), _sorted_rows(want), atol=1e-5)
 
