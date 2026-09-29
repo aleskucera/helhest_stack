@@ -7,13 +7,13 @@
 #   tmuxinator start helhest-nav
 #
 # Modelled on helhest-driver's robotour.yml (same router, driver launch and base_link TF). The robot
-# base (helhest_llc: /cmd_joints in, /joint_states out) is NOT started here: it is ESP32 firmware that
-# joins ROS through the Zenoh router on the NUC, so start the NUC's helhest-base session FIRST
-# (ros/sessions/helhest-base.tmuxinator.yml). The node publishes /cmd_joints; nothing else may
-# publish /cmd_vel while it drives.
+# base (helhest_llc: /cmd_vel and /cmd_joints in, /joint_states out) is NOT started here: it is ESP32
+# firmware that joins ROS through the Zenoh router on the NUC, so start the NUC's helhest-base session
+# FIRST (ros/sessions/helhest-base.tmuxinator.yml). The node publishes /cmd_vel (cmd_output in
+# odin.params.yaml); nothing else may publish it while the node drives.
 #
-# DRIVING IS OFF (-p plan_actuate:=false in the nav pane): check the maps, the planned path and the
-# TF in RViz (fixed frame odom_odin) first, then drop that flag.
+# DRIVING IS ON: the robot moves as soon as a goal is set (2D Goal Pose in RViz, fixed frame
+# odom_odin). To start it planning only, add -p plan_actuate:=false to the nav pane.
 
 name: helhest-nav
 root: /home/robot/workspaces/helhest_ws
@@ -53,8 +53,7 @@ windows:
           export PYTHONPATH="$PWD/ros/helhest_stack_ros:$PYTHONPATH"
           python3 -m helhest_stack_ros.navigation_node --ros-args \
             --params-file ros/config/odin.params.yaml \
-            --params-file ros/config/odin_cras.params.yaml \
-            -p plan_actuate:=false
+            --params-file ros/config/odin_cras.params.yaml
   - view:
       layout: even-horizontal
       panes:

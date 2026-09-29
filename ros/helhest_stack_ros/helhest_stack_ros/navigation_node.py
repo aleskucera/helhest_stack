@@ -656,6 +656,9 @@ class NavigationNode(Node):
         # behind is not sent a stop, so its last command is whatever the LLC does with a silent input.
         d("cmd_output", "joints")
         d("cmd_vel_topic", "/cmd_vel")  # TwistStamped (linear.x, angular.z), cmd_output twist only
+        # [rad/s] hard cap on the yaw rate sent on cmd_vel_topic; 0 = none. The LLC's own loop
+        # drives the wheels until the gyro reads what it was asked for, so this bounds the spin.
+        d("plan_max_yaw_rate", 0.0)
         # WHEEL FEEDBACK: measured wheel velocities from the LLC, used to seed each replan's
         # realized wheel state (motor-lag + body-momentum initial condition). Without it the
         # rollouts plan from wheels-at-rest every frame. Convention/units verified on
@@ -841,6 +844,7 @@ class NavigationNode(Node):
         self.plan_actuate: bool = g("plan_actuate")
         self.cmd_output: str = g("cmd_output")
         self.cmd_vel_topic: str = g("cmd_vel_topic")
+        self.plan_max_yaw_rate: float = g("plan_max_yaw_rate")
         self.plan_max_omega: float = g("plan_max_omega")
         self.plan_max_slew: float = g("plan_max_slew")
         self.plan_max_decel: float = g("plan_max_decel")
@@ -2028,7 +2032,10 @@ class NavigationNode(Node):
             t.header.stamp = self.get_clock().now().to_msg()
             t.header.frame_id = "base_link"
             t.twist.linear.x = float(self._wheel_radius * 0.5 * (cmd[0] + cmd[2]))
-            t.twist.angular.z = float(self._yaw_per_diff * (cmd[2] - cmd[0]))
+            yaw_rate = float(self._yaw_per_diff * (cmd[2] - cmd[0]))
+            if self.plan_max_yaw_rate > 0.0:
+                yaw_rate = float(np.clip(yaw_rate, -self.plan_max_yaw_rate, self.plan_max_yaw_rate))
+            t.twist.angular.z = yaw_rate
             self._pub_twist.publish(t)
         else:
             m = JointState()
