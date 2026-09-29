@@ -237,9 +237,10 @@ def _hash(a: np.ndarray) -> str:
 
 
 def compute(device: str = "cuda:0") -> dict[str, dict[str, np.ndarray]]:
-    # A private kernel cache, emptied every run. Warp's shared cache served a binary that a fresh
-    # compile of the same source does not reproduce (one ill-conditioned settle pose moved), so
-    # both record and check must build from the source as it stands.
+    # A private kernel cache, emptied every run, so record and check build from the source as it
+    # stands. Two compiles of one source used to disagree at a few ill-conditioned settle poses:
+    # Warp emits a module's kernels in a per-process order, the inlining followed it, and FMA
+    # contraction followed the inlining. engine/step.py now compiles without contraction.
     cache = HERE / "golden" / "kernel_cache"
     shutil.rmtree(cache, ignore_errors=True)
     wp.config.kernel_cache_dir = str(cache)

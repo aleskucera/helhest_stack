@@ -37,7 +37,15 @@ from .terrain import sample_normal
 # memory access at runtime). Verified via compute-sanitizer + an -O level sweep
 # (-O3 crashes; -O2/-O1/-O0 are correct). -O2 is correct and ~as fast as -O3, so
 # pin this module to it. CPU is unaffected (defaults to -O2).
-wp.set_module_options({"optimization_level": 2})
+#
+# No FMA contraction either. Warp emits a module's kernels in the iteration order of a WeakSet,
+# which varies per process (the module hash is taken over sorted kernels, so it does not change);
+# the compiler inlines differently depending on that order, and with contraction on, inlining
+# decides which multiply-adds fuse. So one module hash compiled to results that differed in the
+# last bits -- amplified at ill-conditioned settle poses to 3e-3 in the planner's margins, which
+# flipped studies/planning_refactor/golden.py in about one run in five. Unfused, every operation
+# rounds on its own and the result no longer depends on the inlining.
+wp.set_module_options({"optimization_level": 2, "fuse_fp": False})
 
 # Certificate denominators are floored at this fraction of the robot's weight: a near-unloaded
 # contact would otherwise report an enormous ratio while transmitting almost nothing.
