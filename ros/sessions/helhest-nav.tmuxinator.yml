@@ -7,8 +7,10 @@
 #   tmuxinator start helhest-nav
 #
 # Modelled on helhest-driver's robotour.yml (same router, driver launch and base_link TF). The robot
-# base (helhest_llc: /cmd_joints in, /joint_states out) is NOT started here -- it already runs on its
-# own. The node publishes /cmd_joints; nothing else may publish /cmd_vel while it drives.
+# base (helhest_llc: /cmd_joints in, /joint_states out) is NOT started here: it is ESP32 firmware that
+# joins ROS through the Zenoh router on the NUC, so start the NUC's helhest-base session FIRST
+# (ros/sessions/helhest-base.tmuxinator.yml). The node publishes /cmd_joints; nothing else may
+# publish /cmd_vel while it drives.
 #
 # DRIVING IS OFF (-p plan_actuate:=false in the nav pane): check the maps, the planned path and the
 # TF in RViz (fixed frame odom_odin) first, then drop that flag.
