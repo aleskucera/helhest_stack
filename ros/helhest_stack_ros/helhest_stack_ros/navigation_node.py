@@ -60,6 +60,7 @@ from helhest.control.command import JOINT_NAMES
 from helhest.control.command import joint_states_to_model
 from helhest.control.command import spin_side
 from helhest.control.command import to_engine_order
+from helhest.control.command import llc_not_driving
 from helhest.control.mppi import MppiGpu
 from helhest.control.terminal import dock_control
 from helhest.control.turn_adapt import AdaptiveTurnBoost
@@ -268,6 +269,8 @@ class NavigationNode(Node):
         self.create_subscription(Imu, self.imu_topic, self._imu_callback, qos_profile_sensor_data)
         self._wheel_meas: np.ndarray | None = None  # measured [wL, wR, w_rear], model convention
         self._wheel_meas_t: float = 0.0  # node-clock seconds of the last measurement
+        self._llc_idle_since: float | None = None  # node-clock s the LLC's setpoints went to 0
+        self._llc_setpoint_t: float = 0.0  # node-clock s of the last /joint_setpoints
         self._twist_meas: np.ndarray | None = None  # measured body twist (vx, vy, yaw_rate)
         self._twist_meas_t: float = 0.0
         js_topic = self.get_parameter("joint_states_topic").value
@@ -275,6 +278,10 @@ class NavigationNode(Node):
             self.create_subscription(
                 JointState, js_topic, self._joint_states_callback, qos_profile_sensor_data
             )
+        # the LLC's own wheel setpoints: all zero while it is not driving (_rest_if_llc_not_driving)
+        self.create_subscription(
+            JointState, "/joint_setpoints", self._llc_setpoints_callback, qos_profile_sensor_data
+        )
         self.create_subscription(
             PoseStamped, self.get_parameter("goal_topic").value, self._goal_callback, 10
         )
@@ -1555,6 +1562,7 @@ class NavigationNode(Node):
             if self._yaw_track is not None:
                 self._yaw_track.reset()  # at rest: a held integrator is a lurch on the next goal
             if self.plan_actuate:
+                self._rest_if_llc_not_driving()
                 cmd_dt = self._command_dt(dynamics.DT)
                 cmd = condition_command(
                     0.0,
@@ -1756,6 +1764,7 @@ class NavigationNode(Node):
         if not self.plan_actuate:
             return
         d = float(np.hypot(gx - mf.ex, gy - mf.ey))  # robot -> goal distance
+        self._rest_if_llc_not_driving()
         from_plan = False  # True only on the MPPI branch, whose command IS a plan to walk
         if d < self.plan_reach_radius:
             wl, wr = 0.0, 0.0  # reached -> stop (the slew limiter ramps the command down)
@@ -1963,6 +1972,36 @@ class NavigationNode(Node):
             return
         self.plan_sim.command_history.assign(
             in_flight_history(self._cmd_in_flight, n, int(self.plan_sim.batch_size))
+        )
+
+    def _llc_setpoints_callback(self, msg: JointState) -> None:
+        """The LLC's own wheel setpoints: all zero while it is not driving (e-stop)."""
+        v = dict(zip(msg.name, msg.velocity))
+        if "left_wheel_j" not in v or "right_wheel_j" not in v:
+            return
+        self._llc_setpoint_t = self.get_clock().now().nanoseconds * 1e-9
+        if max(abs(v["left_wheel_j"]), abs(v["right_wheel_j"])) < 0.05:  # [rad/s]
+            if self._llc_idle_since is None:
+                self._llc_idle_since = self._llc_setpoint_t
+        else:
+            self._llc_idle_since = None
+
+    def _rest_if_llc_not_driving(self) -> None:
+        """Put the command tracker back at rest while the LLC is not driving (e-stop), so
+        nothing builds up and release starts from zero at the jerk limit. See
+        control.command.llc_not_driving."""
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if self._llc_idle_since is None or now - self._llc_setpoint_t > 0.3:
+            return  # driving, or no fresh setpoints to judge by
+        if not llc_not_driving(self._prev_cmd, now - self._llc_idle_since):
+            return
+        self._prev_cmd = np.zeros(3, np.float32)
+        self._prev_accel = np.zeros(3, np.float32)
+        if self._yaw_track is not None:
+            self._yaw_track.reset()
+        self.get_logger().warning(
+            "the LLC is not driving (e-stop?) -- command held at rest",
+            throttle_duration_sec=2.0,
         )
 
     def _commit_cmd(self, cmd: np.ndarray, dt: float) -> None:

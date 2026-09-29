@@ -146,3 +146,13 @@ def test_spin_side_holds_through_a_spin_and_releases_on_driving():
     assert spin_side(1.0, np.array([2.0, 0.0, -2.0], np.float32)) == -1.0  # a new spin decides
     assert spin_side(1.0, np.zeros(3, np.float32)) == 1.0  # stopped between frames: still left
     assert spin_side(1.0, np.array([1.5, 1.5, 1.8], np.float32)) == 0.0  # drove off: released
+
+
+def test_llc_not_driving_needs_both_a_moving_command_and_idle_setpoints():
+    from helhest.control.command import llc_not_driving
+
+    moving = np.array([1.5, 1.5, 1.5], np.float32)
+    assert llc_not_driving(moving, idle_for_s=0.8)  # e-stop held
+    assert not llc_not_driving(moving, idle_for_s=0.1)  # the LLC has not picked the command up yet
+    at_rest = np.array([0.2, 0.2, 0.2], np.float32)
+    assert not llc_not_driving(at_rest, idle_for_s=5.0)

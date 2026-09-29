@@ -104,6 +104,27 @@ def turn_first(
     return mean * scale - half_diff, mean * scale + half_diff
 
 
+# [s] the LLC's own wheel setpoints held at zero this long under a moving command = not driving
+IDLE_FOR_S = 0.3
+# [rad/s] a front-wheel command above this counts as asking for motion
+MOVING_CMD = 0.5
+
+
+def llc_not_driving(cmd: np.ndarray, idle_for_s: float) -> bool:
+    """True when the published command ([L, rear, R]) asks for motion but the LLC has held its
+    own front-wheel setpoints (/joint_setpoints) at zero for IDLE_FOR_S: an e-stop or a driver
+    cut-out. /estop_active does not show the button (false throughout the e-stop below).
+
+    The command tracker continues from its own last output, so without this it keeps ramping
+    while nothing moves and the LLC jumps to the stale command on release: `turns_twist`
+    (2026-09-29), an e-stop held 9 s while the forward command ramped to 1.85 m/s, then the
+    setpoints went 0 -> 6 rad/s in 0.4 s. Keyed on the SETPOINTS, not the wheels: in `drive` the
+    wheels stood still for 4-7 s under setpoints of 2-4 rad/s -- stalls, where holding the
+    command at rest would keep the wheels from ever breaking loose.
+    """
+    return idle_for_s > IDLE_FOR_S and max(abs(float(cmd[0])), abs(float(cmd[2]))) > MOVING_CMD
+
+
 def spin_side(prev_side: float, cmd: np.ndarray) -> float:
     """Which way MPPI may spin next frame, from the command just published ([L, rear, R]).
 
