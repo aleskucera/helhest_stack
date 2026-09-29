@@ -5,7 +5,7 @@
 #         ./record_motors.sh steps_ground   (same program, on the ground)
 #         ./record_motors.sh <any-name>     (anything else you want to fit)
 #
-# Separate from record_odin.sh on purpose. That script records the elevation pipeline's INPUTS,
+# Separate from record_nav.sh on purpose. That script records the elevation pipeline's INPUTS,
 # which means /odin1/cloud_raw at ~13 MB/s -- fast_experiment0 came to 8.5 GB. None of it is read
 # by the motor fit, which wants the command, what the wheels did, and the gyro. This records those
 # and nothing else, so a 98 s run is tens of MB.

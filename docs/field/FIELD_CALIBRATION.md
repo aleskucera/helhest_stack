@@ -56,7 +56,7 @@ failure that silently ruins a bag — it looks fine until the fit makes no sense
 
 ## 3. The recordings
 
-Start the bag FIRST, then drive. `record_odin.sh <name>` records; Ctrl-C stops and finalises.
+Start the bag FIRST, then drive. `record_nav.sh <name>` records; Ctrl-C stops and finalises.
 
 | # | scenario | footprint | time | driven how | settles |
 |---|---|---|---|---|---|
@@ -69,7 +69,7 @@ Do them in that order: `compact` is safest and shakes out any plumbing problem b
 ### 3.1 `compact` — the one a human cannot do
 
 ```bash
-./ros/tools/record_odin.sh compact              # terminal 1
+./ros/tools/record_nav.sh compact              # terminal 1
 python3 ros/tools/calibrate_drive.py compact    # terminal 2: DRY RUN first, prints the program
 python3 ros/tools/calibrate_drive.py compact --go
 ```
@@ -86,7 +86,7 @@ instead, whose arcs span 7x. **If you need a speed sweep, drive it — do not sp
 ### 3.2 `calibrate` — drive it yourself
 
 ```bash
-./ros/tools/record_odin.sh calibrate            # then drive
+./ros/tools/record_nav.sh calibrate            # then drive
 ```
 
 Manual is fine. The fits read measured wheel speeds, so they do not care whether a human or a
@@ -115,7 +115,7 @@ Gaps, stops, obstacles and traffic cost nothing — the fits segment on the hold
 
 **In the air first, then on the ground. The pair is the measurement; either one alone is not.**
 
-Two terminals, and a different recorder: `record_motors.sh`, not `record_odin.sh`. The odin
+Two terminals, and a different recorder: `record_motors.sh`, not `record_nav.sh`. The odin
 script captures the elevation pipeline's inputs, which means `/odin1/cloud_raw` at ~13 MB/s --
 `fast_experiment0` came to 8.5 GB. The motor fit reads none of it, so this one records the
 drivetrain topics only and a 98 s run lands in tens of MB.
@@ -185,7 +185,7 @@ dynamics, and where breakaway actually sits.
 ### 3.4 `slope` — if you can find one
 
 ```bash
-./ros/tools/record_odin.sh slope
+./ros/tools/record_nav.sh slope
 ```
 
 ≥10° of tilt. Straight up, straight down, and **ACROSS in both directions**, plus a turn while on

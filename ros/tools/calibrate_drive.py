@@ -4,7 +4,7 @@
     ros2 run ... / python3 ros/tools/calibrate_drive.py relax --go
     python3 ros/tools/calibrate_drive.py relax        # dry run: print the program, publish nothing
 
-`record_odin.sh` only RECORDS; the manoeuvre was a description for a human on the sticks. That is
+`record_nav.sh` only RECORDS; the manoeuvre was a description for a human on the sticks. That is
 good enough for steady-state turning, where all that matters is holding a command for a few
 seconds, and not good enough for `relax`, whose whole measurement is a response TIME read off a
 differential step. A hand-made step has an uncertain onset, an uncertain amplitude and a different

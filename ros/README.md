@@ -10,7 +10,7 @@ helhest_stack_ros/   the package: navigation_node, launch/odin_driver.launch.py,
 config/              odin.params.yaml (the robot), odin_follow.params.yaml (follow-me overlay),
                      control_command_raw.yaml (driver), rosbag2_qos.yaml, fastdds_shm.xml
 sessions/            tmuxinator: odin-demo (a bag + node + RViz), bag-view, tmux-follow-odom
-tools/               record_odin.sh, record_motors.sh, calibrate_drive.py, traj_logger.py,
+tools/               record_nav.sh, record_motors.sh, calibrate_drive.py, traj_logger.py,
                      radio_locator_odom.py, params.py, rviz.sh, dev-shell.sh, colcon-build.sh
 ```
 
