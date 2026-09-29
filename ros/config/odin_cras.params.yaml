@@ -1,0 +1,24 @@
+# Overlay for the Odin run through cras_odin_driver (odin_ws), as on helhest-jr-jetson.
+# Load it AFTER the robot file -- a later --params-file wins:
+#
+#   python3 -m helhest_stack_ros.navigation_node --ros-args \
+#     --params-file ros/config/odin.params.yaml \
+#     --params-file ros/config/odin_cras.params.yaml
+#
+# Only what the driver changes is here; every tuned planner knob stays in odin.params.yaml.
+/**:
+  ros__parameters:
+    # cras_odin_driver republishes the vendor cloud in odin1_lidar as /odin1/cloud_raw, and as
+    # /odin1/cloud_filtered after a per-robot pixel mask (masks/<hostname>-lidar.png) that removes
+    # the robot's own body. The node looks up odin1_base_link <- odin1_lidar through the driver's
+    # static chain odin1_base_link -> imu_link -> odin1_lidar, so base_frame stays odin1_base_link.
+    lidar_topic: /odin1/cloud_filtered
+
+    # TF. The driver already publishes the Odin pose, INVERTED so odom_odin hangs under the robot:
+    #   base_link -> odin1_base_link (static) -> odom_odin (dynamic)
+    # A frame has one parent, so the node must not add odom_odin -> odin1_base_link (a loop) or
+    # map -> odom_odin (a second parent). Everything is published in odom_odin instead: set RViz's
+    # fixed frame and the goal's frame to odom_odin.
+    map_frame: odom_odin
+    publish_map_tf: false
+    publish_odom_tf: false

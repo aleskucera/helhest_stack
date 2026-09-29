@@ -1,0 +1,60 @@
+# helhest-nav: the navigation_node on helhest-jr-jetson, over the Odin run by cras_odin_driver.
+#
+# Install once on the robot, then start from anywhere:
+#
+#   ln -s /home/robot/workspaces/helhest_ws/src/helhest_stack/ros/sessions/helhest-nav.tmuxinator.yml \
+#         ~/.tmuxinator/helhest-nav.yml
+#   tmuxinator start helhest-nav
+#
+# Modelled on helhest-driver's robotour.yml (same router, driver launch and base_link TF). The robot
+# base (helhest_llc: /cmd_joints in, /joint_states out) is NOT started here -- it already runs on its
+# own. The node publishes /cmd_joints; nothing else may publish /cmd_vel while it drives.
+#
+# DRIVING IS OFF (-p plan_actuate:=false in the nav pane): check the maps, the planned path and the
+# TF in RViz (fixed frame odom_odin) first, then drop that flag.
+
+name: helhest-nav
+root: /home/robot/workspaces/helhest_ws
+startup_window: nav
+pre_window: source ~/.rosrc; source /home/robot/workspaces/helhest_ws/install/setup.bash; source /home/robot/workspaces/odin_ws/install/setup.bash
+
+windows:
+  - zenoh:
+      panes:
+        - |
+          export ZENOH_CONFIG_OVERRIDE="$ZENOH_CONFIG_OVERRIDE_ROUTER"
+          ros2 run rmw_zenoh_cpp rmw_zenohd
+  - odin:
+      panes:
+        # Frames, the body mask on /odin1/cloud_filtered, the inverted odometry TF and the watchdog
+        # all come from this wrapper. Our old ros/odin/odin_driver.launch.py left the cloud in an
+        # unconnected `lidar` frame.
+        - |
+          sleep 3
+          ros2 launch cras_odin_driver odin1_ros2.launch map_mode:=0
+  - tf:
+      panes:
+        - ros2 run tf2_ros static_transform_publisher --x 0.1 --y 0.0 --z 0.1 --roll 0 --pitch 0 --yaw 0 --frame-id base_link --child-frame-id odin1_base_link
+  - nav:
+      panes:
+        # dev-shell puts the repo's .venv (warp, elevation_belief) and src/ on PYTHONPATH; without it
+        # the node dies on `import warp`. Run as a module, so no colcon rebuild is needed after a pull.
+        - |
+          sleep 12
+          cd src/helhest_stack
+          source ros/tools/dev-shell.sh
+          export PYTHONPATH="$PWD/ros/helhest_stack_ros:$PYTHONPATH"
+          python3 -m helhest_stack_ros.navigation_node --ros-args \
+            --params-file ros/config/odin.params.yaml \
+            --params-file ros/config/odin_cras.params.yaml \
+            -p plan_actuate:=false
+  - view:
+      layout: even-horizontal
+      panes:
+        - |
+          sleep 14; ros2 topic hz /odin1/cloud_filtered
+        - |
+          sleep 14; ros2 topic echo /odin1/odometry --field pose.pose.position
+  - shell:
+      panes:
+        - cd src/helhest_stack
