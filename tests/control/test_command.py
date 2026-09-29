@@ -146,6 +146,10 @@ def test_spin_side_holds_through_a_spin_and_releases_on_driving():
     assert spin_side(1.0, np.array([2.0, 0.0, -2.0], np.float32)) == -1.0  # a new spin decides
     assert spin_side(1.0, np.zeros(3, np.float32)) == 1.0  # stopped between frames: still left
     assert spin_side(1.0, np.array([1.5, 1.5, 1.8], np.float32)) == 0.0  # drove off: released
+    # the planner's choice locks the side before the jerk-limited command has ramped up
+    still = np.array([0.1, 0.0, -0.1], np.float32)
+    assert spin_side(0.0, still, planned=np.array([2.0, -2.0], np.float32)) == -1.0
+    assert spin_side(1.0, still, planned=np.array([2.0, -2.0], np.float32)) == 1.0  # held
 
 
 def test_llc_not_driving_needs_both_a_moving_command_and_idle_setpoints():

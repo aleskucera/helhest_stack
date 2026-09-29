@@ -125,15 +125,18 @@ def llc_not_driving(cmd: np.ndarray, idle_for_s: float) -> bool:
     return idle_for_s > IDLE_FOR_S and max(abs(float(cmd[0])), abs(float(cmd[2]))) > MOVING_CMD
 
 
-def spin_side(prev_side: float, cmd: np.ndarray) -> float:
-    """Which way MPPI may spin next frame, from the command just published ([L, rear, R]).
+def spin_side(prev_side: float, cmd: np.ndarray, planned: np.ndarray | None = None) -> float:
+    """Which way MPPI may spin next frame: +1 left, -1 right, 0 either.
 
-    A spin under way -- barely advancing, clearly turning -- fixes the side: +1 left, -1 right.
-    It holds while the robot stands or keeps spinning, and is released only once it drives off
+    `cmd` is the command just published ([L, rear, R]); `planned` the planner's first step
+    (wL, wR), when there is a fresh one. A spin -- barely advancing, clearly turning -- fixes the
+    side as soon as the PLANNER picks it; the published command would be too late, because under
+    the jerk limit a planner that flips side each frame never lets it ramp past the threshold
+    (drive_sim, goal straight behind: +-5 deg of dithering for 20 s, wheels at +-0.3 rad/s). The
+    side holds while the robot stands or keeps spinning and is released only once it drives off
     (or the caller resets it for a new goal), so a spin finishes the way it started. With the
     goal behind, left and right cost the same and the planner alternated every ~1.6 s on the
-    robot (`turns` bag, 2026-09-29). turn_first's commitment acts only on the published command
-    and only past commit_deg, so MPPI kept planning the other way and won once it let go.
+    robot (`turns` bag, 2026-09-29).
     """
     mean = 0.5 * (float(cmd[0]) + float(cmd[2]))
     diff = float(cmd[2]) - float(cmd[0])
@@ -141,6 +144,11 @@ def spin_side(prev_side: float, cmd: np.ndarray) -> float:
         return 0.0
     if abs(diff) > 1.0:  # [rad/s] a spin under way
         return math.copysign(1.0, diff)
+    if prev_side == 0.0 and planned is not None:
+        p_mean = 0.5 * (float(planned[0]) + float(planned[1]))
+        p_diff = float(planned[1]) - float(planned[0])
+        if abs(p_mean) < 0.5 and abs(p_diff) > 1.0:  # the planner chose a spin
+            return math.copysign(1.0, p_diff)
     return prev_side
 
 
