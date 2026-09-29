@@ -130,3 +130,37 @@ def test_sweeping_ground_nobody_has_measured_is_slow_but_driving_onto_seen_groun
     p[:, 0, 2] = np.linspace(0.0, 0.8, 12)  # turns left on the spot: the tail swings right and down
     wl, wr = gov.cap(-2.0, 2.0, wp.array(p, dtype=wp.vec3f), elev, meas, grid)
     assert gov.blind and abs(wr) < 2.0
+
+
+def _clearance_at(elev: np.ndarray, meas: np.ndarray, y: float) -> float:
+    out = wp.zeros((N, N), dtype=wp.float32)
+    wp.launch(
+        clearance_map_kernel,
+        dim=(N, N),
+        inputs=[wp.array(elev), wp.array(meas), CELL, 0.35, 40],
+        outputs=[out],
+    )
+    return float(out.numpy()[int(y / CELL), N // 2])
+
+
+def test_a_wall_whose_foot_was_never_measured_is_still_a_face():
+    """The map handed in is the inpainted one: the unseen strip in front of the wall is filled at
+    ground height, and the wall top rises above that fill. Requiring a MEASURED low side hid it."""
+    h = np.zeros((N, N), np.float32)
+    ys = (np.arange(N) + 0.5) * CELL
+    h[ys >= 5.0, :] = 1.0
+    m = np.ones((N, N), np.float32)
+    m[(ys >= 4.8) & (ys < 5.0), :] = 0.0  # the wall's foot, never seen; the fill put it at 0
+    face_row = int(5.0 / CELL)
+    assert _clearance_at(h, m, 4.0) == pytest.approx((face_row - int(4.0 / CELL)) * CELL, abs=1e-5)
+
+
+def test_a_filled_plateau_is_never_a_face():
+    """Beyond a wall the fill can form a wall-height plateau that ends in a step onto measured
+    floor. Nobody saw a wall there, so only a MEASURED cell may be a face."""
+    h = np.zeros((N, N), np.float32)
+    ys = (np.arange(N) + 0.5) * CELL
+    m = np.ones((N, N), np.float32)
+    h[ys >= 5.0, :] = 1.0
+    m[ys >= 5.0, :] = 0.0  # the plateau is fill, not measurement
+    assert _clearance_at(h, m, 4.0) == pytest.approx(40 * CELL)  # nothing within reach

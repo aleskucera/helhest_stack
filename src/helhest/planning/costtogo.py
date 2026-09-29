@@ -105,8 +105,9 @@ def _face_kernel(
     Not the 3x3 prominence above: that is taken across the diagonal too, so a steep but smooth
     flank reads as a step -- `bumpy`'s mounds reach 0.44 m on it against 0.50 m at a wall. One
     cell apart, a slope can only rise cell * tan(slope) while a wall rises its full height:
-    measured 0.29 m at most on the mounds, 0.50 m at least at the walls (0.2 m cells). Unobserved
-    cells are skipped for the same reason as in the prominence."""
+    measured 0.29 m at most on the mounds, 0.50 m at least at the walls (0.2 m cells). Only a
+    measured cell can be a face, but its neighbour may be filled -- the same rule as
+    `clearance.is_wall_face`, whose docstring has the measurement."""
     r, c = wp.tid()
     ny = elev.shape[0]
     nx = elev.shape[1]
@@ -125,8 +126,7 @@ def _face_kernel(
                 cc = c + 1
             rr = wp.clamp(rr, 0, ny - 1)
             cc = wp.clamp(cc, 0, nx - 1)
-            if measured[rr, cc] > 0.5:
-                top = wp.max(top, elev[r, c] - elev[rr, cc])
+            top = wp.max(top, elev[r, c] - elev[rr, cc])
     face[r, c] = top
 
 

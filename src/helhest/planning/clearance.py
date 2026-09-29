@@ -69,20 +69,20 @@ def is_wall_face(
     c: int,
     face_h: float,
 ) -> bool:
-    """A measured cell rising more than `face_h` above a measured 4-neighbour: a step the wheel
-    cannot mount. Unmeasured cells are never faces; the caller keeps r, c off the border."""
+    """A measured cell rising more than `face_h` above a 4-neighbour: a step the wheel cannot
+    mount. The caller keeps r, c off the border.
+
+    `elevation` is the INPAINTED map, and the neighbour may be a filled cell. A pole or wall whose
+    foot the sensor never saw is then still a face -- the fill beside it sits well below its top
+    (the ostrich2 corridor recovers 31 faces this way, the Robotour road 14). The cell itself must
+    be measured: where the fill's wall-height plateau meets measured floor it steps by up to
+    1.7 m, and those are walls nobody saw (89 and 14 of them). On a slope the fill interpolates
+    the slope, so a measured hill cell never stands a wheel radius above the fill beside it."""
     if measured[r, c] < 0.5:
         return False
     h = elevation[r, c]
-    rise = float(0.0)
-    if measured[r - 1, c] > 0.5:
-        rise = wp.max(rise, h - elevation[r - 1, c])
-    if measured[r + 1, c] > 0.5:
-        rise = wp.max(rise, h - elevation[r + 1, c])
-    if measured[r, c - 1] > 0.5:
-        rise = wp.max(rise, h - elevation[r, c - 1])
-    if measured[r, c + 1] > 0.5:
-        rise = wp.max(rise, h - elevation[r, c + 1])
+    rise = wp.max(h - elevation[r - 1, c], h - elevation[r + 1, c])
+    rise = wp.max(rise, wp.max(h - elevation[r, c - 1], h - elevation[r, c + 1]))
     return rise > face_h
 
 
