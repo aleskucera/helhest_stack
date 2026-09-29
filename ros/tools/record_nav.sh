@@ -120,4 +120,4 @@ echo "recording -> ~/bags/$NAME   (Ctrl-C to stop)"
 # MCAP with zstd chunk compression: ~2-3x smaller, and read directly by ros2 bag play and by our
 # Python tools (Cloudini would compress the cloud more, but every analysis would need a decode step).
 exec ros2 bag record -o "$DEST" -s mcap --storage-preset-profile zstd_fast \
-  --qos-profile-overrides-path "$QOS" "${TOPICS[@]}" --regex "$TOPIC_REGEX"
+  --qos-profile-overrides-path "$QOS" --topics "${TOPICS[@]}" --regex "$TOPIC_REGEX"
