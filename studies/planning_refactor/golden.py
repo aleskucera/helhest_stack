@@ -1,5 +1,6 @@
 """Freeze what `CostToGo` and `CoarseRouter` compute, so the planning refactor is held to it.
 
+    python studies/planning_refactor/golden.py freeze   # bag recordings -> inputs.npz (tracked)
     python studies/planning_refactor/golden.py record   # arrays -> golden/, hashes -> hashes.json
     python studies/planning_refactor/golden.py check    # recompute; on a mismatch, say where
 
@@ -8,6 +9,12 @@ machine's GPU and Warp build (transcendentals are not bit-portable across archit
 is why this lives here and not in tests/: record and check on the same machine. Every run compiles
 from scratch into its own cache (a few minutes), see `compute`. The arrays are
 kept locally (gitignored) only to diagnose a mismatch -- how many cells, how large, which flips.
+
+The inputs are TRACKED (`inputs.npz`, ~100 kB): the six real-bag routing windows and the plan
+config the robot ran, cut from two node recordings (studies/bag_replay/run_bag.sh on
+in_speed_odin0 and out_odin0) by `freeze`. `record` and `check` read only that file. They used to
+read the recordings themselves, which are gitignored run outputs -- and when those were cleared
+the harness could no longer run at all.
 
 Five configurations over 8 stress-world windows (3 poses each) and 6 real-bag frames:
 
@@ -62,10 +69,12 @@ BAGS = [
 FIELDS = ("V", "V_escape", "blocked", "hazard", "zmargin", "doubt", "_pose_cost", "_seeds")
 
 
+INPUTS = HERE / "inputs.npz"
+
+
 def _deployed_params() -> dict:
     """The resolved plan_* config the robot ran on the recorded bags (no yaml needed)."""
-    d = np.load(REPO / "studies/bag_replay/out2/in_speed_new.npz", allow_pickle=True)
-    return json.loads(str(d["plan_config"]))
+    return json.loads(str(np.load(INPUTS)["plan_config"]))
 
 
 def _world_windows() -> list[dict]:
@@ -106,9 +115,27 @@ def _world_windows() -> list[dict]:
 
 
 def _bag_windows() -> list[dict]:
-    out = []
+    d = np.load(INPUTS)
+    return [
+        dict(
+            name=str(name),
+            h=d["h"][i],
+            measured=d["measured"][i],
+            origin=(float(d["origin"][i][0]), float(d["origin"][i][1])),
+            goal=(float(d["goal"][i][0]), float(d["goal"][i][1])),
+        )
+        for i, name in enumerate(d["names"])
+    ]
+
+
+def _freeze() -> None:
+    """Cut the bag windows and the plan config out of the recordings into the tracked INPUTS."""
+    recordings = REPO / "studies/bag_replay/out2"
+    names, hs, measured, origins, goals = [], [], [], [], []
     for bag, frames in BAGS:
-        d = np.load(REPO / f"studies/bag_replay/out2/{bag}.npz", allow_pickle=True)
+        d = np.load(recordings / f"{bag}.npz", allow_pickle=True)
+        if bag == BAGS[0][0]:
+            plan_config = str(d["plan_config"])
         for i in frames:
             h8 = d["hist_h"][i]
             s8 = d["hist_seen"][i].astype(bool)
@@ -118,16 +145,21 @@ def _bag_windows() -> list[dict]:
             sb = s8[:n8, :n8].reshape(n8 // k, k, n8 // k, k).any(axis=(1, 3))
             h = np.where(sb, hb.max(axis=(1, 3)), 0.0).astype(np.float32)
             meta = d["hist_meta"][i]
-            out.append(
-                dict(
-                    name=f"{bag}_{i}",
-                    h=np.ascontiguousarray(h[:N, :N]),
-                    measured=np.ascontiguousarray(sb[:N, :N].astype(np.float32)),
-                    origin=(float(meta[7]), float(meta[8])),
-                    goal=(float(d["hist_goal"][i][0]), float(d["hist_goal"][i][1])),
-                )
-            )
-    return out
+            names.append(f"{bag}_{i}")
+            hs.append(h[:N, :N])
+            measured.append(sb[:N, :N].astype(np.float32))
+            origins.append((meta[7], meta[8]))
+            goals.append(d["hist_goal"][i][:2])
+    np.savez_compressed(
+        INPUTS,
+        plan_config=np.array(plan_config),
+        names=np.array(names),
+        h=np.stack(hs).astype(np.float32),
+        measured=np.stack(measured),
+        origin=np.asarray(origins, np.float64),
+        goal=np.asarray(goals, np.float64),
+    )
+    print(f"froze {len(names)} bag windows + the plan config -> {INPUTS.name}")
 
 
 def _belief(case: dict) -> tuple[np.ndarray, np.ndarray]:
@@ -218,6 +250,9 @@ def compute(device: str = "cuda:0") -> dict[str, dict[str, np.ndarray]]:
 
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "check"
+    if mode == "freeze":
+        _freeze()
+        return
     gdir = HERE / "golden"
     hfile = HERE / "hashes.json"
     res = compute()
