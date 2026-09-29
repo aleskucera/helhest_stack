@@ -140,6 +140,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             mppi_weight=float(p["plan_clear_mppi_weight"]),
             lookahead_s=float(p["plan_clear_lookahead_s"]),
             decel=float(p["plan_clear_decel"]),
+            wheel_jerk=float(p["plan_max_jerk"]),
             v_blind=float(p["plan_clear_v_blind"]),
         )
         if float(p["plan_clear_t_react"]) > 0.0

@@ -125,6 +125,17 @@ class ClearanceGovernor:
         self.v_cap = float("inf")
         self.blind = False
 
+    def _shed(self, t: np.ndarray) -> np.ndarray:
+        """[m/s] speed braking can shed within t [s]. Under the output's jerk limit the braking
+        ramps up for decel/jerk seconds first (0.6 s on the robot), which at 1 m/s^2 is the
+        difference between shedding 0.7 and 1.0 m/s in the first second."""
+        p = self.params
+        jerk = p.wheel_jerk * self.r  # [m/s^3] at the ground
+        if jerk <= 0.0:
+            return p.decel * t
+        ramp = p.decel / jerk
+        return np.where(t < ramp, 0.5 * jerk * t * t, p.decel * (t - 0.5 * ramp))
+
     def cap(
         self,
         wl: float,
@@ -162,7 +173,7 @@ class ClearanceGovernor:
             allowed = np.where(unseen, np.minimum(allowed, p.v_blind), allowed)
         self.clearance = float(np.min(per_step))
         self.blind = bool(unseen.any())
-        self.v_cap = float(np.min(allowed + p.decel * np.arange(k) * self.plan_dt))
+        self.v_cap = float(np.min(allowed + self._shed(np.arange(k) * self.plan_dt)))
         v = self.r * 0.5 * abs(wl + wr)
         wz = self.r * abs(wr - wl) / (2.0 * self.half_track)  # alpha 1: over-estimates the swing
         fastest = v + p.turn_ratio * self.tail * wz

@@ -38,6 +38,7 @@ def _clearance(p: dict) -> ClearanceParams | None:
         mppi_weight=p["plan_clear_mppi_weight"],
         lookahead_s=p["plan_clear_lookahead_s"],
         decel=p["plan_clear_decel"],
+        wheel_jerk=p["plan_max_jerk"],
         v_blind=p["plan_clear_v_blind"],
     )
 

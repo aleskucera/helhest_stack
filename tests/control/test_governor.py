@@ -164,3 +164,29 @@ def test_a_filled_plateau_is_never_a_face():
     h[ys >= 5.0, :] = 1.0
     m[ys >= 5.0, :] = 0.0  # the plateau is fill, not measurement
     assert _clearance_at(h, m, 4.0) == pytest.approx(40 * CELL)  # nothing within reach
+
+
+def test_braking_that_ramps_in_under_the_jerk_limit_sheds_less_early():
+    """With the output jerk-limited, braking takes decel/jerk to build up: the far-end-tight plan
+    above must now be slowed, where braking at once would not."""
+    elev, meas, grid = _scene(wall_y=5.0)
+    steps = 11
+    p = np.zeros((steps, 2, 3), np.float32)
+    p[:, 0, 0] = 3.0
+    p[:, 0, 1] = np.linspace(3.0, 4.63, steps)
+    p[:, 0, 2] = np.pi / 2
+    plan = wp.array(p, dtype=wp.vec3f)
+    at_once = ClearanceGovernor(ROBOT, 0.1, ClearanceParams(t_react=0.5, t_turn=0.5, decel=1.0))
+    ramped = ClearanceGovernor(
+        ROBOT, 0.1, ClearanceParams(t_react=0.5, t_turn=0.5, decel=1.0, wheel_jerk=5.0)
+    )
+    fast = at_once.cap(4.0, 4.0, plan, elev, meas, grid)
+    slow = ramped.cap(4.0, 4.0, plan, elev, meas, grid)
+    assert ramped.v_cap < at_once.v_cap
+    # speed shed by t: 0.5*j*t^2 inside the ramp, decel*(t - ramp/2) after it
+    t = np.array([0.3, 1.0])
+    jerk = 5.0 * ROBOT.wheel_radius
+    ramp = 1.0 / jerk
+    expect = np.where(t < ramp, 0.5 * jerk * t * t, 1.0 * (t - 0.5 * ramp))
+    assert np.allclose(ramped._shed(t), expect)
+    assert slow[0] <= fast[0]

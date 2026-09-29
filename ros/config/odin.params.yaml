@@ -85,8 +85,11 @@
     # 55 of 79 frames). t_react 0.125 s and plan_clear_c0 0.15 m are sim-tuned; check them in a real
     # corridor. 0 = the old veto. The other plan_clear_* keep their helhest.planner_config defaults.
     plan_clear_t_react: 0.125
-    # [m/s^2] braking the governor counts on: plan_max_decel 3 rad/s^2 x 0.35 m wheel = 1.05
+    # [m/s^2] braking the governor counts on: plan_max_decel 3 rad/s^2 x 0.35 m wheel = 1.05.
+    # It also ramps in under plan_max_jerk (0.6 s), so the governor looks over the whole plan:
+    # in its default 1 s it could shed only ~0.7 m/s and not see far enough to stop from cruise.
     plan_clear_decel: 1.0
+    plan_clear_lookahead_s: 2.5
     plan_wheel_width: 0.10
     # 0.6 -> 1.0 (alpha 1.80) from fast_experiment0/1, 2026-08-10. Regressing the MEASURED gyro
     # on the MEASURED wheel differential gives alpha 1.68-2.27 across both bags, against the 1.48
@@ -160,11 +163,12 @@
     plan_max_slew: 3.0
     plan_max_decel: 3.0       # decel cap d(cmd)/dt [rad/s^2] (also the stop ramp)
     plan_max_jerk: 5.0        # [rad/s^3] how fast the acceleration itself may change
-    # Charge on a candidate's first target for leaving last frame's plan. The top 1% of
-    # candidates sit within ~0.2 of the best cost (of ~240), so without it the winner is a coin
-    # flip every frame. drive_sim pocket, one run each: planner reversals 5.6 -> 2.3/s forward,
-    # 5.8 -> 2.9/s turning, left/right switches 21 -> 1 at 3.0. Rebuilds the planner on change.
-    plan_commit: 3.0
+    # Charge on a candidate's first target for leaving last frame's plan. OFF: in drive_sim 3.0
+    # halved the planner's reversals but anchored the plan -- under the jerk ramp a faster target
+    # pays off too slowly within the horizon to beat the charge, and the robot crept at 0.1 m/s
+    # for 40 s beside open ground (slalom). The jerk-limited output alone already brings the
+    # executed command's reversals from ~5/s to ~0.5/s there.
+    plan_commit: 0.0
     plan_goal_running: 0.3    # progress pull -> higher = faster toward goal
     plan_effort: 0.001        # wheel-speed^2 penalty -> lower = faster
 

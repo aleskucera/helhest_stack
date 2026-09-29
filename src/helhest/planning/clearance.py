@@ -41,6 +41,9 @@ class ClearanceParams:
     mppi_weight: float = 1.0  # MPPI's price for lost time; 1 = exact in goal-cost units
     lookahead_s: float = 1.0  # [s] of the plan the governor checks
     decel: float = 2.0  # [m/s^2] braking the governor may count on before a tight step
+    # [rad/s^3] the output tracker's jerk limit (plan_max_jerk): braking builds up over
+    # decel/jerk seconds instead of arriving at once. 0 = at once.
+    wheel_jerk: float = 0.0
     v_blind: float = 0.3  # [m/s] while the plan sweeps never-measured ground; 0 = off
     blind_area: float = 0.05  # [m^2] of newly swept unseen ground that counts
     search_m: float = 1.5  # [m] how far around the footprint the governor looks for walls
