@@ -33,8 +33,13 @@ windows:
           sleep 3
           ros2 launch cras_odin_driver odin1_ros2.launch map_mode:=0
   - tf:
+      layout: even-vertical
       panes:
         - ros2 run tf2_ros static_transform_publisher --x 0.1 --y 0.0 --z 0.1 --roll 0 --pitch 0 --yaw 0 --frame-id base_link --child-frame-id odin1_base_link
+        # /odin1/imu arrives in the vendor frame `imu`, which cras_odin_driver's TF does not contain
+        # (it names the same IMU imu_link). Without this the node drops every gyro sample and the
+        # yaw-rate loop and mu estimate never run.
+        - ros2 run tf2_ros static_transform_publisher --frame-id imu_link --child-frame-id imu
   - nav:
       panes:
         # dev-shell puts the repo's .venv (warp, elevation_belief) and src/ on PYTHONPATH; without it

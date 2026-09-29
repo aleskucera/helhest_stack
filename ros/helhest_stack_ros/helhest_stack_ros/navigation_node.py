@@ -1130,6 +1130,14 @@ class NavigationNode(Node):
                 return
             base_R_imu = self._gyro_base_rotation(msg.header.frame_id)
             if base_R_imu is None:  # IMU->base TF not ready yet — skip until it is
+                # Loud, because nothing else is: an IMU frame missing from TF drops every sample,
+                # and the yaw-rate loop, the mu estimate and the turn adapter then simply never run
+                # (cras_odin_driver's /odin1/imu is in `imu`, which its own TF does not contain).
+                self.get_logger().warning(
+                    f"IMU frame '{msg.header.frame_id}' has no TF to '{self.base_frame}': gyro "
+                    "samples dropped -- yaw-rate loop, mu estimate and turn adapter are OFF",
+                    throttle_duration_sec=10.0,
+                )
                 return
             w_base = base_R_imu @ np.array([w.x, w.y, w.z])
             t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
