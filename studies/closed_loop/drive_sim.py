@@ -423,6 +423,7 @@ def drive(a: argparse.Namespace) -> dict:
             z_range=None,
             self_box=box,
             max_range=a.window / 2,  # base-frame radius: the belief window cannot hold more
+            min_range=1.0,  # the node's scan_min_range_m
         )
         world_T_base = np.eye(4)
         world_T_base[:3, :3] = R
