@@ -34,6 +34,7 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_goal_running": 0.3,
     "plan_effort": 1e-3,
     "plan_turn": 0.03,
+    "plan_traction": 0.0,  # yaw^2 / (|v| + 0.3) per step: turn while rolling (CostParams.traction)
     "plan_smooth": 0.04,
     "plan_saturation": 300.0,
     # MPPI's hard veto on the cost-to-go's HAZARD field: actual wall contact, without the router's
@@ -93,6 +94,9 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_bridge_m": 1.2,
     "plan_turn_first_deg": 45.0,
     "plan_turn_first_reach_m": 1.5,
+    # [m] turn first only while a wall face is this close along the plan (the governor's
+    # clearance); in the open the robot turns while rolling. 0 = everywhere.
+    "plan_turn_first_clear_m": 0.0,
 }
 
 
@@ -151,6 +155,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             goal_running=float(p["plan_goal_running"]),
             effort=float(p["plan_effort"]),
             turn=float(p["plan_turn"]),
+            traction=float(p["plan_traction"]),
             smoothness=float(p["plan_smooth"]),
             saturation=float(p["plan_saturation"]),
             veto=float(p["plan_wall_veto"]),
@@ -198,6 +203,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
         turn_first=dict(
             start_deg=float(p["plan_turn_first_deg"]),
             reach_m=float(p["plan_turn_first_reach_m"]),
+            clear_m=float(p["plan_turn_first_clear_m"]),
         ),
         clearance=clearance,
     )

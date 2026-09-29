@@ -511,7 +511,11 @@ def drive(a: argparse.Namespace) -> dict:
             planner.replan(state_l, goal_l, a.refine)
             u = planner.nominal()
             wl, wr = float(u[0, 0]), float(u[0, 1])
-            if a.turn_first > 0.0:
+            if chain:
+                side = spin_side(side, prev_lrr, planned=u[0])
+            clear_m = a.cfg.turn_first["clear_m"]
+            near_wall = clear_m <= 0.0 or governor is None or governor.clearance < clear_m
+            if a.turn_first > 0.0 and near_wall:
                 # spin first when the route lies well behind: an arc that turns while advancing
                 # ends inside the robot's own turning clearance of a wall (control/command.py)
                 bearing = ctg.descent_bearing(rx - r0, ry - s0, a.turn_first_reach)

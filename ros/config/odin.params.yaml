@@ -47,6 +47,9 @@
     # yaw, under plan_max_yaw_rate; 4.0 would ask for 1.9. (The too-fast spin that day was on
     # /cmd_joints with our yaw loop, before the switch.)
     plan_spin_max: 2.0
+    # Turn first (brake to a spin when the route is > 45 deg off) only within 1.2 m of a wall face;
+    # in the open it forced the crawl-and-turn the motors hate. Live-tunable, 0 = everywhere.
+    plan_turn_first_clear_m: 1.2
     # Turn gain. alpha = 1 + k_turn*mu sets how much the skid-steer resists yaw, and alpha
     # DIVIDES the predicted yaw rate -- too high and the planner expects less yaw than it gets, so
     # the robot overshoots turns. MEASURED 2026-08-10 on flat tarmac: alpha = 1.50 from three
@@ -130,7 +133,14 @@
     #
     # Lower is quicker but restores the micro-turn wobble on straights this was raised to damp;
     # 0.2 is the compromise. plan_max_slew turned out NOT to matter (17.9 s at both 2 and 6).
-    plan_turn: 0.2
+    # 0.0 (2026-09-29): it charged the differential only while moving, so it pushed turns into
+    # spins -- the case that loads the motors most. plan_traction below replaces it.
+    plan_turn: 0.0
+    # Turn while rolling: each rollout step pays plan_traction * yaw^2 / (|v| + 0.3). Field bags,
+    # median front-wheel effort (ceiling ~70) at 0.6-2 rad/s of yaw: 56 standing, 44 above 1 m/s.
+    # 0.1 is a first guess: in drive_sim it reached pocket and slalom, 0.3 reached neither
+    # (single runs). Rebuilds the planner on change.
+    plan_traction: 0.1
     # Wheel-speed CHANGE penalty -- the anti-jerk knob, and the right one for wobble. plan_turn
     # above penalises the SIZE of a turn, which cannot tell a deliberate 90 deg repositioning from
     # a wobble; this penalises CHANGING YOUR MIND, which is what wobble is. It expands to

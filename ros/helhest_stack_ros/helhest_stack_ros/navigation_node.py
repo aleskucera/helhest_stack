@@ -110,6 +110,7 @@ _PLAN_BUILD = frozenset(
         "plan_goal_running",
         "plan_effort",
         "plan_turn",
+        "plan_traction",
         "plan_wmax",
         "plan_wmin",
         "plan_straight_frac",
@@ -510,6 +511,9 @@ class NavigationNode(Node):
         # (0.42 -> 0.12 m) AND, by killing the near-goal wobble, reached 6/6 stress worlds vs 4/6.
         # Small enough that a genuine need to turn still wins; >~0.1 starts refusing hard turns.
         d("plan_turn", PLAN_DEFAULTS["plan_turn"])
+        # Charge yaw rate by how slowly the robot rolls while turning (CostParams.traction): turning
+        # in place loads the motors to their ceiling, the same turn while rolling does not. 0 = off.
+        d("plan_traction", PLAN_DEFAULTS["plan_traction"])
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
         # NEVER commands above this regardless of the cost. This is the real top-speed knob.
         # ~1.4 m/s at 4.0; ~1.75 m/s at 5.0 (r=0.35). plan_wmax maps to the REAL wheel speed -- the
@@ -608,6 +612,10 @@ class NavigationNode(Node):
         # own turning clearance and MPPI froze there. 0 = off. Live-tunable.
         d("plan_turn_first_deg", PLAN_DEFAULTS["plan_turn_first_deg"])
         d("plan_turn_first_reach_m", PLAN_DEFAULTS["plan_turn_first_reach_m"])
+        # [m] ...but only while a wall face is this close along the plan (the governor's
+        # clearance): the brake exists to keep the tail swing off walls, and in the open it forced
+        # the crawl-and-turn that loads the motors most. 0 = everywhere. Live-tunable.
+        d("plan_turn_first_clear_m", PLAN_DEFAULTS["plan_turn_first_clear_m"])
         # STRAIGHT sampling prior: fraction of MPPI candidates drawn as zero-differential (straight
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
@@ -809,6 +817,7 @@ class NavigationNode(Node):
         self.plan_goal_running: float = g("plan_goal_running")
         self.plan_effort: float = g("plan_effort")
         self.plan_turn: float = g("plan_turn")
+        self.plan_traction: float = g("plan_traction")
         self.plan_smooth: float = g("plan_smooth")
         self.plan_straight_frac: float = g("plan_straight_frac")
         self.plan_debug_cmd: int = int(g("plan_debug_cmd"))
@@ -848,6 +857,7 @@ class NavigationNode(Node):
         self.plan_bridge_m: float = g("plan_bridge_m")
         self.plan_turn_first_deg: float = g("plan_turn_first_deg")
         self.plan_turn_first_reach_m: float = g("plan_turn_first_reach_m")
+        self.plan_turn_first_clear_m: float = g("plan_turn_first_clear_m")
         self.plan_actuate: bool = g("plan_actuate")
         self.cmd_output: str = g("cmd_output")
         self.cmd_vel_topic: str = g("cmd_vel_topic")
@@ -1783,9 +1793,16 @@ class NavigationNode(Node):
             # the whole reach_radius..inf band -- the continuous brake replaces the hard stop-radius.
             from_plan = True
             u0 = self.planner.nominal()[0]  # first committed step (wL, wR), model convention
+            self._spin_side = spin_side(self._spin_side, self._prev_cmd, planned=u0)
             wl, wr = float(u0[0]), float(u0[1])
             wl_raw, wr_raw = wl, wr  # before the yaw loop and the conditioner touch them
-            if self.plan_turn_first_deg > 0.0:
+            # near a wall only; last frame's clearance, since the governor runs after this
+            near_wall = (
+                self.plan_turn_first_clear_m <= 0.0
+                or self.governor is None
+                or self.governor.clearance < self.plan_turn_first_clear_m
+            )
+            if self.plan_turn_first_deg > 0.0 and near_wall:
                 # spin first when the route lies well behind (control/command.turn_first); the way
                 # on is read off the routing field around the robot, in the routing window's frame
                 bearing = self.ctg.descent_bearing(

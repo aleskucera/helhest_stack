@@ -49,6 +49,7 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         goal_running=p["plan_goal_running"],
         effort=p["plan_effort"],
         turn=p["plan_turn"],
+        traction=p["plan_traction"],
         smoothness=p["plan_smooth"],
         saturation=p["plan_saturation"],
         # added after the move: the wall veto, which the node now sets from the table
@@ -144,6 +145,6 @@ def test_the_coarse_layer_and_the_turn_first_brake_come_from_the_table():
     the simulator now falls back to, so a false_door result in the sim is a result for the node."""
     cfg = planner_config(PLAN_DEFAULTS)
     assert cfg.coarse == dict(block_m=0.6, memory_m=60.0, bridge_m=1.2)
-    assert cfg.turn_first == dict(start_deg=45.0, reach_m=1.5)
+    assert cfg.turn_first == dict(start_deg=45.0, reach_m=1.5, clear_m=0.0)
     off = planner_config({**PLAN_DEFAULTS, "plan_coarse_block_m": 0.0, "plan_turn_first_deg": 0.0})
     assert off.coarse["block_m"] == 0.0 and off.turn_first["start_deg"] == 0.0

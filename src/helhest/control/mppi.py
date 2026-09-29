@@ -120,6 +120,8 @@ class CostWeights:
     # flat w.r.t. heading (the free-heading goal). Distinct from effort (which penalizes total speed).
     turn: float
     turn_spin_th: float
+    traction: float  # CostParams.traction
+    traction_v0: float
     # friction-saturation certificate: penalize demand/grip past 1 (dimensionless overshoot).
     # This is what slows the robot where grip is short: demand grows with v*wz and accel.
     saturation: float
@@ -186,6 +188,16 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # condition has to go, not the threshold. What th does control is how much SLOW-but-moving
     # manoeuvring also escapes, which is why it is small.
     turn_spin_th: float = 0.25
+    # TRACTION: yaw rate is what loads this drivetrain, and forward speed makes the same turn
+    # easier. Four field bags (2026-09-29, ~45k samples), median front-wheel effort (ceiling ~70)
+    # [share at the ceiling]: at 0.6-2 rad/s of yaw, 56 [25%] standing and 57 [29%] crawling but
+    # 44 [3%] above 1 m/s; at 0.3-0.6 rad/s, 54 [16%] standing, 43 [0%] above 1 m/s. So each step
+    # pays traction * wz^2 / (|v| + traction_v0): a 180 deg spin at 0.95 rad/s costs ~8x a
+    # 180 deg U-turn arc at 1 m/s and 0.5 rad/s, and spins still win where no arc fits. Not a
+    # charge on spinning as such (see `turn` on why that froze the robot): standing still costs
+    # nothing here too, so the weight must stay below what the goal pays for heading. 0 = off.
+    traction: float = 0.0
+    traction_v0: float = 0.3  # [m/s] keeps the charge finite at standstill
     # friction-saturation certificate weight (per unit demand/grip overshoot, early-weighted sum).
     # ~300 makes a sustained 20% overshoot compete with real routing differences and a 2x overshoot
     # dominate; the certificate is exact at tan(pitch) = mu for station-holding (see test).
@@ -248,6 +260,8 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.infeasible = self.infeasible
         cw.turn = self.turn
         cw.turn_spin_th = self.turn_spin_th
+        cw.traction = self.traction
+        cw.traction_v0 = self.traction_v0
         cw.saturation = self.saturation
         cw.tip = self.tip
         cw.unknown = self.unknown
@@ -568,6 +582,7 @@ def _cost_kernel(
     effort_sum = float(0.0)
     smooth_sum = float(0.0)
     turn_sum = float(0.0)
+    traction_sum = float(0.0)
     penalty_sum = float(0.0)
     sat_sum = float(0.0)
     tip_sum = float(0.0)
@@ -589,6 +604,7 @@ def _cost_kernel(
         v = twist[t + 1, r][0]  # realized body forward speed [m/s]; < 0 = reversing
         alpha = turning[t, r][0]
         wz = robot.wheel_radius * (om[1] - om[0]) / (2.0 * robot.half_track * alpha)
+        traction_sum += wz * wz / (wp.abs(v) + cw.traction_v0)
         if cw.out_of_bounds > 0.0:
             # soft wall at the world edge: depth past the margin (V is clamped off-grid, so the
             # goal term alone doesn't stop the robot driving off the map -- this does).
@@ -705,6 +721,7 @@ def _cost_kernel(
         + cw.effort * effort_sum
         + cw.smoothness * smooth_sum
         + cw.turn * turn_sum
+        + cw.traction * traction_sum
         + cw.reverse * rev_sum
         + cw.clear_time * time_sum
         + safe
