@@ -152,3 +152,12 @@ def test_the_coarse_layer_and_the_turn_first_brake_come_from_the_table():
     assert cfg.turn_first == dict(start_deg=45.0, reach_m=1.5, clear_m=0.0)
     off = planner_config({**PLAN_DEFAULTS, "plan_coarse_block_m": 0.0, "plan_turn_first_deg": 0.0})
     assert off.coarse["block_m"] == 0.0 and off.turn_first["start_deg"] == 0.0
+
+
+def test_the_node_caches_every_table_parameter():
+    """_build_planner reads getattr(self, k) for every PLAN_DEFAULTS key, so a key declared but
+    never cached crashes the node at start-up -- which no other test builds. It happened with
+    plan_lat_accel and plan_keep_away (2026-09-30, on the robot)."""
+    src = NODE.read_text()
+    cached = {k for k in PLAN_DEFAULTS if re.search(rf"self\.{k}\s*(:[^=\n]+)?=", src)}
+    assert set(PLAN_DEFAULTS) - cached == set()
