@@ -60,6 +60,7 @@ from helhest.control.command import JOINT_NAMES
 from helhest.control.command import joint_states_to_model
 from helhest.control.command import spin_side
 from helhest.control.command import to_engine_order
+from helhest.control.command import traction_scale
 from helhest.control.command import llc_not_driving
 from helhest.control.mppi import MppiGpu
 from helhest.control.terminal import dock_control
@@ -211,7 +212,24 @@ class NavigationNode(Node):
         self._bbuf: dict[str, wp.array] = {}  # the belief path's preallocated crops and pools
         self._frame: int = 0  # monotonic processed-frame counter (RViz label, debugging)
         self._rec: dict[str, list] | None = (
-            {k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "meta", "goal", "t", "trail")}
+            {
+                k: []
+                for k in (
+                    "h",
+                    "seen",
+                    "blk",
+                    "v",
+                    "route",
+                    "cv",
+                    "meta",
+                    "goal",
+                    "t",
+                    "trail",
+                    "corig",
+                    "path",
+                    "path_i",
+                )
+            }
             if self.plan_debug_record
             else None
         )
@@ -630,6 +648,11 @@ class NavigationNode(Node):
         # clearance): the brake exists to keep the tail swing off walls, and in the open it forced
         # the crawl-and-turn that loads the motors most. 0 = everywhere. Live-tunable.
         d("plan_turn_first_clear_m", PLAN_DEFAULTS["plan_turn_first_clear_m"])
+        # [deg] traction applies fully while the route is within on_deg of the heading and not at
+        # all past off_deg, so a route far behind is turned in place instead of in a wide rolling
+        # loop (control.command.traction_scale). off_deg 0 = always fully. Live-tunable.
+        d("plan_traction_on_deg", PLAN_DEFAULTS["plan_traction_on_deg"])
+        d("plan_traction_off_deg", PLAN_DEFAULTS["plan_traction_off_deg"])
         # STRAIGHT sampling prior: fraction of MPPI candidates drawn as zero-differential (straight
         # ahead) drives. Straight is usually near-optimal, so seeding it lets the elite lock onto a
         # clean straight command instead of averaging noisy micro-turns -> ~25% less lateral wander on
@@ -876,6 +899,8 @@ class NavigationNode(Node):
         self.plan_turn_first_deg: float = g("plan_turn_first_deg")
         self.plan_turn_first_reach_m: float = g("plan_turn_first_reach_m")
         self.plan_turn_first_clear_m: float = g("plan_turn_first_clear_m")
+        self.plan_traction_on_deg: float = g("plan_traction_on_deg")
+        self.plan_traction_off_deg: float = g("plan_traction_off_deg")
         self.plan_actuate: bool = g("plan_actuate")
         self.cmd_output: str = g("cmd_output")
         self.cmd_vel_topic: str = g("cmd_vel_topic")
@@ -1410,8 +1435,16 @@ class NavigationNode(Node):
         rec = self._rec
         rec["trail"].append([mf.ex, mf.ey])
         self._rec_planned += 1
+        self._rec_this = False
         if (self._rec_planned - 1) % self.plan_debug_record_every != 0:
             return
+        self._rec_this = True  # the plan this frame publishes is kept too (_plan)
+        # the coarse memory scrolls with the robot, so each frame carries where it was
+        rec["corig"].append(
+            [0.0, 0.0]
+            if self.coarse is None
+            else [self.coarse.grid.origin_x, self.coarse.grid.origin_y]
+        )
         rwh, rww = mf.relev_mem.shape
         kr = self._plan_kr
         vh = V.numpy()
@@ -1682,6 +1715,8 @@ class NavigationNode(Node):
                 off_c = bf.measured.shape[0] // 2 - cw // 2
                 cxmin, cymin = bf.xmin + off_c * cell, bf.ymin + off_c * cell
                 if self.coarse.persistent:
+                    # the memory follows the robot, in whole coarse cells (CoarseRouter.recenter)
+                    self.coarse.recenter(mf.ex, mf.ey)
                     cx0, cy0 = self.coarse.grid.origin_x, self.coarse.grid.origin_y
                 else:
                     cx0, cy0 = cxmin, cymin
@@ -1758,6 +1793,18 @@ class NavigationNode(Node):
                 self.planner.update_clearance()
                 self._ck("plan:clear_map")
             self._load_command_history()
+            # how far the route lies off the heading decides whether a rolling turn is preferred
+            scale = 1.0
+            if self.plan_traction_off_deg > 0.0:
+                bearing = self.ctg.descent_bearing(
+                    mf.ex - mf.rxmin, mf.ey - mf.rymin, self.plan_turn_first_reach_m
+                )
+                if np.isfinite(bearing):
+                    err = (bearing - eyaw + np.pi) % (2.0 * np.pi) - np.pi
+                    scale = traction_scale(
+                        err, self.plan_traction_on_deg, self.plan_traction_off_deg
+                    )
+            self.planner.set_traction_scale(scale)
             self.planner.replan(state_l, goal_l, int(self.plan_n_refine))
             self._ck("plan:replan")
         # PLAN CONSISTENCY: EMA the nominal toward last frame's plan, shifted one step forward (the
@@ -1787,6 +1834,11 @@ class NavigationNode(Node):
         self._ck("plan:readback")
         origin = np.array([mf.lxmin, mf.lymin], np.float32)
         self._publish_path(nominal_xy[:, :2] + origin, ez, stamp)
+        if self._rec is not None and getattr(self, "_rec_this", False):
+            # the plan of a recorded frame, in the map frame; path_i = its row in the other hist_*
+            self._rec["path"].append((nominal_xy[:, :2] + origin).astype(np.float32))
+            self._rec["path_i"].append(len(self._rec["meta"]) - 1)
+            self._rec_this = False
         self._ck("plan:pub_path")
 
         # --- ACTUATION: turn the plan into a conditioned /cmd_joints command (default OFF) ---

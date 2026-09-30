@@ -106,6 +106,10 @@ PLAN_DEFAULTS: dict[str, Any] = {
     # [m] turn first only while a wall face is this close along the plan (the governor's
     # clearance); in the open the robot turns while rolling. 0 = everywhere.
     "plan_turn_first_clear_m": 0.0,
+    # traction applies fully while the route is within on_deg of the heading, not at all past
+    # off_deg (control.command.traction_scale); off_deg 0 = always fully
+    "plan_traction_on_deg": 60.0,
+    "plan_traction_off_deg": 0.0,
 }
 
 

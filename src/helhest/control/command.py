@@ -125,6 +125,25 @@ def llc_not_driving(cmd: np.ndarray, idle_for_s: float) -> bool:
     return idle_for_s > IDLE_FOR_S and max(abs(float(cmd[0])), abs(float(cmd[2]))) > MOVING_CMD
 
 
+def traction_scale(heading_error: float, on_deg: float, off_deg: float) -> float:
+    """How much of the traction cost applies this frame: 1 while the route lies within `on_deg`
+    of the heading, 0 beyond `off_deg`, linear between; `off_deg` <= 0 = always 1.
+
+    Traction (CostParams.traction) makes a rolling turn cheaper than a spin, which is right while
+    the way on is roughly ahead and wrong when it lies behind: under the corner limit a rolling
+    U-turn needs a radius of ~1.7 m at 1 m/s, and in `tree2` (2026-09-30) goals 148-172 deg behind
+    took 25-29 m of driving for 10-15 m of straight line. Turned off there, MPPI plans the spin.
+    """
+    if off_deg <= 0.0:
+        return 1.0
+    e = abs(math.degrees(heading_error))
+    if e <= on_deg:
+        return 1.0
+    if e >= off_deg:
+        return 0.0
+    return (off_deg - e) / (off_deg - on_deg)
+
+
 def spin_side(prev_side: float, cmd: np.ndarray, planned: np.ndarray | None = None) -> float:
     """Which way MPPI may spin next frame: +1 left, -1 right, 0 either.
 

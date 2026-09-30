@@ -69,6 +69,23 @@ from .terrain_value_field.hierarchical import seed_goal_kernel
 
 
 @wp.kernel
+def _shift_kernel(
+    src: wp.array2d(dtype=wp.float32),
+    dr: int,  # [cells] the new grid's row 0 is the old grid's row dr
+    dc: int,
+    fill: wp.float32,  # what a cell that enters the grid holds: nothing remembered
+    dst: wp.array2d(dtype=wp.float32),
+):
+    r, c = wp.tid()
+    sr = r + dr
+    sc = c + dc
+    if sr >= 0 and sr < src.shape[0] and sc >= 0 and sc < src.shape[1]:
+        dst[r, c] = src[sr, sc]
+    else:
+        dst[r, c] = fill
+
+
+@wp.kernel
 def _mask_kernel(
     count: wp.array2d(dtype=wp.int32),  # fine [ny, nx], points per cell
     measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = at least one
@@ -418,6 +435,50 @@ class CoarseRouter:
         self._pose_cost = self.field.pose_cost
         self._seeds = self.field.seeds
         self.V = wp.zeros((cy, cx, 1), dtype=wp.float32, device=self.device)
+
+    def recenter(self, x: float, y: float, slack_frac: float = 0.25) -> bool:
+        """Scroll an anchored memory so (x, y) -- the robot, in the memory's frame -- sits at its
+        centre again once it has strayed more than `slack_frac` of the map from it. Whole coarse
+        cells only, so the window keeps landing on the memory's lattice; what stays inside keeps
+        what it holds, what enters is unknown. Returns whether it moved.
+
+        The memory used to stay where the node built it, centred on the map frame's origin --
+        wherever the Odin started. In `tree2` (2026-09-30) the robot worked 20-38 m from it, so
+        goals east of x = 30 lay outside the 60 m map and the route led to its edge: the robot
+        drove 8 m north, away from a goal 10 m east.
+        """
+        if not self.persistent:
+            return False
+        g = self.grid
+        cc = g.cell_size
+        cx = g.origin_x + 0.5 * g.cells_x * cc
+        cy = g.origin_y + 0.5 * g.cells_y * cc
+        if max(abs(x - cx) / (g.cells_x * cc), abs(y - cy) / (g.cells_y * cc)) <= slack_frac:
+            return False
+        dc = int(round((x - cx) / cc))
+        dr = int(round((y - cy) / cc))
+        for layer, fill in (
+            (self.passable, 0.0),
+            (self.seen, 0.0),
+            (self.coverage, 0.0),
+            (self.floor, 1.0e30),
+        ):
+            old = wp.clone(layer)
+            wp.launch(
+                _shift_kernel,
+                dim=layer.shape,
+                inputs=[old, dr, dc, fill],
+                outputs=[layer],
+                device=self.device,
+            )
+        self.grid = GridParams(
+            cells_x=g.cells_x,
+            cells_y=g.cells_y,
+            cell_size=cc,
+            origin_x=g.origin_x + dc * cc,
+            origin_y=g.origin_y + dr * cc,
+        )
+        return True
 
     def solve(
         self,

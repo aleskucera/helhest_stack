@@ -601,6 +601,7 @@ def _cost_kernel(
     cw: CostWeights,
     robot: Robot,  # envelope + feasibility thresholds (shared with the cost-to-go feasibility)
     horizon: int,
+    traction_scale: wp.array(dtype=float),  # [1] this frame's share of the traction cost
     Jout: wp.array(dtype=float),
     Jsafe: wp.array(dtype=float),  # the SAFETY share of Jout (see _robust_j_kernel)
 ):
@@ -760,7 +761,7 @@ def _cost_kernel(
         + cw.effort * effort_sum
         + cw.smoothness * smooth_sum
         + cw.turn * turn_sum
-        + cw.traction * traction_sum
+        + cw.traction * traction_scale[0] * traction_sum
         + cw.lat_accel * lat_sum
         + cw.keep_away * away_sum
         + cw.reverse * rev_sum
@@ -1076,6 +1077,7 @@ class MppiGpu:
             self.cmd_state = wp.zeros(1, dtype=wp.vec4)  # set_command_state; zeros = at rest
             self.U_ref = wp.zeros((self.horizon, 2), dtype=wp.float32)  # last frame's plan
             self.spin_side = wp.zeros(1, dtype=wp.float32)  # set_spin_side; 0 = either way
+            self.traction_scale = wp.ones(1, dtype=wp.float32)  # set_traction_scale
         self.set_mu_band()  # nominal mu (fills sim.mu_scale for the replica layout)
 
         # the grid the cost kernel samples the lattice field on: defaults to the sim grid, but a COARSER
@@ -1116,6 +1118,11 @@ class MppiGpu:
         self.cmd_state.assign(
             np.array([[wheels[0], wheels[1], accel[0], accel[1]]], dtype=np.float32)
         )
+
+    def set_traction_scale(self, scale: float) -> None:
+        """This frame's share of the traction cost, 0..1 (control.command.traction_scale).
+        Graph-safe."""
+        self.traction_scale.assign(np.array([float(scale)], dtype=np.float32))
 
     def set_spin_side(self, side: float) -> None:
         """+1 = spin candidates turn left only, -1 = right only, 0 = either. See
@@ -1261,6 +1268,7 @@ class MppiGpu:
                 self.cw,
                 self.robot,
                 self.horizon,
+                self.traction_scale,
             ],
             outputs=[self.J, self.Jsafe],
             device=self.device,

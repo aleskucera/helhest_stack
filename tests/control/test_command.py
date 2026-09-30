@@ -160,3 +160,14 @@ def test_llc_not_driving_needs_both_a_moving_command_and_idle_setpoints():
     assert not llc_not_driving(moving, idle_for_s=0.1)  # the LLC has not picked the command up yet
     at_rest = np.array([0.2, 0.2, 0.2], np.float32)
     assert not llc_not_driving(at_rest, idle_for_s=5.0)
+
+
+def test_traction_scale_fades_out_as_the_route_falls_behind():
+    import math
+
+    from helhest.control.command import traction_scale
+
+    assert traction_scale(math.radians(30), 60, 120) == 1.0
+    assert abs(traction_scale(math.radians(90), 60, 120) - 0.5) < 1e-9
+    assert traction_scale(math.radians(-170), 60, 120) == 0.0
+    assert traction_scale(math.radians(170), 60, 0.0) == 1.0  # off_deg 0: always fully

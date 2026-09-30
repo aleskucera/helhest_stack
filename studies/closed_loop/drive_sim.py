@@ -49,6 +49,7 @@ from helhest import dynamics
 from helhest.control.command import condition_command
 from helhest.control.command import spin_side
 from helhest.control.command import to_engine_order
+from helhest.control.command import traction_scale
 from helhest.control.command import turn_first
 from helhest.control.governor import ClearanceGovernor
 from helhest.control.mppi import MppiGpu
@@ -447,6 +448,7 @@ def drive(a: argparse.Namespace) -> dict:
             # the coarse grid's origin in the WORLD: fixed when anchored, the window's otherwise.
             # An anchored grid works in world coordinates, a window-bound one in the window's.
             if coarse.persistent:
+                coarse.recenter(rx, ry)  # the memory follows the robot (CoarseRouter.recenter)
                 cx0, cy0 = coarse.grid.origin_x, coarse.grid.origin_y
                 vc = coarse.solve(height_d, measured_d, goal, (belief.xmin, belief.ymin))
             else:
@@ -509,6 +511,15 @@ def drive(a: argparse.Namespace) -> dict:
             # the wall-distance map the clearance-time and keep-away costs read
             if a.cfg.clearance is not None or a.cfg.cost.keep_away > 0.0:
                 planner.update_clearance()
+            off_deg = float(a.plan_params.get("plan_traction_off_deg", 0.0))
+            scale = 1.0
+            if off_deg > 0.0:
+                bearing = ctg.descent_bearing(rx - r0, ry - s0, a.turn_first_reach)
+                if np.isfinite(bearing):
+                    on_deg = float(a.plan_params.get("plan_traction_on_deg", 60.0))
+                    err = (bearing - yaw + np.pi) % (2.0 * np.pi) - np.pi
+                    scale = traction_scale(err, on_deg, off_deg)
+            planner.set_traction_scale(scale)
             planner.replan(state_l, goal_l, a.refine)
             u = planner.nominal()
             wl, wr = float(u[0, 0]), float(u[0, 1])

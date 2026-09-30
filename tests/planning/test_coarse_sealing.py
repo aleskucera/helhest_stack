@@ -195,3 +195,32 @@ def test_a_shadow_at_a_walls_end_is_not_bridged():
     m[9 * FACTOR : 11 * FACTOR, 27:36] = 0.0  # ... and rows 9-10 beside its end are unseen
     r.solve(_dev(h), _dev(m), (11.0, 6.0), (0.0, 0.0))
     assert (r.bridged.numpy() < 0.5).all()
+
+
+def test_the_memory_scrolls_with_the_robot_and_keeps_what_it_saw():
+    """The anchored memory used to stay centred on the map origin, so on the robot (tree2, 20-38 m
+    from the Odin's origin) goals past its edge were unroutable. It now follows the robot in
+    whole cells: a remembered wall stays at its world position, new ground enters unknown."""
+    fine = GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    mem = GridParams(cells_x=150, cells_y=150, cell_size=CELL, origin_x=-15.0, origin_y=-15.0)
+    r = CoarseRouter(fine, factor=FACTOR, max_step_m=0.25, memory_grid=mem, device="cuda")
+    cc = r.grid.cell_size
+    h = np.zeros((N, N), np.float32)
+    m = np.ones((N, N), np.float32)
+    h[:, 30:32] = 1.0  # a wall at x = 6 m (the window's origin at world (0, 0))
+    r.solve(_dev(h), _dev(m), (3.0, 3.0), (0.0, 0.0))
+    wall_col = lambda: int(round((6.0 - r.grid.origin_x) / cc))  # noqa: E731
+    before = r.passable.numpy()[:, wall_col()].copy()
+    assert not r.recenter(2.0, 1.0), "inside the slack the memory stays put"
+    assert r.recenter(12.0, 0.0), "12 m east of the centre of a 30 m map: it must move"
+    # the robot is back near the centre, in whole cells
+    centre_x = r.grid.origin_x + 0.5 * r.grid.cells_x * cc
+    assert (
+        abs(centre_x - 12.0) <= 0.5 * cc
+        and abs(r.grid.origin_x / cc - round(r.grid.origin_x / cc)) < 1e-6
+    )
+    # the wall is still at x = 6 m, now in a different column
+    assert np.array_equal(r.passable.numpy()[:, wall_col()], before), "the remembered wall moved"
+    # and the columns that entered from the east are unknown
+    assert (r.seen.numpy()[:, -10:] == 0).all()
+    assert (r.floor.numpy()[:, -10:] >= 1e29).all()
