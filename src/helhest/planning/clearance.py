@@ -49,6 +49,14 @@ class ClearanceParams:
     search_m: float = 1.5  # [m] how far around the footprint the governor looks for walls
     # the governor also caps FORWARD speed by the robot carrying straight on (see governor.py)
     straight: bool = False
+    # The governor counts a wall face only if this many of its 8 neighbours are faces too, or it
+    # stands `face_tall_m` above the lowest cell within 2 cells: grass tufts are single or paired
+    # face cells and held the robot at v_min for 20 s (kolecko3, 2026-09-30); walls, kerbs and
+    # trunks are solid, and a thin post is tall. 0.45 m is the knee on the recorded maps: grass
+    # within 1 m of the robot in 4 of 470 frames (293 without the rule); the in_speed corridor's
+    # nearest face moves in 6 of 79 frames, isolated 0.37-0.45 m objects (12 at 0.6 m).
+    face_neighbours: int = 2
+    face_tall_m: float = 0.45  # [m]
 
     @property
     def turn_ratio(self) -> float:

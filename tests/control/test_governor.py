@@ -249,3 +249,37 @@ def test_carrying_straight_on_never_caps_turning_away_from_a_wall():
 
 def test_the_straight_on_check_is_off_by_default():
     assert not ClearanceParams().straight
+
+
+def _flat_with(
+    cells: list[tuple[float, float]], height: float
+) -> tuple[wp.array, wp.array, object]:
+    """Flat ground with single raised cells at the given (x, y) [m]."""
+    h = np.zeros((N, N), np.float32)
+    for x, y in cells:
+        h[int(y / CELL), int(x / CELL)] = height
+    grid = GridParams(N, N, CELL, 0.0, 0.0).build()
+    return wp.array(h), wp.array(np.ones((N, N), np.float32)), grid
+
+
+def test_scattered_grass_tufts_are_not_walls():
+    # kolecko3: isolated face cells 0.2-0.5 m tall held the robot at v_min for 20 s
+    tufts = [(x, y) for x in np.arange(3.0, 4.6, 0.3) for y in (4.5, 4.9, 5.3)]
+    elev, meas, grid = _flat_with(tufts, 0.4)
+    gov = _gov()
+    assert gov.cap(4.0, 4.0, _plan(y=4.0), elev, meas, grid) == (4.0, 4.0)
+
+
+def test_a_thin_tall_post_is_still_a_wall():
+    elev, meas, grid = _flat_with([(3.5, 4.7)], 1.0)
+    gov = _gov()
+    gov.cap(4.0, 4.0, _plan(y=4.0), elev, meas, grid)
+    assert gov.clearance < 0.5
+
+
+def test_a_low_one_cell_thick_wall_is_still_a_wall():
+    kerb = [(x, 4.7) for x in np.arange(2.0, 6.0, CELL)]
+    elev, meas, grid = _flat_with(kerb, 0.45)
+    gov = _gov()
+    gov.cap(4.0, 4.0, _plan(y=4.0), elev, meas, grid)
+    assert gov.clearance < 0.5

@@ -33,6 +33,40 @@ def _in_rect(
     return wp.abs(ca * ex + sa * ey) <= hx and wp.abs(-sa * ex + ca * ey) <= hw
 
 
+@wp.func
+def _solid_face(
+    elevation: wp.array2d(dtype=wp.float32),
+    measured: wp.array2d(dtype=wp.float32),
+    r: int,
+    c: int,
+    face_h: float,
+    face_neighbours: int,
+    face_tall: float,
+) -> bool:
+    """A wall face (is_wall_face) that is part of something solid or tall; see
+    ClearanceParams.face_neighbours. The caller keeps r, c off the border."""
+    ny = elevation.shape[0]
+    nx = elevation.shape[1]
+    n = int(0)
+    for i in range(-1, 2):
+        for j in range(-1, 2):
+            rr = r + i
+            cc = c + j
+            if (i != 0 or j != 0) and rr >= 1 and rr < ny - 1 and cc >= 1 and cc < nx - 1:
+                if is_wall_face(elevation, measured, rr, cc, face_h):
+                    n += 1
+    if n >= face_neighbours:
+        return True
+    lowest = elevation[r, c]
+    for i in range(-2, 3):
+        for j in range(-2, 3):
+            rr = r + i
+            cc = c + j
+            if rr >= 0 and rr < ny and cc >= 0 and cc < nx:
+                lowest = wp.min(lowest, elevation[rr, cc])
+    return elevation[r, c] - lowest > face_tall
+
+
 @wp.kernel
 def _plan_clearance_kernel(
     controlled: wp.array2d(dtype=wp.vec3f),  # [T+1, B] rollout poses (x, y, yaw) on `grid`
@@ -43,6 +77,8 @@ def _plan_clearance_kernel(
     x_hi: wp.float32,
     half_w: wp.float32,
     face_h: wp.float32,
+    face_neighbours: int,
+    face_tall: wp.float32,
     search: int,  # [cells] how far around the footprint to look
     out: wp.array(dtype=wp.float32),  # [K] clearance per plan step, `search` cells if none
     blind: wp.array(dtype=wp.float32),  # [K] never-measured area [m^2] the footprint newly covers
@@ -85,6 +121,8 @@ def _plan_clearance_kernel(
                             unseen += grid.cell_size * grid.cell_size
                 continue
             if not is_wall_face(elevation, measured, r, c, face_h):
+                continue
+            if not _solid_face(elevation, measured, r, c, face_h, face_neighbours, face_tall):
                 continue
             # signed distance from the wall cell to the rectangle, in the footprint's frame
             dx = gx - cx
@@ -185,6 +223,8 @@ class ClearanceGovernor:
                 self.x_hi,
                 self.half_w,
                 self.face_h,
+                int(p.face_neighbours),
+                float(p.face_tall_m),
                 search,
             ],
             outputs=[self._out, self._blind],
@@ -249,6 +289,8 @@ class ClearanceGovernor:
                 self.x_hi,
                 self.half_w,
                 self.face_h,
+                int(p.face_neighbours),
+                float(p.face_tall_m),
                 search,
             ],
             outputs=[self._out_straight, self._blind_straight],
