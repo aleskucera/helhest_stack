@@ -4,7 +4,8 @@
 #   * base: the Zenoh router the motor controller (helhest_llc, ESP32 firmware at 192.168.18.2) and
 #     the jetson join through; the robot's URDF (base_link -> odin1_base_link, base_link -> imu,
 #     ...); the Fixposition GNSS with its FP_VRTK -> base_link mount, and a relay that re-sends
-#     /tf_static so late starters get it.
+#     /tf_static so late starters get it; the u-blox + NTRIP client that feed the Fixposition its
+#     RTK corrections on /rtcm.
 #   * missions: the Robotour stack -- OSM map + route planner, QR goals, the follower in `gps`
 #     mode -- driving navigation_node through ros/tools/commander_bridge.py, which stands in for
 #     crl_commander. RViz goals on /goal_pose work alongside; the bridge only sends while a
@@ -22,8 +23,10 @@
 #
 # With GPX set the robot drives the route as soon as the follower has a fix: be ready to stop it.
 # Never run Robotour's `adam` session alongside: crl_commander's path follower drives /cmd_vel too.
-# Deliberately left out of helhest_bringup's helhest.launch: sound, the Septentrio GNSS, the Basler
-# cameras; and from Robotour: u-blox, thermal camera, mission reporter.
+# Deliberately left out of helhest_bringup's helhest.launch: sound, the Septentrio GNSS (it takes its
+# corrections inside the receiver; nothing here reads it), the Basler cameras; and from Robotour's
+# tmux-launch: the thermal camera and the mission reporter. Do not run tmux-launch alongside: it
+# starts a second router, URDF and Fixposition driver.
 
 name: helhest-nav
 root: /home/robot/workspaces/helhest_ws
@@ -48,6 +51,20 @@ windows:
         - |
           sleep 5
           ros2 run helhest_bringup static_tf_relay.py --ros-args -p period:=5.0
+  - gnss:
+      layout: even-vertical
+      panes:
+        # The Fixposition takes its RTK corrections on /rtcm (cras_fixposition_driver config:
+        # corr_topic), which ublox_dgnss publishes from the NTRIP client's stream; without them its
+        # fusion never initialises and FP_ECEF -> FP_POI (hence every GPX waypoint) is missing.
+        # Same three panes as Robotour's tmux-launch.
+        - |
+          sleep 3
+          ros2 launch ublox_dgnss ublox_x20p_rover_hpposllh_navsatfix.launch.py -a
+        - |
+          sleep 3
+          ros2 launch ublox_dgnss ntrip_client.launch.py use_https:=false host:=192.168.140.101 port:=2101 mountpoint:=BLACKBOX
+        - ros2 run tf2_ros static_transform_publisher --x 0.32 --y -0.05 --z 0.2 --frame-id base_link --child-frame-id ubx
   - map:
       panes:
         - |
