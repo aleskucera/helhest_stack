@@ -11,9 +11,19 @@
 # from the URDF on the NUC (base_link -> imu); an imu_link -> imu here would give it a second
 # parent. Without the NUC session `imu` has no transform and the gyro is dropped.
 #
-#   ln -s /home/robot/workspaces/helhest_ws/src/helhest_stack/ros/sessions/helhest-nav.tmuxinator.yml \
-#         ~/.tmuxinator/helhest-nav.yml
+# The code runs from its own checkout, ~/workspaces/helhest_stack_nav, kept on this branch: the
+# checkout in helhest_ws/src/helhest_stack is shared with other work and changes branch under us
+# (2026-09-30: switched to main, which has no navigation_node). Outside helhest_ws/src so colcon
+# does not see a second helhest_stack_ros; the nav pane puts this checkout first on PYTHONPATH.
+#
+#   git clone -b study/tvf-migration <repo> ~/workspaces/helhest_stack_nav
+#   cd ~/workspaces/helhest_stack_nav && uv venv --system-site-packages && uv pip install -e .
+#   ln -sf ~/workspaces/helhest_stack_nav/ros/sessions/helhest-nav.tmuxinator.yml \
+#          ~/.tmuxinator/helhest-nav.yml
 #   tmuxinator start helhest-nav
+#
+# elevation-belief is a private git pin the jetson cannot fetch: install it from the local copy,
+# `uv pip install ~/workspaces/deps/elevation_belief-8177bbd`, then `uv pip install --no-deps -e .`.
 #
 # DRIVING IS ON: the robot moves as soon as a goal arrives. To plan only, add
 # -p plan_actuate:=false to the nav pane.
@@ -46,7 +56,7 @@ windows:
       panes:
         - |
           sleep 12
-          cd src/helhest_stack
+          cd /home/robot/workspaces/helhest_stack_nav
           source ros/tools/dev-shell.sh
           export PYTHONPATH="$PWD/ros/helhest_stack_ros:$PYTHONPATH"
           python3 -m helhest_stack_ros.navigation_node --ros-args \
@@ -61,4 +71,4 @@ windows:
           sleep 14; ros2 topic echo /goal_pose --field pose.position
   - shell:
       panes:
-        - cd src/helhest_stack
+        - cd /home/robot/workspaces/helhest_stack_nav
