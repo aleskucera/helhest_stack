@@ -6,9 +6,10 @@
 # Goals: RViz 2D Goal Pose on /goal_pose (fixed frame odom_odin), or a GPX / QR mission through the
 # NUC's commander bridge, which sends them on the same topic, already in odom_odin.
 #
-# No static transforms of our own: the NUC's URDF has base_link -> odin1_base_link (0.1, 0, 0.1) and
-# base_link -> imu. An extra imu_link -> imu here would give `imu` a second parent; the URDF's has
-# the same rotation, so the gyro still resolves. Without the NUC session those frames are missing.
+# One static transform of our own, base_link -> odin1_base_link (0.1, 0, 0.1): the robot's URDF has
+# no Odin frame (Robotour's jetson session publishes the same one). The gyro's frame `imu` comes
+# from the URDF on the NUC (base_link -> imu); an imu_link -> imu here would give it a second
+# parent. Without the NUC session `imu` has no transform and the gyro is dropped.
 #
 #   ln -s /home/robot/workspaces/helhest_ws/src/helhest_stack/ros/sessions/helhest-nav.tmuxinator.yml \
 #         ~/.tmuxinator/helhest-nav.yml
@@ -33,6 +34,9 @@ windows:
         - |
           sleep 3
           ros2 launch cras_odin_driver odin1_ros2.launch map_mode:=0
+  - tf:
+      panes:
+        - ros2 run tf2_ros static_transform_publisher --x 0.1 --y 0.0 --z 0.1 --roll 0 --pitch 0 --yaw 0 --frame-id base_link --child-frame-id odin1_base_link
   - qr:
       panes:
         - |

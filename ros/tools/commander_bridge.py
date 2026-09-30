@@ -269,8 +269,14 @@ def main() -> None:
 
         # ---------------------------------------------------------------- loop
         def tick(self) -> None:
+            if self.mode == "STOP":
+                return
             r = self.robot()
-            if r is None or self.mode == "STOP":
+            if r is None:
+                self.get_logger().warning(
+                    f"no TF {self.robot_frame} -> {self.map_frame}: cannot place the robot",
+                    throttle_duration_sec=5.0,
+                )
                 return
             now = self.get_clock().now().nanoseconds * 1e-9
             if self.mode == "GOTO":
