@@ -228,6 +228,7 @@ class NavigationNode(Node):
                     "corig",
                     "path",
                     "path_i",
+                    "gov",
                 )
             }
             if self.plan_debug_record
@@ -1901,6 +1902,20 @@ class NavigationNode(Node):
                 capped = self.governor.cap(
                     wl, wr, sim.controlled, sim.elevation, self.planner.measured, sim.grid
                 )
+                if self._rec is not None and self._rec["meta"]:
+                    # [latest recorded frame, wheels in, wheels capped [rad/s], clearance [m],
+                    # cap [m/s]]: whether the governor is what holds the robot back
+                    self._rec["gov"].append(
+                        [
+                            len(self._rec["meta"]) - 1,
+                            wl,
+                            wr,
+                            float(capped[0]),
+                            float(capped[1]),
+                            self.governor.clearance,
+                            self.governor.v_cap,
+                        ]
+                    )
                 if self.plan_clear_governor:
                     wl, wr = capped
                 self._ck("plan:governor")
