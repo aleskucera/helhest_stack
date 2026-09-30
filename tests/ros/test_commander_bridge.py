@@ -27,7 +27,16 @@ def test_arrival_is_a_box_in_the_robots_frame():
 def test_a_sequence_starts_after_the_nearest_waypoint():
     assert cb.start_index((9.0, 1.0), ROUTE, from_next=True) == 2
     assert cb.start_index((9.0, 1.0), ROUTE, from_next=False) == 1
-    assert cb.start_index((31.0, 0.0), ROUTE, from_next=True) is None  # nothing left
+    # at the end of an open route: sent to the last waypoint, which it has already reached
+    assert cb.start_index((31.0, 0.0), ROUTE, from_next=True) == 3
+    assert cb.start_index((0.0, 0.0), [], from_next=True) is None
+
+
+def test_a_loop_route_starts_at_its_beginning():
+    # kolecko2: the start and end of a loop lie side by side and the robot, between them, was
+    # nearest the LAST waypoint -- the sequence ended before it began, 20 times in a row
+    loop = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0), (0.0, 3.0)]
+    assert cb.start_index((0.0, 2.0), loop, from_next=True) == 1
 
 
 def test_the_walk_advances_on_arrival_and_ends():
@@ -46,3 +55,13 @@ def test_a_waypoint_is_skipped_after_the_timeout_and_a_loop_wraps():
     assert w.step((1.0, 0.0, 0.0), ROUTE, now=181.0) == "advanced" and w.index == 2
     w.index = 3
     assert w.step((30.0, 0.0, 0.0), ROUTE, now=200.0) == "advanced" and w.index == 0
+
+
+def test_a_waypoint_is_lifted_along_the_ellipsoid_normal():
+    # a GPX point at altitude 0 near Temesvar, lifted to the robot's height
+    lat, lon = math.radians(49.37), math.radians(14.26)
+    point = cb.geodetic_to_ecef(lat, lon, 0.0)
+    lat2, lon2, h2 = cb.ecef_to_geodetic(*cb.lift_to_height(point, 454.0))
+    assert abs(h2 - 454.0) < 1e-3
+    # same place on the ground: < 1 mm of latitude / longitude change
+    assert abs(lat2 - lat) * cb.WGS84_A < 1e-3 and abs(lon2 - lon) * cb.WGS84_A < 1e-3

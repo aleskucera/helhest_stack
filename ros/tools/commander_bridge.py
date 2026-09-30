@@ -15,6 +15,12 @@ Mirrors crl_commander (adam_ws, 674dcac) where the follower can tell the differe
     frame (2.5 x 2.5 m); a sequence starts at the waypoint AFTER the nearest one; a waypoint is
     skipped after sequence_point_timeout_sec (180 s).
   * waypoints are re-converted into the map frame every tick: the earth -> map link drifts.
+Differs from crl_commander on purpose:
+  * earth-frame waypoints are lifted to the robot's ellipsoidal height before the conversion. The
+    follower sends GPX points at altitude 0, ~450 m under the robot, and the Fixposition and the
+    Odin disagree on tilt by ~1 deg, which moved every goal ~9 m (kolecko, 2026-09-30).
+  * the nearest-waypoint search at the start leaves the last waypoint out: on a loop route the
+    robot starts next to both ends, and "nearest is the last" ended the mission before it began.
 Left out: crl_commander's skip-ahead past optional waypoints, the gpx sequence source, and the
 explore / WEX / follow-me modes (refused).
 
@@ -45,16 +51,54 @@ def reached(
     return abs(ahead) <= box_x and abs(left) <= box_y
 
 
+WGS84_A = 6378137.0  # [m]
+WGS84_E2 = 6.69437999014e-3  # first eccentricity squared
+
+
+def ecef_to_geodetic(x: float, y: float, z: float) -> tuple[float, float, float]:
+    """(lat [rad], lon [rad], ellipsoidal height [m]) of an ECEF point."""
+    lon = math.atan2(y, x)
+    r = math.hypot(x, y)
+    lat = math.atan2(z, r * (1.0 - WGS84_E2))
+    h = 0.0
+    for _ in range(6):  # converges to < 1 mm near the surface
+        n = WGS84_A / math.sqrt(1.0 - WGS84_E2 * math.sin(lat) ** 2)
+        h = r / math.cos(lat) - n
+        lat = math.atan2(z, r * (1.0 - WGS84_E2 * n / (n + h)))
+    return lat, lon, h
+
+
+def geodetic_to_ecef(lat: float, lon: float, h: float) -> tuple[float, float, float]:
+    n = WGS84_A / math.sqrt(1.0 - WGS84_E2 * math.sin(lat) ** 2)
+    return (
+        (n + h) * math.cos(lat) * math.cos(lon),
+        (n + h) * math.cos(lat) * math.sin(lon),
+        (n * (1.0 - WGS84_E2) + h) * math.sin(lat),
+    )
+
+
+def lift_to_height(
+    point_ecef: tuple[float, float, float], height: float
+) -> tuple[float, float, float]:
+    """The same latitude and longitude at `height` [m] above the ellipsoid. Along the ellipsoid
+    normal, not the geocentric radius: over ~450 m the two differ by up to ~1.5 m sideways."""
+    lat, lon, _ = ecef_to_geodetic(*point_ecef)
+    return geodetic_to_ecef(lat, lon, height)
+
+
 def start_index(
     robot_xy: tuple[float, float], waypoints_xy: list[tuple[float, float]], from_next: bool
 ) -> int | None:
-    """Where a sequence starts: the nearest waypoint, or the one after it. None = nothing left
-    to do (the nearest is already the last)."""
+    """Where a sequence starts: the nearest waypoint, or the one after it; None = no waypoints.
+    The last waypoint is left out of the nearest search, so a loop route (its ends side by side)
+    starts at its beginning; a robot already at the end of an open route is sent to the last
+    waypoint, reaches it at once and the sequence completes."""
     if not waypoints_xy:
         return None
     d = [math.hypot(wx - robot_xy[0], wy - robot_xy[1]) for wx, wy in waypoints_xy]
-    i = min(range(len(d)), key=d.__getitem__) + (1 if from_next else 0)
-    return i if i < len(waypoints_xy) else None
+    candidates = range(max(1, len(d) - 1))
+    i = min(candidates, key=d.__getitem__) + (1 if from_next else 0)
+    return min(i, len(waypoints_xy) - 1)
 
 
 @dataclass
@@ -128,6 +172,8 @@ def main() -> None:
             p = self.declare_parameter
             self.map_frame = p("map_frame", "odom_odin").value
             self.robot_frame = p("robot_frame", "base_link").value
+            # waypoints in this frame are lifted to the robot's height (see the module docstring)
+            self.earth_frame = p("earth_frame", "FP_ECEF").value
             self.goal_topic = p("goal_topic", "/goal_pose").value
             self.walker = Walker(
                 box_x=p("goal_reached_dist_x", 2.5).value,
@@ -224,7 +270,30 @@ def main() -> None:
         def publish_state(self) -> None:
             self.pub_state.publish(String(data=self.mode))
 
-        def to_map(self, ps: PoseStamped) -> tuple[float, float] | None:
+        def robot_height(self) -> float | None:
+            """The robot's ellipsoidal height [m], from earth_frame -> robot_frame."""
+            try:
+                t = self.tf.lookup_transform(self.earth_frame, self.robot_frame, Time())
+            except Exception as e:
+                self.get_logger().warning(
+                    f"no TF {self.robot_frame} -> {self.earth_frame}: {e}",
+                    throttle_duration_sec=5.0,
+                )
+                return None
+            p = t.transform.translation
+            return ecef_to_geodetic(p.x, p.y, p.z)[2]
+
+        def to_map(self, ps: PoseStamped, height: float | None) -> tuple[float, float] | None:
+            if ps.header.frame_id == self.earth_frame:
+                if height is None:
+                    return None  # unlifted, the goal would land ~9 m off
+                lifted = PoseStamped()
+                lifted.header = ps.header
+                lifted.pose.orientation = ps.pose.orientation
+                q = ps.pose.position
+                x, y, z = lift_to_height((q.x, q.y, q.z), height)
+                lifted.pose.position.x, lifted.pose.position.y, lifted.pose.position.z = x, y, z
+                ps = lifted
             try:
                 t = self.tf.lookup_transform(self.map_frame, ps.header.frame_id, Time())
             except Exception as e:  # TF not there yet: wait, as the commander does
@@ -282,18 +351,19 @@ def main() -> None:
             if self.mode == "GOTO":
                 if self.goto_goal is None:
                     return
-                xy = self.to_map(self.goto_goal)
+                xy = self.to_map(self.goto_goal, self.robot_height())
                 if xy is not None:
                     self.send(("goto", id(self.goto_goal)), xy)
                 return
             # SEQUENCE: convert every waypoint each tick -- the earth -> map link drifts
-            pts = [self.to_map(w) for w in self.sequence]
+            height = self.robot_height()
+            pts = [self.to_map(w, height) for w in self.sequence]
             if not pts or any(p is None for p in pts):
                 return
             if self.seq_fresh:
                 self.seq_fresh = False
                 if not self.walker.begin(r[:2], pts, self.from_next, now):
-                    self.get_logger().info("nearest waypoint is the last: nothing to do")
+                    self.get_logger().info("empty sequence: nothing to do")
                     self.set_mode("STOP")
                     return
                 self.get_logger().info(
