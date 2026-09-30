@@ -1,0 +1,102 @@
+# helhest-nav (NUC half): everything helhest-jr-nuc runs for navigation_node, which runs on the jetson
+# in its own helhest-nav session (ros/sessions/helhest-nav.tmuxinator.yml). Start this one FIRST.
+#
+#   * base: the Zenoh router the motor controller (helhest_llc, ESP32 firmware at 192.168.18.2) and
+#     the jetson join through; the robot's URDF (base_link -> odin1_base_link, base_link -> imu,
+#     ...); the Fixposition GNSS with its FP_VRTK -> base_link mount, and a relay that re-sends
+#     /tf_static so late starters get it.
+#   * missions: the Robotour stack -- OSM map + route planner, QR goals, the follower in `gps`
+#     mode -- driving navigation_node through ros/tools/commander_bridge.py, which stands in for
+#     crl_commander. RViz goals on /goal_pose work alongside; the bridge only sends while a
+#     mission runs.
+#   * the map_data viewer (http://127.0.0.1:5000 on the NUC) for making GPX routes; tunnel it with
+#     `ssh -N -L 5050:localhost:5000 helhest-jr-nuc` and open http://localhost:5050.
+#
+# The NUC has no checkout of this repo, so the files are copied there:
+#
+#   scp ros/sessions/helhest-nav-nuc.tmuxinator.yml helhest-jr-nuc:.tmuxinator/helhest-nav.yml
+#   scp ros/tools/commander_bridge.py helhest-jr-nuc:commander_bridge.py
+#
+#   tmuxinator start helhest-nav                                      # QR / RViz goals
+#   GPX=/home/robot/gpx/<route>.gpx tmuxinator start helhest-nav      # a GPX mission
+#
+# With GPX set the robot drives the route as soon as the follower has a fix: be ready to stop it.
+# Never run Robotour's `adam` session alongside: crl_commander's path follower drives /cmd_vel too.
+# Deliberately left out of helhest_bringup's helhest.launch: sound, the Septentrio GNSS, the Basler
+# cameras; and from Robotour: u-blox, thermal camera, mission reporter.
+
+name: helhest-nav
+root: /home/robot/workspaces/helhest_ws
+startup_window: follower
+# ~/.rosrc sets rmw_zenoh, ZENOH_CONFIG_OVERRIDE_ROUTER (this machine's endpoints) and sources helhest_ws.
+pre_window: export ROS_DISTRO=kilted; source ~/.rosrc
+
+windows:
+  - zenoh:
+      panes:
+        - ZENOH_CONFIG_OVERRIDE="$ZENOH_CONFIG_OVERRIDE_ROUTER" ros2 run rmw_zenoh_cpp rmw_zenohd
+  - base:
+      layout: even-vertical
+      panes:
+        - |
+          sleep 3
+          ros2 launch helhest_description helhest_description.launch.xml
+        - |
+          sleep 3
+          ros2 launch -a cras_fixposition_driver node.launch ip:=192.168.18.190
+        - ros2 run tf2_ros static_transform_publisher --x -0.12 --y 0.0125 --z -0.24 --child-frame-id base_link --frame-id FP_VRTK
+        - |
+          sleep 5
+          ros2 run helhest_bringup static_tf_relay.py --ros-args -p period:=5.0
+  - map:
+      panes:
+        - |
+          sleep 3
+          ros2 launch map_data osm_cloud.launch.py mapdata_file:=robotour.mapdata
+        - |
+          sleep 3
+          ros2 run map_data map_data_viewer --config src/map_data/config/helhest_jr.yaml
+  - planner:
+      panes:
+        - |
+          sleep 3
+          ros2 launch map_data route_planner.launch.py mapdata_file:=robotour.mapdata
+  - bridge:
+      panes:
+        # crl_commander's interfaces (its services) come from adam_ws
+        - |
+          sleep 3
+          source /home/robot/workspaces/adam_ws/install/setup.bash
+          python3 ~/commander_bridge.py
+  - follower:
+      panes:
+        - |
+          sleep 6
+          source /home/robot/workspaces/adam_ws/install/setup.bash
+          ros2 launch robot_mission_planner gps_follower.launch <%= ENV["GPX"].to_s.empty? ? "" : "gps_file:=#{ENV['GPX']}" %>
+        - |
+          history -s 'ros2 service call /road_follower/abort std_srvs/srv/Trigger'
+          history -s 'ros2 service call /crl_commander/switch_mode crl_commander/srv/SwitchMode "{mode: stop}"'
+          echo "press Up: STOP the robot through the bridge / ABORT the current leg"
+  - qr:
+      panes:
+        - |
+          history -s 'ros2 run robot_mission_planner qr_goal_send "geo:50.1103476,14.4159857"'
+          echo "press Up: send a goal by hand"
+  - view:
+      layout: even-horizontal
+      panes:
+        # both at their rates (~100 Hz and ~30 Hz) = the motor controller is connected and alive
+        - |
+          sleep 8; ros2 topic hz /joint_states
+        - |
+          sleep 8; ros2 run robot_mission_planner mission_hud
+  - record:
+      panes:
+        - |
+          cd
+          history -s "ros2 launch helhest_bringup record_robotour_nuc.launch"
+          echo "press Up: record the mission side (route, commander state, GNSS)"
+  - shell:
+      panes:
+        - cd
