@@ -38,8 +38,11 @@ shift $((OPTIND - 1))
 NAME="${1:-}"
 [[ -n "$NAME" || $DRY -eq 1 ]] || { echo "usage: turn_test.sh [options] <name>   (-h for options)"; exit 1; }
 
+# ROS setup scripts read unset variables, and under set -u that silently ends this script
+set +u
 source ~/.rosrc >/dev/null 2>&1 || true
 source ~/workspaces/helhest_ws/install/setup.bash >/dev/null 2>&1 || true
+set -u
 
 # The command programme and its publisher. Kept in one file with the recording so a run is one
 # command on the robot; the profile itself is plain Python below.
