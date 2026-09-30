@@ -10,23 +10,27 @@
 #   -d DIST    each straight [m]                      (default 3.0)
 #   -a ACC     forward acceleration [m/s^2]           (default 0.5)
 #   -A ACC     yaw acceleration [rad/s^2]             (default 1.0)
+#   -j JERK    forward jerk [m/s^3], 0 = linear ramps (default 1.0)
+#   -J JERK    yaw jerk [rad/s^3], 0 = linear ramps   (default 2.0)
 #   -r         turn right (default left)
 #   -n         dry run
 #
 # The programme: straight DIST, stop 1 s, turn 180 deg in place, stop 1 s, straight DIST back.
-# Every segment is a trapezoid (ramp at the given acceleration, hold, ramp down), so nothing
-# steps; the command is open loop and identical every run, which is the point.
+# Every segment is an S-curve: the acceleration itself ramps in and out at the given jerk, holds,
+# and the speed holds between -- so neither the command nor its rate steps. Open loop and
+# identical every run, which is the point.
 #
 # SAFETY. navigation_node must NOT be running: it publishes /cmd_vel too and the two would fight.
 # The script refuses to start while anything else publishes /cmd_vel. It counts down 3 s before
 # moving, and sends zeros on any exit -- Ctrl-C included. Needs ~4 m of clear ground ahead.
 set -euo pipefail
 
-SPEED=0.5; RATE=0.6; DIST=3.0; ACC=0.5; YAW_ACC=1.0; SIDE=1; DRY=0
-while getopts "v:w:d:a:A:rnh" opt; do
+SPEED=0.5; RATE=0.6; DIST=3.0; ACC=0.5; YAW_ACC=1.0; JERK=1.0; YAW_JERK=2.0; SIDE=1; DRY=0
+while getopts "v:w:d:a:A:j:J:rnh" opt; do
   case $opt in
     v) SPEED=$OPTARG ;; w) RATE=$OPTARG ;; d) DIST=$OPTARG ;;
-    a) ACC=$OPTARG ;; A) YAW_ACC=$OPTARG ;; r) SIDE=-1 ;; n) DRY=1 ;;
+    a) ACC=$OPTARG ;; A) YAW_ACC=$OPTARG ;; j) JERK=$OPTARG ;; J) YAW_JERK=$OPTARG ;;
+    r) SIDE=-1 ;; n) DRY=1 ;;
     *) sed -n '2,/^set -e/p' "$0" | grep '^#' | sed 's/^# \?//'; exit 0 ;;
   esac
 done
@@ -40,41 +44,72 @@ source ~/workspaces/helhest_ws/install/setup.bash >/dev/null 2>&1 || true
 # The command programme and its publisher. Kept in one file with the recording so a run is one
 # command on the robot; the profile itself is plain Python below.
 drive() {
-  python3 - "$SPEED" "$RATE" "$DIST" "$ACC" "$YAW_ACC" "$SIDE" "$1" <<'PY'
+  python3 - "$SPEED" "$RATE" "$DIST" "$ACC" "$YAW_ACC" "$JERK" "$YAW_JERK" "$SIDE" "$1" <<'PY'
 import math
 import sys
 import time
 
-speed, rate, dist, acc, yaw_acc, side, go = map(float, sys.argv[1:8])
+speed, rate, dist, acc, yaw_acc, jerk, yaw_jerk, side, go = map(float, sys.argv[1:10])
 HZ = 20.0  # command rate: an LLC deadman always sees a fresh command
 
 
-def trapezoid(total: float, peak: float, ramp: float) -> list[float]:
-    """Samples at HZ of a profile that covers `total` (distance or angle) at most at `peak`,
-    ramping at `ramp`; a triangle when the segment is too short to reach the peak."""
-    peak = min(peak, math.sqrt(total * ramp))
-    t_ramp = peak / ramp
-    t_hold = (total - peak * t_ramp) / peak
-    n = int(round((2 * t_ramp + t_hold) * HZ))
-    out = []
-    for i in range(n + 1):
-        t = i / HZ
-        out.append(min(peak, ramp * t, ramp * max(0.0, 2 * t_ramp + t_hold - t)))
-    return out
+def ramp_up(peak: float, acc: float, jerk: float):
+    """Rest -> `peak` with the acceleration capped at `acc` and changing at most `jerk` (0 = at
+    once): (duration, speed at time t). The acceleration is a trapezoid in time, a triangle when
+    `peak` is reached before it gets to `acc`."""
+    if jerk <= 0.0:
+        a1, t_j = acc, 0.0
+    else:
+        a1 = min(acc, math.sqrt(peak * jerk))
+        t_j = a1 / jerk
+    t_up = peak / a1 + t_j
+
+    def v(t: float) -> float:
+        if t <= 0.0:
+            return 0.0
+        if t >= t_up:
+            return peak
+        if t < t_j:
+            return 0.5 * jerk * t * t
+        if t < t_up - t_j:
+            return 0.5 * a1 * t_j + a1 * (t - t_j)
+        return peak - 0.5 * jerk * (t_up - t) ** 2
+
+    return t_up, v
+
+
+def s_curve(total: float, peak: float, acc: float, jerk: float) -> list[float]:
+    """Samples at HZ of a rest-to-rest profile covering `total` (distance or angle), at most at
+    `peak`. The ramp-up covers peak * t_up / 2 (it is symmetric), so a segment too short to
+    reach `peak` gets a lower one, found by bisection."""
+    if peak * ramp_up(peak, acc, jerk)[0] > total:
+        lo, hi = 0.0, peak
+        for _ in range(60):
+            mid = 0.5 * (lo + hi)
+            lo, hi = (mid, hi) if mid * ramp_up(mid, acc, jerk)[0] <= total else (lo, mid)
+        peak = lo
+    t_up, v = ramp_up(peak, acc, jerk)
+    t_cruise = (total - peak * t_up) / peak
+    t_all = 2.0 * t_up + t_cruise
+    n = int(math.ceil(t_all * HZ))
+    out = [min(v(i / HZ), v(t_all - i / HZ)) for i in range(n + 1)]
+    scale = total / (sum(out) / HZ)  # sampling at HZ shaves a hair off; put it back exactly
+    return [x * scale for x in out]
 
 
 def pause(seconds: float) -> list[tuple[float, float]]:
     return [(0.0, 0.0)] * int(round(seconds * HZ))
 
 
-straight = [(v, 0.0) for v in trapezoid(dist, speed, acc)]
-turn = [(0.0, side * w) for w in trapezoid(math.pi, rate, yaw_acc)]
+straight = [(v, 0.0) for v in s_curve(dist, speed, acc, jerk)]
+turn = [(0.0, side * w) for w in s_curve(math.pi, rate, yaw_acc, yaw_jerk)]
 prog = pause(1.0) + straight + pause(1.0) + turn + pause(1.0) + straight + pause(1.0)
 
 dur = len(prog) / HZ
 side_name = "left" if side > 0 else "right"
-print(f"programme: {dist:.1f} m at {speed:.2f} m/s (acc {acc:.2f}), turn 180 deg {side_name} at "
-      f"{rate:.2f} rad/s (acc {yaw_acc:.2f}), {dist:.1f} m back -- {dur:.1f} s")
+print(f"programme: {dist:.1f} m at {speed:.2f} m/s (acc {acc:.2f}, jerk {jerk:.2f}), turn 180 deg "
+      f"{side_name} at {rate:.2f} rad/s (acc {yaw_acc:.2f}, jerk {yaw_jerk:.2f}), {dist:.1f} m back "
+      f"-- {dur:.1f} s")
 print(f"  distance per straight {sum(v for v, _ in straight) / HZ:.2f} m, "
       f"turn {math.degrees(sum(abs(w) for _, w in turn) / HZ):.0f} deg")
 if not go:
