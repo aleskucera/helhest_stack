@@ -122,6 +122,9 @@ class CostWeights:
     turn_spin_th: float
     traction: float  # CostParams.traction
     traction_v0: float
+    traction_v_sat: float
+    lat_accel: float  # CostParams.lat_accel
+    lat_accel_max: float
     # friction-saturation certificate: penalize demand/grip past 1 (dimensionless overshoot).
     # This is what slows the robot where grip is short: demand grows with v*wz and accel.
     saturation: float
@@ -145,6 +148,8 @@ class CostWeights:
     reverse: float
     # TIME LOST TO THE CLEARANCE LAW (planning/clearance.py), built from CostParams.clearance
     clear_time: float  # weight; 1 = a second lost costs exactly what it costs in goal terms
+    keep_away: float  # CostParams.keep_away
+    keep_away_m: float
     clear_t_react: float
     clear_v_min: float
     clear_c0: float  # [m] the law's fixed margin
@@ -198,6 +203,25 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # nothing here too, so the weight must stay below what the goal pays for heading. 0 = off.
     traction: float = 0.0
     traction_v0: float = 0.3  # [m/s] keeps the charge finite at standstill
+    # [m/s] speed above which turning gets no cheaper. Unbounded, the charge rewarded cornering
+    # fast: in the `tree` bag (2026-09-30) 46% of plans turned harder than the output's turn
+    # brake allows, at up to 2 m/s. The effort data shows no further gain above ~1 m/s.
+    traction_v_sat: float = 1.0
+    # LATERAL ACCELERATION: charge each step lat_accel * max(0, |v * wz| - lat_accel_max)^2, so
+    # MPPI plans only corners the output keeps. The output's turn brake (condition_command) scales
+    # speed and yaw down together past plan_turn_brake_a_max, and MPPI did not know: in `tree`
+    # 46% of plans exceeded it (p90 1.07 m/s^2 against 0.6). lat_accel_max is that same limit.
+    # 0 = off.
+    lat_accel: float = 0.0
+    lat_accel_max: float = 0.0  # [m/s^2]
+    # KEEP AWAY: each step pays keep_away * max(0, keep_away_m - clearance)^2, clearance being the
+    # footprint's distance to the nearest wall face. Distance as something MPPI trades against
+    # progress, not a speed limit: a wide berth where there is room, and a narrow gap still
+    # taken when it is the only way. With the governor's time pricing off, the robot hugged
+    # obstacles in drive_sim and touched them in 4 of 6 pocket/slalom runs (2026-09-30).
+    # 0 = off.
+    keep_away: float = 0.0
+    keep_away_m: float = 0.6  # [m]
     # friction-saturation certificate weight (per unit demand/grip overshoot, early-weighted sum).
     # ~300 makes a sustained 20% overshoot compete with real routing differences and a 2x overshoot
     # dominate; the certificate is exact at tan(pitch) = mu for station-holding (see test).
@@ -262,6 +286,11 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.turn_spin_th = self.turn_spin_th
         cw.traction = self.traction
         cw.traction_v0 = self.traction_v0
+        cw.traction_v_sat = self.traction_v_sat
+        cw.lat_accel = self.lat_accel
+        cw.lat_accel_max = self.lat_accel_max
+        cw.keep_away = self.keep_away
+        cw.keep_away_m = self.keep_away_m
         cw.saturation = self.saturation
         cw.tip = self.tip
         cw.unknown = self.unknown
@@ -583,6 +612,8 @@ def _cost_kernel(
     smooth_sum = float(0.0)
     turn_sum = float(0.0)
     traction_sum = float(0.0)
+    lat_sum = float(0.0)
+    away_sum = float(0.0)
     penalty_sum = float(0.0)
     sat_sum = float(0.0)
     tip_sum = float(0.0)
@@ -604,7 +635,10 @@ def _cost_kernel(
         v = twist[t + 1, r][0]  # realized body forward speed [m/s]; < 0 = reversing
         alpha = turning[t, r][0]
         wz = robot.wheel_radius * (om[1] - om[0]) / (2.0 * robot.half_track * alpha)
-        traction_sum += wz * wz / (wp.abs(v) + cw.traction_v0)
+        traction_sum += wz * wz / (wp.min(wp.abs(v), cw.traction_v_sat) + cw.traction_v0)
+        if cw.lat_accel > 0.0:
+            lat_excess = wp.max(wp.abs(v * wz) - cw.lat_accel_max, 0.0)
+            lat_sum += lat_excess * lat_excess
         if cw.out_of_bounds > 0.0:
             # soft wall at the world edge: depth past the margin (V is clamped off-grid, so the
             # goal term alone doesn't stop the robot driving off the map -- this does).
@@ -680,6 +714,11 @@ def _cost_kernel(
             # pose is refused per heading, and a cell that is fine facing one way is not fine
             # facing another
             veto_sum += early * sample_lattice(veto_field, grid, n_theta, pose[0], pose[1], yaw_eff)
+        if cw.keep_away > 0.0:
+            gap = wp.max(
+                cw.keep_away_m - _footprint_clearance(clear_field, sgrid, robot, pose), 0.0
+            )
+            away_sum += gap * gap
         if cw.clear_time > 0.0:
             tail = -robot.wheel_pos[2][0] + robot.wheel_radius
             cmin = _footprint_clearance(clear_field, sgrid, robot, pose)
@@ -722,6 +761,8 @@ def _cost_kernel(
         + cw.smoothness * smooth_sum
         + cw.turn * turn_sum
         + cw.traction * traction_sum
+        + cw.lat_accel * lat_sum
+        + cw.keep_away * away_sum
         + cw.reverse * rev_sum
         + cw.clear_time * time_sum
         + safe

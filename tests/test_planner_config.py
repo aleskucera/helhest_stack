@@ -50,6 +50,10 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         effort=p["plan_effort"],
         turn=p["plan_turn"],
         traction=p["plan_traction"],
+        lat_accel=p["plan_lat_accel"],
+        lat_accel_max=p["plan_turn_brake_a_max"],
+        keep_away=p["plan_keep_away"],
+        keep_away_m=p["plan_keep_away_m"],
         smoothness=p["plan_smooth"],
         saturation=p["plan_saturation"],
         # added after the move: the wall veto, which the node now sets from the table
@@ -120,7 +124,7 @@ def test_planner_config_reproduces_the_node(name):
 def test_the_deployed_file_is_actually_read():
     """Guards the test above against passing vacuously on a file nobody parsed."""
     d = _deployed()
-    assert d["plan_turn"] == 0.2 and d["plan_wmax"] == 6.0 and d["plan_n_mu"] == 3
+    assert d["plan_turn"] == 0.0 and d["plan_wmax"] == 6.0 and d["plan_n_mu"] == 3
 
 
 def test_the_node_takes_every_default_from_the_table():

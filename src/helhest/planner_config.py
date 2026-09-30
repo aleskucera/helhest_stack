@@ -35,6 +35,13 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_effort": 1e-3,
     "plan_turn": 0.03,
     "plan_traction": 0.0,  # yaw^2 / (|v| + 0.3) per step: turn while rolling (CostParams.traction)
+    # MPPI's charge on cornering past the output's turn brake (CostParams.lat_accel); 0 = off.
+    "plan_lat_accel": 0.0,
+    # [m/s^2] the turn brake's lateral limit -- the output brakes past it, MPPI is charged past it
+    "plan_turn_brake_a_max": 0.0,
+    # keep_away * max(0, keep_away_m - wall clearance)^2 per step (CostParams.keep_away); 0 = off
+    "plan_keep_away": 0.0,
+    "plan_keep_away_m": 0.6,
     "plan_smooth": 0.04,
     "plan_saturation": 300.0,
     # MPPI's hard veto on the cost-to-go's HAZARD field: actual wall contact, without the router's
@@ -84,6 +91,8 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_clear_lookahead_s": 1.0,  # [s] of the plan the governor checks
     "plan_clear_decel": 2.0,  # [m/s^2] braking the governor may count on
     "plan_clear_v_blind": 0.3,  # [m/s] while the plan sweeps never-measured ground; 0 = off
+    # False = the governor still measures clearance (turn-first reads it) but never caps speed
+    "plan_clear_governor": True,
     # robot
     "plan_wheel_width": 0.10,
     # the coarse "which way" layer (planning/coarse.py) and the turn-first brake
@@ -156,6 +165,10 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             effort=float(p["plan_effort"]),
             turn=float(p["plan_turn"]),
             traction=float(p["plan_traction"]),
+            lat_accel=float(p["plan_lat_accel"]),
+            lat_accel_max=float(p["plan_turn_brake_a_max"]),
+            keep_away=float(p["plan_keep_away"]),
+            keep_away_m=float(p["plan_keep_away_m"]),
             smoothness=float(p["plan_smooth"]),
             saturation=float(p["plan_saturation"]),
             veto=float(p["plan_wall_veto"]),

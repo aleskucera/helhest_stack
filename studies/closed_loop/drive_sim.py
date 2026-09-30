@@ -506,7 +506,8 @@ def drive(a: argparse.Namespace) -> dict:
                 # is exactly where a pose is vetoed -- the goal term cannot carry a veto, so it has
                 # to be its own term. Walls only, and without the router's margin (CostToGo.hazard)
                 planner.set_veto(ctg.hazard, sgrid)
-            if a.cfg.clearance is not None:  # the wall-distance map the clearance-time cost reads
+            # the wall-distance map the clearance-time and keep-away costs read
+            if a.cfg.clearance is not None or a.cfg.cost.keep_away > 0.0:
                 planner.update_clearance()
             planner.replan(state_l, goal_l, a.refine)
             u = planner.nominal()
@@ -532,9 +533,11 @@ def drive(a: argparse.Namespace) -> dict:
                     )
             if governor is not None:
                 wl_in = wl
-                wl, wr = governor.cap(
+                capped = governor.cap(
                     wl, wr, plan_sim.controlled, plan_sim.elevation, planner.measured, plan_sim.grid
                 )
+                if a.plan_params.get("plan_clear_governor", PLAN_DEFAULTS["plan_clear_governor"]):
+                    wl, wr = capped
                 gov_log.append(
                     [
                         f,

@@ -111,6 +111,10 @@ _PLAN_BUILD = frozenset(
         "plan_effort",
         "plan_turn",
         "plan_traction",
+        "plan_lat_accel",
+        "plan_keep_away",
+        "plan_keep_away_m",
+        "plan_turn_brake_a_max",
         "plan_wmax",
         "plan_wmin",
         "plan_straight_frac",
@@ -514,6 +518,13 @@ class NavigationNode(Node):
         # Charge yaw rate by how slowly the robot rolls while turning (CostParams.traction): turning
         # in place loads the motors to their ceiling, the same turn while rolling does not. 0 = off.
         d("plan_traction", PLAN_DEFAULTS["plan_traction"])
+        # Charge MPPI for cornering past plan_turn_brake_a_max, the limit the output brakes at, so
+        # it plans only turns the robot will make (CostParams.lat_accel). 0 = off.
+        d("plan_lat_accel", PLAN_DEFAULTS["plan_lat_accel"])
+        # Charge MPPI for passing closer than plan_keep_away_m [m] to a wall face, quadratic in the
+        # shortfall (CostParams.keep_away): a wider berth where there is room. 0 = off.
+        d("plan_keep_away", PLAN_DEFAULTS["plan_keep_away"])
+        d("plan_keep_away_m", PLAN_DEFAULTS["plan_keep_away_m"])
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
         # NEVER commands above this regardless of the cost. This is the real top-speed knob.
         # ~1.4 m/s at 4.0; ~1.75 m/s at 5.0 (r=0.35). plan_wmax maps to the REAL wheel speed -- the
@@ -559,6 +570,9 @@ class NavigationNode(Node):
         d("plan_clear_v_min", PLAN_DEFAULTS["plan_clear_v_min"])
         d("plan_clear_lookahead_s", PLAN_DEFAULTS["plan_clear_lookahead_s"])
         d("plan_clear_mppi_weight", PLAN_DEFAULTS["plan_clear_mppi_weight"])
+        # False: the governor keeps measuring clearance (turn-first needs it) but no longer caps
+        # the speed near walls or over unseen ground. Live-tunable.
+        d("plan_clear_governor", PLAN_DEFAULTS["plan_clear_governor"])
         d("plan_clear_decel", PLAN_DEFAULTS["plan_clear_decel"])
         d("plan_clear_c0", PLAN_DEFAULTS["plan_clear_c0"])
         d("plan_clear_t_turn", PLAN_DEFAULTS["plan_clear_t_turn"])
@@ -757,7 +771,7 @@ class NavigationNode(Node):
         # (scaling mean alone would tighten it). 0 = off. For reference, at plan_wmax 6 and
         # k_turn 1 the HARDEST corner the planner can command is ~1.5 m/s^2 (v 1.05 m/s,
         # wz 1.44 rad/s), so useful values sit below that -- try ~0.6-1.2. Live-tunable.
-        d("plan_turn_brake_a_max", 0.0)
+        d("plan_turn_brake_a_max", PLAN_DEFAULTS["plan_turn_brake_a_max"])
         # Look this far ahead along the COMMITTED plan and pre-apply the tightest cap it finds, so
         # the robot brakes BEFORE the corner rather than in it. 0 = reactive only (cap the current
         # command). The plan is plan_horizon * DT long, so this saturates at 2.5 s by default.
@@ -839,6 +853,7 @@ class NavigationNode(Node):
         self.plan_clear_v_min: float = g("plan_clear_v_min")
         self.plan_clear_lookahead_s: float = g("plan_clear_lookahead_s")
         self.plan_clear_mppi_weight: float = g("plan_clear_mppi_weight")
+        self.plan_clear_governor: bool = g("plan_clear_governor")
         self.plan_clear_decel: float = g("plan_clear_decel")
         self.plan_clear_c0: float = g("plan_clear_c0")
         self.plan_clear_t_turn: float = g("plan_clear_t_turn")
@@ -1735,7 +1750,8 @@ class NavigationNode(Node):
             self.planner.set_lattice(self.ctg.V_escape, self.sgrid)
             if self.planner.cw.veto > 0.0:  # walls are a hard no for the controller too
                 self.planner.set_veto(self.ctg.hazard, self.sgrid)
-            if self.planner.cw.clear_time > 0.0:  # the wall-distance map the clearance cost reads
+            # the wall-distance map the clearance and keep-away costs read
+            if self.planner.cw.clear_time > 0.0 or self.planner.cw.keep_away > 0.0:
                 self.planner.update_clearance()
                 self._ck("plan:clear_map")
             self._load_command_history()
@@ -1827,9 +1843,11 @@ class NavigationNode(Node):
             if self.governor is not None:
                 # only as fast as the room along the next second of the plan allows
                 sim = self.planner.sim
-                wl, wr = self.governor.cap(
+                capped = self.governor.cap(
                     wl, wr, sim.controlled, sim.elevation, self.planner.measured, sim.grid
                 )
+                if self.plan_clear_governor:
+                    wl, wr = capped
                 self._ck("plan:governor")
         # rear-follower + goal brake + turn boost + magnitude clamp + slew limit, all in control/command.py
         turn_boost = (
