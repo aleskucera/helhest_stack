@@ -13,6 +13,7 @@ Kernels (all suffixed _kernel):
   _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -750,6 +751,7 @@ class MppiGpu:
         # the rollouts do fine obstacle avoidance, so the global router needn't be sim-resolution.
         self.lattice_grid = sim.grid
         self._graph = None
+        self._cost_hook = None  # set_cost_hook: an extra per-rollout cost term, off by default
 
         # opt-in per-stage profiling of the captured refine loop (CUDA-event timing; off = no overhead)
         self._prof = StageProfiler(self.device, ("sample", "rollout", "cost", "reweight"), profile)
@@ -813,6 +815,17 @@ class MppiGpu:
         if grid is not None:
             self.lattice_grid = grid
 
+    def set_cost_hook(self, hook: Callable[["MppiGpu"], None] | None) -> None:
+        """Add an extra per-rollout cost term (e.g. a learned model-error cost) to every refine;
+        None removes it. `_refine` calls `hook(self)` after the cost kernel and before the robust
+        reduction, so it is captured into the refine's graph: it may only LAUNCH device work (no
+        host sync, no allocation) and must add its term to `self.J` in place. The term lands in
+        the averaged (non-safety) share of the robust cost, which for a term shared by all n_mu
+        replicas of a candidate is the term itself. Drops the captured graph -> the next replan
+        recaptures."""
+        self._cost_hook = hook
+        self._graph = None
+
     def _refine(self):
         """One MPPI iteration: sample -> rollout -> cost -> CEM reweight, all on device."""
         self._prof.mark(0)
@@ -867,6 +880,8 @@ class MppiGpu:
             outputs=[self.J, self.Jsafe],
             device=self.device,
         )
+        if self._cost_hook is not None:
+            self._cost_hook(self)
         # collapse the mu replicas: worst-replica safety + mean-replica goal/shaping
         wp.launch(
             _robust_j_kernel,

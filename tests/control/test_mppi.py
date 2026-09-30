@@ -18,6 +18,8 @@ sync burden. So instead:
                     region, and thus the trajectory, >= the requested margin off obstacles.
   * reweight      : the GPU bisection top-k elite mean vs an EXACT numpy top-k (a different
                     algorithm for the same spec -- a real oracle, not a transcription).
+  * cost hook     : ANALYTIC -- a hook's known per-candidate term shows up in Jc exactly, and a
+                    zero hook leaves U bit-identical to no hook.
 
 Run:  python -m tests.control.test_mppi
 """
@@ -697,6 +699,52 @@ def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
     print(f"reweight parity  {'OK' if err < 5e-2 else 'REVIEW'}")
 
 
+@wp.kernel
+def _hook_term_kernel(n_cand: int, scale: float, J: wp.array(dtype=float)):
+    r = wp.tid()
+    J[r] = J[r] + scale * float(r % n_cand)  # shared by every mu replica of candidate r % n_cand
+
+
+def selftest_cost_hook(device: str = "cuda", B: int = 64, T: int = 21, n_mu: int = 2) -> None:
+    """set_cost_hook: a hook's term reaches the robust candidate cost Jc unchanged (a term shared
+    by the mu replicas survives the mean), and a hook adding zero leaves U bit-identical to no
+    hook. Two planners with the same seed sample identical candidates, so after ONE refine their
+    Jc differ by exactly the hook's term."""
+
+    def planner(scale: float | None) -> mg.MppiGpu:
+        p = mg.MppiGpu(
+            _build_sim(device, B, T), mg.CostParams(), mg.SamplingConfig(n_mu=n_mu), seed=7
+        )
+        if scale is not None:
+            n_cand = p.n_cand
+
+            def hook(q: mg.MppiGpu) -> None:
+                wp.launch(
+                    _hook_term_kernel, q.n_rollouts, inputs=[n_cand, scale, q.J], device=device
+                )
+
+            p.set_cost_hook(hook)
+        return p
+
+    state, goal = np.array([0.0, 0.0, 0.0]), (4.0, 0.0)
+    plain, hooked = planner(None), planner(0.5)
+    plain.replan(state, goal, 1)
+    hooked.replan(state, goal, 1)
+    term = 0.5 * np.arange(plain.n_cand, dtype=np.float32)
+    dJc = hooked.Jc.numpy() - plain.Jc.numpy()
+    err = np.abs(dJc - term).max() / max(1.0, np.abs(plain.Jc.numpy()).max())
+    hooked.set_cost_hook(None)
+    dropped = hooked._graph is None
+
+    plain, zero = planner(None), planner(0.0)
+    same = all(
+        np.array_equal(plain.replan(state, goal, 3).numpy(), zero.replan(state, goal, 3).numpy())
+        for _ in range(3)
+    )
+    print(f"  cost hook: max rel|dJc - term|={err:.1e}, zero hook U bit-identical={same}")
+    print(f"cost hook  {'OK' if (err < 1e-6 and same and dropped) else 'REVIEW'}")
+
+
 if __name__ == "__main__":
     wp.init()
     dev = "cuda" if wp.get_cuda_device_count() > 0 else "cpu"
@@ -711,3 +759,4 @@ if __name__ == "__main__":
     selftest_robust_reduce(dev)
     selftest_robust_margin(dev)
     selftest_reweight_parity(dev)
+    selftest_cost_hook(dev)
