@@ -125,6 +125,35 @@ def llc_not_driving(cmd: np.ndarray, idle_for_s: float) -> bool:
     return idle_for_s > IDLE_FOR_S and max(abs(float(cmd[0])), abs(float(cmd[2]))) > MOVING_CMD
 
 
+def anchor_to_wheels(
+    prev: np.ndarray, prev_accel: np.ndarray, measured: np.ndarray, max_lead: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Pull the command tracker's state back to within `max_lead` [rad/s] of the measured wheels.
+
+    prev, prev_accel: the tracker's last [left, rear, right] command and its acceleration.
+    measured: the wheels' [left, rear, right] speeds from /joint_states, same convention.
+
+    The jerk limit ramps from the last COMMAND, so whenever the wheels do not follow -- the remote's
+    brake trigger, an e-stop, a stall -- the command keeps climbing toward the plan with nothing
+    moving, and the smoothing is spent before the wheels see it. Stromovka 13_43_24 (2026-10-07):
+    the brake trigger held the wheels at 0 for 15 s while /cmd_vel rode at 1.4 m/s; on release the
+    LLC would have stepped 0 -> ~4 rad/s. Anchored, release starts at most `max_lead` above the
+    wheels and ramps from there.
+
+    Only ever pulls toward the wheels when that LOWERS |command|: wheels running ahead of the command
+    (braking lag, rolling downhill) must not drag the command up. A pulled joint also restarts from
+    zero acceleration, or the ramp it had built would carry on at full slope. A lead is kept rather
+    than snapping to the wheels so a stalled wheel still has a setpoint above it to break loose with.
+    """
+    prev = np.asarray(prev, np.float32)
+    anchored = np.clip(prev, measured - max_lead, measured + max_lead)
+    pull = np.abs(anchored) < np.abs(prev)
+    return (
+        np.where(pull, anchored, prev).astype(np.float32),
+        np.where(pull, 0.0, prev_accel).astype(np.float32),
+    )
+
+
 def traction_scale(heading_error: float, on_deg: float, off_deg: float) -> float:
     """How much of the traction cost applies this frame: 1 while the route lies within `on_deg`
     of the heading, 0 beyond `off_deg`, linear between; `off_deg` <= 0 = always 1.

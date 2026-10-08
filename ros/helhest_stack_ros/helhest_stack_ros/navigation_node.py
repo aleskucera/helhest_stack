@@ -52,6 +52,7 @@ from helhest.perception import StatisticalOutlierFilter
 from helhest.perception import transform_points
 from helhest.planning.coarse import CoarseRouter
 from helhest import dynamics
+from helhest.control.command import anchor_to_wheels
 from helhest.control.command import condition_command
 from helhest.control.command import turn_first
 from helhest.control.governor import ClearanceGovernor
@@ -732,6 +733,11 @@ class NavigationNode(Node):
         # acceleration 2.7 times a second, half the time at the cap. The rollouts run the same
         # tracker, so the planner only commits to what these limits let the wheels do.
         d("plan_max_jerk", PLAN_DEFAULTS["plan_max_jerk"])
+        # [rad/s] how far the command may run ahead of the measured wheels; 0 = off. The ramp
+        # above starts from the last command, so while the wheels are held (brake trigger, e-stop,
+        # stall) it climbs with nothing moving and the LLC gets a step on release. Stromovka
+        # 13_43_24: normal driving leads the rear wheel by < 0.6 rad/s (p99), the held robot by 4.4.
+        d("plan_cmd_max_lead", 1.5)
         # Log the RAW MPPI command next to the conditioned one every Nth planned frame. 0 = off.
         d("plan_debug_cmd", 0)
         # Planner-input dump to /tmp/plan_dump.npz, one-shot. 1 = the next planned frame;
@@ -910,6 +916,7 @@ class NavigationNode(Node):
         self.plan_max_slew: float = g("plan_max_slew")
         self.plan_max_decel: float = g("plan_max_decel")
         self.plan_max_jerk: float = g("plan_max_jerk")
+        self.plan_cmd_max_lead: float = g("plan_cmd_max_lead")
         self.plan_command_delay: float = g("plan_command_delay")
         self.plan_turn_boost: float = g("plan_turn_boost")
         self.plan_turn_boost_adapt: bool = g("plan_turn_boost_adapt")
@@ -1607,6 +1614,8 @@ class NavigationNode(Node):
         # Keep publishing a (ramped) stop each frame so the LLC stays fed at rest. Resumes on a new goal.
         # In "follow" mode the latch is NOT sticky: _goal_reached tracks "within radius" per-frame,
         # so the robot stops on top of a stationary tag but resumes the instant the tag moves away.
+        if self.plan_actuate:
+            self._anchor_cmd_to_wheels()  # before anything reads the tracker, the planner included
         d_goal = float(np.hypot(gx - mf.ex, gy - mf.ey))
         within = d_goal < self.plan_reach_radius
         if self.goal_source == "follow":
@@ -2107,6 +2116,21 @@ class NavigationNode(Node):
         self.get_logger().warning(
             "the LLC is not driving (e-stop?) -- command held at rest",
             throttle_duration_sec=2.0,
+        )
+
+    def _anchor_cmd_to_wheels(self) -> None:
+        """Keep the command tracker within plan_cmd_max_lead of the measured wheels, so a robot
+        that is not following never builds up a command it then jumps to. See
+        control.command.anchor_to_wheels."""
+        now = self.get_clock().now().nanoseconds * 1e-9
+        if self.plan_cmd_max_lead <= 0.0 or self._wheel_meas is None:
+            return
+        if now - self._wheel_meas_t > 0.3:
+            return  # stale wheels say nothing about now
+        wl, wr, w_rear = self._wheel_meas
+        measured = np.array([wl, w_rear, wr], np.float32)  # model order -> [left, rear, right]
+        self._prev_cmd, self._prev_accel = anchor_to_wheels(
+            self._prev_cmd, self._prev_accel, measured, self.plan_cmd_max_lead
         )
 
     def _commit_cmd(self, cmd: np.ndarray, dt: float) -> None:
