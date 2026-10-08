@@ -173,59 +173,44 @@ def test_traction_scale_fades_out_as_the_route_falls_behind():
     assert traction_scale(math.radians(170), 60, 0.0) == 1.0  # off_deg 0: always fully
 
 
-def test_anchor_pulls_a_command_the_wheels_are_not_following():
-    from helhest.control.command import anchor_to_wheels
+def _cap(wl, wr, body_v, lead=0.5):
+    from helhest.control.command import cap_forward_target
 
-    held = np.zeros(3, np.float32)  # brake trigger: the wheels stand still
-    prev = np.array([4.0, 4.0, 4.0], np.float32)
-    accel = np.array([3.0, 3.0, 3.0], np.float32)
-    cmd, acc = anchor_to_wheels(prev, accel, held, max_lead=1.5)
-    np.testing.assert_allclose(cmd, [1.5, 1.5, 1.5])
-    np.testing.assert_allclose(acc, 0.0)  # the ramp restarts rather than carrying on at full slope
-    # backward too
-    cmd, _ = anchor_to_wheels(-prev, -accel, held, max_lead=1.5)
-    np.testing.assert_allclose(cmd, [-1.5, -1.5, -1.5])
+    return cap_forward_target(wl, wr, body_v, max_lead=lead, wheel_radius=0.35)
 
 
-def test_anchor_leaves_a_following_robot_and_never_raises_the_command():
-    from helhest.control.command import anchor_to_wheels
-
-    prev = np.array([3.0, 3.0, 3.0], np.float32)
-    accel = np.array([2.0, 2.0, 2.0], np.float32)
-    following = np.array([2.6, 2.7, 2.8], np.float32)  # the motor lag, well inside the lead
-    cmd, acc = anchor_to_wheels(prev, accel, following, max_lead=1.5)
-    np.testing.assert_array_equal(cmd, prev)
-    np.testing.assert_array_equal(acc, accel)
-    # braking: the wheels lag ABOVE a command that is ramping down -- not dragged back up
-    cmd, _ = anchor_to_wheels(np.full(3, 1.0, np.float32), accel, np.full(3, 4.0, np.float32), 1.5)
-    np.testing.assert_allclose(cmd, 1.0)
+def test_cap_holds_forward_speed_near_a_held_robot_and_keeps_the_turn():
+    wl, wr = _cap(3.5, 4.5, 0.0)  # 1.4 m/s forward, differential 1.0, robot not moving
+    np.testing.assert_allclose(0.5 * (wl + wr) * 0.35, 0.5, atol=1e-6)
+    np.testing.assert_allclose(wr - wl, 1.0, atol=1e-6)  # the LLC's yaw loop owns turning
+    wl, wr = _cap(-3.5, -4.5, 0.0)  # backward too
+    np.testing.assert_allclose(0.5 * (wl + wr) * 0.35, -0.5, atol=1e-6)
 
 
-def test_anchor_turns_a_held_ramp_into_a_smooth_release():
-    """Stromovka 13_43_24 in miniature: the wheels are held at 0 for 10 s under a 4 rad/s target.
-    Unanchored, the command is already at the target when they are let go; anchored, it is within
-    the lead and ramps from there."""
-    from helhest.control.command import anchor_to_wheels
+def test_cap_leaves_a_following_robot_and_never_raises_the_target():
+    assert _cap(4.0, 4.0, 1.2) == (4.0, 4.0)  # 1.4 m/s target, robot at 1.2
+    assert _cap(1.0, 1.0, 1.4) == (1.0, 1.0)  # robot faster than the target: not dragged up
+    assert _cap(-2.0, 2.0, 0.0) == (-2.0, 2.0)  # a spin: no forward speed to cap
 
+
+def test_cap_turns_a_held_ramp_into_a_smooth_release():
+    """Stromovka 13_43_24 in miniature: the robot is held at 0 for 10 s under a 4 rad/s target.
+    Uncapped, the command is at the target when it is let go; capped, it sits near the lead -- and
+    got there through the jerk-limited tracker, so it never stepped."""
     dt, target = 0.1, 4.0
 
-    def release_step(max_lead: float) -> float:
-        prev, accel, wheels = Z.copy(), Z.copy(), Z.copy()
-        for _ in range(100):  # held
-            if max_lead > 0.0:
-                prev, accel = anchor_to_wheels(prev, accel, wheels, max_lead)
+    def hold(capped: bool) -> tuple[float, float]:
+        prev, accel, worst_step = Z.copy(), Z.copy(), 0.0
+        for _ in range(100):
+            wl, wr = _cap(target, target, 0.0) if capped else (target, target)
             cmd = condition_command(
-                target,
-                target,
-                prev,
-                max_omega=5.0,
-                max_slew=3.0,
-                dt=dt,
-                prev_accel=accel,
-                max_jerk=5.0,
+                wl, wr, prev, max_omega=5.0, max_slew=3.0, dt=dt, prev_accel=accel, max_jerk=5.0
             )
+            worst_step = max(worst_step, float(np.abs((cmd - prev) / dt - accel).max()) / dt)
             accel, prev = (cmd - prev) / dt, cmd
-        return float(prev[1] - wheels[1])  # what the LLC is asked for the instant it is let go
+        return float(prev[1]) * 0.35, worst_step  # [m/s] at release, worst jerk [rad/s^3]
 
-    assert release_step(0.0) > 3.9
-    assert release_step(1.5) <= 1.5 + 5.0 * dt * dt + 1e-6  # the lead plus one jerk-limited tick
+    assert hold(False)[0] > 1.3
+    speed, jerk = hold(True)
+    assert speed <= 0.5 + 1e-3
+    assert jerk <= 5.0 + 1e-3

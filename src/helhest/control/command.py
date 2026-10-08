@@ -125,33 +125,32 @@ def llc_not_driving(cmd: np.ndarray, idle_for_s: float) -> bool:
     return idle_for_s > IDLE_FOR_S and max(abs(float(cmd[0])), abs(float(cmd[2]))) > MOVING_CMD
 
 
-def anchor_to_wheels(
-    prev: np.ndarray, prev_accel: np.ndarray, measured: np.ndarray, max_lead: float
-) -> tuple[np.ndarray, np.ndarray]:
-    """Pull the command tracker's state back to within `max_lead` [rad/s] of the measured wheels.
+def cap_forward_target(
+    wl: float, wr: float, body_v: float, *, max_lead: float, wheel_radius: float
+) -> tuple[float, float]:
+    """Cap the planner's wheel target so its forward speed is at most `max_lead` [m/s] ahead of
+    the robot's measured forward speed `body_v` [m/s] (Odin odometry).
 
-    prev, prev_accel: the tracker's last [left, rear, right] command and its acceleration.
-    measured: the wheels' [left, rear, right] speeds from /joint_states, same convention.
+    The jerk-limited tracker ramps from its last COMMAND, so while the robot does not follow -- the
+    remote's brake trigger (analog: it also slows the robot partially), an e-stop -- the command
+    climbs toward the plan with nothing moving and the LLC gets a step on release. Stromovka
+    13_43_24 (2026-10-07): held 15 s while /cmd_vel rode at 1.4 m/s.
 
-    The jerk limit ramps from the last COMMAND, so whenever the wheels do not follow -- the remote's
-    brake trigger, an e-stop, a stall -- the command keeps climbing toward the plan with nothing
-    moving, and the smoothing is spent before the wheels see it. Stromovka 13_43_24 (2026-10-07):
-    the brake trigger held the wheels at 0 for 15 s while /cmd_vel rode at 1.4 m/s; on release the
-    LLC would have stepped 0 -> ~4 rad/s. Anchored, release starts at most `max_lead` above the
-    wheels and ramps from there.
-
-    Only ever pulls toward the wheels when that LOWERS |command|: wheels running ahead of the command
-    (braking lag, rolling downhill) must not drag the command up. A pulled joint also restarts from
-    zero acceleration, or the ramp it had built would carry on at full slope. A lead is kept rather
-    than snapping to the wheels so a stalled wheel still has a setpoint above it to break loose with.
+    It caps the TARGET, not the tracker's state, so the command still moves only as the jerk limit
+    allows (pulling the state down instead broke the jerk limit ~10x, as Odin's noise stepped it).
+    Forward speed only: in twist mode the LLC's own yaw loop sets the wheel differential, and the
+    yaw a differential yields depends on the terrain alpha -- anchoring either cut 25-42% of spins
+    on the bags. Only ever lowers |speed| and never below body_v + max_lead, so it cannot brake the
+    robot. Replayed on 22 bags (2026-10-08): caps ~3.5% of driving, nearly all take-off, changing
+    the speed by ~0.01 m/s on average; no oscillation in closed-loop simulation even against an
+    LLC with 44% overshoot.
     """
-    prev = np.asarray(prev, np.float32)
-    anchored = np.clip(prev, measured - max_lead, measured + max_lead)
-    pull = np.abs(anchored) < np.abs(prev)
-    return (
-        np.where(pull, anchored, prev).astype(np.float32),
-        np.where(pull, 0.0, prev_accel).astype(np.float32),
-    )
+    mean, half = 0.5 * (wl + wr), 0.5 * (wr - wl)
+    measured, lead = body_v / wheel_radius, max_lead / wheel_radius
+    capped = float(np.clip(mean, measured - lead, measured + lead))
+    if abs(capped) < abs(mean):
+        mean = capped
+    return mean - half, mean + half
 
 
 def traction_scale(heading_error: float, on_deg: float, off_deg: float) -> float:

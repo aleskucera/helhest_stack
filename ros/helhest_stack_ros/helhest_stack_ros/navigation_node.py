@@ -52,7 +52,7 @@ from helhest.perception import StatisticalOutlierFilter
 from helhest.perception import transform_points
 from helhest.planning.coarse import CoarseRouter
 from helhest import dynamics
-from helhest.control.command import anchor_to_wheels
+from helhest.control.command import cap_forward_target
 from helhest.control.command import condition_command
 from helhest.control.command import turn_first
 from helhest.control.governor import ClearanceGovernor
@@ -733,11 +733,11 @@ class NavigationNode(Node):
         # acceleration 2.7 times a second, half the time at the cap. The rollouts run the same
         # tracker, so the planner only commits to what these limits let the wheels do.
         d("plan_max_jerk", PLAN_DEFAULTS["plan_max_jerk"])
-        # [rad/s] how far the command may run ahead of the measured wheels; 0 = off. The ramp
-        # above starts from the last command, so while the wheels are held (brake trigger, e-stop,
-        # stall) it climbs with nothing moving and the LLC gets a step on release. Stromovka
-        # 13_43_24: normal driving leads the rear wheel by < 0.6 rad/s (p99), the held robot by 4.4.
-        d("plan_cmd_max_lead", 1.5)
+        # [m/s] how far the planner's forward-speed target may run ahead of Odin's measured speed;
+        # 0 = off. The ramp above starts from the last command, so while the robot is held (brake
+        # trigger, e-stop) it climbs with nothing moving and the LLC gets a step on release.
+        # See control.command.cap_forward_target.
+        d("plan_cmd_max_lead", 0.5)
         # Log the RAW MPPI command next to the conditioned one every Nth planned frame. 0 = off.
         d("plan_debug_cmd", 0)
         # Planner-input dump to /tmp/plan_dump.npz, one-shot. 1 = the next planned frame;
@@ -1614,8 +1614,6 @@ class NavigationNode(Node):
         # Keep publishing a (ramped) stop each frame so the LLC stays fed at rest. Resumes on a new goal.
         # In "follow" mode the latch is NOT sticky: _goal_reached tracks "within radius" per-frame,
         # so the robot stops on top of a stationary tag but resumes the instant the tag moves away.
-        if self.plan_actuate:
-            self._anchor_cmd_to_wheels()  # before anything reads the tracker, the planner included
         d_goal = float(np.hypot(gx - mf.ex, gy - mf.ey))
         within = d_goal < self.plan_reach_radius
         if self.goal_source == "follow":
@@ -1945,6 +1943,7 @@ class NavigationNode(Node):
             ):
                 self._turn_adapt_update(self._last_diff_out, float(self._imu_buffer[-1][2][2]))
             self._last_diff_out = float(self._prev_cmd[2] - self._prev_cmd[0])
+        wl, wr = self._cap_to_body_speed(wl, wr)  # before the yaw loop, so its reference agrees
         # INNER YAW LOOP. The reference is the UNCORRECTED plan through the same conditioner:
         # post-turn-brake and post-slew, but free of the loop's own output. Referencing the
         # corrected command makes reference and measurement both scale with the correction, so the
@@ -2118,19 +2117,20 @@ class NavigationNode(Node):
             throttle_duration_sec=2.0,
         )
 
-    def _anchor_cmd_to_wheels(self) -> None:
-        """Keep the command tracker within plan_cmd_max_lead of the measured wheels, so a robot
-        that is not following never builds up a command it then jumps to. See
-        control.command.anchor_to_wheels."""
+    def _cap_to_body_speed(self, wl: float, wr: float) -> tuple[float, float]:
+        """The planner's wheel target with its forward speed held within plan_cmd_max_lead of
+        Odin's measured speed. See control.command.cap_forward_target."""
         now = self.get_clock().now().nanoseconds * 1e-9
-        if self.plan_cmd_max_lead <= 0.0 or self._wheel_meas is None:
-            return
-        if now - self._wheel_meas_t > 0.3:
-            return  # stale wheels say nothing about now
-        wl, wr, w_rear = self._wheel_meas
-        measured = np.array([wl, w_rear, wr], np.float32)  # model order -> [left, rear, right]
-        self._prev_cmd, self._prev_accel = anchor_to_wheels(
-            self._prev_cmd, self._prev_accel, measured, self.plan_cmd_max_lead
+        if self.plan_cmd_max_lead <= 0.0 or self._twist_meas is None:
+            return wl, wr
+        if now - self._twist_meas_t > 0.3:
+            return wl, wr  # stale odometry says nothing about now
+        return cap_forward_target(
+            wl,
+            wr,
+            float(self._twist_meas[0]),
+            max_lead=self.plan_cmd_max_lead,
+            wheel_radius=self._wheel_radius,
         )
 
     def _commit_cmd(self, cmd: np.ndarray, dt: float) -> None:
