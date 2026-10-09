@@ -47,6 +47,8 @@ class ClearanceParams:
     v_blind: float = 0.3  # [m/s] while the plan sweeps never-measured ground; 0 = off
     blind_area: float = 0.05  # [m^2] of newly swept unseen ground that counts
     search_m: float = 1.5  # [m] how far around the footprint the governor looks for walls
+    # the governor also caps FORWARD speed by the robot carrying straight on (see governor.py)
+    straight: bool = False
 
     @property
     def turn_ratio(self) -> float:

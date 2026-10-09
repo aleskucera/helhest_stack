@@ -91,6 +91,7 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_clear_lookahead_s": 1.0,  # [s] of the plan the governor checks
     "plan_clear_decel": 2.0,  # [m/s^2] braking the governor may count on
     "plan_clear_v_blind": 0.3,  # [m/s] while the plan sweeps never-measured ground; 0 = off
+    "plan_clear_straight": 0.0,  # 1 = the governor also caps forward speed by carrying straight on
     # False = the governor still measures clearance (turn-first reads it) but never caps speed
     "plan_clear_governor": True,
     # robot
@@ -159,6 +160,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             decel=float(p["plan_clear_decel"]),
             wheel_jerk=float(p["plan_max_jerk"]),
             v_blind=float(p["plan_clear_v_blind"]),
+            straight=float(p["plan_clear_straight"]) > 0.0,
         )
         if float(p["plan_clear_t_react"]) > 0.0
         else None

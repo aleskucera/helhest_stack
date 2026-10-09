@@ -3,6 +3,8 @@ one-factor slowdown that makes the body's fastest point obey v = clearance / t_r
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 import warp as wp
@@ -190,3 +192,60 @@ def test_braking_that_ramps_in_under_the_jerk_limit_sheds_less_early():
     expect = np.where(t < ramp, 0.5 * jerk * t * t, 1.0 * (t - 0.5 * ramp))
     assert np.allclose(ramped._shed(t), expect)
     assert slow[0] <= fast[0]
+
+
+def _wall_ahead() -> tuple[wp.array, wp.array, object]:
+    """Flat ground with a 1 m wall occupying x >= 6.5, across the robot's heading."""
+    xs = (np.arange(N) + 0.5) * CELL
+    h = np.zeros((N, N), np.float32)
+    h[:, xs >= 6.5] = 1.0
+    grid = GridParams(N, N, CELL, 0.0, 0.0).build()
+    return wp.array(h), wp.array(np.ones((N, N), np.float32)), grid
+
+
+def _bending_away(steps: int = 26) -> wp.array:
+    """Rollout 0 starting at x = 4 heading +x at the wall 2.5 m ahead, and bending left away --
+    the plan that keeps promising a swerve the robot then does not make."""
+    p = np.zeros((steps, 2, 3), np.float32)
+    s = 0.2 * np.arange(steps)  # 2 m/s at plan_dt 0.1
+    yaw = np.minimum(s / 0.6, np.pi / 2)  # 90 deg over the first ~0.9 m
+    p[:, 0, 0] = 4.0 + np.cumsum(np.r_[0.0, 0.2 * np.cos(yaw[:-1])])
+    p[:, 0, 1] = 4.0 + np.cumsum(np.r_[0.0, 0.2 * np.sin(yaw[:-1])])
+    p[:, 0, 2] = yaw
+    return wp.array(p, dtype=wp.vec3f)
+
+
+def _gov_straight(straight: bool) -> ClearanceGovernor:
+    params = ClearanceParams(t_react=0.08, t_turn=0.16, lookahead_s=2.5, decel=1.0)
+    return ClearanceGovernor(
+        ROBOT, plan_dt=0.1, params=dataclasses.replace(params, straight=straight)
+    )
+
+
+def test_carrying_straight_on_slows_a_plan_that_promises_to_bend_away():
+    elev, meas, grid = _wall_ahead()
+    w = 2.0 / ROBOT.wheel_radius  # 2 m/s
+    plan_only = _gov_straight(False).cap(w, w, _bending_away(), elev, meas, grid)
+    gov = _gov_straight(True)
+    capped = gov.cap(w, w, _bending_away(), elev, meas, grid)
+    assert plan_only == (w, w)  # the plan's bend shows room enough for full speed
+    assert gov.v_cap_straight < 2.0  # straight on, the wall is 2.5 m ahead
+    assert capped[0] == pytest.approx(capped[1])  # forward speed only
+    assert ROBOT.wheel_radius * capped[0] == pytest.approx(gov.v_cap_straight, rel=1e-5)
+
+
+def test_carrying_straight_on_never_caps_turning_away_from_a_wall():
+    """Facing a wall, MPPI pivots away. The straight-on line runs into the wall, but that is no
+    reason not to turn: capping the turn pinned the robot in drive_sim's pocket for a minute."""
+    elev, meas, grid = _wall_ahead()
+    pivot = np.zeros((26, 2, 3), np.float32)
+    pivot[:, 0, 0], pivot[:, 0, 1] = 6.0, 4.0  # nose 0.15 m from the wall face
+    pivot[:, 0, 2] = np.linspace(0.0, np.pi / 2, 26)
+    plan = wp.array(pivot, dtype=wp.vec3f)
+    plain = _gov_straight(False).cap(-2.0, 2.0, plan, elev, meas, grid)
+    straight = _gov_straight(True).cap(-2.0, 2.0, plan, elev, meas, grid)
+    assert straight == pytest.approx(plain)
+
+
+def test_the_straight_on_check_is_off_by_default():
+    assert not ClearanceParams().straight

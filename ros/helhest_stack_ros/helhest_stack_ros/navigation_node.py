@@ -148,6 +148,7 @@ _PLAN_BUILD = frozenset(
         "plan_max_decel",
         "plan_max_jerk",
         "plan_clear_v_blind",
+        "plan_clear_straight",
         "plan_coarse_block_m",
         "plan_coarse_memory_m",
         "plan_coarse_win_m",
@@ -598,6 +599,7 @@ class NavigationNode(Node):
         d("plan_clear_t_turn", PLAN_DEFAULTS["plan_clear_t_turn"])
         d("plan_clear_route_turn", PLAN_DEFAULTS["plan_clear_route_turn"])
         d("plan_clear_v_blind", PLAN_DEFAULTS["plan_clear_v_blind"])
+        d("plan_clear_straight", PLAN_DEFAULTS["plan_clear_straight"])
         # ROBUST-MU replicas: each MPPI candidate is rolled out under this many friction hypotheses
         # spanning the current uncertainty band and ranked by its WORST outcome, so the winner is a
         # plan that works whether the ground grips or slips (the over/understeer sim-to-real gap).
@@ -892,6 +894,7 @@ class NavigationNode(Node):
         self.plan_clear_t_turn: float = g("plan_clear_t_turn")
         self.plan_clear_route_turn: float = g("plan_clear_route_turn")
         self.plan_clear_v_blind: float = g("plan_clear_v_blind")
+        self.plan_clear_straight: float = g("plan_clear_straight")
         self.plan_n_mu: int = g("plan_n_mu")
         self.plan_mu_span: float = g("plan_mu_span")
         self.plan_mu_adapt: bool = g("plan_mu_adapt")

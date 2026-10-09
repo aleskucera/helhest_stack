@@ -97,6 +97,26 @@ def _plan_clearance_kernel(
     blind[k] = unseen
 
 
+@wp.kernel
+def _straight_on_kernel(
+    controlled: wp.array2d(dtype=wp.vec3f),  # [T+1, B] rollout poses; rollout 0 = the plan
+    k: int,
+    out: wp.array2d(dtype=wp.vec3f),  # [k, 1] the start pose carried straight on
+):
+    """The robot carrying straight on along its current heading, covering the same distance per
+    step as the plan does."""
+    p0 = controlled[0, 0]
+    ca = wp.cos(p0[2])
+    sa = wp.sin(p0[2])
+    dist = float(0.0)
+    out[0, 0] = p0
+    for i in range(1, k):
+        a = controlled[i - 1, 0]
+        b = controlled[i, 0]
+        dist += wp.length(wp.vec2f(b[0] - a[0], b[1] - a[1]))
+        out[i, 0] = wp.vec3f(p0[0] + ca * dist, p0[1] + sa * dist, p0[2])
+
+
 class ClearanceGovernor:
     """Scale MPPI's first command so the body's fastest point obeys the clearance law along the
     next `params.lookahead_s` of the plan. One small kernel; the readback is a few floats."""
@@ -120,9 +140,13 @@ class ClearanceGovernor:
         self.steps = max(1, int(math.ceil(params.lookahead_s / plan_dt)))
         self._out = wp.zeros(self.steps + 1, dtype=wp.float32, device=self.device)
         self._blind = wp.zeros(self.steps + 1, dtype=wp.float32, device=self.device)
+        self._straight = wp.zeros((self.steps + 1, 1), dtype=wp.vec3f, device=self.device)
+        self._out_straight = wp.zeros(self.steps + 1, dtype=wp.float32, device=self.device)
+        self._blind_straight = wp.zeros(self.steps + 1, dtype=wp.float32, device=self.device)
         # last frame's readings, for logging
         self.clearance = float("inf")
         self.v_cap = float("inf")
+        self.v_cap_straight = float("inf")  # [m/s] the forward-speed cap from carrying straight on
         self.blind = False
 
     def _shed(self, t: np.ndarray) -> np.ndarray:
@@ -167,17 +191,74 @@ class ClearanceGovernor:
             device=self.device,
         )
         per_step = self._out.numpy()[:k]
+        shed = self._shed(np.arange(k) * self.plan_dt)
         unseen = self._blind.numpy()[:k] >= p.blind_area
         allowed = np.maximum(p.v_min, (per_step - p.c0) / p.t_react)
         if p.v_blind > 0.0:
             allowed = np.where(unseen, np.minimum(allowed, p.v_blind), allowed)
         self.clearance = float(np.min(per_step))
         self.blind = bool(unseen.any())
-        self.v_cap = float(np.min(allowed + self._shed(np.arange(k) * self.plan_dt)))
+        self.v_cap = float(np.min(allowed + shed))
         v = self.r * 0.5 * abs(wl + wr)
         wz = self.r * abs(wr - wl) / (2.0 * self.half_track)  # alpha 1: over-estimates the swing
         fastest = v + p.turn_ratio * self.tail * wz
-        if fastest <= self.v_cap:
+        if fastest > self.v_cap:
+            s = self.v_cap / fastest
+            wl, wr = wl * s, wr * s
+        if p.straight:
+            wl, wr = self._cap_straight_on(wl, wr, controlled, elevation, measured, grid, k, search)
+        return wl, wr
+
+    def _cap_straight_on(
+        self,
+        wl: float,
+        wr: float,
+        controlled: wp.array,
+        elevation: wp.array,
+        measured: wp.array,
+        grid: Grid,
+        k: int,
+        search: int,
+    ) -> tuple[float, float]:
+        """Cap FORWARD speed by the room along the robot carrying straight on, and leave the turn.
+
+        The plan alone is not enough: approaching a trunk, each replan bent a little closer to it,
+        so the plan always showed more room than the robot then had -- Stromovka 14_12_38, 0.55 m
+        seen 2.8 s out, 0.14 m driven -- and the governor braked only 0.5 s before it. Carrying
+        straight on shows the trunk at once. Only forward speed is capped: driving straight into a
+        wall is no reason not to turn away from it, and capping the turn too pinned the robot in
+        drive_sim's `pocket` corner for a minute.
+        """
+        p = self.params
+        wp.launch(
+            _straight_on_kernel,
+            dim=1,
+            inputs=[controlled, k],
+            outputs=[self._straight],
+            device=self.device,
+        )
+        wp.launch(
+            _plan_clearance_kernel,
+            dim=k,
+            inputs=[
+                self._straight,
+                elevation,
+                measured,
+                grid,
+                self.x_lo,
+                self.x_hi,
+                self.half_w,
+                self.face_h,
+                search,
+            ],
+            outputs=[self._out_straight, self._blind_straight],
+            device=self.device,
+        )
+        straight = self._out_straight.numpy()[:k]
+        allowed = np.maximum(p.v_min, (straight - p.c0) / p.t_react)
+        self.v_cap_straight = float(np.min(allowed + self._shed(np.arange(k) * self.plan_dt)))
+        mean, half = 0.5 * (wl + wr), 0.5 * (wr - wl)
+        if self.r * abs(mean) <= self.v_cap_straight:
             return wl, wr
-        s = self.v_cap / fastest
-        return wl * s, wr * s
+        mean = math.copysign(self.v_cap_straight / self.r, mean)
+        return mean - half, mean + half
