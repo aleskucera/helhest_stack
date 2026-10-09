@@ -661,6 +661,10 @@ def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
     turns = wp.zeros(B, dtype=float, device=device)
     best_dir = wp.zeros(1, dtype=float, device=device)
     best_turn = wp.zeros(1, dtype=float, device=device)
+    spins = wp.zeros(B, dtype=float, device=device)
+    best_spin = wp.zeros(1, dtype=float, device=device)
+    # wlo at -wmax: no candidate is below it, so no spin key, and the numpy mirror needs none
+    wlo = wp.array([-_WMAX], dtype=float, device=device)
     Ud = wp.zeros((T, 2), dtype=float, device=device)
     wp.launch(mg._reset_minmax_kernel, 1, inputs=[jmin, jmax, count], device=device)
     wp.launch(mg._minmax_kernel, B, inputs=[Jd, jmin, jmax], device=device)
@@ -673,22 +677,35 @@ def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
     wp.launch(
         mg._cand_dir_kernel,
         B,
-        inputs=[target_wheel_omega, T, turn_th],
-        outputs=[dirs, turns],
+        inputs=[target_wheel_omega, T, turn_th, wlo],
+        outputs=[dirs, turns, spins],
         device=device,
     )
     wp.launch(
         mg._best_dir_kernel,
         1,
-        inputs=[Jd, jmin, dirs, turns, B],
-        outputs=[best_dir, best_turn],
+        inputs=[Jd, jmin, dirs, turns, spins, B],
+        outputs=[best_dir, best_turn, best_spin],
         device=device,
     )
-    wlo = wp.array([-_WMAX], dtype=float, device=device)
     wp.launch(
         mg._elite_u_kernel,
         (T, 2),
-        inputs=[Jd, tau, dirs, turns, best_dir, best_turn, target_wheel_omega, wlo, _WMAX, B, Ud],
+        inputs=[
+            Jd,
+            tau,
+            dirs,
+            turns,
+            spins,
+            best_dir,
+            best_turn,
+            best_spin,
+            target_wheel_omega,
+            wlo,
+            _WMAX,
+            B,
+            Ud,
+        ],
         device=device,
     )
     U_gpu = Ud.numpy()
@@ -745,6 +762,74 @@ def selftest_cost_hook(device: str = "cuda", B: int = 64, T: int = 21, n_mu: int
     print(f"cost hook  {'OK' if (err < 1e-6 and same and dropped) else 'REVIEW'}")
 
 
+def selftest_spin_kept(device: str = "cuda", T: int = 6, w: float = 2.0) -> None:
+    """With reverse off (wlo 0) a winning SPIN must survive the reweight: U keeps the reversed
+    wheel instead of being clamped into a one-wheel-stopped arc, and spins are not averaged with
+    forward arcs. The sampler must then keep that spin nominal for candidate 0. Candidates: 0 a
+    left spin (best), 1 another left spin, 2-3 forward left arcs, all inside the elite."""
+    spin = np.tile(np.array([-w, w], np.float32), (T, 1))
+    arc = np.tile(np.array([0.5, w], np.float32), (T, 1))
+    Ub = np.stack([spin, spin * 1.5, arc, arc], 0)  # [B, T, 2]
+    B = Ub.shape[0]
+    target_wheel_omega = wp.array(_to_target_wheel_omega(Ub), dtype=wp.vec3, device=device)
+    Jd = wp.array(np.array([1.0, 2.0, 3.0, 4.0], np.float32), dtype=float, device=device)
+    jmin = wp.array([1.0], dtype=float, device=device)
+    tau = wp.array([10.0], dtype=float, device=device)  # every candidate is an elite
+    wlo = wp.zeros(1, dtype=float, device=device)
+    dirs, turns, spins = (wp.zeros(B, dtype=float, device=device) for _ in range(3))
+    best_dir, best_turn, best_spin = (wp.zeros(1, dtype=float, device=device) for _ in range(3))
+    Ud = wp.zeros((T, 2), dtype=float, device=device)
+    wp.launch(
+        mg._cand_dir_kernel,
+        B,
+        inputs=[target_wheel_omega, T, 0.1, wlo],
+        outputs=[dirs, turns, spins],
+        device=device,
+    )
+    wp.launch(
+        mg._best_dir_kernel,
+        1,
+        inputs=[Jd, jmin, dirs, turns, spins, B],
+        outputs=[best_dir, best_turn, best_spin],
+        device=device,
+    )
+    wp.launch(
+        mg._elite_u_kernel,
+        (T, 2),
+        inputs=[
+            Jd,
+            tau,
+            dirs,
+            turns,
+            spins,
+            best_dir,
+            best_turn,
+            best_spin,
+            target_wheel_omega,
+            wlo,
+            _WMAX,
+            B,
+            Ud,
+        ],
+        device=device,
+    )
+    U = Ud.numpy()
+    kept = np.allclose(U, spin * 1.25) and np.array_equal(spins.numpy(), [1.0, 1.0, 0.0, 0.0])
+    # the sampler: candidate 0 is the nominal unchanged, spin included (n_cand 1, all bands empty)
+    out = wp.zeros((T, 1), dtype=wp.vec3, device=device)
+    seed = wp.array([3], dtype=wp.int32, device=device)
+    wp.launch(
+        mg._sample_target_wheel_omega_kernel,
+        (T, 1),
+        inputs=[Ud, 0.3, 0.5, wlo, _WMAX, 1, 0, 0, 0, 2.0, 0, 3, seed],
+        outputs=[out],
+        device=device,
+    )
+    nominal = np.allclose(out.numpy()[:, 0, :2], U)
+    print(f"  spin best at wlo 0: U[0]={U[0].round(2).tolist()}, sampler keeps it={nominal}")
+    print(f"spin kept  {'OK' if (kept and nominal) else 'REVIEW'}")
+
+
 if __name__ == "__main__":
     wp.init()
     dev = "cuda" if wp.get_cuda_device_count() > 0 else "cpu"
@@ -760,3 +845,4 @@ if __name__ == "__main__":
     selftest_robust_margin(dev)
     selftest_reweight_parity(dev)
     selftest_cost_hook(dev)
+    selftest_spin_kept(dev)

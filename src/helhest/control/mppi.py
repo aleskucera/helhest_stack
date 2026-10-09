@@ -334,6 +334,11 @@ def _sample_target_wheel_omega_kernel(
     lo = wmin
     if b >= n_wide and b < n_wide + n_spin:
         lo = -wmax
+    elif b == 0 or b >= n_wide + n_spin + n_straight + n_pivot:
+        # the nominal is a SPIN (only the spin band ever goes below wmin, and _elite_u_kernel
+        # keeps a winning spin), so candidate 0 and the band refining around it keep it too
+        if wp.min(U[t, 0], U[t, 1]) < wmin:
+            lo = -wmax
     target_wheel_omega[t, r] = wp.vec3(wp.clamp(wheel_l, lo, wmax), wp.clamp(wheel_r, lo, wmax), 0.0)
 
 
@@ -585,8 +590,10 @@ def _cand_dir_kernel(
     target_wheel_omega: wp.array2d(dtype=wp.vec3),
     horizon: int,
     turn_th: float,  # net-differential deadband; below it a candidate is "straight" (neutral)
+    wlo: wp.array(dtype=float),  # [1] effective lower wheel-speed bound
     dir_out: wp.array(dtype=float),  # [n_cand] net direction: +1 forward-ish, -1 reverse-ish
     turn_out: wp.array(dtype=float),  # [n_cand] net turn mode: -1 right / 0 neutral / +1 left
+    spin_out: wp.array(dtype=float),  # [n_cand] 1 = a spin (a wheel below wlo), else 0
 ):
     """Per-candidate maneuver mode keys. The elite is MULTIMODAL in two ways and a plain mean
     averages the modes into the worst of both worlds:
@@ -595,14 +602,20 @@ def _cand_dir_kernel(
         and under slew-limited (smooth) actuation the robot then cannot dodge late.
     dir = sign of the summed mean wheel speed; turn = sign of the summed differential with a
     deadband (cruise noise stays neutral). The elite mean is restricted to candidates compatible
-    with the best candidate's keys (see _elite_u_kernel)."""
+    with the best candidate's keys (see _elite_u_kernel). A third key separates SPINS: the
+    sampler clamps every other candidate to [wlo, wmax], so a wheel below wlo marks exactly the
+    spin band and the samples refining a spin nominal."""
     b = wp.tid()
     s = float(0.0)
     dsum = float(0.0)
+    spin = float(0.0)
     for t in range(horizon):
         w = target_wheel_omega[t, b]
         s += w[0] + w[1]
         dsum += w[1] - w[0]
+        if wp.min(w[0], w[1]) < wlo[0]:
+            spin = 1.0
+    spin_out[b] = spin
     dir_out[b] = wp.where(s < 0.0, -1.0, 1.0)
     tk = float(0.0)
     if dsum > turn_th:
@@ -618,16 +631,20 @@ def _best_dir_kernel(
     jmin: wp.array(dtype=float),
     dirs: wp.array(dtype=float),
     turns: wp.array(dtype=float),
+    spins: wp.array(dtype=float),
     n_cand: int,
     best_dir: wp.array(dtype=float),  # [1] direction of the lowest-cost candidate
     best_turn: wp.array(dtype=float),  # [1] turn mode of the lowest-cost candidate
+    best_spin: wp.array(dtype=float),  # [1] 1 = the lowest-cost candidate is a spin
 ):
     best_dir[0] = 1.0
     best_turn[0] = 0.0
+    best_spin[0] = 0.0
     for b in range(n_cand):
         if J[b] <= jmin[0]:
             best_dir[0] = dirs[b]
             best_turn[0] = turns[b]
+            best_spin[0] = spins[b]
             return
 
 
@@ -637,8 +654,10 @@ def _elite_u_kernel(
     tau: wp.array(dtype=float),
     dirs: wp.array(dtype=float),  # [n_cand] net direction per candidate
     turns: wp.array(dtype=float),  # [n_cand] net turn mode per candidate
+    spins: wp.array(dtype=float),  # [n_cand] 1 = spin candidate
     best_dir: wp.array(dtype=float),  # [1] direction of the best candidate
     best_turn: wp.array(dtype=float),  # [1] turn mode of the best candidate
+    best_spin: wp.array(dtype=float),  # [1] 1 = the best candidate is a spin
     target_wheel_omega: wp.array2d(
         dtype=wp.vec3
     ),  # replicas share controls -> read columns < n_cand
@@ -652,15 +671,20 @@ def _elite_u_kernel(
     # maneuver mode -- same direction, and same turn side (a NEUTRAL/straight candidate is
     # compatible with either side; if the best is neutral, sided candidates are excluded so a
     # left/right split can't pull the mean off the straight line). Forward-only cruising makes
-    # every key (+1, 0), which reduces to the plain elite mean.
+    # every key (+1, 0), which reduces to the plain elite mean. Spins average only with spins,
+    # and a winning spin keeps its reversed wheel: clamping it to wlo (0 with reverse off) would
+    # turn the spin the sampler exempted into a one-wheel-stopped arc, so it would never be driven.
     elite_sum = float(0.0)
     elite_n = float(0.0)
     for b in range(n_cand):
-        if J[b] <= tau[0] and dirs[b] == best_dir[0]:
+        if J[b] <= tau[0] and dirs[b] == best_dir[0] and spins[b] == best_spin[0]:
             if turns[b] == best_turn[0] or turns[b] == 0.0:
                 elite_sum += target_wheel_omega[t, b][wheel]
                 elite_n += 1.0
-    U[t, wheel] = wp.clamp(elite_sum / wp.max(elite_n, 1.0), wlo[0], wmax)
+    lo = wlo[0]
+    if best_spin[0] > 0.5:
+        lo = -wmax
+    U[t, wheel] = wp.clamp(elite_sum / wp.max(elite_n, 1.0), lo, wmax)
 
 
 @wp.kernel
@@ -733,6 +757,8 @@ class MppiGpu:
             self.turns = wp.zeros(self.n_cand, dtype=wp.float32)  # per-candidate net turn mode
             self.best_dir = wp.zeros(1, dtype=wp.float32)  # best candidate's direction
             self.best_turn = wp.zeros(1, dtype=wp.float32)  # best candidate's turn mode
+            self.spins = wp.zeros(self.n_cand, dtype=wp.float32)  # per-candidate spin flag
+            self.best_spin = wp.zeros(1, dtype=wp.float32)  # best candidate is a spin
             self.seed = wp.array([int(seed)], dtype=wp.int32)
             self.goal = wp.zeros(2, dtype=wp.float32)
             # effective lower wheel-speed bound, device-side so the node can gate reverse per frame
@@ -944,15 +970,16 @@ class MppiGpu:
                 self.sim.target_wheel_omega,
                 self.horizon,
                 self.sampling.turn_mode_th * float(self.horizon),
+                self.wlo,
             ],
-            outputs=[self.dirs, self.turns],
+            outputs=[self.dirs, self.turns, self.spins],
             device=self.device,
         )
         wp.launch(
             _best_dir_kernel,
             1,
-            inputs=[self.Jc, self.jmin, self.dirs, self.turns, self.n_cand],
-            outputs=[self.best_dir, self.best_turn],
+            inputs=[self.Jc, self.jmin, self.dirs, self.turns, self.spins, self.n_cand],
+            outputs=[self.best_dir, self.best_turn, self.best_spin],
             device=self.device,
         )
         wp.launch(
@@ -963,8 +990,10 @@ class MppiGpu:
                 self.tau,
                 self.dirs,
                 self.turns,
+                self.spins,
                 self.best_dir,
                 self.best_turn,
+                self.best_spin,
                 self.sim.target_wheel_omega,
                 self.wlo,
                 self.sampling.wmax,
