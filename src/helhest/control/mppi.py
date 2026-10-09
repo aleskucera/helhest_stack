@@ -14,6 +14,7 @@ Kernels (all suffixed _kernel):
 """
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -513,6 +514,11 @@ def _sample_target_wheel_omega_kernel(
     lo = wmin
     if b >= n_wide and b < n_wide + n_spin:
         lo = -wmax
+    elif b == 0 or b >= n_wide + n_spin + n_straight + n_pivot:
+        # the nominal is a SPIN (only the spin band ever goes below wmin, and _elite_u_kernel
+        # keeps a winning spin), so candidate 0 and the band refining around it keep it too
+        if wp.min(U[t, 0], U[t, 1]) < wmin:
+            lo = -wmax
     target_wheel_omega[t, r] = wp.vec3(
         wp.clamp(wheel_l, lo, wmax), wp.clamp(wheel_r, lo, wmax), 0.0
     )
@@ -1088,6 +1094,7 @@ class MppiGpu:
         # the rollouts do fine obstacle avoidance, so the global router needn't be sim-resolution.
         self.lattice_grid = sim.grid
         self._graph = None
+        self._cost_hook = None  # set_cost_hook: an extra per-rollout cost term, off by default
 
         # opt-in per-stage profiling of the captured refine loop (CUDA-event timing; off = no overhead)
         self._prof = StageProfiler(self.device, ("sample", "rollout", "cost", "reweight"), profile)
@@ -1202,6 +1209,17 @@ class MppiGpu:
             device=self.device,
         )
 
+    def set_cost_hook(self, hook: Callable[["MppiGpu"], None] | None) -> None:
+        """Add an extra per-rollout cost term (e.g. a learned model-error cost) to every refine;
+        None removes it. `_refine` calls `hook(self)` after the cost kernel and before the robust
+        reduction, so it is captured into the refine's graph: it may only LAUNCH device work (no
+        host sync, no allocation) and must add its term to `self.J` in place. The term lands in
+        the averaged (non-safety) share of the robust cost, which for a term shared by all n_mu
+        replicas of a candidate is the term itself. Drops the captured graph -> the next replan
+        recaptures."""
+        self._cost_hook = hook
+        self._graph = None
+
     def _refine(self):
         """One MPPI iteration: sample -> rollout -> cost -> CEM reweight, all on device."""
         self._prof.mark(0)
@@ -1276,6 +1294,8 @@ class MppiGpu:
             outputs=[self.J, self.Jsafe],
             device=self.device,
         )
+        if self._cost_hook is not None:
+            self._cost_hook(self)
         if self.cw.commit > 0.0:
             wp.launch(
                 _commit_cost_kernel,

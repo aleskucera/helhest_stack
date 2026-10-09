@@ -18,6 +18,8 @@ sync burden. So instead:
                     region, and thus the trajectory, >= the requested margin off obstacles.
   * reweight      : the GPU bisection top-k elite mean vs an EXACT numpy top-k (a different
                     algorithm for the same spec -- a real oracle, not a transcription).
+  * cost hook     : ANALYTIC -- a hook's known per-candidate term shows up in Jc exactly, and a
+                    zero hook leaves U bit-identical to no hook.
 
 Run:  python -m tests.control.test_mppi
 """
@@ -566,7 +568,9 @@ def selftest_robust_reduce(device="cuda"):
     )
     exp = Jsafe.reshape(n_mu, n_cand).max(0) + Jrest.reshape(n_mu, n_cand).mean(0)
     err = np.abs(Jc.numpy() - exp).max()
-    print(f"robust reduce (worst safe + mean rest)  max|err|={err:.2e}  {'OK' if err < 1e-5 else 'REVIEW'}")
+    print(
+        f"robust reduce (worst safe + mean rest)  max|err|={err:.2e}  {'OK' if err < 1e-5 else 'REVIEW'}"
+    )
 
 
 def selftest_robust_margin(device="cuda"):
@@ -659,6 +663,10 @@ def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
     turns = wp.zeros(B, dtype=float, device=device)
     best_dir = wp.zeros(1, dtype=float, device=device)
     best_turn = wp.zeros(1, dtype=float, device=device)
+    spins = wp.zeros(B, dtype=float, device=device)
+    best_spin = wp.zeros(1, dtype=float, device=device)
+    # wlo at -wmax: no candidate is below it, so no spin key, and the numpy mirror needs none
+    wlo = wp.array([-_WMAX], dtype=float, device=device)
     Ud = wp.zeros((T, 2), dtype=float, device=device)
     wp.launch(mg._reset_minmax_kernel, 1, inputs=[jmin, jmax, count], device=device)
     wp.launch(mg._minmax_kernel, B, inputs=[Jd, jmin, jmax], device=device)
@@ -671,7 +679,113 @@ def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
     wp.launch(
         mg._cand_dir_kernel,
         B,
-        inputs=[target_wheel_omega, T, turn_th],
+        inputs=[target_wheel_omega, T, turn_th, wlo],
+        outputs=[dirs, turns, spins],
+        device=device,
+    )
+    wp.launch(
+        mg._best_dir_kernel,
+        1,
+        inputs=[Jd, jmin, dirs, turns, spins, B],
+        outputs=[best_dir, best_turn, best_spin],
+        device=device,
+    )
+    wp.launch(
+        mg._elite_u_kernel,
+        (T, 2),
+        inputs=[
+            Jd,
+            tau,
+            dirs,
+            turns,
+            spins,
+            best_dir,
+            best_turn,
+            best_spin,
+            target_wheel_omega,
+            wlo,
+            _WMAX,
+            B,
+            Ud,
+        ],
+        device=device,
+    )
+    U_gpu = Ud.numpy()
+
+    n_gpu = int(keep.sum())
+    err = np.abs(U_gpu - U_np).max()
+    print(f"  CEM reweight B={B} T={T}: target_k={target_k} gpu_elite={n_gpu} max|dU|={err:.2e}")
+    print(f"reweight parity  {'OK' if err < 5e-2 else 'REVIEW'}")
+
+
+@wp.kernel
+def _hook_term_kernel(n_cand: int, scale: float, J: wp.array(dtype=float)):
+    r = wp.tid()
+    J[r] = J[r] + scale * float(r % n_cand)  # shared by every mu replica of candidate r % n_cand
+
+
+def selftest_cost_hook(device: str = "cuda", B: int = 64, T: int = 21, n_mu: int = 2) -> None:
+    """set_cost_hook: a hook's term reaches the robust candidate cost Jc unchanged (a term shared
+    by the mu replicas survives the mean), and a hook adding zero leaves U bit-identical to no
+    hook. Two planners with the same seed sample identical candidates, so after ONE refine their
+    Jc differ by exactly the hook's term."""
+
+    def planner(scale: float | None) -> mg.MppiGpu:
+        p = mg.MppiGpu(
+            _build_sim(device, B, T), mg.CostParams(), mg.SamplingConfig(n_mu=n_mu), seed=7
+        )
+        if scale is not None:
+            n_cand = p.n_cand
+
+            def hook(q: mg.MppiGpu) -> None:
+                wp.launch(
+                    _hook_term_kernel, q.n_rollouts, inputs=[n_cand, scale, q.J], device=device
+                )
+
+            p.set_cost_hook(hook)
+        return p
+
+    state, goal = np.array([0.0, 0.0, 0.0]), (4.0, 0.0)
+    plain, hooked = planner(None), planner(0.5)
+    plain.replan(state, goal, 1)
+    hooked.replan(state, goal, 1)
+    term = 0.5 * np.arange(plain.n_cand, dtype=np.float32)
+    dJc = hooked.Jc.numpy() - plain.Jc.numpy()
+    err = np.abs(dJc - term).max() / max(1.0, np.abs(plain.Jc.numpy()).max())
+    hooked.set_cost_hook(None)
+    dropped = hooked._graph is None
+
+    plain, zero = planner(None), planner(0.0)
+    same = all(
+        np.array_equal(plain.replan(state, goal, 3).numpy(), zero.replan(state, goal, 3).numpy())
+        for _ in range(3)
+    )
+    print(f"  cost hook: max rel|dJc - term|={err:.1e}, zero hook U bit-identical={same}")
+    print(f"cost hook  {'OK' if (err < 1e-6 and same and dropped) else 'REVIEW'}")
+
+
+def selftest_spin_kept(device: str = "cuda", T: int = 6, w: float = 2.0) -> None:
+    """With reverse off (wlo 0) a winning SPIN must survive the reweight: U keeps the reversed
+    wheel instead of being clamped into a one-wheel-stopped arc, and spins are not averaged with
+    forward arcs. The sampler must then keep that spin nominal for candidate 0. Candidates: 0 a
+    left spin (best), 1 another left spin, 2-3 forward left arcs, all inside the elite."""
+    spin = np.tile(np.array([-w, w], np.float32), (T, 1))
+    arc = np.tile(np.array([0.5, w], np.float32), (T, 1))
+    Ub = np.stack([spin, spin * 1.5, arc, arc], 0)  # [B, T, 2]
+    B = Ub.shape[0]
+    target_wheel_omega = wp.array(_to_target_wheel_omega(Ub), dtype=wp.vec3, device=device)
+    Jd = wp.array(np.array([1.0, 2.0, 3.0, 4.0], np.float32), dtype=float, device=device)
+    jmin = wp.array([1.0], dtype=float, device=device)
+    tau = wp.array([10.0], dtype=float, device=device)  # every candidate is an elite
+    wlo = wp.zeros(1, dtype=float, device=device)
+    # this branch keys a spin as its own DIRECTION (0 = goes nowhere), not as a separate spin flag
+    dirs, turns = (wp.zeros(B, dtype=float, device=device) for _ in range(2))
+    best_dir, best_turn = (wp.zeros(1, dtype=float, device=device) for _ in range(2))
+    Ud = wp.zeros((T, 2), dtype=float, device=device)
+    wp.launch(
+        mg._cand_dir_kernel,
+        B,
+        inputs=[target_wheel_omega, T, 0.1, 0.25 * T],
         outputs=[dirs, turns],
         device=device,
     )
@@ -682,19 +796,28 @@ def selftest_reweight_parity(device="cuda", B=2048, T=70, elite_frac=0.1):
         outputs=[best_dir, best_turn],
         device=device,
     )
-    wlo = wp.array([-_WMAX], dtype=float, device=device)
     wp.launch(
         mg._elite_u_kernel,
         (T, 2),
         inputs=[Jd, tau, dirs, turns, best_dir, best_turn, target_wheel_omega, wlo, _WMAX, B, Ud],
         device=device,
     )
-    U_gpu = Ud.numpy()
-
-    n_gpu = int(keep.sum())
-    err = np.abs(U_gpu - U_np).max()
-    print(f"  CEM reweight B={B} T={T}: target_k={target_k} gpu_elite={n_gpu} max|dU|={err:.2e}")
-    print(f"reweight parity  {'OK' if err < 5e-2 else 'REVIEW'}")
+    U = Ud.numpy()
+    kept = np.allclose(U, spin * 1.25) and np.array_equal(dirs.numpy(), [0.0, 0.0, 1.0, 1.0])
+    # the sampler: candidate 0 is the nominal unchanged, spin included (n_cand 1, all bands empty)
+    out = wp.zeros((T, 1), dtype=wp.vec3, device=device)
+    seed = wp.array([3], dtype=wp.int32, device=device)
+    side = wp.zeros(1, dtype=float, device=device)
+    wp.launch(
+        mg._sample_target_wheel_omega_kernel,
+        (T, 1),
+        inputs=[Ud, 0.3, 0.5, wlo, _WMAX, 1, 0, 0, 0, 2.0, 0.0, 0, 3, seed, side],
+        outputs=[out],
+        device=device,
+    )
+    nominal = np.allclose(out.numpy()[:, 0, :2], U)
+    print(f"  spin best at wlo 0: U[0]={U[0].round(2).tolist()}, sampler keeps it={nominal}")
+    print(f"spin kept  {'OK' if (kept and nominal) else 'REVIEW'}")
 
 
 if __name__ == "__main__":
@@ -711,3 +834,5 @@ if __name__ == "__main__":
     selftest_robust_reduce(dev)
     selftest_robust_margin(dev)
     selftest_reweight_parity(dev)
+    selftest_cost_hook(dev)
+    selftest_spin_kept(dev)
