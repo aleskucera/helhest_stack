@@ -393,6 +393,7 @@ def drive(a: argparse.Namespace) -> dict:
     qp = None
     qp_log: list = []  # per frame: [f, 1 = the QP path drove / 0 = MPPI, reason code]
     qp_paths: list = []  # [f, x, y, v] of the optimised path, world frame, every history frame
+    mppi_paths: list = []  # [f, x, y] of MPPI's nominal rollout, world frame, every history frame
     qp_driven = None  # this frame's QP path as timed poses, when the QP drove (governor input)
     if a.controller == "qp":
         side_w = robot.half_track + 0.5 * (robot.wheel_width or 2.0 * robot.wheel_radius)
@@ -591,6 +592,7 @@ def drive(a: argparse.Namespace) -> dict:
                         (cx0 - wx0, cy0 - wy0),
                         float(coarse.grid.cell_size),
                         qp.p.horizon_m,
+                        goal=(goal[0] - wx0, goal[1] - wy0),
                     )
                 ref = resample_reference(pts, qp.p.ds, qp.p.horizon_m)
                 reason = 1
@@ -686,6 +688,10 @@ def drive(a: argparse.Namespace) -> dict:
                         prev_diff=prev_diff,
                         speed=speed,
                     )
+            if mppi and a.history and f % a.history == 0:
+                # rollout 0 is the noise-free nominal: what MPPI intends, as the governor reads it
+                for x_, y_, _ in plan_sim.controlled.numpy()[:, 0]:
+                    mppi_paths.append([f, x_ + wx0, y_ + wy0])
             if governor is not None:
                 wl_in = wl
                 checked = plan_sim.controlled if qp_driven is None else qp_driven
@@ -852,6 +858,7 @@ def drive(a: argparse.Namespace) -> dict:
             **({"governor": np.asarray(gov_log)} if gov_log else {}),
             **({"qp_log": np.asarray(qp_log)} if qp_log else {}),
             **({"qp_paths": np.asarray(qp_paths)} if qp_paths else {}),
+            **({"mppi_paths": np.asarray(mppi_paths)} if mppi_paths else {}),
         )
         print(f"wrote {a.out}")
 

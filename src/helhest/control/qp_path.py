@@ -165,12 +165,23 @@ def resample_reference(pts: np.ndarray, ds: float, length: float) -> np.ndarray 
         return None
     si = np.arange(n) * ds
     x, y = np.interp(si, s, pts[:, 0]), np.interp(si, s, pts[:, 1])
-    # the staircase's corners are not the robot's: average them out before reading heading
+    # the staircase's corners are not the robot's: average them out before reading heading.
+    # Padded by odd reflection, which keeps the ends where they are: "edge" padding dragged the
+    # first points together (0.00, 0.15, 0.30 m became 0.09, 0.18, 0.30), and the QP, which takes
+    # its samples to be ds apart, then started every path ~10 deg past the robot's heading -- the
+    # tail swung into a trunk the governor then braked for
     k = 5
     if n > k:
         pad = k // 2
-        x = np.convolve(np.pad(x, pad, mode="edge"), np.ones(k) / k, "valid")
-        y = np.convolve(np.pad(y, pad, mode="edge"), np.ones(k) / k, "valid")
+        x = np.convolve(np.pad(x, pad, mode="reflect", reflect_type="odd"), np.ones(k) / k, "valid")
+        y = np.convolve(np.pad(y, pad, mode="reflect", reflect_type="odd"), np.ones(k) / k, "valid")
+        # smoothing cuts corners, so the spacing is no longer ds: resample by arc length again
+        s2 = np.r_[0.0, np.cumsum(np.hypot(np.diff(x), np.diff(y)))]
+        n = int(s2[-1] / ds) + 1
+        if n < 3:
+            return None
+        si = np.arange(n) * ds
+        x, y = np.interp(si, s2, x), np.interp(si, s2, y)
     th = np.unwrap(np.arctan2(np.gradient(y), np.gradient(x)))
     kappa = np.gradient(th) / ds
     return np.stack([x, y, th, kappa], 1)
@@ -207,12 +218,25 @@ def trim_at_edge(
     return pts if out.size == 0 else pts[: out[0] + 2]
 
 
+def _cut_corners(pts: np.ndarray, rounds: int = 3) -> np.ndarray:
+    """Chaikin corner cutting: each round replaces every interior corner by two points 1/4 and
+    3/4 along its segments. The ends stay where they are; the curve stays inside the polygon."""
+    for _ in range(rounds):
+        if len(pts) < 3:
+            return pts
+        a, b = pts[:-1], pts[1:]
+        cut = np.stack([0.75 * a + 0.25 * b, 0.25 * a + 0.75 * b], 1).reshape(-1, 2)
+        pts = np.concatenate([pts[:1], cut[1:-1], pts[-1:]], 0)
+    return pts
+
+
 def extend_route(
     pts: np.ndarray,
     coarse_v: np.ndarray,
     origin: tuple[float, float],
     cell: float,
     length: float,
+    goal: tuple[float, float] | None = None,
 ) -> np.ndarray:
     """Continue the fine route `pts` [k, 2] downhill on the coarse value grid `coarse_v` [cy, cx]
     (cell centres at origin + (i + 0.5) * cell, same frame as pts) until it is `length` long.
@@ -220,8 +244,13 @@ def extend_route(
     The fine route stops at the routing window's edge, ~5 m out, which is shorter than the
     horizon the path needs to bend early round an obstacle. The coarse layer already priced that
     window's border, so walking down its value continues the same route, only coarser. Steps go to
-    the lowest of the 8 neighbours and stop when none is lower (the goal, or a closed pocket)."""
+    the lowest of the 8 neighbours and stop when none is lower (a closed pocket) or at `goal`,
+    which ends the route exactly -- not at its coarse cell's centre, up to 0.4 m past or beside it.
+    The continuation is corner-cut: a staircase of 0.6 m cells has corners sharper than the
+    sideways shift the QP may put on it, and shifting a corner by more than its radius loops."""
     pts = np.asarray(pts, np.float64)
+    if goal is not None and len(pts) and np.hypot(*(pts[-1] - goal)) < cell:
+        return np.concatenate([pts, np.asarray(goal, np.float64)[None]], 0)
     done = float(np.hypot(*np.diff(pts, axis=0).T).sum()) if len(pts) > 1 else 0.0
     if done >= length or len(pts) == 0:
         return pts
@@ -230,7 +259,7 @@ def extend_route(
     c = int((pts[-1, 0] - origin[0]) / cell)
     if not (0 <= r < ny and 0 <= c < nx) or not np.isfinite(coarse_v[r, c]):
         return pts
-    out = [pts]
+    ext = [pts[-1]]
     last = pts[-1]
     while done < length:
         best, br, bc = coarse_v[r, c], r, c
@@ -243,14 +272,23 @@ def extend_route(
             break
         r, c = br, bc
         p = np.array([origin[0] + (c + 0.5) * cell, origin[1] + (r + 0.5) * cell])
+        if goal is not None and np.hypot(*(p - goal)) < cell:
+            ext.append(np.asarray(goal, np.float64))
+            break
         # the first coarse centres can lie beside or behind the fine route's end: skip to the
         # first one a whole cell on, or the joint folds back on itself
         if np.hypot(*(p - last)) < cell:
             continue
         done += float(np.hypot(*(p - last)))
-        out.append(p[None])
+        ext.append(p)
         last = p
-    return np.concatenate(out, 0)
+    if len(ext) == 1:
+        return pts
+    # cut the corners from the fine route's last ~1 m on, so the joint is rounded too
+    keep = max(0, len(pts) - 5)
+    return np.concatenate(
+        [pts[:keep], _cut_corners(np.concatenate([pts[keep:-1], np.array(ext)], 0))], 0
+    )
 
 
 def _bspline(u: np.ndarray, order: int) -> np.ndarray:
@@ -447,6 +485,21 @@ class PathQp:
         # plan only as far as the corridor is one passage: up to a point with no room, or where it
         # jumps sides (a route through an obstacle -- the coarse layer's, at 0.6 m -- is free to
         # the left at one point and to the right at the next). Stop before the cut.
+        # on the inside of a bend the path's radius is the bend's minus the shift, so keep the
+        # shift to (radius - the tightest radius the robot turns, 1 / kappa_max): a path shifted
+        # past the bend's radius loops (an offset curve's swallowtail), and short of it already
+        # turns 1 / (1 - kappa e) times sharper than the bend -- which the curvature limit, being
+        # linearised about the reference, cannot see. A bend tighter than the robot's turn makes
+        # the limit negative: the path must pass it on the outside
+        kr_all = ref[:, 3]
+        inside = np.abs(kr_all) > 1e-6
+        radius = 1.0 / np.where(inside, np.abs(kr_all), 1.0)
+        room = np.minimum(0.8 * radius, radius - 1.0 / p.kappa_max)
+        lim = np.where(inside, np.sign(kr_all) * room, 0.0)
+        hi = np.where(kr_all > 1e-6, np.minimum(hi, lim), hi)
+        lo = np.where(kr_all < -1e-6, np.maximum(lo, lim), lo)
+        for i in range(min(3, len(ref))):  # ... but the robot is still where it is
+            lo[i], hi[i] = min(lo[i], e0 - 0.05), max(hi[i], e0 + 0.05)
         n = consistent_length(lo, hi)
         if n < len(ref):
             ref, lo, hi, stop_at_end = ref[:n], lo[:n], hi[:n], True

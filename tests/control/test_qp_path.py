@@ -142,3 +142,52 @@ def test_the_fine_route_is_cut_where_it_reaches_the_window_edge():
     pts = np.r_[np.stack([np.linspace(0.0, 4.9, 50), np.zeros(50)], 1), wander]
     out = trim_at_edge(pts, (-5.0, -5.0), (5.0, 5.0), 0.4)
     assert out[-1, 0] >= 4.6 and len(out) <= 50  # stops on arrival, before the wandering
+
+
+def test_the_path_starts_at_the_robot_along_its_heading():
+    # the governor checks the robot's footprint along the path's heading: a path that leaves 10 deg
+    # off the robot's swings the 1.1 m tail ~0.2 m sideways, into a wall that is not there
+    q = _qp()
+    stairs = np.array([[0.0, 0.0]] + [[0.24 * (k + 1), 0.24 * (k // 3)] for k in range(40)])
+    ref = resample_reference(stairs, DS, 6.5)
+    assert np.allclose(ref[0, :2], 0.0, atol=1e-9)
+    # arc-length spacing; a chord across a smoothed corner is a fraction of a mm shorter
+    assert np.allclose(np.hypot(*np.diff(ref[:, :2], axis=0).T), DS, atol=1e-3)
+    for psi in (0.0, -0.35, 0.35):
+        n = len(ref)
+        path = q.solve(ref, np.full(n, -3.0), np.full(n, 3.0), 0.0, psi, 1.0, False)
+        assert abs(path.heading[0] - (ref[0, 2] + psi)) < np.radians(2.0)
+
+
+def test_the_path_is_never_shifted_past_a_bend_s_radius():
+    # a drivable 0.6 m-radius left bend, and a corridor that wants the path 0.7 m to its inside:
+    # shifted that far the path would loop (offset past the radius); it must stop short instead
+    q = _qp()
+    a = np.linspace(0.0, np.pi / 2, 30)
+    bend = np.r_[
+        np.stack([np.linspace(0.0, 3.0, 21), np.zeros(21)], 1),
+        np.stack([3.0 + 0.6 * np.sin(a[1:]), 0.6 - 0.6 * np.cos(a[1:])], 1),
+        np.stack([np.full(15, 3.6), np.linspace(0.75, 3.0, 15)], 1),
+    ]
+    ref = resample_reference(bend, DS, 6.0)
+    n = len(ref)
+    lo, hi = np.full(n, 0.7), np.full(n, 3.0)
+    lo[:8] = -0.05  # room to get there
+    path = q.solve(ref, lo, hi, 0.0, 0.0, 1.0, False)
+    assert path is not None
+    kr = ref[: len(path.offset), 3]
+    radius = 1.0 / np.maximum(np.abs(kr), 1e-6)
+    inside = path.offset * np.sign(kr)  # > 0: shifted toward the bend's centre
+    assert np.all(inside <= radius - 1.0 / q.p.kappa_max + 1e-6)  # never tighter than a turn
+    assert np.all(np.abs(np.diff(path.heading)) < np.radians(60.0))  # no segment doubles back
+
+
+def test_the_route_ends_at_the_goal_not_at_its_coarse_cell():
+    cell, origin = 0.6, (-6.0, -18.3)
+    centres = (np.arange(60) + 0.5) * cell
+    XX, YY = np.meshgrid(origin[0] + centres, origin[1] + centres)
+    coarse_v = np.hypot(XX - 6.2, YY - 0.1)  # the goal sits off its cell's centre
+    fine = np.stack([np.linspace(0.0, 4.0, 21), np.zeros(21)], 1)
+    out = extend_route(fine, coarse_v, origin, cell, 8.0, goal=(6.2, 0.1))
+    assert np.allclose(out[-1], (6.2, 0.1))
+    assert np.hypot(*(out - (6.2, 0.1)).T).min() < 1e-9 and out[:, 0].max() <= 6.2 + 1e-9
