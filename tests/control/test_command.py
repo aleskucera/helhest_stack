@@ -136,3 +136,81 @@ def test_joint_states_missing_joint_is_none():
     from helhest.control.command import joint_states_to_model
 
     assert joint_states_to_model(["left_wheel_j"], [1.0]) is None
+
+
+def test_spin_side_holds_through_a_spin_and_releases_on_driving():
+    from helhest.control.command import spin_side
+
+    left_spin = np.array([-2.0, 0.0, 2.0], np.float32)
+    assert spin_side(0.0, left_spin) == 1.0
+    assert spin_side(1.0, np.array([2.0, 0.0, -2.0], np.float32)) == -1.0  # a new spin decides
+    assert spin_side(1.0, np.zeros(3, np.float32)) == 1.0  # stopped between frames: still left
+    assert spin_side(1.0, np.array([1.5, 1.5, 1.8], np.float32)) == 0.0  # drove off: released
+    # the planner's choice locks the side before the jerk-limited command has ramped up
+    still = np.array([0.1, 0.0, -0.1], np.float32)
+    assert spin_side(0.0, still, planned=np.array([2.0, -2.0], np.float32)) == -1.0
+    assert spin_side(1.0, still, planned=np.array([2.0, -2.0], np.float32)) == 1.0  # held
+
+
+def test_llc_not_driving_needs_both_a_moving_command_and_idle_setpoints():
+    from helhest.control.command import llc_not_driving
+
+    moving = np.array([1.5, 1.5, 1.5], np.float32)
+    assert llc_not_driving(moving, idle_for_s=0.8)  # e-stop held
+    assert not llc_not_driving(moving, idle_for_s=0.1)  # the LLC has not picked the command up yet
+    at_rest = np.array([0.2, 0.2, 0.2], np.float32)
+    assert not llc_not_driving(at_rest, idle_for_s=5.0)
+
+
+def test_traction_scale_fades_out_as_the_route_falls_behind():
+    import math
+
+    from helhest.control.command import traction_scale
+
+    assert traction_scale(math.radians(30), 60, 120) == 1.0
+    assert abs(traction_scale(math.radians(90), 60, 120) - 0.5) < 1e-9
+    assert traction_scale(math.radians(-170), 60, 120) == 0.0
+    assert traction_scale(math.radians(170), 60, 0.0) == 1.0  # off_deg 0: always fully
+
+
+def _cap(wl, wr, body_v, lead=0.5):
+    from helhest.control.command import cap_forward_target
+
+    return cap_forward_target(wl, wr, body_v, max_lead=lead, wheel_radius=0.35)
+
+
+def test_cap_holds_forward_speed_near_a_held_robot_and_keeps_the_turn():
+    wl, wr = _cap(3.5, 4.5, 0.0)  # 1.4 m/s forward, differential 1.0, robot not moving
+    np.testing.assert_allclose(0.5 * (wl + wr) * 0.35, 0.5, atol=1e-6)
+    np.testing.assert_allclose(wr - wl, 1.0, atol=1e-6)  # the LLC's yaw loop owns turning
+    wl, wr = _cap(-3.5, -4.5, 0.0)  # backward too
+    np.testing.assert_allclose(0.5 * (wl + wr) * 0.35, -0.5, atol=1e-6)
+
+
+def test_cap_leaves_a_following_robot_and_never_raises_the_target():
+    assert _cap(4.0, 4.0, 1.2) == (4.0, 4.0)  # 1.4 m/s target, robot at 1.2
+    assert _cap(1.0, 1.0, 1.4) == (1.0, 1.0)  # robot faster than the target: not dragged up
+    assert _cap(-2.0, 2.0, 0.0) == (-2.0, 2.0)  # a spin: no forward speed to cap
+
+
+def test_cap_turns_a_held_ramp_into_a_smooth_release():
+    """Stromovka 13_43_24 in miniature: the robot is held at 0 for 10 s under a 4 rad/s target.
+    Uncapped, the command is at the target when it is let go; capped, it sits near the lead -- and
+    got there through the jerk-limited tracker, so it never stepped."""
+    dt, target = 0.1, 4.0
+
+    def hold(capped: bool) -> tuple[float, float]:
+        prev, accel, worst_step = Z.copy(), Z.copy(), 0.0
+        for _ in range(100):
+            wl, wr = _cap(target, target, 0.0) if capped else (target, target)
+            cmd = condition_command(
+                wl, wr, prev, max_omega=5.0, max_slew=3.0, dt=dt, prev_accel=accel, max_jerk=5.0
+            )
+            worst_step = max(worst_step, float(np.abs((cmd - prev) / dt - accel).max()) / dt)
+            accel, prev = (cmd - prev) / dt, cmd
+        return float(prev[1]) * 0.35, worst_step  # [m/s] at release, worst jerk [rad/s^3]
+
+    assert hold(False)[0] > 1.3
+    speed, jerk = hold(True)
+    assert speed <= 0.5 + 1e-3
+    assert jerk <= 5.0 + 1e-3

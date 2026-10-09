@@ -8,6 +8,7 @@ import warp as wp
 from .kernels import blur_axis_kernel
 from .kernels import diffuse_step_kernel
 from .kernels import downsample_kernel
+from .kernels import finite_mask_kernel
 from .kernels import upsample_inject_kernel
 
 
@@ -47,11 +48,21 @@ def _run_diffusion(a: wp.array, b: wp.array, fixed: wp.array, iters: int) -> wp.
 
 
 def _fixed_mask_from(heightmap_wp: wp.array) -> wp.array:
-    """Build a (int32) mask of finite cells from a float32 wp array."""
-    # Readback-free path: download tiny + re-upload is cheaper than a custom kernel
-    # for the common case. Keep it simple; replace with a kernel later if needed.
-    finite = np.isfinite(heightmap_wp.numpy()).astype(np.int32)
-    return wp.array(finite, dtype=wp.int32)
+    """Build a (int32) mask of finite cells from a float32 wp array.
+
+    On device throughout. This used to read the map back to the host, test it with
+    `np.isfinite` and upload the result -- cheap for a one-shot call and a per-frame
+    device->host->device round trip for anything in a control loop.
+    """
+    fixed = wp.zeros(heightmap_wp.shape, dtype=wp.int32, device=heightmap_wp.device)
+    wp.launch(
+        finite_mask_kernel,
+        dim=heightmap_wp.shape,
+        inputs=[heightmap_wp],
+        outputs=[fixed],
+        device=heightmap_wp.device,
+    )
+    return fixed
 
 
 def multigrid_inpaint(

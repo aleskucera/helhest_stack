@@ -10,22 +10,47 @@ for the stress harness. They target different weaknesses:
            a greedy Euclidean planner drives into the closed side and stalls
   ridge    a diagonal barrier with one notch -> direction-dependent crossing
   bumpy    rough terrain, some bumps tall enough to high-center -> tilt / settle feasibility
-  corridor a straight hallway too narrow for a forward-arc U-turn, goal BEHIND the start ->
-           only a point-turn (pivot_cost > 0) reaches it; see helhest.planning.turnmaps
+  false_door  a door aimed at the goal into a closed room, and a side gap -> commit, find the
+           dead end, turn round, back out through the door, take the other way
 
 Render them:  python -m helhest.worlds [--out /tmp/worlds.png]
 """
 
 import argparse
 import math
+from dataclasses import dataclass
 
 import numpy as np
 
 from .heightmap import _grid
 from .heightmap import Heightmap
-from .planning import turnmaps
 
 _WALL = 1.0  # impassable obstacle height (drive in -> infeasible settle)
+
+
+@dataclass(frozen=True)
+class Box:
+    """One obstacle as a solid box, in world metres.
+
+    The heightmap builders below rasterise obstacles into cells, which is what the
+    planner consumes. A physics simulator wants the solid instead: extruding a
+    rasterised wall gives one sliver quad per cell across the height discontinuity
+    (0.06 m wide, 1.0 m tall), so a wheel finds a handful of badly-conditioned
+    contacts on a face that should produce a dense manifold.
+
+    ``OBSTACLES`` below carries the same geometry the builders draw, so a consumer
+    that can use solids does not have to recover them from the grid.
+    ``test_obstacles_match_heightmaps`` keeps the two in step.
+
+    The box spans ``z`` in ``[0, h]``; ``yaw`` rotates it about its centre.
+    """
+
+    cx: float
+    cy: float
+    hx: float
+    hy: float
+    h: float = _WALL
+    yaw: float = 0.0
 
 
 def _box(H, XX, YY, cx, cy, hx, hy, h=_WALL):
@@ -37,6 +62,15 @@ def gap_world(cell=0.06):
     XX, YY = _grid(xlim, ylim, cell)
     H = np.zeros_like(XX)
     H[(np.abs(XX - 6.0) <= 0.2) & (np.abs(YY) >= 0.9)] = _WALL  # wall, 1.8 m gap at |y| < 0.9
+    return Heightmap(H, (xlim[0], ylim[0]), cell)
+
+
+def box_world(cell=0.06):
+    xlim, ylim = (-2.0, 14.0), (-5.0, 5.0)
+    XX, YY = _grid(xlim, ylim, cell)
+    H = np.zeros_like(XX)
+    # one 1 m box on the straight line, halfway to the goal: the robot only has to drive around it
+    _box(H, XX, YY, 6.0, 0.0, 0.5, 0.5)
     return Heightmap(H, (xlim[0], ylim[0]), cell)
 
 
@@ -92,6 +126,22 @@ def ridge_world(cell=0.06):
     return Heightmap(H, (xlim[0], ylim[0]), cell)
 
 
+# The two trap worlds. From the start, the opening aimed at the goal is the obvious way and its
+# dead end is 18 m out -- past the harness's 10 m sensing -- so the robot can only find it by
+# driving in. Both are 22 m to the goal and share an extent, so they are directly comparable.
+def false_door_world(cell=0.06):
+    xlim, ylim = (-2.0, 24.0), (-9.0, 9.0)
+    XX, YY = _grid(xlim, ylim, cell)
+    H = np.zeros_like(XX)
+    _box(H, XX, YY, 5.0, -5.0, 0.2, 4.0)  # front wall; a 2.0 m door at |y| < 1.0 ...
+    _box(H, XX, YY, 5.0, 3.3, 0.2, 2.3)
+    _box(H, XX, YY, 5.0, 8.2, 0.2, 0.8)  # ... and a 1.8 m side gap at y 5.6..7.4
+    _box(H, XX, YY, 11.5, 5.0, 6.7, 0.2)  # a room behind the door, 12.6 x 9.6 m clear,
+    _box(H, XX, YY, 11.5, -5.0, 6.7, 0.2)
+    _box(H, XX, YY, 18.0, 0.0, 0.2, 5.2)  # closed at the back
+    return Heightmap(H, (xlim[0], ylim[0]), cell)
+
+
 def bumpy_world(cell=0.06, seed=0):
     xlim, ylim = (-2.0, 16.0), (-5.0, 5.0)
     XX, YY = _grid(xlim, ylim, cell)
@@ -106,16 +156,156 @@ def bumpy_world(cell=0.06, seed=0):
     return Heightmap(H, (xlim[0], ylim[0]), cell)
 
 
-def corridor_world(cell=turnmaps.DEFAULT_CELL):
-    """A turnmaps.py corridor at the width validated by tests/planning/test_pivot.py: wide
-    enough to pivot in place, too narrow for a forward-arc U-turn.
+# The same obstacles the builders above rasterise, as solids. Kept beside the
+# builders so the two are edited together; test_obstacles_match_heightmaps
+# rasterises these and diffs against the builder output.
+#
+# bumpy has none -- it is summed Gaussian mounds, genuinely continuous terrain
+# that a heightmap represents correctly and a box cannot.
+OBSTACLES: dict[str, tuple[Box, ...]] = {
+    # one slab with a 1.8 m gap at |y| < 0.9, split into the two halves
+    "gap": (
+        Box(6.0, 3.2, 0.2, 2.3),
+        Box(6.0, -3.2, 0.2, 2.3),
+    ),
+    # three partial-width slabs forcing an S-weave
+    "slalom": (
+        Box(4.0, -2.15, 0.2, 3.35),  # open above y = 1.2
+        Box(9.0, 2.15, 0.2, 3.35),  # open below y = -1.2
+        Box(14.0, 3.35, 0.2, 2.15),  # open centre
+        Box(14.0, -3.35, 0.2, 2.15),
+    ),
+    "pillars": tuple(
+        Box(cx, cy, 0.45, 0.45)
+        for cx, cy in (
+            (4.0, -2.0),
+            (4.0, 2.0),
+            (7.0, 0.0),
+            (7.0, -4.0),
+            (7.0, 4.0),
+            (10.0, -2.0),
+            (10.0, 2.0),
+            (13.0, -2.5),
+            (13.0, 2.5),
+        )
+    ),
+    # U opening away from the start
+    "pocket": (
+        Box(7.0, 0.0, 0.2, 2.5),  # closed side, faces the start
+        Box(9.0, 2.5, 2.0, 0.2),  # top
+        Box(9.0, -2.5, 2.0, 0.2),  # bottom
+    ),
+    # diagonal band with a notch near x = 6, as two rotated slabs. The notch is a
+    # vertical cut while a box ends perpendicular to its axis, so the two ends are
+    # off by the ridge angle -- approximate here, unlike the others.
+    "ridge": (
+        Box(
+            1.5,
+            0.3 * (1.5 - 6.0),
+            3.5 / math.cos(0.2914567944778671),
+            0.2873478855663454,
+            yaw=0.2914567944778671,
+        ),
+        Box(
+            10.5,
+            0.3 * (10.5 - 6.0),
+            3.5 / math.cos(0.2914567944778671),
+            0.2873478855663454,
+            yaw=0.2914567944778671,
+        ),
+    ),
+    "bumpy": (),
+    "box": (Box(6.0, 0.0, 0.5, 0.5),),
+    "false_door": (
+        Box(5.0, -5.0, 0.2, 4.0),
+        Box(5.0, 3.3, 0.2, 2.3),
+        Box(5.0, 8.2, 0.2, 0.8),
+        Box(11.5, 5.0, 6.7, 0.2),
+        Box(11.5, -5.0, 6.7, 0.2),
+        Box(18.0, 0.0, 0.2, 5.2),
+    ),
+}
 
-    length/extent_y are pinned well past turnmaps' own tight defaults: this world gets consumed
-    through navigate_partial_view.py's cropped 9 m / 16 m planning windows, and any crop that
-    reaches past the scene's real edge is filled with elevation 0 (unmapped -> optimism), which
-    would silently turn the corridor's walls into a bypassable illusion the moment a window
-    samples past them. Sized so every crop this demo takes stays on REAL wall/floor."""
-    return turnmaps.bump_corridor(2.2, length=24.0, extent_y=22.0, cell=cell)
+
+def stamp(boxes, XX, YY):
+    """Stamp `boxes` onto the sample points `XX`, `YY` -- the inverse of reading OBSTACLES."""
+    H = np.zeros_like(XX)
+    for b in boxes:
+        dx, dy = XX - b.cx, YY - b.cy
+        if b.yaw:
+            c, s_ = np.cos(-b.yaw), np.sin(-b.yaw)
+            dx, dy = c * dx - s_ * dy, s_ * dx + c * dy
+        H[(np.abs(dx) <= b.hx) & (np.abs(dy) <= b.hy)] = b.h
+    return H
+
+
+def rasterise(boxes, xlim, ylim, cell):
+    """Stamp `boxes` into a fresh height grid over `xlim`/`ylim`."""
+    return stamp(boxes, *_grid(xlim, ylim, cell))
+
+
+def footprint(r) -> tuple[float, float, float, float]:
+    """(x_min, x_max, y_min, y_max) of the robot's TRUE extent in its base frame, from RobotParams.
+
+    Base origin at the front axle; the rear wheel sits `rear_offset` behind it; wheels reach
+    `wheel_radius` fore and aft of their axles and `half_track + wheel_width / 2` to each side. No
+    margin: this is for asking whether the robot TOUCHED something, and padding it would turn a
+    graze into a pass.
+    """
+    side = r.half_track + 0.5 * r.wheel_width
+    return (-(r.rear_offset + r.wheel_radius), r.wheel_radius, -side, side)
+
+
+def _rect_sdf(p: np.ndarray, hx: float, hy: float) -> np.ndarray:
+    """Signed distance from points p [N, 2] to a centred axis-aligned rectangle; < 0 inside."""
+    q = np.abs(p) - np.array([hx, hy])
+    return np.linalg.norm(np.maximum(q, 0.0), axis=1) + np.minimum(np.max(q, axis=1), 0.0)
+
+
+def obstacle_clearance(
+    world: str, x: float, y: float, yaw: float, fp: tuple[float, float, float, float]
+) -> float:
+    """Signed distance [m] from the robot's footprint to the nearest solid obstacle; < 0 = overlap.
+
+    Exact geometry from OBSTACLES, not a height threshold on the raster, so it is the physical
+    question -- did the chassis reach a wall -- rather than a proxy for it. Inf for a world with no
+    solids (bumpy: continuous mounds, where the hazard is tilt, not contact).
+
+    Two convex rectangles: the robot's boundary is sampled against each box's SDF, and each box's
+    corners against the robot's -- the second catches a box corner poking into the robot's side,
+    which boundary samples alone can step over. Resolution is the boundary spacing, ~5 cm.
+    """
+    boxes = OBSTACLES.get(world, ())
+    if not boxes:
+        return float("inf")
+    x0, x1, y0, y1 = fp
+    n = 32
+    xs, ys = np.linspace(x0, x1, n), np.linspace(y0, y1, n)
+    edge = np.concatenate(
+        [
+            np.stack([xs, np.full(n, y0)], 1),
+            np.stack([xs, np.full(n, y1)], 1),
+            np.stack([np.full(n, x0), ys], 1),
+            np.stack([np.full(n, x1), ys], 1),
+        ]
+    )
+    c, s = np.cos(yaw), np.sin(yaw)
+    world_pts = edge @ np.array([[c, s], [-s, c]]) + np.array([x, y])  # base -> world
+    centre = np.array([0.5 * (x0 + x1), 0.5 * (y0 + y1)])
+    half = (0.5 * (x1 - x0), 0.5 * (y1 - y0))
+    best = float("inf")
+    for b in boxes:
+        cb, sb = np.cos(b.yaw), np.sin(b.yaw)
+        d = world_pts - np.array([b.cx, b.cy])
+        local = np.stack([d[:, 0] * cb + d[:, 1] * sb, -d[:, 0] * sb + d[:, 1] * cb], 1)
+        best = min(best, float(_rect_sdf(local, b.hx, b.hy).min()))
+        # the box's corners, into the robot's frame
+        corners = np.array([[sx * b.hx, sy * b.hy] for sx in (-1, 1) for sy in (-1, 1)])
+        cw = corners @ np.array([[cb, sb], [-sb, cb]]) + np.array([b.cx, b.cy])  # box -> world
+        dw = cw - np.array([x, y])
+        cr = np.stack([dw[:, 0] * c + dw[:, 1] * s, -dw[:, 0] * s + dw[:, 1] * c], 1) - centre
+        best = min(best, float(_rect_sdf(cr, *half).min()))
+    return best
 
 
 WORLDS = {
@@ -125,7 +315,8 @@ WORLDS = {
     "pocket": (pocket_world, (0.0, 0.0, 0.0), (9.0, 0.0)),
     "ridge": (ridge_world, (0.0, -4.0, 0.0), (9.0, 2.5)),
     "bumpy": (bumpy_world, (0.0, 0.0, 0.0), (14.0, 0.0)),
-    "corridor": (corridor_world, (-3.0, 0.0, math.pi), (3.0, 0.0)),
+    "false_door": (false_door_world, (0.0, 0.0, 0.0), (22.0, 0.0)),
+    "box": (box_world, (0.0, 0.0, 0.0), (12.0, 0.0)),
 }
 
 
@@ -140,7 +331,7 @@ def _plot_all(out):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(2, 3, figsize=(16, 8))
+    fig, axes = plt.subplots(2, 4, figsize=(21, 8))  # 8 worlds
     for ax, (name, (builder, start, goal)) in zip(axes.ravel(), WORLDS.items()):
         hm = builder()
         ext = [hm.x0, hm.x0 + hm.nx * hm.cell, hm.y0, hm.y0 + hm.ny * hm.cell]

@@ -1,0 +1,581 @@
+"""Which way round, decided where that is the only question worth asking.
+
+The fine router answers "can the robot stand here", pose by pose, from the settle. That answer is
+only meaningful on ground the robot has actually measured, and Odin's dToF measures 4 m ahead
+completely, 74-85% at 6 m, 41-49% at 8 m and 12-14% at 12 m (`out_odin0`, 141 m driven). Past
+that a finer window is not planning over terrain, it is planning over whatever filled the
+unobserved cells.
+
+Coarsening changes that, because coverage is a question of whether ANY return landed in a cell.
+Pooled to 1.0 m the same map is 85% known at 10 m where the 0.2 m grid is 26%. So the coarse
+layer can see the shape of the world at a range where the fine layer cannot see anything -- which
+is the range at which "go left or go right" is decided.
+
+This layer must be STRICTLY more permissive than the fine one. That is the property that stops
+the two disagreeing in a loop: a route the coarse layer promises and the fine layer then refuses
+makes the robot oscillate between them. Everything below follows from it, and the first version
+of this file got each point backwards, so each carries the measurement that corrected it.
+
+  It pools PASSABILITY, not height, and by FRACTION. The question here is "is there room to
+  cross this block", which neither extreme answers. Pooling height with MAX answers the fine
+  layer's question -- "how bad is the worst thing in this block" -- and seals every passage
+  narrower than a cell or two: measured on the `gap` world, whose wall has a 1.8 m opening, MAX
+  read that opening as sealed in every frame from the sixteenth on, priced the far side at 3.4 m
+  and the robot's own side at 18.5, and left the two unconnected. Pooling with ANY overshoots the
+  other way: a 0.4 m wall inside a 1.0 m block leaves climbable ground beside it, so the block
+  reads open and the layer routes straight through a wall spanning the world.
+
+  So a block is passable when at least `min_pass_fraction` of its measured cells are climbable.
+  That is a proxy for width, and it is the honest one available: a block is crossable when most
+  of it is drivable. On the measured cases it separates cleanly -- a 1.8 m doorway pools near
+  1.0, a block straddling a 0.4 m wall pools near 0.4. It is a heuristic, and the reason a
+  heuristic is needed is that a per-CELL cost cannot express "you may stand in this block but not
+  cross it"; saying that properly needs per-EDGE feasibility, which the solver does not take.
+
+  Passability is a property of a cell and its own neighbours, never of the block next door. The
+  version that vetoed a block when a NEIGHBOURING block differed in height by more than a step
+  blocked everything within a metre of an obstacle, so a corridor needed about 3 m of clearance
+  before its centre survived. No 1.8 m gap passes that at any grid alignment. The one thing
+  read from the blocks around is the GROUND -- the lowest measured height nearby -- and only to
+  tell a cell 0.5 m or more above it that it is the top of something (`_climb_kernel`). That
+  fires on wall tops, which the step test alone passes, and on nothing a wheel could climb.
+
+  No settle. A 1.0 m cell is smaller than the robot, so placing a 1.5 m chassis on one and
+  solving its contacts says nothing the pooling has not already said. A fine cell is climbable
+  when the step to its immediate neighbours is one a wheel could drive up. That is a smaller
+  effective footprint than the fine layer's, deliberately: this layer is allowed to promise a gap
+  the robot then turns out not to fit through, and not allowed to hide one it would have fitted.
+
+  Unmeasured is not blocked, but past a frontier it is not free either. Ignorance about ground
+  the robot has not reached is no reason to route around it -- that is the fine layer's job once
+  it arrives. Taken without limit, though, it lets this layer route through terrain that does not
+  exist: on `gap`, 748 of 818 routable cells had never been measured and 483 of those lay outside
+  the world's own 16 x 10 m extent, so it costed an 18 m detour around the OUTSIDE of the world
+  and called it a route. Cells within `frontier_m` of measured ground stay free; past that each
+  costs `void_penalty`. Still reachable -- a goal in terrain nobody has seen must stay reachable
+  or the robot will never go and look at it -- but no longer cheaper than the real way round.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import warp as wp
+
+from ..engine import GridParams
+from .terrain_value_field import omni_control_set
+from .terrain_value_field import TerrainValueField
+from .terrain_value_field.hierarchical import goal_cell_kernel
+from .terrain_value_field.hierarchical import seed_goal_kernel
+
+
+@wp.kernel
+def _shift_kernel(
+    src: wp.array2d(dtype=wp.float32),
+    dr: int,  # [cells] the new grid's row 0 is the old grid's row dr
+    dc: int,
+    fill: wp.float32,  # what a cell that enters the grid holds: nothing remembered
+    dst: wp.array2d(dtype=wp.float32),
+):
+    r, c = wp.tid()
+    sr = r + dr
+    sc = c + dc
+    if sr >= 0 and sr < src.shape[0] and sc >= 0 and sc < src.shape[1]:
+        dst[r, c] = src[sr, sc]
+    else:
+        dst[r, c] = fill
+
+
+@wp.kernel
+def _mask_kernel(
+    count: wp.array2d(dtype=wp.int32),  # fine [ny, nx], points per cell
+    measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = at least one
+):
+    r, c = wp.tid()
+    measured[r, c] = wp.where(count[r, c] > 0, 1.0, 0.0)
+
+
+def mask_from_count(count: wp.array, out: wp.array) -> wp.array:
+    """A heightmap raster's point count -> the float measured mask `CoarseRouter.solve` takes,
+    on device; `out` is the caller's buffer so a per-frame call allocates nothing."""
+    wp.launch(_mask_kernel, dim=out.shape, inputs=[count], outputs=[out], device=out.device)
+    return out
+
+
+@wp.kernel
+def _floor_kernel(
+    elevation: wp.array2d(dtype=wp.float32),  # fine [ny, nx], the window
+    measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = observed
+    factor: wp.int32,
+    off_r: wp.int32,  # the window's origin, in fine cells of the coarse grid's own lattice
+    off_c: wp.int32,
+    floor: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], lowest measured height, else 1e30
+):
+    """The lowest measured height in the block: the ground under it.
+
+    Minimum because a block holding an obstacle still has ground beside it. Unseen blocks carry
+    a sentinel rather than 0.0, so that a neighbour looking for ground never mistakes a fill for
+    it. A block with no measured cell in the window this frame is left as it was: remembered,
+    or never seen.
+    """
+    r, c = wp.tid()
+    ny = elevation.shape[0]
+    nx = elevation.shape[1]
+    lo = float(1.0e30)
+    for dr in range(factor):
+        for dc in range(factor):
+            fr = r * factor + dr - off_r
+            fc = c * factor + dc - off_c
+            if fr >= 0 and fr < ny and fc >= 0 and fc < nx:
+                if measured[fr, fc] > 0.5:
+                    lo = wp.min(lo, elevation[fr, fc])
+    if lo < 1.0e29:
+        floor[r, c] = wp.min(floor[r, c], lo)  # the lowest ground ever seen under the block
+
+
+@wp.kernel
+def _climb_kernel(
+    elevation: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
+    measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = observed
+    floor: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], from _floor_kernel
+    factor: wp.int32,
+    off_r: wp.int32,  # the window's origin, in fine cells of the coarse grid's own lattice
+    off_c: wp.int32,
+    max_step: wp.float32,  # [m] the largest rise a wheel can drive up
+    elevated: wp.float32,  # [m] above the ground around it, a cell is a top and not terrain
+    climbable: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = a wheel could cross it
+):
+    """A fine cell is climbable when the step to its immediate neighbours is one the robot can
+    drive up, and it is not standing on top of something.
+
+    Unmeasured cells, and unmeasured neighbours, are skipped rather than counted: the height
+    there is a fill, and treating a fill as ground manufactures a cliff at the edge of the map.
+
+    The top of a wall passes the step test: its neighbours along the wall are level with it and
+    the ground at its foot lies in the sensor's shadow, so seen from one side a 1.0 m wall is a
+    flat strip of measured cells. Enough of them in one block -- the block that holds a wall's
+    far edge, or the corner where two walls meet -- and the block pools as crossable, and the
+    layer routes through the wall (false_door, the north wall and both far corners). So a cell
+    is also compared with the ground around it: the lowest measured height in its own block and
+    the eight beside it. More than `elevated` above that is a top, not terrain.
+    """
+    r, c = wp.tid()
+    if measured[r, c] < 0.5:
+        climbable[r, c] = 0.0
+        return
+    rows = elevation.shape[0]
+    cols = elevation.shape[1]
+    h = elevation[r, c]
+    ground = float(1.0e30)
+    br = (r + off_r) / factor
+    bc = (c + off_c) / factor
+    for dr in range(-1, 2):
+        for dc in range(-1, 2):
+            rr = br + dr
+            cc = bc + dc
+            if rr >= 0 and rr < floor.shape[0] and cc >= 0 and cc < floor.shape[1]:
+                ground = wp.min(ground, floor[rr, cc])
+    if h - ground > elevated:
+        climbable[r, c] = 0.0
+        return
+    ok = float(1.0)
+    for dr in range(-1, 2):
+        for dc in range(-1, 2):
+            rr = r + dr
+            cc = c + dc
+            if rr >= 0 and rr < rows and cc >= 0 and cc < cols:
+                if measured[rr, cc] > 0.5:
+                    if wp.abs(elevation[rr, cc] - h) > max_step:
+                        ok = 0.0
+    climbable[r, c] = ok
+
+
+@wp.kernel
+def _pool_kernel(
+    measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
+    climbable: wp.array2d(dtype=wp.float32),  # fine [ny, nx]
+    factor: wp.int32,
+    off_r: wp.int32,  # the window's origin, in fine cells of the coarse grid's own lattice
+    off_c: wp.int32,
+    coverage: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], measured cells behind `passable`
+    passable: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], climbable FRACTION in 0..1
+    seen: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], 1 = some fine cell observed
+):
+    """What fraction of the block's MEASURED cells a wheel could drive over.
+
+    Over the measured ones, not all of them, so a half-observed block is not marked impassable
+    for the half nobody has looked at -- that half's price is the frontier's business.
+
+    A view of FEWER cells than the one the block holds does not replace it. The belief window
+    drops what scrolls out of it, and when a wall comes back into view the ground before it is
+    measured first and its top last: re-pooled from those cells alone the block read open, the
+    remembered wall was gone, and the robot drove back to it (false_door: the back wall's sealed
+    blocks went 20 -> 6 -> 20 -> 5 -> 20 over the run). Equal coverage does replace it, so a
+    world that has changed is still seen to change.
+    """
+    r, c = wp.tid()
+    ny = measured.shape[0]
+    nx = measured.shape[1]
+    n_seen = float(0.0)
+    n_climb = float(0.0)
+    for dr in range(factor):
+        for dc in range(factor):
+            fr = r * factor + dr - off_r
+            fc = c * factor + dc - off_c
+            if fr >= 0 and fr < ny and fc >= 0 and fc < nx:
+                if measured[fr, fc] > 0.5:
+                    n_seen += 1.0
+                    if climbable[fr, fc] > 0.5:
+                        n_climb += 1.0
+    if n_seen > 0.0 and n_seen >= coverage[r, c]:
+        coverage[r, c] = n_seen
+        passable[r, c] = n_climb / n_seen
+        seen[r, c] = 1.0
+
+
+@wp.kernel
+def _bridge_kernel(
+    passable: wp.array2d(dtype=wp.float32),  # coarse [cy, cx]
+    seen: wp.array2d(dtype=wp.float32),  # coarse [cy, cx]
+    min_pass: wp.float32,
+    reach: wp.int32,  # [cells] the longest unseen run a wall is carried across
+    bridged: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], 1 = unseen, and a wall continues
+):
+    """An unseen block in a short run between two sealed blocks along a row or a column is the
+    wall continuing through the sensor's shadow, not a door.
+
+    A wall seen from one side ends, in the map, where its shadow begins -- and "unseen within
+    the frontier is free" then draws a door there. On false_door the coarse layer's exit from
+    the room was two such blocks at the west end of each side wall, priced 6 m cheaper than the
+    real door; the fine layer, whose border under that wall is vetoed, could not take the route
+    and inherited its price through the east ring instead, so its field went flat and the robot
+    dithered. `reach` bounds the run: at two 0.6 m blocks no 1.8 m doorway -- the narrowest this
+    robot fits through -- is ever bridged. A measured block is never touched; a door, once seen,
+    opens.
+    """
+    r, c = wp.tid()
+    bridged[r, c] = 0.0
+    if seen[r, c] > 0.5:
+        return
+    rows = seen.shape[0]
+    cols = seen.shape[1]
+    for axis in range(2):
+        # walk each way to the first seen block, at most `reach` unseen blocks in the run
+        wall_a = float(0.0)
+        wall_b = float(0.0)
+        run = int(0)
+        for sgn in range(2):
+            step = 1 - 2 * sgn
+            hit = float(0.0)
+            for k in range(1, reach + 1):
+                rr = r + wp.where(axis == 0, 0, step * k)
+                cc = c + wp.where(axis == 0, step * k, 0)
+                if rr < 0 or rr >= rows or cc < 0 or cc >= cols:
+                    break
+                if seen[rr, cc] > 0.5:
+                    hit = wp.where(passable[rr, cc] < min_pass, 1.0, 0.0)
+                    run += k - 1
+                    break
+            if sgn == 0:
+                wall_a = hit
+            else:
+                wall_b = hit
+        if wall_a > 0.5 and wall_b > 0.5 and run + 1 <= reach:
+            bridged[r, c] = 1.0
+            return
+
+
+@wp.kernel
+def _cost_kernel(
+    passable: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], climbable fraction
+    seen: wp.array2d(dtype=wp.float32),  # coarse [cy, cx]
+    bridged: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], from _bridge_kernel
+    min_pass: wp.float32,  # climbable fraction a block needs to count as crossable
+    frontier: wp.int32,  # [cells] how far past measured ground stays free
+    void_penalty: wp.float32,  # [m] charged per cell beyond that
+    pose_cost: wp.array3d(dtype=wp.float32),  # coarse [cy, cx, 1]
+):
+    """Pack passability into the one signed field the solver reads.
+
+    Sign convention is the solver's (terrain_value_field.margin, POSE COST): the veto rides in
+    the sign, so a free cell is `+penalty` and a vetoed one `-1 - penalty`. Measured ground is
+    free or vetoed outright. Unmeasured ground is free near the frontier and priced beyond it,
+    never vetoed -- a goal in terrain nobody has seen has to stay reachable, or the robot will
+    not go and look at it -- except where a sealed wall continues through it (`_bridge_kernel`).
+    """
+    r, c, _t = wp.tid()
+    if seen[r, c] > 0.5:
+        pose_cost[r, c, 0] = wp.where(passable[r, c] >= min_pass, 0.0, -1.0)
+        return
+    if bridged[r, c] > 0.5:
+        pose_cost[r, c, 0] = -1.0
+        return
+    rows = seen.shape[0]
+    cols = seen.shape[1]
+    near = float(0.0)
+    for dr in range(-frontier, frontier + 1):
+        for dc in range(-frontier, frontier + 1):
+            rr = r + dr
+            cc = c + dc
+            if rr >= 0 and rr < rows and cc >= 0 and cc < cols:
+                if seen[rr, cc] > 0.5:
+                    near = 1.0
+    pose_cost[r, c, 0] = wp.where(near > 0.5, 0.0, void_penalty)
+
+
+class CoarseRouter:
+    """A heading-free cost-to-go over the whole window, at a cell size where coverage is good.
+
+    `factor` is how many fine cells go into one coarse cell and `max_step_m` the rise a wheel can
+    drive up. `elevated_m` is how far above the ground around it a measured cell is the top of
+    something rather than terrain: looser than `max_step_m` on purpose, since this layer must
+    stay more permissive than the fine one -- 0.5 m over the 0.9 m to a neighbouring block's
+    floor is a 29 deg rise, past the tip-over envelope, and a 0.5 m face is already a hazard to
+    the fine layer. `min_pass_fraction` is how much of a block must be climbable before it counts
+    as crossable. `frontier_m` is how far past measured ground stays free, and `void_penalty` what
+    each cell costs beyond it -- in metres, so 1.0 doubles the price of crossing a metre of
+    terrain nobody has looked at.
+
+    DO NOT TUNE `min_pass_fraction`. It was carried as a heuristic standing in for per-edge
+    feasibility, i.e. as an untuned risk. Measured across the six stress worlds it is a knob that
+    moves everything except the answer: swept 0.1 -> 0.9 it takes blocked coarse cells from ~1.5%
+    to ~13% and shifts this field by up to 48 m on `pocket`, and the closed loop changes by under
+    2%, non-monotonically -- 1476 / 1504 / 1473 total frames at 0.1 / 0.5 / 0.9, all 6/6. What
+    this layer contributes is a coarse "which way out of the routing window", and that survives
+    a wholesale change of opinion about which blocks are passable. So the stand-in does not need
+    replacing with per-edge feasibility; it needs leaving alone.
+
+    The insensitivity is measured on stress worlds, whose coverage is good. On real maps -- far
+    patchier, much more of the window unmeasured -- it may bind, and `frontier_m`/`void_penalty`
+    (which decide what unseen ground costs) are the more likely levers there anyway.
+
+    The layer as a whole DOES earn its place: driving all six worlds with it off (`--coarsen 0`)
+    still reaches 6/6, but costs +4.2% frames overall and +15% on `pillars`, +11% on `ridge` --
+    the two worlds where "which way round" actually binds. Pooling at `factor` 1 rather than 5
+    buys nothing and costs 2.0 ms a frame (0.31 -> 2.32 ms), so the pooling stays too.
+    """
+
+    def __init__(
+        self,
+        fine_grid: GridParams,
+        factor: int = 5,
+        max_step_m: float = 0.25,
+        elevated_m: float = 0.5,
+        min_pass_fraction: float = 0.5,
+        frontier_m: float = 3.0,
+        void_penalty: float = 1.0,
+        bridge_m: float = 1.2,
+        memory_grid: GridParams | None = None,
+        device: wp.Device | str | None = None,
+    ) -> None:
+        if factor < 1:
+            raise ValueError(f"factor must be >= 1 fine cells per coarse cell, got {factor}")
+        if max_step_m <= 0.0:
+            raise ValueError(f"max_step_m must be > 0, got {max_step_m}")
+        if elevated_m < max_step_m:
+            raise ValueError(
+                f"elevated_m must be >= max_step_m or the layer is stricter than the fine one, "
+                f"got {elevated_m} < {max_step_m}"
+            )
+        if frontier_m < 0.0 or void_penalty < 0.0 or bridge_m < 0.0:
+            raise ValueError(
+                f"frontier_m, void_penalty and bridge_m must be >= 0, got {frontier_m}, "
+                f"{void_penalty}, {bridge_m}"
+            )
+        self.device = wp.get_device(device)
+        self.factor = int(factor)
+        self.max_step_m = float(max_step_m)
+        self.elevated_m = float(elevated_m)
+        self.min_pass_fraction = float(min_pass_fraction)
+        self.void_penalty = float(void_penalty)
+        # The lattice the blocks are pooled on: the window's own, or the memory's. Both are at
+        # the fine cell size, and a memory is only useful if the window's origin lands on its
+        # lattice -- `solve` rounds the offset to whole cells and a belief that recenters in
+        # whole cells satisfies that by construction.
+        self.persistent = memory_grid is not None
+        base = memory_grid if memory_grid is not None else fine_grid
+        if abs(base.cell_size - fine_grid.cell_size) > 1e-9:
+            raise ValueError(
+                f"memory_grid must be at the fine cell size, got {base.cell_size} vs "
+                f"{fine_grid.cell_size}"
+            )
+        # ceil, so the coarse grid covers the fine one even when it does not divide evenly
+        cy = (base.cells_y + self.factor - 1) // self.factor
+        cx = (base.cells_x + self.factor - 1) // self.factor
+        self.grid = GridParams(
+            cells_x=cx,
+            cells_y=cy,
+            cell_size=fine_grid.cell_size * self.factor,
+            origin_x=base.origin_x,
+            origin_y=base.origin_y,
+        )
+        self.frontier = int(round(float(frontier_m) / self.grid.cell_size))
+        self.bridge = int(round(float(bridge_m) / self.grid.cell_size))
+        with wp.ScopedDevice(self.device):
+            self._climb = wp.zeros((fine_grid.cells_y, fine_grid.cells_x), dtype=wp.float32)
+            self.passable = wp.zeros((cy, cx), dtype=wp.float32)
+            self.seen = wp.zeros((cy, cx), dtype=wp.float32)
+            self.coverage = wp.zeros((cy, cx), dtype=wp.float32)
+            self.bridged = wp.zeros((cy, cx), dtype=wp.float32)
+            self.floor = wp.full((cy, cx), 1.0e30, dtype=wp.float32)
+            self._goal_rc = wp.zeros(2, dtype=wp.int32)
+            self._goal_xy = wp.zeros(2, dtype=wp.float32)
+        # heading-free, and fed a pose cost directly: this layer's passability is its own pooling
+        # rule, not a margin. penalty_scale 1.0: the void penalty is already in metres, so it
+        # adds to the move's own length as itself rather than being weighted a second time.
+        self.field = TerrainValueField(
+            cy,
+            cx,
+            self.grid.cell_size,
+            n_theta=1,
+            penalty_scale=1.0,
+            control_set=omni_control_set(self.grid.cell_size),
+            device=self.device,
+        )
+        self.solver = self.field.solver
+        self._pose_cost = self.field.pose_cost
+        self._seeds = self.field.seeds
+        self.V = wp.zeros((cy, cx, 1), dtype=wp.float32, device=self.device)
+
+    def recenter(self, x: float, y: float, slack_frac: float = 0.25) -> bool:
+        """Scroll an anchored memory so (x, y) -- the robot, in the memory's frame -- sits at its
+        centre again once it has strayed more than `slack_frac` of the map from it. Whole coarse
+        cells only, so the window keeps landing on the memory's lattice; what stays inside keeps
+        what it holds, what enters is unknown. Returns whether it moved.
+
+        The memory used to stay where the node built it, centred on the map frame's origin --
+        wherever the Odin started. In `tree2` (2026-09-30) the robot worked 20-38 m from it, so
+        goals east of x = 30 lay outside the 60 m map and the route led to its edge: the robot
+        drove 8 m north, away from a goal 10 m east.
+        """
+        if not self.persistent:
+            return False
+        g = self.grid
+        cc = g.cell_size
+        cx = g.origin_x + 0.5 * g.cells_x * cc
+        cy = g.origin_y + 0.5 * g.cells_y * cc
+        if max(abs(x - cx) / (g.cells_x * cc), abs(y - cy) / (g.cells_y * cc)) <= slack_frac:
+            return False
+        dc = int(round((x - cx) / cc))
+        dr = int(round((y - cy) / cc))
+        for layer, fill in (
+            (self.passable, 0.0),
+            (self.seen, 0.0),
+            (self.coverage, 0.0),
+            (self.floor, 1.0e30),
+        ):
+            old = wp.clone(layer)
+            wp.launch(
+                _shift_kernel,
+                dim=layer.shape,
+                inputs=[old, dr, dc, fill],
+                outputs=[layer],
+                device=self.device,
+            )
+        self.grid = GridParams(
+            cells_x=g.cells_x,
+            cells_y=g.cells_y,
+            cell_size=cc,
+            origin_x=g.origin_x + dc * cc,
+            origin_y=g.origin_y + dr * cc,
+        )
+        return True
+
+    def solve(
+        self,
+        elevation: wp.array,
+        measured: wp.array,
+        goal_xy: tuple[float, float],
+        window_xy: tuple[float, float] = (0.0, 0.0),
+    ) -> wp.array:
+        """Fine `elevation` and `measured` [ny, nx] -> coarse V [cy, cx, 1], device-resident.
+
+        `goal_xy` and `window_xy` -- where the window's origin sits -- are in the frame this
+        layer's grid was built in, i.e. positions that `self.grid.origin_x/y` is a point of: the
+        fine grid's own frame for a window-bound layer (then `window_xy` is that grid's origin),
+        the memory grid's for an anchored one. Blocks the window covers are re-pooled from what
+        it measured; with a memory the rest keep what they hold, without one they are reset,
+        since the grid moved with the window and its blocks are somewhere else now.
+        """
+        self._goal_xy.assign(np.asarray(goal_xy[:2], np.float32))
+        cell = self.grid.cell_size / self.factor
+        off_c = int(round((float(window_xy[0]) - self.grid.origin_x) / cell))
+        off_r = int(round((float(window_xy[1]) - self.grid.origin_y) / cell))
+        if not self.persistent:
+            self.passable.zero_()
+            self.seen.zero_()
+            self.coverage.zero_()
+            self.floor.fill_(1.0e30)
+        wp.launch(
+            _floor_kernel,
+            dim=self.floor.shape,
+            inputs=[elevation, measured, self.factor, off_r, off_c],
+            outputs=[self.floor],
+            device=self.device,
+        )
+        wp.launch(
+            _climb_kernel,
+            dim=self._climb.shape,
+            inputs=[
+                elevation,
+                measured,
+                self.floor,
+                self.factor,
+                off_r,
+                off_c,
+                self.max_step_m,
+                self.elevated_m,
+            ],
+            outputs=[self._climb],
+            device=self.device,
+        )
+        wp.launch(
+            _pool_kernel,
+            dim=self.passable.shape,
+            inputs=[measured, self._climb, self.factor, off_r, off_c],
+            outputs=[self.coverage, self.passable, self.seen],
+            device=self.device,
+        )
+        wp.launch(
+            _bridge_kernel,
+            dim=self.bridged.shape,
+            inputs=[self.passable, self.seen, self.min_pass_fraction, self.bridge],
+            outputs=[self.bridged],
+            device=self.device,
+        )
+        wp.launch(
+            _cost_kernel,
+            dim=self._pose_cost.shape,
+            inputs=[
+                self.passable,
+                self.seen,
+                self.bridged,
+                self.min_pass_fraction,
+                self.frontier,
+                self.void_penalty,
+            ],
+            outputs=[self._pose_cost],
+            device=self.device,
+        )
+        wp.launch(
+            goal_cell_kernel,
+            dim=1,
+            inputs=[
+                self._goal_xy,
+                self.grid.origin_x,
+                self.grid.origin_y,
+                self.grid.cell_size,
+                self.grid.cells_y,
+                self.grid.cells_x,
+            ],
+            outputs=[self._goal_rc],
+            device=self.device,
+        )
+        wp.launch(
+            seed_goal_kernel,
+            dim=self._seeds.shape,
+            inputs=[self._goal_rc, self.solver._inf],
+            outputs=[self._seeds],
+            device=self.device,
+        )
+        self.V = self.field.iterate()
+        return self.V

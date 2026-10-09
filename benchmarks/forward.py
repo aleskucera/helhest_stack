@@ -4,6 +4,8 @@ One fused `rollout_kernel` over B rollouts x T steps. Reports ms/rollout, the re
 (simulated seconds per wall-second = B*T*dt / wall), and throughput (M wheel-steps/s). Sweeps batch
 B and horizon T at planner scale, on CPU and (if present) CUDA.
 
+The wheel is the planner's 0.10 m cylinder (`plan_wheel_width`), not the old sphere.
+
 Wall-clock is independent of `dt` (it only scales the integrated velocities), so the timings hold
 for any `dt`; only the real-time factor moves with it -- set it with `--dt` (default 0.1).
 
@@ -18,9 +20,11 @@ import warp as wp
 from helhest import dynamics
 from helhest import friction
 from helhest import heightmap as hmmod
-from helhest.control.reference import _to_target_wheel_omega
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
+
+# the planner's cylinder wheel (plan_wheel_width): 32 yaw-binned envelopes, one read per step
+WHEEL_WIDTH = 0.10
 
 
 def _time(fn, reps, device):
@@ -36,7 +40,7 @@ def _time(fn, reps, device):
 
 def _build(scene, mu, B, T, device, dt):
     sim = ForwardSimulator(
-        dynamics.robot_params(),
+        dynamics.robot_params(WHEEL_WIDTH),
         dynamics.planning_solver(dt),
         GridParams(scene.nx, scene.ny, scene.cell, scene.x0, scene.y0),
         B,
@@ -47,11 +51,7 @@ def _build(scene, mu, B, T, device, dt):
         wp.array(np.ascontiguousarray(scene.H, np.float32), dtype=wp.float32, device=device)
     )
     sim.set_friction(mu)
-    sim.target_wheel_omega.assign(
-        np.ascontiguousarray(
-            _to_target_wheel_omega(np.full((B, T, 2), 2.0, np.float32)), np.float32
-        )
-    )
+    sim.target_wheel_omega.assign(np.full((T, B, 3), 2.0, np.float32))
     sim.start_pose.assign(np.tile(np.asarray((0.0, 0.0, 0.0), np.float32), (B, 1)))
     return sim
 
@@ -88,7 +88,8 @@ def main():
             batch_sweep, fixed_T = [512, 2048, 8192], 40
             horizon_sweep, fixed_B, reps = [20, 40, 80, 160], 2048, 20
         print(
-            f"\n=== ForwardSimulator  device={device}  dt={dt:.2f}  grid={scene.ny}x{scene.nx}  reps={reps} ==="
+            f"\n=== ForwardSimulator  device={device}  dt={dt:.2f}  grid={scene.ny}x{scene.nx}  "
+            f"cylinder {WHEEL_WIDTH} m  reps={reps} ==="
         )
         print(f"  batch sweep (T={fixed_T}):")
         _header()

@@ -1,0 +1,613 @@
+<title>Odin Planner Replay</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --ground: #eef1f0;
+    --panel: #ffffff;
+    --panel-2: #f6f8f7;
+    --ink: #10161a;
+    --ink-2: #475459;
+    --ink-3: #7c8a8f;
+    --line: #d5dcda;
+    --line-2: #c2ccc9;
+    --accent: #0f8a7e;
+    --accent-ink: #ffffff;
+    --goal: #b5179e;
+    --alarm: #c2410c;
+    --ok: #0b6b4f;
+    --shadow: 0 1px 2px rgba(16, 22, 26, .06), 0 8px 24px rgba(16, 22, 26, .05);
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --ground: #0e1416;
+      --panel: #161d20;
+      --panel-2: #1b2428;
+      --ink: #e6edeb;
+      --ink-2: #a3b1b4;
+      --ink-3: #6f8086;
+      --line: #263135;
+      --line-2: #33434a;
+      --accent: #2bb5a3;
+      --accent-ink: #06201d;
+      --goal: #e879d0;
+      --alarm: #f2884f;
+      --ok: #45c08f;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0e1416;
+    --panel: #161d20;
+    --panel-2: #1b2428;
+    --ink: #e6edeb;
+    --ink-2: #a3b1b4;
+    --ink-3: #6f8086;
+    --line: #263135;
+    --line-2: #33434a;
+    --accent: #2bb5a3;
+    --accent-ink: #06201d;
+    --goal: #e879d0;
+    --alarm: #f2884f;
+    --ok: #45c08f;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .35);
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding-inline: 16px; padding-block: 22px 40px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 16px; margin-bottom: 4px; }
+  h1 { font-size: 20px; font-weight: 700; letter-spacing: -.01em; margin: 0; text-wrap: balance; }
+  .sub { color: var(--ink-2); font-size: 13px; max-width: 62ch; margin: 2px 0 18px; }
+  .sub code { font-family: var(--mono); font-size: 12px; color: var(--ink); }
+
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .tab {
+    font: 500 13px/1 var(--sans); padding: 8px 12px; border-radius: 7px; cursor: pointer;
+    background: var(--panel); color: var(--ink-2); border: 1px solid var(--line);
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .tab:hover { border-color: var(--line-2); color: var(--ink); }
+  .tab[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+  .tab .dot.miss { background: var(--alarm); }
+  .tab[aria-selected="true"] .dot { background: var(--accent-ink); opacity: .85; }
+
+  .stage { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .stage { grid-template-columns: minmax(0, 1fr); } }
+
+  .board { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+  .boardhead {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--panel-2);
+  }
+  .chip {
+    font: 500 12px/1 var(--sans); padding: 6px 10px; border-radius: 6px; cursor: pointer;
+    background: transparent; color: var(--ink-2); border: 1px solid var(--line);
+  }
+  .chip:hover { color: var(--ink); border-color: var(--line-2); }
+  .chip[aria-pressed="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+  .spacer { flex: 1 1 auto; }
+  .toggles { display: flex; gap: 6px; }
+
+  .canvaswrap { position: relative; background: var(--panel-2); }
+  canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+  .scalebar {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+    border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; color: var(--ink-2);
+  }
+  .ramp { height: 9px; flex: 1 1 auto; border-radius: 3px; border: 1px solid var(--line); }
+
+  .transport { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-top: 1px solid var(--line); }
+  .play {
+    width: 34px; height: 34px; flex: none; border-radius: 8px; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink); border: none;
+    display: grid; place-items: center; font-size: 13px;
+  }
+  input[type="range"] { flex: 1 1 auto; accent-color: var(--accent); min-width: 0; }
+  .speeds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 12px 11px; }
+  .speeds .lbl { font-size: 12px; color: var(--ink-3); margin-right: 2px; }
+  .fcount { font-family: var(--mono); font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  .rail { display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 13px 14px; }
+  .card h2 { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 9px; font-weight: 600; }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; }
+  dt { color: var(--ink-2); font-size: 12px; }
+  dd { margin: 0; text-align: right; font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+  dd.big { font-size: 15px; font-weight: 600; }
+  .verdict { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .verdict.ok { color: var(--ok); }
+  .verdict.miss { color: var(--alarm); }
+
+  .legend { display: grid; gap: 6px; }
+  .legend div { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 12px; }
+  .sw { width: 13px; height: 13px; border-radius: 3px; flex: none; border: 1px solid var(--line-2); }
+  .sw.line { height: 3px; border-radius: 2px; border: none; }
+
+  .note { color: var(--ink-3); font-size: 12px; line-height: 1.55; margin: 20px 0 0; max-width: 72ch; }
+  .note b { color: var(--ink-2); font-weight: 600; }
+  .loading { padding: 40px 14px; text-align: center; color: var(--ink-3); font-family: var(--mono); font-size: 12px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Odin Planner Replay</h1>
+    <span class="fcount" id="hdr"></span>
+  </header>
+  <p class="sub">
+    The <b>deployed stack</b> as committed: <b>ostrich</b> physics as the robot, the measured Odin dToF ray table as
+    the sensor, a probabilistic belief map as the only thing the planner sees, the robot's own controller read from its
+    params file, the world-anchored coarse map, the turn-first brake and the shadow bridge. The route now runs entirely
+    on <b>terrain_value_field</b>: the robot's settle at every pose is read as margins (roll, pitch, belly, with the
+    settle residual and step gate as hard tests), the library classifies and value-iterates them, and the coarse map's
+    ring is read under each routing cell's centre. Near walls the robot is not
+    kept out but slowed, by one law: speed = (clearance &minus; 0.15 m) / 0.125 s for the body's fastest point, tail
+    included. It prices the route in time, steers MPPI's choice and brakes the plan it drives; the route also charges
+    turning near walls for the tail swing, and the robot crawls while its tail is about to sweep ground the sensor has
+    never seen. Seven stress worlds plus two study worlds (a 2.4 m L-bend and a 2.4 m corridor started 0.5 m off
+    centre). Every frame is what the robot believed and decided; the governor's reading is under "This frame".
+    The robot turns red while it touches a wall.
+  </p>
+
+  <div class="tabs" id="tabs" role="tablist"></div>
+
+  <div class="stage">
+    <div class="board">
+      <div class="boardhead" id="layers"></div>
+      <div class="canvaswrap"><canvas id="cv" width="700" height="700"></canvas></div>
+      <div class="scalebar">
+        <span id="slo">—</span><div class="ramp" id="ramp"></div><span id="shi">—</span>
+      </div>
+      <div class="transport">
+        <button class="play" id="play" aria-label="Play">▶</button>
+        <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Frame">
+        <span class="fcount" id="fc">—</span>
+      </div>
+      <div class="speeds" id="speeds" role="group" aria-label="Playback speed"></div>
+    </div>
+
+    <div class="rail">
+      <div class="card">
+        <h2>This frame</h2>
+        <dl>
+          <dt>to goal</dt><dd class="big" id="m-dist">—</dd>
+          <dt>position</dt><dd id="m-pos">—</dd>
+          <dt>heading</dt><dd id="m-yaw">—</dd>
+          <dt>wheels L / R</dt><dd id="m-cmd">—</dd>
+          <dt>cost-to-go here</dt><dd id="m-vh">—</dd>
+          <dt>headings w/ route</dt><dd id="m-route">—</dd>
+          <dt>roll / pitch</dt><dd id="m-rp">—</dd>
+          <dt>map seen</dt><dd id="m-seen">—</dd>
+          <dt>poses blocked</dt><dd id="m-blk">—</dd>
+          <dt>wall clearance</dt><dd id="m-cl">—</dd>
+          <dt>speed governor</dt><dd id="m-gov">—</dd>
+        </dl>
+      </div>
+      <div class="card">
+        <h2>Run</h2>
+        <dl>
+          <dt>outcome</dt><dd><span class="verdict" id="m-verdict">—</span></dd>
+          <dt>goal</dt><dd id="m-goal">—</dd>
+          <dt>belief window</dt><dd id="m-win">—</dd>
+          <dt>routing window</dt><dd id="m-rwin">—</dd>
+          <dt>closest to a wall</dt><dd id="m-wall">—</dd>
+        </dl>
+      </div>
+      <div class="card">
+        <h2>Controller</h2>
+        <dl id="ctl"></dl>
+      </div>
+      <div class="card">
+        <h2>Overlay</h2>
+        <div class="legend">
+          <div><span class="sw line" style="background:var(--accent)"></span> driven so far</div>
+          <div><span class="sw" style="background:var(--goal)"></span> goal</div>
+          <div><span class="sw" style="background:var(--ink-3)"></span> robot, facing</div>
+          <div><span class="sw" style="background:var(--alarm)"></span> no route from here</div>
+          <div><span class="sw" style="background:var(--alarm)"></span> attitude past the envelope</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">
+    The view is a <b>chase camera on the belief window</b> — <span id="n-span">—</span> across, robot-centred, recentred
+    in whole cells as it drives. Ground the robot mapped earlier scrolls out of it, which is why
+    the driven path runs off into empty space. The <b>routing</b> and <b>blocked</b> layers cover
+    only the inner <span id="n-route">—</span>, because a fine window larger than the sensor's reliable coverage plans
+    over whatever filled the unobserved cells rather than over terrain. Each layer is scaled
+    against <b>its own range in that frame</b>, printed under the map: a colour means a slightly
+    different value from one frame to the next, which is what lets centimetres of relief stay
+    visible before the robot has found anything taller.
+  </p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  const LAYERS = [
+    { k: "h",    name: "height",      unit: "m",  grid: "belief" },
+    { k: "seen", name: "coverage",    unit: "",   grid: "belief" },
+    { k: "cv",   name: "coarse: which way", unit: "m", grid: "coarse" },
+    { k: "blk",  name: "blocked",     unit: "",   grid: "route"  },
+    { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
+    { k: "route", name: "headings with a route", unit: "", grid: "route" },
+  ];
+  let ORDER = ["gap", "slalom", "pillars", "pocket", "ridge", "bumpy", "false_door"];
+  const LABEL = { false_door: "false door", cornerL24: "L-bend 2.4 m", corridor24: "corridor 2.4 m", corridor26: "corridor 2.6 m", corridor24_nearmiss: "corridor 2.4 m, near-miss" };
+  const labelOf = (name) => LABEL[name] || name.replace(/_/g, " ");
+
+  // --- colour ramps, one per layer role -------------------------------------------------
+  function ramp(stops) {
+    const lut = new Uint8Array(256 * 3);
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255;
+      let a = stops[0], b = stops[stops.length - 1];
+      for (let s = 0; s < stops.length - 1; s++) {
+        if (t >= stops[s][0] && t <= stops[s + 1][0]) { a = stops[s]; b = stops[s + 1]; break; }
+      }
+      const f = b[0] === a[0] ? 0 : (t - a[0]) / (b[0] - a[0]);
+      for (let c = 0; c < 3; c++) lut[i * 3 + c] = Math.round(a[1][c] + f * (b[1][c] - a[1][c]));
+    }
+    return lut;
+  }
+  const RAMPS = {
+    // ground -> rise -> crest: an earth ramp, so relief reads as relief
+    h: ramp([[0, [26, 66, 88]], [.35, [58, 124, 112]], [.62, [176, 168, 106]], [.85, [199, 152, 112]], [1, [246, 243, 236]]]),
+    seen: ramp([[0, [44, 58, 64]], [1, [226, 232, 230]]]),
+    blk: ramp([[0, [247, 246, 243]], [.5, [231, 160, 110]], [1, [150, 33, 12]]]),
+    v: ramp([[0, [253, 231, 156]], [.45, [86, 180, 146]], [.8, [43, 96, 135]], [1, [37, 38, 84]]]),
+    cv: ramp([[0, [252, 235, 205]], [.45, [226, 134, 92]], [.8, [151, 46, 90]], [1, [49, 18, 63]]]),
+    route: ramp([[0, [150, 33, 12]], [.5, [231, 160, 110]], [.85, [226, 232, 230]], [1, [15, 138, 126]]]),
+  };
+  const NONE = { h: null, seen: null, blk: null, v: [194, 65, 12], cv: [194, 65, 12], route: null };
+
+  // --- state ----------------------------------------------------------------------------
+  let M = null, world = null, imgs = null, frame = 0, layer = "h", timer = null;
+  // Playback runs on SIMULATED time, not on recorded frames: a run recorded every 8th frame and
+  // one recorded every frame then play at the same pace, and 1x is the robot's own speed.
+  const SPEEDS = [1, 2, 4, 8];
+  let speed = 1, clock = null;
+  const show = { trail: true, goal: true, footprint: true };
+  const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+  const off = document.createElement("canvas"), octx = off.getContext("2d");
+  const $ = (id) => document.getElementById(id);
+  const fmt = (v, n = 2) => (v === undefined || v === null || !isFinite(v) ? "—" : v.toFixed(n));
+
+  const sideOf = (w, key) => (key === "h" || key === "seen" ? w.n : key === "cv" ? w.nc : w.nr);
+
+  function drawPlane(key, w, meta) {
+    const img = imgs && imgs[key];
+    if (!img || !img.complete || !img.naturalWidth) return;
+    const side = sideOf(w, key);
+    off.width = side; off.height = side;
+    octx.clearRect(0, 0, side, side);
+    // one frame's tile out of the atlas (row-major, `w.cols` across); tiles are stored already
+    // flipped, so this lands the low-y edge at the bottom of the canvas with no transform
+    const cols = w.cols || 1;
+    octx.drawImage(img, (frame % cols) * side, Math.floor(frame / cols) * side, side, side, 0, 0, side, side);
+    const id = octx.getImageData(0, 0, side, side), d = id.data;
+    const lut = RAMPS[key], none = NONE[key];
+    for (let i = 0; i < d.length; i += 4) {
+      const q = d[i];                                   // grayscale: r = g = b = the quantised value
+      if (q === 0) {
+        if (!none) { d[i + 3] = 0; continue; }
+        d[i] = none[0]; d[i + 1] = none[1]; d[i + 2] = none[2]; d[i + 3] = 255;
+        continue;
+      }
+      const t = key === "seen" ? 255 : q;
+      d[i] = lut[t * 3]; d[i + 1] = lut[t * 3 + 1]; d[i + 2] = lut[t * 3 + 2]; d[i + 3] = 255;
+    }
+    octx.putImageData(id, 0, 0);
+    const W = cv.width, H = cv.height;
+    ctx.imageSmoothingEnabled = false;
+    if (key === "blk" || key === "v" || key === "route") {
+      const s = W / w.n, x = w.off_r * s, ww = w.nr * s;
+      ctx.drawImage(off, x, H - x - ww, ww, ww);       // the routing crop sits inside the window
+    } else {
+      ctx.drawImage(off, 0, 0, W, H);
+    }
+  }
+
+  function draw() {
+    if (!M || !imgs) return;
+    const w = M.worlds[world], meta = w.frames[frame];
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue("--panel-2") || "#eee";
+    ctx.fillRect(0, 0, W, H);
+    drawPlane(layer, w, meta);
+
+    // world -> canvas, for this frame's window origin
+    const span = w.n * w.cell;
+    const px = (x) => ((x - meta.bx) / span) * W;
+    const py = (y) => H - ((y - meta.by) / span) * H;
+
+    if (show.trail) {
+      const upto = Math.min(w.trail.length, meta.f + 1);
+      ctx.strokeStyle = cssVar("--accent"); ctx.lineWidth = 3; ctx.lineJoin = "round"; ctx.lineCap = "round";
+      ctx.beginPath();
+      for (let i = 0; i < upto; i++) {
+        const p = w.trail[i];
+        i === 0 ? ctx.moveTo(px(p[0]), py(p[1])) : ctx.lineTo(px(p[0]), py(p[1]));
+      }
+      ctx.stroke();
+    }
+    if (show.goal) {
+      const goal = meta.g || w.goal;  // a recording with a goal per frame draws that frame's
+      const gx = px(goal[0]), gy = py(goal[1]);
+      ctx.fillStyle = cssVar("--goal"); ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 2;
+      star(ctx, gx, gy, 13, 6);
+      ctx.fill(); ctx.stroke();
+    }
+    // robot: its true footprint (drive axle at the origin, tail 1.1 m behind, wheel to wheel wide)
+    // and a wedge at the axle pointing where it faces
+    const rx = px(meta.x), ry = py(meta.y), a = -meta.yaw;
+    const touching = meta.cl != null && meta.cl < 0;
+    if (show.footprint && M.footprint) {
+      const [x0, x1, y0, y1] = M.footprint, s = W / span;
+      ctx.save(); ctx.translate(rx, ry); ctx.rotate(a);
+      ctx.fillStyle = touching ? "rgba(220, 60, 40, .28)" : "rgba(255, 255, 255, .18)";
+      ctx.strokeStyle = touching ? cssVar("--alarm") : cssVar("--ink");
+      ctx.lineWidth = 1.5;
+      // canvas y points down, the body frame's y left: mirror it (the rectangle is symmetric anyway)
+      ctx.beginPath(); ctx.rect(x0 * s, -y1 * s, (x1 - x0) * s, (y1 - y0) * s);
+      ctx.fill(); ctx.stroke(); ctx.restore();
+    }
+    ctx.save(); ctx.translate(rx, ry); ctx.rotate(a);
+    ctx.fillStyle = touching ? cssVar("--alarm") : cssVar("--ink-3");
+    ctx.strokeStyle = cssVar("--panel"); ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(-9, 9); ctx.lineTo(-9, -9); ctx.closePath();
+    ctx.fill(); ctx.stroke(); ctx.restore();
+
+    paintRail(w, meta);
+  }
+
+  function star(c, x, y, R, r) {
+    c.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const rad = i % 2 ? r : R, t = (Math.PI / 5) * i - Math.PI / 2;
+      i === 0 ? c.moveTo(x + rad * Math.cos(t), y + rad * Math.sin(t))
+              : c.lineTo(x + rad * Math.cos(t), y + rad * Math.sin(t));
+    }
+    c.closePath();
+  }
+  const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || "#888";
+
+  function paintRail(w, meta) {
+    $("m-dist").textContent = fmt(meta.dist) + " m";
+    $("m-pos").textContent = fmt(meta.x, 1) + ", " + fmt(meta.y, 1);
+    $("m-yaw").textContent = fmt((meta.yaw * 180) / Math.PI, 0) + "°";
+    $("m-cmd").textContent = fmt(meta.cmd[0], 1) + " / " + fmt(meta.cmd[1], 1);
+    // `cost-to-go` the LAYER is the best over all headings; this is the one the robot is
+    // actually on. When the layer looks healthy and this reads the cap, the heading ring has
+    // holes in it -- which is invisible in every min-over-headings view.
+    const vhEl = $("m-vh"), dead = meta.vh != null && w.cap && meta.vh >= 0.9 * w.cap;
+    vhEl.textContent = meta.vh == null ? "—" : dead ? "no route" : fmt(meta.vh) + " m";
+    // The one unambiguous alarm on this axis, and it needs no threshold: the heading the robot
+    // is ON has no route, while the layer beside it -- the best over all headings -- may look
+    // perfectly healthy. That disagreement is the whole reason these two are recorded.
+    vhEl.style.color = dead ? "var(--alarm)" : "";
+    // No colour on the fraction: its healthy level is a property of the MAP, not the lattice.
+    // Measured 59-76% across the six worlds with a fully connected ring, because a routing
+    // window legitimately contains blind cells, ground behind walls and edge states.
+    $("m-route").textContent = meta.route == null ? "—" : (meta.route * 100).toFixed(0) + "%";
+    // The clearance speed governor: the room it measured along the next second of the plan, and
+    // whether that room was tight enough to slow the robot. Only runs recorded with it carry this.
+    const gv = $("m-gov");
+    if (meta.gv) {
+      const [gc, cap, sc] = meta.gv;
+      const room = gc >= 1.4 ? "open" : fmt(gc, 2) + " m";
+      gv.textContent = sc < 0.999 ? "braking to " + (sc * 100).toFixed(0) + "% · " + room : "full speed · " + room;
+      gv.style.color = sc < 0.999 ? "var(--alarm)" : "";
+      gv.title = "clearance along the next second of the plan; allowed " + fmt(cap, 2) + " m/s at the fastest body point";
+    } else {
+      gv.textContent = "—"; gv.style.color = ""; gv.title = "";
+    }
+    // Which controller produced this run. Before runs saved their config, a sim result could not
+    // say what it had tested -- and for a week the answer was "not the robot's controller".
+    const ctl = $("ctl"), c = w.controller;
+    const shown = [["turn", "plan_turn"], ["wmax", "plan_wmax"], ["friction replicas", "plan_n_mu"],
+                   ["spin prior", "plan_spin_frac"], ["pivot cost", "plan_pivot_cost"],
+                   ["headings", "plan_n_theta"]];
+    ctl.innerHTML = c
+      ? shown.map(([n, k]) => "<dt>" + n + "</dt><dd>" + (c[k] ?? "—") + "</dd>").join("")
+      : "<dt>not recorded</dt><dd>run predates it</dd>";
+    const rp = $("m-rp"), lim = M.limits;
+    if (meta.rp && lim) {
+      const [ro, pi] = meta.rp;
+      // nose-up is NEGATIVE pitch, so the two pitch limits are not symmetric about zero
+      const over = Math.abs(ro) > lim.roll || -pi > lim.pitch_up || pi > lim.pitch_down;
+      rp.textContent = ro.toFixed(0) + "° / " + pi.toFixed(0) + "°";
+      rp.style.color = over ? "var(--alarm)" : "";
+      rp.title = over ? "outside the envelope the settle vetoes against" : "";
+    } else {
+      rp.textContent = "—";
+    }
+    $("m-seen").textContent = (meta.seen * 100).toFixed(1) + "%";
+    $("m-blk").textContent = (meta.blk * 100).toFixed(1) + "%";
+    const v = $("m-verdict");
+    v.textContent = w.reached ? "REACHED" : "did not reach";
+    v.className = "verdict " + (w.reached ? "ok" : "miss");
+    $("m-goal").textContent = fmt((meta.g || w.goal)[0], 1) + ", " + fmt((meta.g || w.goal)[1], 1);
+    $("m-win").textContent = (w.n * w.cell).toFixed(0) + " m @ " + w.cell.toFixed(2) + " m";
+    $("m-rwin").textContent = (w.nr * w.cell).toFixed(0) + " m @ " + w.cell.toFixed(2) + " m";
+    const cl = $("m-cl"), touching = meta.cl != null && meta.cl < 0;
+    cl.textContent = meta.cl == null ? "no walls" : touching ? "TOUCHING " + fmt(-meta.cl, 2) + " m in" : fmt(meta.cl, 2) + " m";
+    cl.style.color = touching ? "var(--alarm)" : "";
+    const wl = $("m-wall");
+    wl.textContent = !w.wall ? "no walls" : fmt(w.wall.min, 2) + " m · " + w.wall.touching + " frames touching";
+    wl.style.color = w.wall && w.wall.touching ? "var(--alarm)" : "";
+    $("fc").textContent = "frame " + meta.f + " · " + (meta.f * w.dt).toFixed(1) + " s";
+    const L = LAYERS.find((l) => l.k === layer);
+    const rangeKey = { h: "h", v: "v", cv: "cv" }[layer];
+    if (rangeKey) {
+      $("slo").textContent = fmt(meta[rangeKey][0]) + " " + L.unit;
+      $("shi").textContent = fmt(meta[rangeKey][1]) + " " + L.unit;
+    } else if (layer === "blk") {
+      $("slo").textContent = "0 headings"; $("shi").textContent = "all headings";
+    } else if (layer === "route") {
+      $("slo").textContent = "no heading has a route"; $("shi").textContent = "every heading does";
+    } else {
+      $("slo").textContent = "never measured"; $("shi").textContent = "measured";
+    }
+    const lut = RAMPS[layer];
+    const stops = [];
+    for (let i = 0; i <= 10; i++) {
+      const q = Math.round((i / 10) * 255);
+      stops.push("rgb(" + lut[q * 3] + "," + lut[q * 3 + 1] + "," + lut[q * 3 + 2] + ")");
+    }
+    $("ramp").style.background = "linear-gradient(90deg," + stops.join(",") + ")";
+  }
+
+  // --- chrome ---------------------------------------------------------------------------
+  function buildTabs() {
+    const t = $("tabs"); t.innerHTML = "";
+    for (const name of ORDER) {
+      const w = M.worlds[name]; if (!w) continue;
+      const b = document.createElement("button");
+      b.className = "tab"; b.setAttribute("role", "tab"); b.id = "tab-" + name;
+      b.innerHTML = '<span class="dot' + (w.reached ? "" : " miss") + '"></span>' + labelOf(name);
+      b.onclick = () => selectWorld(name);
+      t.appendChild(b);
+    }
+  }
+  function buildLayers() {
+    const h = $("layers"); h.innerHTML = "";
+    for (const L of LAYERS) {
+      const b = document.createElement("button");
+      b.className = "chip"; b.id = "lay-" + L.k; b.textContent = L.name;
+      b.onclick = () => { layer = L.k; syncLayers(); draw(); };
+      h.appendChild(b);
+    }
+    const sp = document.createElement("span"); sp.className = "spacer"; h.appendChild(sp);
+    for (const [key, label] of [["trail", "path"], ["goal", "goal"], ["footprint", "footprint"]]) {
+      const b = document.createElement("button");
+      b.className = "chip"; b.id = "tg-" + key; b.textContent = label;
+      b.onclick = () => { show[key] = !show[key]; syncLayers(); draw(); };
+      h.appendChild(b);
+    }
+    syncLayers();
+  }
+  function syncLayers() {
+    for (const L of LAYERS) $("lay-" + L.k).setAttribute("aria-pressed", String(L.k === layer));
+    for (const key of ["trail", "goal", "footprint"]) $("tg-" + key).setAttribute("aria-pressed", String(show[key]));
+  }
+
+  async function selectWorld(name) {
+    stop();
+    world = name;
+    for (const n of ORDER) {
+      const el = $("tab-" + n);
+      if (el) el.setAttribute("aria-selected", String(n === name));
+    }
+    const w = M.worlds[name];
+    imgs = null;
+    $("fc").textContent = "loading…";
+    const loaded = {};
+    await Promise.all(
+      LAYERS.map((L) => new Promise((res) => {
+        const im = new Image();
+        im.onload = () => { loaded[L.k] = im; res(); };
+        im.onerror = () => res();
+        im.src = name + "_" + L.k + ".png";
+      }))
+    );
+    imgs = loaded;
+    const last = w.frames.length - 1;
+    $("scrub").max = String(last);
+    // open on a frame where the run is underway, not on an empty first map
+    frame = Math.min(last, Math.round(last * 0.62));
+    $("scrub").value = String(frame);
+    $("hdr").textContent = w.frames.length + " recorded frames · " + Object.keys(M.worlds).length + " runs";
+    // read the window sizes off the data rather than restating them: both have changed once
+    $("n-span").textContent = (w.n * w.cell).toFixed(0) + " m";
+    $("n-route").textContent = (w.nr * w.cell).toFixed(0) + " m";
+    draw();
+  }
+
+  function step() {
+    const w = M.worlds[world];
+    frame = (frame + 1) % w.frames.length;
+    $("scrub").value = String(frame);
+    draw();
+  }
+  const simTime = (w, i) => w.frames[i].f * w.dt;
+  function tick(now) {
+    const w = M.worlds[world], last = w.frames.length - 1;
+    const t = clock.t0 + ((now - clock.wall0) / 1000) * speed;
+    let i = frame;
+    while (i < last && simTime(w, i + 1) <= t) i++;
+    if (i !== frame) { frame = i; $("scrub").value = String(frame); draw(); }
+    if (frame === last && t >= simTime(w, last)) {
+      // hold the final frame a moment, then loop from the start
+      if (now - clock.wall0 > ((simTime(w, last) - clock.t0) / speed) * 1000 + 800) restart(now, 0);
+    }
+    timer = requestAnimationFrame(tick);
+  }
+  function restart(now, i) {
+    frame = i; $("scrub").value = String(frame); draw();
+    clock = { t0: simTime(M.worlds[world], i), wall0: now };
+  }
+  function play() {
+    if (timer) return stop();
+    const w = M.worlds[world];
+    restart(performance.now(), frame === w.frames.length - 1 ? 0 : frame);
+    timer = requestAnimationFrame(tick);
+    $("play").textContent = "❚❚";
+  }
+  function stop() { if (timer) cancelAnimationFrame(timer); timer = null; $("play").textContent = "▶"; }
+  function buildSpeeds() {
+    const g = $("speeds"); g.innerHTML = '<span class="lbl">speed</span>';
+    for (const s of SPEEDS) {
+      const b = document.createElement("button");
+      b.className = "chip"; b.id = "sp-" + s; b.textContent = s + "×";
+      b.title = s === 1 ? "real time" : s + "× real time";
+      b.onclick = () => {
+        speed = s;
+        // re-anchor so the change of speed does not jump the playhead
+        if (timer) clock = { t0: simTime(M.worlds[world], frame), wall0: performance.now() };
+        syncSpeeds();
+      };
+      g.appendChild(b);
+    }
+    syncSpeeds();
+  }
+  function syncSpeeds() {
+    for (const s of SPEEDS) $("sp-" + s).setAttribute("aria-pressed", String(s === speed));
+  }
+
+  $("play").onclick = play;
+  $("scrub").oninput = (e) => { stop(); frame = +e.target.value; draw(); };
+  addEventListener("keydown", (e) => {
+    if (!M) return;
+    if (e.key === "ArrowRight") { stop(); step(); }
+    if (e.key === "ArrowLeft") { stop(); frame = Math.max(0, frame - 1); $("scrub").value = String(frame); draw(); }
+    if (e.key === " ") { e.preventDefault(); play(); }
+  });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => draw());
+
+  fetch("manifest.json")
+    .then((r) => r.json())
+    .then((m) => {
+      M = m;
+      if (m.order) ORDER = m.order;
+      if (m.title) { document.querySelector("h1").textContent = m.title; document.title = m.title; }
+      if (m.intro) document.querySelector("p.sub").textContent = m.intro;
+      buildTabs(); buildLayers(); buildSpeeds();
+      const first = ORDER.find((n) => M.worlds[n]);
+      if (first) selectWorld(first);
+    })
+    .catch(() => { $("fc").textContent = "no data"; });
+})();
+</script>

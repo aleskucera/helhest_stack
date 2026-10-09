@@ -27,11 +27,12 @@ DT = 0.1  # control timestep -- the plan horizon step AND the driver frame step 
 # k = 0.62 -- i.e. it behaves like the INDOOR preset, not the outdoor one. Three independent
 # estimates agree (steady arcs 1.52, spins 1.50-1.70, lag fit 1.55) over mean speeds 0.37-3.73
 # rad/s and both directions, and converged Project Chrono independently predicts ~1.6. See
-# CALIBRATION_RESULTS.md. Neither preset is changed by this: 0.6 gives 1.48 and is CONFIRMED, and
-# the outdoor 1.0 was calibrated on grass/dirt, which this is not. What it does mean is that
-# "outdoor" is about the SURFACE, not about being out of doors -- ros/odin/odin_elevation.params
-# .yaml pins k_turn 1.0, which over-predicts turn resistance by 20% on tarmac, so the robot yaws
-# more than the planner expects and overshoots turns.
+# docs/field/CALIBRATION_RESULTS.md. Neither preset is changed by this: 0.6 gives 1.48 and is
+# CONFIRMED, and the outdoor 1.0 was calibrated on grass/dirt, which this is not. What it does
+# mean is that
+# "outdoor" is about the SURFACE, not about being out of doors -- ros/config/odin.params.yaml pins
+# k_turn 1.0, which over-predicts turn resistance by 20% on tarmac, so the robot yaws more than
+# the planner expects and overshoots turns.
 # Pick per environment via k_turn_for(); a single constant can't be right for both. (Forward gain
 # measured ~0.95-0.97 both -> wheel_radius unchanged; /cmd_joints is all-positive-forward, no flip.
 # The 2026-08-10 bags put forward gain at 0.932, consistent with the 0.906-0.925 on record.)
@@ -51,7 +52,7 @@ MOTOR_TAU = 0.19  # [s] first-order actuator lag; blend = dt/tau = 0.53 at DT = 
 # joint fit leaves 0-50 ms of dead time on top. Quantised to whole rollout steps it rounds to 0 at
 # DT = 0.1, so it only bites if dt is shortened.
 COMMAND_DELAY = 0.04
-K_TURN = K_TURN_INDOOR  # module default (used by WarpDriver / demos when not overridden)
+K_TURN = K_TURN_INDOOR  # module default when not overridden
 
 
 def k_turn_for(terrain: str) -> float:

@@ -1,43 +1,31 @@
-"""Timing benchmark for the planning/ stack: the cost-to-go routing solve.
+"""Timing benchmark for the planning/ stack: the cost-to-go routing solve, as the robot runs it.
 
-`CostToGo.compute` (planning/costtogo.py) builds the orientation-aware routing field V(x, y, theta)
-via the internal LatticeValueSolver -- settle-based feasibility + value iteration. It runs per
-window update (less often than the per-tick MPPI replan, which is benchmarked in control.py).
+`CostToGo.compute` (planning/costtogo.py) builds the orientation-aware routing field
+V(x, y, theta): the settle at every pose, read as margins in sigmas, then value iteration. The node
+runs it once per frame on its routing window (`route_m` max-pooled by `plan_lat_coarsen`), with the
+robot's cost-to-go settings from `ros/config/odin.params.yaml` (see `_common`). The first row is
+that point; the sweep varies the heading bin count around it, which the solve scales with.
 
-Cost scales with grid cells x n_theta, so this sweeps terrain coarsening (k -> ~k^3 fewer states)
-and the heading bin count n_theta. CUDA-only (graph capture); skips cleanly without a GPU.
+Compare with the node's `plan:ctg` stage (`profile_stages`, over a bag replay), which also carries
+the belief crops feeding it. CUDA-only (graph capture); skips cleanly without a GPU.
 
 Run from the repo root:  python -m benchmarks.planning [--world slalom]
 """
+
+from __future__ import annotations
 
 import argparse
 
 import warp as wp
 from helhest import worlds as W
 
-from ._common import build_routing
-from ._common import build_scene
+from ._common import build_costtogo
+from ._common import robot_scene
+from ._common import route_inputs
 from ._common import time_fn
 
 
-def _header():
-    print(f"    {'coarsen':>7} {'n_theta':>7} {'grid':>10} {'states':>9} {'solve_ms':>9}")
-
-
-def _row(coarsen, n_theta, grid, t):
-    states = grid.cells_x * grid.cells_y * n_theta
-    print(
-        f"    {coarsen:>7} {n_theta:>7} {f'{grid.cells_y}x{grid.cells_x}':>10} {states:>9} {t*1e3:>9.2f}"
-    )
-
-
-def _solve_ms(scene, n_theta, k, goal, device, reps):
-    clat, _, grid, Hc = build_routing(scene, n_theta, k, goal, device)
-    t = time_fn(lambda: clat.compute(Hc, (float(goal[0]), float(goal[1]))), reps, device)
-    return grid, t
-
-
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--world", default="slalom", choices=list(W.WORLDS))
     args = ap.parse_args()
@@ -47,22 +35,22 @@ def main():
         print("CUDA not available -- the cost-to-go solve is GPU-only (graph capture). Skipping.")
         return
     device = "cuda"
-    scene, _, _, goal = build_scene(args.world)
-    ntheta0, reps = 24, 15
-
-    print(f"\n=== cost-to-go  device={device}  world={args.world}  grid={scene.ny}x{scene.nx} ===")
-
-    print(f"  coarsen sweep (n_theta={ntheta0}):")
-    _header()
-    for k in [1, 2, 4]:
-        grid, t = _solve_ms(scene, ntheta0, k, goal, device, reps)
-        _row(k, ntheta0, grid, t)
-
-    print("  n_theta sweep (coarsen=1):")
-    _header()
-    for nt in [8, 16, 24, 32]:
-        grid, t = _solve_ms(scene, nt, 1, goal, device, reps)
-        _row(1, nt, grid, t)
+    rs = robot_scene(args.world)
+    inputs = route_inputs(rs, device)
+    reps = 15
+    grid = rs.route_grid
+    print(
+        f"\n=== cost-to-go  world={args.world}  routing window {grid.cells_y}x{grid.cells_x} "
+        f"at {grid.cell_size:.2f} m (the robot's) ==="
+    )
+    print(f"    {'n_theta':>7} {'states':>9} {'solve_ms':>9}")
+    robot_n_theta = rs.cfg.n_theta
+    for n_theta in sorted({robot_n_theta, 16, 32}):
+        ctg = build_costtogo(rs, device, n_theta=n_theta)
+        t = time_fn(lambda: ctg.compute(goal_xy=rs.goal_route, **inputs), reps, device)
+        mark = "  <- robot" if n_theta == robot_n_theta else ""
+        states = grid.cells_x * grid.cells_y * n_theta
+        print(f"    {n_theta:>7} {states:>9} {t * 1e3:>9.2f}{mark}")
 
 
 if __name__ == "__main__":

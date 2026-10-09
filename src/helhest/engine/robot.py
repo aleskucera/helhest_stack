@@ -109,11 +109,34 @@ class RobotParams:  # host-side robot knobs — what you nudge
     # struct, so the cost-to-go feasibility AND the MPPI cost kernels read one shared source. ---
     # tightest forward arc the planner assumes (skid-steer maneuverability)
     min_turn_radius: float = 0.5
-    # [rad] lateral tip-over limit (symmetric; narrow track -> strict)
-    max_roll: float = np.radians(15.0)
-    max_pitch_up: float = np.radians(25.0)  # [rad] climbing limit (nose UP, pitch < 0)
-    # [rad] descending limit (nose DOWN, pitch > 0; front-heavy)
-    max_pitch_down: float = np.radians(15.0)
+    # The PLANNING envelope: what the planner will commit to, deliberately inside what the robot
+    # survives. Measured in `studies/envelope/` by driving onto a curved ramp until it goes over,
+    # rather than by standing it on a slope (it slides) or dropping it onto one (it tumbles):
+    #
+    #   axis        static geometry   simulator                        set here
+    #   roll                  34.6d   TIPPED at 48.2 / 48.4 deg          30 deg
+    #   nose-down             29.5d   held to 33.3 (mu 3.0), 25.4 (0.8)  25 deg
+    #   nose-up               57.6d   held to 36.1, ran out of ramp      45 deg
+    #
+    # The margin lives HERE and nowhere else. It used to be split between these numbers and
+    # `sigma_floor_m` in the margin test, which subtracted another 4.4 deg of roll on top -- two
+    # margins for one uncertainty, and the measured cost was that `ridge` and `bumpy` became
+    # unreachable the moment the veto was enforced. One place, auditable against the row above.
+    #
+    # Below the simulator on purpose: its CoM sits at AXLE height because every entry in the mass
+    # table has z = 0, and every limit scales as atan(lever / h_com), so a real chassis sitting
+    # higher has smaller limits than these. Note also that the measured roll tip is 14 deg ABOVE
+    # the static geometry -- driving into a wedge, the climbing wheel carries load a static
+    # support triangle does not -- so geometry is the conservative source here, not the sim.
+    max_roll: float = np.radians(30.0)
+    # nose-up is the one EXTRAPOLATED value: the ramp ran out at 36.1 deg with the robot still
+    # holding, so 45 rests on the geometric 57.6 rather than on a measurement. It is the benign
+    # axis (0.552 m of lever to the rear wheel against 0.198 m forward), and the geometry erred
+    # conservative on the axis we did measure, but it is not verified.
+    max_pitch_up: float = np.radians(45.0)  # [rad] climbing limit (nose UP, pitch < 0)
+    # [rad] descending limit (nose DOWN, pitch > 0; front-heavy). At mu = 0.8 traction gives out
+    # at 25.4 deg reversing up a ramp, so this is also roughly where the ground stops you anyway.
+    max_pitch_down: float = np.radians(25.0)
     # min belly-terrain gap [m]; below it the pose is infeasible (high-centers)
     clear_margin: float = 0.05
     # settle residual above which the pose is infeasible (can't find a resting pose)

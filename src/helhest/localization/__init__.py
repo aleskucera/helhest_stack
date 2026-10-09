@@ -1,5 +1,1 @@
-from .localizer import Localizer
-from .localizer import LocalizerConfig
-from .localizer import RegistrationOutcome
-
-__all__ = ["Localizer", "LocalizerConfig", "RegistrationOutcome"]
+"""Pose helpers (4x4 transforms, quaternions, crops) the node uses around Odin's odometry."""

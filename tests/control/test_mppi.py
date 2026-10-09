@@ -568,7 +568,9 @@ def selftest_robust_reduce(device="cuda"):
     )
     exp = Jsafe.reshape(n_mu, n_cand).max(0) + Jrest.reshape(n_mu, n_cand).mean(0)
     err = np.abs(Jc.numpy() - exp).max()
-    print(f"robust reduce (worst safe + mean rest)  max|err|={err:.2e}  {'OK' if err < 1e-5 else 'REVIEW'}")
+    print(
+        f"robust reduce (worst safe + mean rest)  max|err|={err:.2e}  {'OK' if err < 1e-5 else 'REVIEW'}"
+    )
 
 
 def selftest_robust_margin(device="cuda"):
@@ -776,52 +778,40 @@ def selftest_spin_kept(device: str = "cuda", T: int = 6, w: float = 2.0) -> None
     jmin = wp.array([1.0], dtype=float, device=device)
     tau = wp.array([10.0], dtype=float, device=device)  # every candidate is an elite
     wlo = wp.zeros(1, dtype=float, device=device)
-    dirs, turns, spins = (wp.zeros(B, dtype=float, device=device) for _ in range(3))
-    best_dir, best_turn, best_spin = (wp.zeros(1, dtype=float, device=device) for _ in range(3))
+    # this branch keys a spin as its own DIRECTION (0 = goes nowhere), not as a separate spin flag
+    dirs, turns = (wp.zeros(B, dtype=float, device=device) for _ in range(2))
+    best_dir, best_turn = (wp.zeros(1, dtype=float, device=device) for _ in range(2))
     Ud = wp.zeros((T, 2), dtype=float, device=device)
     wp.launch(
         mg._cand_dir_kernel,
         B,
-        inputs=[target_wheel_omega, T, 0.1, wlo],
-        outputs=[dirs, turns, spins],
+        inputs=[target_wheel_omega, T, 0.1, 0.25 * T],
+        outputs=[dirs, turns],
         device=device,
     )
     wp.launch(
         mg._best_dir_kernel,
         1,
-        inputs=[Jd, jmin, dirs, turns, spins, B],
-        outputs=[best_dir, best_turn, best_spin],
+        inputs=[Jd, jmin, dirs, turns, B],
+        outputs=[best_dir, best_turn],
         device=device,
     )
     wp.launch(
         mg._elite_u_kernel,
         (T, 2),
-        inputs=[
-            Jd,
-            tau,
-            dirs,
-            turns,
-            spins,
-            best_dir,
-            best_turn,
-            best_spin,
-            target_wheel_omega,
-            wlo,
-            _WMAX,
-            B,
-            Ud,
-        ],
+        inputs=[Jd, tau, dirs, turns, best_dir, best_turn, target_wheel_omega, wlo, _WMAX, B, Ud],
         device=device,
     )
     U = Ud.numpy()
-    kept = np.allclose(U, spin * 1.25) and np.array_equal(spins.numpy(), [1.0, 1.0, 0.0, 0.0])
+    kept = np.allclose(U, spin * 1.25) and np.array_equal(dirs.numpy(), [0.0, 0.0, 1.0, 1.0])
     # the sampler: candidate 0 is the nominal unchanged, spin included (n_cand 1, all bands empty)
     out = wp.zeros((T, 1), dtype=wp.vec3, device=device)
     seed = wp.array([3], dtype=wp.int32, device=device)
+    side = wp.zeros(1, dtype=float, device=device)
     wp.launch(
         mg._sample_target_wheel_omega_kernel,
         (T, 1),
-        inputs=[Ud, 0.3, 0.5, wlo, _WMAX, 1, 0, 0, 0, 2.0, 0, 3, seed],
+        inputs=[Ud, 0.3, 0.5, wlo, _WMAX, 1, 0, 0, 0, 2.0, 0.0, 0, 3, seed, side],
         outputs=[out],
         device=device,
     )

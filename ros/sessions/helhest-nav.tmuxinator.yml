@@ -1,0 +1,74 @@
+# helhest-nav (jetson half): navigation_node on helhest-jr-jetson, over the Odin run by cras_odin_driver.
+# The NUC runs the other half, its own helhest-nav session (ros/sessions/helhest-nav-nuc.tmuxinator.yml):
+# the Zenoh router the motor controller joins through, the robot's URDF, the Fixposition GNSS and the
+# Robotour mission stack. Start that one FIRST.
+#
+# Goals: RViz 2D Goal Pose on /goal_pose (fixed frame odom_odin), or a GPX / QR mission through the
+# NUC's commander bridge, which sends them on the same topic, already in odom_odin.
+#
+# One static transform of our own, base_link -> odin1_base_link (0.1, 0, 0.1): the robot's URDF has
+# no Odin frame (Robotour's jetson session publishes the same one). The gyro's frame `imu` comes
+# from the URDF on the NUC (base_link -> imu); an imu_link -> imu here would give it a second
+# parent. Without the NUC session `imu` has no transform and the gyro is dropped.
+#
+# The code runs from its own checkout, ~/workspaces/helhest_stack_nav, kept on this branch: the
+# checkout in helhest_ws/src/helhest_stack is shared with other work and changes branch under us
+# (2026-09-30: switched to main, which has no navigation_node). Outside helhest_ws/src so colcon
+# does not see a second helhest_stack_ros; the nav pane puts this checkout first on PYTHONPATH.
+#
+#   git clone -b study/tvf-migration <repo> ~/workspaces/helhest_stack_nav
+#   cd ~/workspaces/helhest_stack_nav && uv venv --system-site-packages && uv pip install -e .
+#   ln -sf ~/workspaces/helhest_stack_nav/ros/sessions/helhest-nav.tmuxinator.yml \
+#          ~/.tmuxinator/helhest-nav.yml
+#   tmuxinator start helhest-nav
+#
+# elevation-belief is a private git pin the jetson cannot fetch: install it from the local copy,
+# `uv pip install ~/workspaces/deps/elevation_belief-8177bbd`, then `uv pip install --no-deps -e .`.
+#
+# DRIVING IS ON: the robot moves as soon as a goal arrives. To plan only, add
+# -p plan_actuate:=false to the nav pane.
+
+name: helhest-nav
+root: /home/robot/workspaces/helhest_ws
+startup_window: nav
+pre_window: source ~/.rosrc; source /home/robot/workspaces/helhest_ws/install/setup.bash; source /home/robot/workspaces/odin_ws/install/setup.bash
+
+windows:
+  - zenoh:
+      panes:
+        - |
+          export ZENOH_CONFIG_OVERRIDE="$ZENOH_CONFIG_OVERRIDE_ROUTER"
+          ros2 run rmw_zenoh_cpp rmw_zenohd
+  - odin:
+      panes:
+        - |
+          sleep 3
+          ros2 launch cras_odin_driver odin1_ros2.launch map_mode:=0
+  - tf:
+      panes:
+        - ros2 run tf2_ros static_transform_publisher --x 0.1 --y 0.0 --z 0.1 --roll 0 --pitch 0 --yaw 0 --frame-id base_link --child-frame-id odin1_base_link
+  - qr:
+      panes:
+        - |
+          sleep 3
+          ros2 launch robot_mission_planner qr_goal.launch
+  - nav:
+      panes:
+        - |
+          sleep 12
+          cd /home/robot/workspaces/helhest_stack_nav
+          source ros/tools/dev-shell.sh
+          export PYTHONPATH="$PWD/ros/helhest_stack_ros:$PYTHONPATH"
+          python3 -m helhest_stack_ros.navigation_node --ros-args \
+            --params-file ros/config/odin.params.yaml \
+            --params-file ros/config/odin_cras.params.yaml
+  - view:
+      layout: even-horizontal
+      panes:
+        - |
+          sleep 14; ros2 topic echo /crl_commander/state
+        - |
+          sleep 14; ros2 topic echo /goal_pose --field pose.position
+  - shell:
+      panes:
+        - cd /home/robot/workspaces/helhest_stack_nav

@@ -1,6 +1,6 @@
 """Calibrate /joint_states.effort to Nm at the wheel, and bound the drivetrain torque envelope.
 
-Run:  python scripts/wheel_torque_from_bags.py bags/out_experiment_goal_unreachable0 [more bags]
+Run:  python scripts/wheel_torque_from_bags.py bags/motors0 [more bags]
 
 The LLC publishes an `effort` field on /joint_states in an undocumented raw unit. Two
 independent estimators pin it, both from Newton's law along the body x axis:
@@ -9,8 +9,10 @@ independent estimators pin it, both from Newton's law along the body x axis:
 
   IMU  -- a_x is the accelerometer's SPECIFIC force, which already contains the gravity
           component, so the fit is valid on grades as well as on the flat.
-  ODOM -- a_x is d/dt of the wheel-kinematic forward speed. No accelerometer involved, so
-          agreement between the two is a real cross-check rather than a restatement.
+  ODOM -- a_x is d/dt of the odometry's forward speed: the wheel-kinematic /odom_2d on older
+          bags, Odin's SLAM /odin1/odometry on current ones. Either way it is not the
+          accelerometer, so agreement between the two is a real cross-check rather than a
+          restatement.
 
 Only straight-line, moving frames are used: turning adds skid scrub and a lever arm that this
 one-axis balance does not model.
@@ -32,6 +34,10 @@ from rosbags.highlevel import AnyReader
 JOINTS = ["left_wheel_j", "right_wheel_j", "rear_wheel_j"]
 MASS = 106.2  # [kg] robot total (model.py / RobotParams)
 WHEEL_RADIUS = 0.35  # [m]
+# Odin bags carry /odin1/imu (verified on motors0 and in_speed_odin0: specific force in m/s^2 with
+# +x forward, yaw rate on +z) and /odin1/odometry; older bags /imu/data and /odom_2d.
+IMU_TOPICS = ("/imu/data", "/odin1/imu")
+ODOM_TOPICS = ("/odom_2d", "/odin1/odometry")
 STRAIGHT_YAW_RATE = 0.15  # [rad/s] above this the frame is turning, so it is dropped
 MOVING_OMEGA = 0.3  # [rad/s] wheel speed below which the frame is not driving
 
@@ -40,7 +46,7 @@ def _load(bag: Path) -> dict[str, np.ndarray]:
     """Pull effort/velocity, IMU and odometry out of one bag, as parallel arrays."""
     out: dict[str, list] = {k: [] for k in ("t", "eff", "vel", "imu_t", "ax", "wz", "od_t", "od_v")}
     with AnyReader([bag]) as reader:
-        topics = {"/joint_states", "/imu/data", "/odom_2d"}
+        topics = {"/joint_states", *IMU_TOPICS, *ODOM_TOPICS}
         conns = [c for c in reader.connections if c.topic in topics]
         order = None
         for conn, stamp, raw in reader.messages(connections=conns):
@@ -52,11 +58,11 @@ def _load(bag: Path) -> dict[str, np.ndarray]:
                 out["t"].append(t)
                 out["eff"].append([msg.effort[i] for i in order])
                 out["vel"].append([msg.velocity[i] for i in order])
-            elif conn.topic == "/imu/data":
+            elif conn.topic in IMU_TOPICS:
                 out["imu_t"].append(t)
                 out["ax"].append(msg.linear_acceleration.x)
                 out["wz"].append(msg.angular_velocity.z)
-            elif conn.topic == "/odom_2d":
+            elif conn.topic in ODOM_TOPICS:
                 out["od_t"].append(t)
                 out["od_v"].append(msg.twist.twist.linear.x)
     return {k: np.asarray(v, float) for k, v in out.items()}
@@ -83,7 +89,7 @@ def _rolling_mean(x: np.ndarray, window: int) -> np.ndarray:
 def analyse(bag: Path) -> None:
     data = _load(bag)
     if data["t"].size == 0 or data["imu_t"].size == 0:
-        print(f"{bag.name}: no /joint_states effort or no /imu/data")
+        print(f"{bag.name}: no /joint_states effort or no IMU")
         return
     finite = np.isfinite(data["eff"]).all(1)
     t, eff, vel = data["t"][finite], data["eff"][finite], data["vel"][finite]

@@ -13,6 +13,7 @@ Kernels (all suffixed _kernel):
   _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
 """
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -24,6 +25,9 @@ from ..engine.simulator import ForwardSimulator
 from ..engine.terrain import _locate
 from ..engine.terrain import Grid
 from ..engine.terrain import sample_field
+from ..planning.clearance import allowed_speed
+from ..planning.clearance import clearance_map_kernel
+from ..planning.clearance import ClearanceParams
 from ..profiling import StageProfiler
 
 
@@ -61,6 +65,11 @@ class SamplingConfig:
     # Minimum |wheel speed| for a spin candidate. MEASURED on the robot 2026-08-10: below about
     # 2 rad/s it will not break loose on the spot at all, so a smaller command just strains.
     spin_min: float = 2.0
+    # Ceiling on a spin candidate's wheel speed [rad/s]; 0 = wmax. The fastest spin reaches the new
+    # heading soonest, so the elite sits near the top of the band, and the output chain then boosts
+    # the differential (plan_turn_boost) -- at wmax 6 the robot spun at the 7.5 rad/s clamp. With
+    # wmin >= 0 only the spin band can reverse a wheel, so this caps every spin MPPI can choose.
+    spin_max: float = 0.0
     # fraction drawn from the PIVOT prior (wl == -wr, turn in place). Only useful with reverse
     # enabled (effective wmin < 0); with wmin >= 0 the clamp degrades these to sharp arcs. 0 = off.
     pivot_frac: float = 0.0
@@ -74,6 +83,22 @@ class SamplingConfig:
     # elite mean only mixes candidates on the best candidate's side (obstacle dead ahead ->
     # commit early instead of averaging left- and right-passers into a straight-at-it mean).
     turn_mode_th: float = 0.5
+    # spin-mode deadband [rad/s per step] on the MEAN wheel speed. A spin has wl = -wr, so its
+    # mean speed is exactly zero -- and a two-way direction key (`s < 0 -> reverse else forward`)
+    # therefore files every spin under FORWARD, next to the forward arcs. The elite mean then
+    # averages a spin with an arc and commits neither: a shallow turn, with the spin's magnitude
+    # pulled below `spin_min`, which is the one speed floor that exists because the wheels will
+    # not break loose under it. Three-way -- reverse / SPIN / forward -- keeps them apart.
+    spin_mode_th: float = 0.25
+    # The output chain's acceleration and jerk limits (control.command.condition_command), so the
+    # rollouts drive the command the wheels will actually get rather than the raw sample: each
+    # candidate's targets pass through the same jerk-limited tracker, starting from the command
+    # last published (MppiGpu.set_command_state). The sample stays the decision -- the elite
+    # averages raw targets and the node's output tracker does the smoothing -- so nothing is
+    # filtered twice. max_accel 0 = off: rollouts take the samples as they are.
+    max_accel: float = 0.0  # [rad/s^2]
+    max_decel: float = 0.0  # [rad/s^2] toward rest; 0 = max_accel
+    max_jerk: float = 0.0  # [rad/s^3]; 0 = a plain rate limit
 
 
 @wp.struct
@@ -95,6 +120,12 @@ class CostWeights:
     # penalize the turn differential (wr - wl)^2 -> a gradient toward STRAIGHT where the goal cost is
     # flat w.r.t. heading (the free-heading goal). Distinct from effort (which penalizes total speed).
     turn: float
+    turn_spin_th: float
+    traction: float  # CostParams.traction
+    traction_v0: float
+    traction_v_sat: float
+    lat_accel: float  # CostParams.lat_accel
+    lat_accel_max: float
     # friction-saturation certificate: penalize demand/grip past 1 (dimensionless overshoot).
     # This is what slows the robot where grip is short: demand grows with v*wz and accel.
     saturation: float
@@ -102,8 +133,29 @@ class CostWeights:
     tip: float
     # penalize occupying UNMEASURED map cells while reversing (no sensor coverage backward).
     unknown: float
+    # the cost-to-go's own per-pose VETO, sampled at the rollout pose and priced independently of
+    # V. The envelope terms above are computed from THIS rollout, whose settle is shallow and
+    # loose for speed; the cost-to-go's is a full static settle and is the more accurate of the
+    # two where they disagree. Measured on `bumpy`: at poses the robot actually held, the static
+    # settle predicted 15.3-17.8 deg of nose-down against a real 16.6-24.5, while 85% of sampled
+    # rollouts read clean. Independent of V because a vetoed pose is exactly a pose where V is
+    # capped, and a capped V arms `explore_fallback`, which replaces the lattice's verdict with
+    # straight-line distance to the goal -- so routing the veto through V alone deletes it in the
+    # one situation it is most needed. 71% of the frames where the robot left its envelope had V
+    # capped at its own cell, against 21% of the frames where it did not.
+    veto: float
+    commit: float  # first-target charge for leaving last frame's plan (CostParams.commit)
     # mild per-meter preference against reverse motion (forward keeps the sensor looking ahead).
     reverse: float
+    # TIME LOST TO THE CLEARANCE LAW (planning/clearance.py), built from CostParams.clearance
+    clear_time: float  # weight; 1 = a second lost costs exactly what it costs in goal terms
+    keep_away: float  # CostParams.keep_away
+    keep_away_m: float
+    clear_t_react: float
+    clear_v_min: float
+    clear_c0: float  # [m] the law's fixed margin
+    clear_v_cruise: float  # [m/s] the route's time unit: V is metres at this speed
+    clear_turn_ratio: float  # t_turn / t_react: how much more the tail's swing counts than driving
     # (alpha - 1) -> grip recovery: total_grip = (alpha-1)*m*g/k_turn. 0 disables saturation.
     inv_k_turn: float
     dt: float  # rollout timestep [s] for the accel term of the saturation demand
@@ -129,6 +181,48 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # penalize turning (wr - wl)^2 -> prefer straight when the goal cost doesn't care about heading;
     # small enough that a real need to turn (obstacle/offset goal) still wins. 0 = off.
     turn: float = 0.0
+    # [rad/s] mean wheel speed below which `turn` is NOT charged. The turn penalty exists to prefer
+    # a straight line over a curved one WHILE MAKING PROGRESS, and it is quadratic in the wheel
+    # differential -- so a spin, pure differential with no progress, is the one manoeuvre it
+    # annihilates. Measured at the deployed turn weight of 0.2: a spin at 2.86 rad/s carries
+    # diff^2 = 32.7 per step, 818 over the horizon, 164 of cost -- more than the ENTIRE cost of a
+    # good candidate (66-137). The spin band fell from rank 0 to 588 of 1365 and the planner
+    # committed (0, 0), because standing still genuinely did beat turning. A spin has no forward
+    # progress to trade, so charging it per-differential compares it against the wrong baseline.
+    # NOTE 0 does NOT restore the old behaviour: the test is |mean| > th, and an exact spin has
+    # mean EXACTLY zero, so it escapes the charge at any th >= 0. To charge everything again the
+    # condition has to go, not the threshold. What th does control is how much SLOW-but-moving
+    # manoeuvring also escapes, which is why it is small.
+    turn_spin_th: float = 0.25
+    # TRACTION: yaw rate is what loads this drivetrain, and forward speed makes the same turn
+    # easier. Four field bags (2026-09-29, ~45k samples), median front-wheel effort (ceiling ~70)
+    # [share at the ceiling]: at 0.6-2 rad/s of yaw, 56 [25%] standing and 57 [29%] crawling but
+    # 44 [3%] above 1 m/s; at 0.3-0.6 rad/s, 54 [16%] standing, 43 [0%] above 1 m/s. So each step
+    # pays traction * wz^2 / (|v| + traction_v0): a 180 deg spin at 0.95 rad/s costs ~8x a
+    # 180 deg U-turn arc at 1 m/s and 0.5 rad/s, and spins still win where no arc fits. Not a
+    # charge on spinning as such (see `turn` on why that froze the robot): standing still costs
+    # nothing here too, so the weight must stay below what the goal pays for heading. 0 = off.
+    traction: float = 0.0
+    traction_v0: float = 0.3  # [m/s] keeps the charge finite at standstill
+    # [m/s] speed above which turning gets no cheaper. Unbounded, the charge rewarded cornering
+    # fast: in the `tree` bag (2026-09-30) 46% of plans turned harder than the output's turn
+    # brake allows, at up to 2 m/s. The effort data shows no further gain above ~1 m/s.
+    traction_v_sat: float = 1.0
+    # LATERAL ACCELERATION: charge each step lat_accel * max(0, |v * wz| - lat_accel_max)^2, so
+    # MPPI plans only corners the output keeps. The output's turn brake (condition_command) scales
+    # speed and yaw down together past plan_turn_brake_a_max, and MPPI did not know: in `tree`
+    # 46% of plans exceeded it (p90 1.07 m/s^2 against 0.6). lat_accel_max is that same limit.
+    # 0 = off.
+    lat_accel: float = 0.0
+    lat_accel_max: float = 0.0  # [m/s^2]
+    # KEEP AWAY: each step pays keep_away * max(0, keep_away_m - clearance)^2, clearance being the
+    # footprint's distance to the nearest wall face. Distance as something MPPI trades against
+    # progress, not a speed limit: a wide berth where there is room, and a narrow gap still
+    # taken when it is the only way. With the governor's time pricing off, the robot hugged
+    # obstacles in drive_sim and touched them in 4 of 6 pocket/slalom runs (2026-09-30).
+    # 0 = off.
+    keep_away: float = 0.0
+    keep_away_m: float = 0.6  # [m]
     # friction-saturation certificate weight (per unit demand/grip overshoot, early-weighted sum).
     # ~300 makes a sustained 20% overshoot compete with real routing differences and a 2x overshoot
     # dominate; the certificate is exact at tan(pitch) = mu for station-holding (see test).
@@ -139,6 +233,30 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # unmeasured-cell occupancy while REVERSING (forward motion into unknown stays allowed -- the
     # sensor sees it before arrival; backward there is no sensor, so unknown must hard-lose).
     unknown: float = 1e4
+    # The cost-to-go's veto, sampled per rollout pose. OFF by default, and the reason is measured
+    # rather than cautious: at 1e5 across the six stress worlds it is free on the four flat ones
+    # (gap 182 -> 181 frames, slalom 423 -> 411, pillars 248 -> 248, pocket 572 -> 623) and breaks
+    # both worlds with relief outright (ridge and bumpy, reached -> not reached). On bumpy it
+    # stalled the robot at 8.0 m of 14, which shows up as MORE frames in violation, not fewer --
+    # 56% against 4.7% -- because it parks in one marginal pose rather than driving through
+    # several.
+    #
+    # The mechanism is sound; the veto set was not ready to be authoritative. Of 17 vetoed poses
+    # the robot actually held on bumpy, the real attitude was outside the envelope in 6. The rest
+    # are z_veto: with a 2 cm map sd it demands 2.22 deg of roll and 1.87 deg of pitch per sigma,
+    # so z_veto = 2 turns a 15 deg envelope into an 11 deg one, which is most of the passable set
+    # on terrain that genuinely sits at 10-15 deg. That was a veto on EVERY cause. The node and
+    # drive_sim now feed it the cost-to-go's HAZARD field only (`CostToGo.hazard`: contact, no tilt)
+    # at `plan_wall_veto`, which is what makes it safe to enforce hard.
+    veto: float = 0.0
+    # COMMITMENT: charge a candidate's FIRST target for leaving the plan committed last frame,
+    # commit * ((wL - wL_prev)^2 + (wR - wR_prev)^2). Candidates that differ only in noise cost
+    # nearly the same, so without it the elite re-picks faster/slower, left/right every frame and
+    # the command reverses its acceleration 2-3 times a second (`turns` bag, 2026-09-29). The
+    # plan changes when the gain beats the charge. Raw targets, not the rate-limited command: the
+    # executed first step is already tied to the current one by the tracker; the choice is not.
+    # 0 = off.
+    commit: float = 0.0
     # per-meter shaping against reverse -- sized so reverse is an ESCAPE, not a route. A pivot's
     # V-surcharge is small (the router blends turning into arcs) and a pi pivot eats most of the
     # horizon, so myopic backward progress outbids pivot-then-forward at low weights: measured, at
@@ -146,6 +264,14 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # routes. ~75 makes any forward-capable route win while a genuinely stuck robot (forward
     # progress impossible, V flat ahead) still backs out over remembered ground.
     reverse: float = 75.0
+    # The clearance law (planning/clearance.py). Each rollout step whose fastest body point is
+    # faster than the law allows at its footprint clearance is charged the seconds the governor
+    # would add, priced in goal units: a second is worth (goal_terminal + goal_running) * 2 * V *
+    # v_cruise, the goal cost of the route distance it would have covered at that step's V, so the
+    # trade does not depend on how far away the goal is. MPPI then prefers a manoeuvre with room
+    # to one the governor would have to brake. None = off; on, update_clearance() must run each
+    # frame or the wall map reads empty.
+    clearance: ClearanceParams | None = None
 
     def build(self) -> CostWeights:
         cw = CostWeights()
@@ -158,13 +284,60 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.smoothness = self.smoothness
         cw.infeasible = self.infeasible
         cw.turn = self.turn
+        cw.turn_spin_th = self.turn_spin_th
+        cw.traction = self.traction
+        cw.traction_v0 = self.traction_v0
+        cw.traction_v_sat = self.traction_v_sat
+        cw.lat_accel = self.lat_accel
+        cw.lat_accel_max = self.lat_accel_max
+        cw.keep_away = self.keep_away
+        cw.keep_away_m = self.keep_away_m
         cw.saturation = self.saturation
         cw.tip = self.tip
         cw.unknown = self.unknown
+        cw.veto = self.veto
+        cw.commit = self.commit
         cw.reverse = self.reverse
+        c = self.clearance if self.clearance is not None else ClearanceParams()
+        cw.clear_time = c.mppi_weight if self.clearance is not None else 0.0
+        cw.clear_t_react = c.t_react
+        cw.clear_v_min = c.v_min
+        cw.clear_c0 = c.c0
+        cw.clear_v_cruise = c.v_cruise
+        cw.clear_turn_ratio = c.turn_ratio
         cw.inv_k_turn = 0.0  # armed by MppiGpu from the sim's solver (0 = saturation off)
         cw.dt = 0.1  # overwritten by MppiGpu from the sim's solver
         return cw
+
+
+@wp.func
+def _footprint_clearance(
+    clear_field: wp.array2d(dtype=float), grid: Grid, robot: Robot, pose: wp.vec3
+) -> float:
+    """[m] the footprint rectangle's clearance to the nearest wall face: the per-cell wall-distance
+    map (MppiGpu.update_clearance) read at 38 points around the perimeter."""
+    tail = -robot.wheel_pos[2][0] + robot.wheel_radius
+    hw = robot.half_track + wp.where(
+        robot.wheel_half_width > 0.0, robot.wheel_half_width, robot.wheel_radius
+    )
+    ca = wp.cos(pose[2])
+    sa = wp.sin(pose[2])
+    cmin = float(1.0e3)
+    for q in range(12):  # the long sides
+        u = -tail + (robot.wheel_radius + tail) * float(q) / 11.0
+        for side in range(2):
+            w = wp.where(side == 0, -hw, hw)
+            x = pose[0] + ca * u - sa * w
+            y = pose[1] + sa * u + ca * w
+            cmin = wp.min(cmin, sample_field(clear_field, grid, x, y))
+    for q in range(7):  # the ends
+        w = -hw + 2.0 * hw * float(q) / 6.0
+        for end in range(2):
+            u = wp.where(end == 0, -tail, robot.wheel_radius)
+            x = pose[0] + ca * u - sa * w
+            y = pose[1] + sa * u + ca * w
+            cmin = wp.min(cmin, sample_field(clear_field, grid, x, y))
+    return cmin
 
 
 @wp.func
@@ -245,9 +418,11 @@ def _sample_target_wheel_omega_kernel(
     n_straight: int,
     n_spin: int,
     spin_min: float,
+    spin_max: float,  # 0 = wmax
     n_pivot: int,
     n_knots: int,
     seed: wp.array(dtype=int),
+    spin_side: wp.array(dtype=float),  # [1] +1 left / -1 right: spin only that way; 0 = either
     target_wheel_omega: wp.array2d(dtype=wp.vec3),
 ):
     # Candidate index c keys ALL randomness, so the n_mu replicas of a candidate get identical
@@ -285,9 +460,14 @@ def _sample_target_wheel_omega_kernel(
         # held across the horizon, because a spin that changes its mind mid-rollout is not a spin.
         # Magnitude is floored at spin_min: the real robot will not break loose below ~2 rad/s.
         u_spin = wp.randf(wp.rand_init(seed[0] + 5150, b))
-        mag = spin_min + (wmax - spin_min) * u_spin
+        top = wp.where(spin_max > 0.0, wp.min(spin_max, wmax), wmax)
+        mag = spin_min + (wp.max(top, spin_min) - spin_min) * u_spin
         if wp.randf(wp.rand_init(seed[0] + 6271, b)) < 0.5:
             mag = -mag
+        # A spin under way keeps its direction (MppiGpu.set_spin_side): with the goal behind,
+        # left and right cost the same and the elite alternated every ~1.6 s on the robot.
+        if spin_side[0] != 0.0:
+            mag = wp.abs(mag) * spin_side[0]
         wheel_l = -mag
         wheel_r = mag
     elif b < n_wide + n_spin + n_straight:
@@ -339,7 +519,66 @@ def _sample_target_wheel_omega_kernel(
         # keeps a winning spin), so candidate 0 and the band refining around it keep it too
         if wp.min(U[t, 0], U[t, 1]) < wmin:
             lo = -wmax
-    target_wheel_omega[t, r] = wp.vec3(wp.clamp(wheel_l, lo, wmax), wp.clamp(wheel_r, lo, wmax), 0.0)
+    target_wheel_omega[t, r] = wp.vec3(
+        wp.clamp(wheel_l, lo, wmax), wp.clamp(wheel_r, lo, wmax), 0.0
+    )
+
+
+@wp.func
+def _jerk_limited_step(
+    target: float,
+    prev: float,
+    accel: float,
+    max_accel: float,
+    max_decel: float,
+    max_jerk: float,
+    dt: float,
+):
+    """control.command.jerk_limited_step for one joint; returns (command, its acceleration).
+    Keep the two identical: this is how the rollouts know what the output tracker will send."""
+    error = target - prev
+    lim = max_decel
+    if wp.abs(target) >= wp.abs(prev):
+        lim = max_accel
+    if max_jerk <= 0.0:
+        step = wp.clamp(error, -lim * dt, lim * dt)
+        return wp.vec2(prev + step, step / dt)
+    reach = max_jerk * (wp.sqrt(0.25 * dt * dt + 2.0 * wp.abs(error) / max_jerk) - 0.5 * dt)
+    wanted = wp.sign(error) * wp.min(lim, reach)
+    if error == 0.0:
+        wanted = 0.0
+    new_accel = wp.clamp(wanted, accel - max_jerk * dt, accel + max_jerk * dt)
+    land = error / dt
+    if wp.abs(land - accel) <= max_jerk * dt and wp.abs(land) <= max_jerk * dt:
+        new_accel = land
+    return wp.vec2(prev + new_accel * dt, new_accel)
+
+
+@wp.kernel
+def _rate_limit_kernel(
+    raw: wp.array2d(dtype=wp.vec3),  # [T, B] sampled targets (wL, wR, -)
+    cmd_state: wp.array(dtype=wp.vec4),  # [1] last published (wL, wR) and their accelerations
+    max_accel: float,
+    max_decel: float,
+    max_jerk: float,
+    dt: float,
+    target_wheel_omega: wp.array2d(dtype=wp.vec3),  # [T, B] what the rollouts drive
+):
+    r = wp.tid()
+    s = cmd_state[0]
+    wl = s[0]
+    wr = s[1]
+    al = s[2]
+    ar = s[3]
+    for t in range(raw.shape[0]):
+        u = raw[t, r]
+        left = _jerk_limited_step(u[0], wl, al, max_accel, max_decel, max_jerk, dt)
+        right = _jerk_limited_step(u[1], wr, ar, max_accel, max_decel, max_jerk, dt)
+        wl = left[0]
+        al = left[1]
+        wr = right[0]
+        ar = right[1]
+        target_wheel_omega[t, r] = wp.vec3(wl, wr, u[2])
 
 
 @wp.kernel
@@ -350,7 +589,9 @@ def _cost_kernel(
     residual: wp.array2d(dtype=float),
     target_wheel_omega: wp.array2d(dtype=wp.vec3),  # Ub in components [0], [1]
     current_wheel_omega: wp.array2d(dtype=wp.vec3),  # [T+1, B] realized omega; row t+1 drove step t
-    twist: wp.array2d(dtype=wp.vec3),  # [T+1, B] solved body twist (vx, vy, yaw_rate); row t+1 drove step t
+    twist: wp.array2d(
+        dtype=wp.vec3
+    ),  # [T+1, B] solved body twist (vx, vy, yaw_rate); row t+1 drove step t
     turning: wp.array2d(dtype=wp.vec2),  # [T, B] (alpha, x_icr) used at step t
     loads: wp.array2d(dtype=wp.vec3),  # [T, B] wheel normal loads at the post-step pose
     measured: wp.array2d(dtype=wp.float32),  # [ny, nx] 1 = real data (sim grid); gates reverse
@@ -360,10 +601,13 @@ def _cost_kernel(
     lattice_field: wp.array3d(
         dtype=float
     ),  # [ny, nx, n_theta] cost-to-go V(x,y,theta); the goal cost
+    veto_field: wp.array3d(dtype=float),  # [ny, nx, n_theta] 1 = the cost-to-go refuses this pose
+    clear_field: wp.array2d(dtype=float),  # [ny, nx] on sgrid: distance to the nearest wall face
     n_theta: int,
     cw: CostWeights,
     robot: Robot,  # envelope + feasibility thresholds (shared with the cost-to-go feasibility)
     horizon: int,
+    traction_scale: wp.array(dtype=float),  # [1] this frame's share of the traction cost
     Jout: wp.array(dtype=float),
     Jsafe: wp.array(dtype=float),  # the SAFETY share of Jout (see _robust_j_kernel)
 ):
@@ -374,9 +618,14 @@ def _cost_kernel(
     effort_sum = float(0.0)
     smooth_sum = float(0.0)
     turn_sum = float(0.0)
+    traction_sum = float(0.0)
+    lat_sum = float(0.0)
+    away_sum = float(0.0)
     penalty_sum = float(0.0)
     sat_sum = float(0.0)
     tip_sum = float(0.0)
+    veto_sum = float(0.0)
+    time_sum = float(0.0)
     unk_sum = float(0.0)
     rev_sum = float(0.0)
     edge = float(0.4)  # soft-wall margin inside the grid border
@@ -387,12 +636,17 @@ def _cost_kernel(
     mg_w = robot.mass * robot.gravity  # robot weight [N]
     prev_l = float(0.0)
     prev_r = float(0.0)
+    tail = -robot.wheel_pos[2][0] + robot.wheel_radius  # [m] axle to the back of the body
     for t in range(horizon):
         pose = controlled[t + 1, r]  # (x, y, yaw) after step t (pose 0 is shared by all candidates)
         om = current_wheel_omega[t + 1, r]  # realized (lagged) omega that drove step t
         v = twist[t + 1, r][0]  # realized body forward speed [m/s]; < 0 = reversing
         alpha = turning[t, r][0]
         wz = robot.wheel_radius * (om[1] - om[0]) / (2.0 * robot.half_track * alpha)
+        traction_sum += wz * wz / (wp.min(wp.abs(v), cw.traction_v_sat) + cw.traction_v0)
+        if cw.lat_accel > 0.0:
+            lat_excess = wp.max(wp.abs(v * wz) - cw.lat_accel_max, 0.0)
+            lat_sum += lat_excess * lat_excess
         if cw.out_of_bounds > 0.0:
             # soft wall at the world edge: depth past the margin (V is clamped off-grid, so the
             # goal term alone doesn't stop the robot driving off the map -- this does).
@@ -418,7 +672,9 @@ def _cost_kernel(
         wheels = target_wheel_omega[t, r]  # (wL, wR) commanded
         effort_sum += wheels[0] * wheels[0] + wheels[1] * wheels[1]
         diff = wheels[1] - wheels[0]  # turn differential -> penalize (prefer straight)
-        turn_sum += diff * diff
+        # ...but only where there is forward progress to trade for it. See CostParams.turn_spin_th.
+        if wp.abs(0.5 * (wheels[0] + wheels[1])) > cw.turn_spin_th:
+            turn_sum += diff * diff
         if t > 0:
             dl = wheels[0] - prev_l
             dr = wheels[1] - prev_r
@@ -461,6 +717,28 @@ def _cost_kernel(
             sat_sum += early * wp.max(sat - 1.0, 0.0)
         # TIP-OVER margin: a negative wheel load = CoM outside the support triangle (and the settle
         # pose is no longer trustworthy from here on) -- penalize the deficit as a weight fraction.
+        if cw.veto > 0.0:
+            # sampled at the pose AND the heading the rollout holds there, the same way V is: a
+            # pose is refused per heading, and a cell that is fine facing one way is not fine
+            # facing another
+            veto_sum += early * sample_lattice(veto_field, grid, n_theta, pose[0], pose[1], yaw_eff)
+        # one footprint read per step for both terms: a second inlined call that passes `robot`
+        # (a struct holding an array) read its array handle out of bounds of the local copy
+        # (compute-sanitizer, 2026-10-08) and crashed every plan with clear_time on
+        cmin = float(1.0e3)
+        if cw.keep_away > 0.0 or cw.clear_time > 0.0:
+            cmin = _footprint_clearance(clear_field, sgrid, robot, pose)
+        if cw.keep_away > 0.0:
+            gap = wp.max(cw.keep_away_m - cmin, 0.0)
+            away_sum += gap * gap
+        if cw.clear_time > 0.0:
+            fastest = wp.abs(v) + cw.clear_turn_ratio * tail * wp.abs(wz)
+            allowed = allowed_speed(cmin, cw.clear_c0, cw.clear_t_react, cw.clear_v_min)
+            v_here = wp.min(vl, cw.lattice_cap)
+            per_m = (cw.goal_terminal + cw.goal_running) * 2.0 * v_here  # goal units per metre
+            if fastest > allowed:
+                # seconds lost, in goal units at this step's V (see CostParams.clearance)
+                time_sum += per_m * cw.clear_v_cruise * cw.dt * (fastest / allowed - 1.0)
         if cw.tip > 0.0:
             ld = loads[t, r]
             min_n = wp.min(wp.min(ld[0], ld[1]), ld[2])
@@ -483,6 +761,7 @@ def _cost_kernel(
         + cw.saturation * sat_sum
         + cw.tip * tip_sum
         + cw.unknown * unk_sum
+        + cw.veto * veto_sum
     )
     Jsafe[r] = safe
     Jout[r] = (
@@ -491,9 +770,26 @@ def _cost_kernel(
         + cw.effort * effort_sum
         + cw.smoothness * smooth_sum
         + cw.turn * turn_sum
+        + cw.traction * traction_scale[0] * traction_sum
+        + cw.lat_accel * lat_sum
+        + cw.keep_away * away_sum
         + cw.reverse * rev_sum
+        + cw.clear_time * time_sum
         + safe
     )
+
+
+@wp.kernel
+def _commit_cost_kernel(
+    raw: wp.array2d(dtype=wp.vec3),  # [T, B] sampled targets: the decision
+    U_ref: wp.array2d(dtype=float),  # [T, 2] the plan committed last frame
+    commit: float,
+    J: wp.array(dtype=float),
+):
+    r = wp.tid()
+    dl = raw[0, r][0] - U_ref[0, 0]
+    dr = raw[0, r][1] - U_ref[0, 1]
+    J[r] = J[r] + commit * (dl * dl + dr * dr)
 
 
 @wp.kernel
@@ -590,33 +886,36 @@ def _cand_dir_kernel(
     target_wheel_omega: wp.array2d(dtype=wp.vec3),
     horizon: int,
     turn_th: float,  # net-differential deadband; below it a candidate is "straight" (neutral)
-    wlo: wp.array(dtype=float),  # [1] effective lower wheel-speed bound
-    dir_out: wp.array(dtype=float),  # [n_cand] net direction: +1 forward-ish, -1 reverse-ish
+    spin_th: float,  # mean-speed deadband; below it a candidate goes nowhere, i.e. it SPINS
+    dir_out: wp.array(dtype=float),  # [n_cand] net direction: +1 forward, 0 spin, -1 reverse
     turn_out: wp.array(dtype=float),  # [n_cand] net turn mode: -1 right / 0 neutral / +1 left
-    spin_out: wp.array(dtype=float),  # [n_cand] 1 = a spin (a wheel below wlo), else 0
 ):
     """Per-candidate maneuver mode keys. The elite is MULTIMODAL in two ways and a plain mean
     averages the modes into the worst of both worlds:
-      - direction (reverse enabled): back-up vs pivot-and-drive -> mean is ~zero velocity;
+      - direction: back-up vs pivot-and-drive -> mean is ~zero velocity; and a SPIN is its own
+        mode, not a slow forward one -- its mean wheel speed is exactly zero, so a two-way key
+        would file it as forward and let the elite average it with a forward arc;
       - turn side (obstacle dead ahead): pass-left vs pass-right -> mean aims AT the obstacle,
         and under slew-limited (smooth) actuation the robot then cannot dodge late.
     dir = sign of the summed mean wheel speed; turn = sign of the summed differential with a
     deadband (cruise noise stays neutral). The elite mean is restricted to candidates compatible
-    with the best candidate's keys (see _elite_u_kernel). A third key separates SPINS: the
-    sampler clamps every other candidate to [wlo, wmax], so a wheel below wlo marks exactly the
-    spin band and the samples refining a spin nominal."""
+    with the best candidate's keys (see _elite_u_kernel)."""
     b = wp.tid()
     s = float(0.0)
     dsum = float(0.0)
-    spin = float(0.0)
     for t in range(horizon):
         w = target_wheel_omega[t, b]
         s += w[0] + w[1]
         dsum += w[1] - w[0]
-        if wp.min(w[0], w[1]) < wlo[0]:
-            spin = 1.0
-    spin_out[b] = spin
-    dir_out[b] = wp.where(s < 0.0, -1.0, 1.0)
+    # s is the summed (wl + wr); halved it is the summed MEAN wheel speed, which is what the
+    # per-step spin_th is scaled against by the caller.
+    spd = s * 0.5
+    dk = float(0.0)  # inside the deadband: goes nowhere on average -> a spin
+    if spd > spin_th:
+        dk = 1.0
+    elif spd < -spin_th:
+        dk = -1.0
+    dir_out[b] = dk
     tk = float(0.0)
     if dsum > turn_th:
         tk = 1.0
@@ -631,20 +930,16 @@ def _best_dir_kernel(
     jmin: wp.array(dtype=float),
     dirs: wp.array(dtype=float),
     turns: wp.array(dtype=float),
-    spins: wp.array(dtype=float),
     n_cand: int,
     best_dir: wp.array(dtype=float),  # [1] direction of the lowest-cost candidate
     best_turn: wp.array(dtype=float),  # [1] turn mode of the lowest-cost candidate
-    best_spin: wp.array(dtype=float),  # [1] 1 = the lowest-cost candidate is a spin
 ):
     best_dir[0] = 1.0
     best_turn[0] = 0.0
-    best_spin[0] = 0.0
     for b in range(n_cand):
         if J[b] <= jmin[0]:
             best_dir[0] = dirs[b]
             best_turn[0] = turns[b]
-            best_spin[0] = spins[b]
             return
 
 
@@ -654,10 +949,8 @@ def _elite_u_kernel(
     tau: wp.array(dtype=float),
     dirs: wp.array(dtype=float),  # [n_cand] net direction per candidate
     turns: wp.array(dtype=float),  # [n_cand] net turn mode per candidate
-    spins: wp.array(dtype=float),  # [n_cand] 1 = spin candidate
     best_dir: wp.array(dtype=float),  # [1] direction of the best candidate
     best_turn: wp.array(dtype=float),  # [1] turn mode of the best candidate
-    best_spin: wp.array(dtype=float),  # [1] 1 = the best candidate is a spin
     target_wheel_omega: wp.array2d(
         dtype=wp.vec3
     ),  # replicas share controls -> read columns < n_cand
@@ -668,21 +961,30 @@ def _elite_u_kernel(
 ):
     t, wheel = wp.tid()  # (timestep, wheel: 0=L, 1=R)
     # MODE-COHERENT elite mean: average only elites compatible with the best candidate's
-    # maneuver mode -- same direction, and same turn side (a NEUTRAL/straight candidate is
+    # maneuver mode -- same direction key (forward / spin / reverse), and same turn side
+    # (a NEUTRAL/straight candidate is
     # compatible with either side; if the best is neutral, sided candidates are excluded so a
     # left/right split can't pull the mean off the straight line). Forward-only cruising makes
-    # every key (+1, 0), which reduces to the plain elite mean. Spins average only with spins,
-    # and a winning spin keeps its reversed wheel: clamping it to wlo (0 with reverse off) would
-    # turn the spin the sampler exempted into a one-wheel-stopped arc, so it would never be driven.
+    # every key (+1, 0), which reduces to the plain elite mean.
     elite_sum = float(0.0)
     elite_n = float(0.0)
+    # When the best candidate is a SPIN (best_dir == 0) a turn-neutral candidate at the same
+    # direction key is not "compatible", it is a STOP -- averaging it in is what drags the spin
+    # under `spin_min` and leaves the robot creeping. Require the turn side exactly there.
+    strict = best_dir[0] == 0.0
     for b in range(n_cand):
-        if J[b] <= tau[0] and dirs[b] == best_dir[0] and spins[b] == best_spin[0]:
-            if turns[b] == best_turn[0] or turns[b] == 0.0:
+        if J[b] <= tau[0] and dirs[b] == best_dir[0]:
+            if turns[b] == best_turn[0] or (turns[b] == 0.0 and not strict):
                 elite_sum += target_wheel_omega[t, b][wheel]
                 elite_n += 1.0
+    # A SPIN elite must not be clamped to wlo. The sampler deliberately exempts the spin band
+    # from that clamp -- "clamping it to wmin would silently zero that wheel" -- and clamping it
+    # HERE does the same damage one step later, and worse: the candidate was SCORED with its true
+    # controls, so the robot would commit a manoeuvre that was never the one evaluated. With
+    # reverse locked that turns the winning spin into a half-spin arc every frame, and the
+    # consistency EMA averages the mismatch toward nothing.
     lo = wlo[0]
-    if best_spin[0] > 0.5:
+    if best_dir[0] == 0.0:
         lo = -wmax
     U[t, wheel] = wp.clamp(elite_sum / wp.max(elite_n, 1.0), lo, wmax)
 
@@ -757,8 +1059,6 @@ class MppiGpu:
             self.turns = wp.zeros(self.n_cand, dtype=wp.float32)  # per-candidate net turn mode
             self.best_dir = wp.zeros(1, dtype=wp.float32)  # best candidate's direction
             self.best_turn = wp.zeros(1, dtype=wp.float32)  # best candidate's turn mode
-            self.spins = wp.zeros(self.n_cand, dtype=wp.float32)  # per-candidate spin flag
-            self.best_spin = wp.zeros(1, dtype=wp.float32)  # best candidate is a spin
             self.seed = wp.array([int(seed)], dtype=wp.int32)
             self.goal = wp.zeros(2, dtype=wp.float32)
             # effective lower wheel-speed bound, device-side so the node can gate reverse per frame
@@ -767,9 +1067,26 @@ class MppiGpu:
             ny, nx = sim.elevation.shape
             self.n_theta = int(n_theta)
             self.lattice_field = wp.zeros((ny, nx, n_theta), dtype=wp.float32)  # V(x,y,theta)
+            # all-clear until armed by set_veto, so a caller that never calls it keeps the old
+            # behaviour exactly
+            self.veto_field = wp.zeros((ny, nx, n_theta), dtype=wp.float32)
+            # [m] distance to the nearest wall face on the sim grid; far everywhere until update_clearance
+            self.clear_field = wp.full((ny, nx), 1.0e3, dtype=wp.float32)
             # observed-cell mask on the sim grid (1 = real data); all-measured by default so the
             # unknown-cell penalty is inert until a perception mask is supplied (set_measured)
             self.measured = wp.full((ny, nx), 1.0, dtype=wp.float32)
+            # the output chain's limits armed: samples land here and the rollouts drive their
+            # rate-limited version (see SamplingConfig.max_accel); otherwise no extra buffer
+            self.rate_limited = sampling.max_accel > 0.0
+            self.raw_target = (
+                wp.zeros((self.horizon, self.n_rollouts), dtype=wp.vec3)
+                if self.rate_limited
+                else sim.target_wheel_omega
+            )
+            self.cmd_state = wp.zeros(1, dtype=wp.vec4)  # set_command_state; zeros = at rest
+            self.U_ref = wp.zeros((self.horizon, 2), dtype=wp.float32)  # last frame's plan
+            self.spin_side = wp.zeros(1, dtype=wp.float32)  # set_spin_side; 0 = either way
+            self.traction_scale = wp.ones(1, dtype=wp.float32)  # set_traction_scale
         self.set_mu_band()  # nominal mu (fills sim.mu_scale for the replica layout)
 
         # the grid the cost kernel samples the lattice field on: defaults to the sim grid, but a COARSER
@@ -803,6 +1120,24 @@ class MppiGpu:
 
     def set_nominal(self, U_host):
         self.U.assign(np.ascontiguousarray(U_host, np.float32))
+
+    def set_command_state(self, wheels: np.ndarray, accel: np.ndarray) -> None:
+        """The last PUBLISHED (wL, wR) command and its acceleration [rad/s^2], in the planner's
+        convention -- where the output tracker continues from. Only read with the rate limit
+        armed (SamplingConfig.max_accel > 0); graph-safe, call before every replan."""
+        self.cmd_state.assign(
+            np.array([[wheels[0], wheels[1], accel[0], accel[1]]], dtype=np.float32)
+        )
+
+    def set_traction_scale(self, scale: float) -> None:
+        """This frame's share of the traction cost, 0..1 (control.command.traction_scale).
+        Graph-safe."""
+        self.traction_scale.assign(np.array([float(scale)], dtype=np.float32))
+
+    def set_spin_side(self, side: float) -> None:
+        """+1 = spin candidates turn left only, -1 = right only, 0 = either. See
+        control.command.spin_side for when a spin counts as under way. Graph-safe."""
+        self.spin_side.assign(np.array([float(side)], dtype=np.float32))
 
     def set_mu_band(self, center=1.0, span=0.0):
         """Friction-uncertainty band for the robust replicas: replica k of every candidate rolls
@@ -841,6 +1176,39 @@ class MppiGpu:
         if grid is not None:
             self.lattice_grid = grid
 
+    def set_veto(self, blocked, grid=None):
+        """Copy the cost-to-go's per-pose veto `blocked[ny', nx', n_theta]` into the stable buffer
+        the cost kernel reads. Same shape and grid as `set_lattice`'s V, and subject to the same
+        rule: call before the first replan, and on re-solve call again with the SAME shape.
+
+        Priced independently of V on purpose -- see `CostWeights.veto`. Leave it unset and the
+        field stays zero, which is the behaviour before it existed.
+        """
+        if tuple(blocked.shape) != tuple(self.veto_field.shape):
+            self.veto_field = wp.zeros(blocked.shape, dtype=float, device=self.device)
+        wp.copy(self.veto_field, blocked)
+        if grid is not None:
+            self.lattice_grid = grid
+
+    def update_clearance(self, reach_m: float = 1.0) -> None:
+        """Rebuild the wall-distance map from the sim's current terrain and `measured` mask, for
+        the clearance-time cost. Call after set_terrain and before replan, every frame; a wall is a
+        rise taller than a wheel radius, as in the governor."""
+        grid = self.sim.grid
+        wp.launch(
+            clearance_map_kernel,
+            dim=self.clear_field.shape,
+            inputs=[
+                self.sim.elevation,
+                self.measured,
+                float(grid.cell_size),
+                float(self.robot.wheel_radius),
+                max(1, int(math.ceil(reach_m / float(grid.cell_size)))),
+            ],
+            outputs=[self.clear_field],
+            device=self.device,
+        )
+
     def set_cost_hook(self, hook: Callable[["MppiGpu"], None] | None) -> None:
         """Add an extra per-rollout cost term (e.g. a learned model-error cost) to every refine;
         None removes it. `_refine` calls `hook(self)` after the cost kernel and before the robust
@@ -870,13 +1238,30 @@ class MppiGpu:
                 self.n_straight,
                 self.n_spin,
                 self.sampling.spin_min,
+                self.sampling.spin_max,
                 self.n_pivot,
                 self.sampling.n_knots,
                 self.seed,
+                self.spin_side,
             ],
-            outputs=[self.sim.target_wheel_omega],
+            outputs=[self.raw_target],
             device=self.device,
         )
+        if self.rate_limited:
+            wp.launch(
+                _rate_limit_kernel,
+                self.n_rollouts,
+                inputs=[
+                    self.raw_target,
+                    self.cmd_state,
+                    self.sampling.max_accel,
+                    self.sampling.max_decel or self.sampling.max_accel,
+                    self.sampling.max_jerk,
+                    float(self.sim.solver.dt),
+                ],
+                outputs=[self.sim.target_wheel_omega],
+                device=self.device,
+            )
         self._prof.mark(1)  # sample done
         self.sim.rollout_launch()
         self._prof.mark(2)  # rollout done
@@ -898,16 +1283,27 @@ class MppiGpu:
                 self.goal,
                 self.lattice_grid,
                 self.lattice_field,
+                self.veto_field,
+                self.clear_field,
                 self.n_theta,
                 self.cw,
                 self.robot,
                 self.horizon,
+                self.traction_scale,
             ],
             outputs=[self.J, self.Jsafe],
             device=self.device,
         )
         if self._cost_hook is not None:
             self._cost_hook(self)
+        if self.cw.commit > 0.0:
+            wp.launch(
+                _commit_cost_kernel,
+                self.n_rollouts,
+                inputs=[self.raw_target, self.U_ref, self.cw.commit],
+                outputs=[self.J],
+                device=self.device,
+            )
         # collapse the mu replicas: worst-replica safety + mean-replica goal/shaping
         wp.launch(
             _robust_j_kernel,
@@ -967,19 +1363,19 @@ class MppiGpu:
             _cand_dir_kernel,
             self.n_cand,
             inputs=[
-                self.sim.target_wheel_omega,
+                self.raw_target,
                 self.horizon,
                 self.sampling.turn_mode_th * float(self.horizon),
-                self.wlo,
+                self.sampling.spin_mode_th * float(self.horizon),
             ],
-            outputs=[self.dirs, self.turns, self.spins],
+            outputs=[self.dirs, self.turns],
             device=self.device,
         )
         wp.launch(
             _best_dir_kernel,
             1,
-            inputs=[self.Jc, self.jmin, self.dirs, self.turns, self.spins, self.n_cand],
-            outputs=[self.best_dir, self.best_turn, self.best_spin],
+            inputs=[self.Jc, self.jmin, self.dirs, self.turns, self.n_cand],
+            outputs=[self.best_dir, self.best_turn],
             device=self.device,
         )
         wp.launch(
@@ -990,11 +1386,9 @@ class MppiGpu:
                 self.tau,
                 self.dirs,
                 self.turns,
-                self.spins,
                 self.best_dir,
                 self.best_turn,
-                self.best_spin,
-                self.sim.target_wheel_omega,
+                self.raw_target,  # the decision; the rollouts drove its rate-limited version
                 self.wlo,
                 self.sampling.wmax,
                 self.n_cand,
@@ -1006,6 +1400,8 @@ class MppiGpu:
     def replan(self, state, goal_xy, n_refine):
         """Run n_refine GPU refines from `state` toward world `goal_xy`; updates U in place."""
         self.goal.assign(np.asarray(goal_xy[:2], np.float32))
+        # the plan committed last frame, before this frame's refines move U
+        wp.copy(self.U_ref, self.U)
         self.sim.start_pose.assign(
             np.ascontiguousarray(
                 np.tile(np.asarray(state, np.float32), (self.n_rollouts, 1)), np.float32

@@ -17,8 +17,9 @@ TWO DIFFERENT ALPHAS, and which one you get depends on the bag:
   from MEASURED wheel speeds (/joint_states) -- the vehicle model proper, separating what the
       wheels did from what the body did.
 
-The Odin bags carry no /joint_states, so only the first is available there. Where both exist the
-script prints both and their ratio, which IS the drivetrain realization factor.
+A bag with only one of them gets that one: a planner-driven bag without /joint_states the first, a
+manual drive on the remote (which publishes /joint_setpoints, not /cmd_joints) the second. Where
+both exist the script prints both and their ratio, which IS the drivetrain realization factor.
 """
 
 from __future__ import annotations
@@ -116,10 +117,34 @@ def _fit_alpha(diff_omega: np.ndarray, yaw_rate: np.ndarray) -> tuple[float, flo
     return (1.0 / slope if slope else float("nan")), corr, int(keep.sum())
 
 
+def _analyse_measured_only(bag: Path, d: dict) -> None:
+    """A bag with measured wheels but no command -- a manual drive on the remote, which publishes
+    /joint_setpoints, not /cmd_joints. Only the vehicle model's alpha exists there."""
+    meas = np.stack([np.interp(d["gt"], d["st"], d["meas"][:, i]) for i in range(3)], 1)
+    diff = meas[:, 1] - meas[:, 0]
+    axis, score = _yaw_axis(d["gyro"], diff)
+    yaw_rate = np.clip(d["gyro"][:, axis], -MAX_GYRO, MAX_GYRO)
+    if score < 0:
+        yaw_rate = -yaw_rate
+    alpha, corr, n = _fit_alpha(diff, yaw_rate)
+    print(
+        f"=== {bag.name}   gyro axis {'xyz'[axis]}{'(negated)' if score < 0 else ''}, "
+        "no /cmd_joints (manual drive)"
+    )
+    print(f"  alpha from MEASURED wheels:  {alpha:5.2f}  (corr {corr:+.3f}, n={n})")
+    print(
+        f"  -> k_turn = (alpha - 1) / plan_friction = {(alpha - 1) / 0.8:.2f} at plan_friction 0.8"
+        " (vehicle model; the planner's commanded alpha also carries the drivetrain loss)"
+    )
+
+
 def analyse(bag: Path) -> None:
     d = _load(bag)
-    if d["gt"].size == 0 or d["ct"].size == 0:
-        print(f"{bag.name}: needs an IMU and /cmd_joints")
+    if d["gt"].size == 0 or (d["ct"].size == 0 and d["st"].size <= 10):
+        print(f"{bag.name}: needs an IMU and /cmd_joints or /joint_states")
+        return
+    if d["ct"].size == 0:
+        _analyse_measured_only(bag, d)
         return
     dt = float(np.median(np.diff(d["gt"])))
     odom_rate = np.interp(d["gt"], d["ot"], d["v"]) if d["ot"].size > 10 else np.zeros_like(d["gt"])

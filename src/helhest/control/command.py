@@ -11,7 +11,8 @@ robot 2026-07-10 (an all-positive /cmd_joints drove straight forward).
 
 This is the single place all actuator-safety logic lives, so it is auditable and unit-tested:
   1. rear-as-follower                               (rear = mean(L, R); left/right pass through)
-  2. asymmetric accel/decel rate limit  (a jumpy MPPI step can't shock the drivetrain)
+  2. asymmetric accel/decel rate limit, optionally jerk-limited  (a jumpy MPPI step can't shock
+     the drivetrain; the planner's rollouts run the same `jerk_limited_step`)
   3. a hard per-joint magnitude clamp               (final backstop below the motor's safe max)
 """
 
@@ -47,6 +48,157 @@ def joint_states_to_model(names: list[str], velocities: list[float]) -> np.ndarr
         return None
 
 
+def turn_first(
+    wl: float,
+    wr: float,
+    heading_error: float,
+    *,
+    start_deg: float = 45.0,
+    full_deg: float = 110.0,
+    min_scale: float = 0.1,
+    prev_diff: float | None = None,
+    commit_deg: float = 90.0,
+    speed: float | None = None,
+    stop_below: float = 0.3,
+) -> tuple[float, float]:
+    """Slow the FORWARD component when the way on is well off the robot's heading, so a large
+    turn is made in place before driving rather than as an arc that also advances.
+
+    `heading_error` [rad] is the angle from the heading to where the route falls away. Below
+    `start_deg` nothing changes; from there the mean speed scales linearly down to `min_scale`
+    at `full_deg` and beyond. The differential is kept, so at a full brake the command is the
+    spin the planner asked for without the advance.
+
+    Why: forward-only, a minimum-radius arc that turns 52 deg advances 1.4 m (false_door, the
+    anchored-map runs). Begun 1.9 m from a wall it ends 0.55 m from it, inside the robot's own
+    turning clearance, where every forward and spinning rollout is vetoed and MPPI freezes.
+
+    `prev_diff` is last frame's published differential (wr - wl). While the error is past
+    `commit_deg` a spin already under way keeps its direction: with the way on straight behind,
+    left and right cost the same, and the planner's elite picked a different one every frame
+    (corridor: four reversals in 60 frames). A spin here is not in place -- 0.16 m sideways per
+    95 deg -- so each reversal walked the robot toward a wall until the last 50 deg would have
+    swept a corner into it and everything was vetoed. One direction, decided once.
+
+    `speed` [m/s] is the robot's measured ground speed. At a full brake with the robot still
+    moving faster than `stop_below`, the command is a plain stop and the spin waits: a spin
+    begun at cruise carries the cruise momentum through the skid -- 0.9 m sideways per 120 deg
+    in the corridor -- where a spin from rest travels 0.2 m (measured in the same physics at
+    1.5-6 rad/s). Stop, then turn.
+    """
+    e = abs(math.degrees(heading_error))
+    if e <= start_deg or full_deg <= start_deg:
+        return wl, wr
+    scale = max(min_scale, 1.0 - (e - start_deg) / (full_deg - start_deg) * (1.0 - min_scale))
+    if e >= full_deg and speed is not None and speed > stop_below:
+        return 0.0, 0.0
+    mean = 0.5 * (wl + wr)
+    half_diff = 0.5 * (wr - wl)
+    if (
+        prev_diff is not None
+        and e > commit_deg
+        and abs(prev_diff) > 1.0
+        and half_diff * prev_diff < 0.0
+    ):
+        half_diff = -half_diff
+    return mean * scale - half_diff, mean * scale + half_diff
+
+
+# [s] the LLC's own wheel setpoints held at zero this long under a moving command = not driving
+IDLE_FOR_S = 0.3
+# [rad/s] a front-wheel command above this counts as asking for motion
+MOVING_CMD = 0.5
+
+
+def llc_not_driving(cmd: np.ndarray, idle_for_s: float) -> bool:
+    """True when the published command ([L, rear, R]) asks for motion but the LLC has held its
+    own front-wheel setpoints (/joint_setpoints) at zero for IDLE_FOR_S: an e-stop or a driver
+    cut-out. /estop_active does not show the button (false throughout the e-stop below).
+
+    The command tracker continues from its own last output, so without this it keeps ramping
+    while nothing moves and the LLC jumps to the stale command on release: `turns_twist`
+    (2026-09-29), an e-stop held 9 s while the forward command ramped to 1.85 m/s, then the
+    setpoints went 0 -> 6 rad/s in 0.4 s. Keyed on the SETPOINTS, not the wheels: in `drive` the
+    wheels stood still for 4-7 s under setpoints of 2-4 rad/s -- stalls, where holding the
+    command at rest would keep the wheels from ever breaking loose.
+    """
+    return idle_for_s > IDLE_FOR_S and max(abs(float(cmd[0])), abs(float(cmd[2]))) > MOVING_CMD
+
+
+def cap_forward_target(
+    wl: float, wr: float, body_v: float, *, max_lead: float, wheel_radius: float
+) -> tuple[float, float]:
+    """Cap the planner's wheel target so its forward speed is at most `max_lead` [m/s] ahead of
+    the robot's measured forward speed `body_v` [m/s] (Odin odometry).
+
+    The jerk-limited tracker ramps from its last COMMAND, so while the robot does not follow -- the
+    remote's brake trigger (analog: it also slows the robot partially), an e-stop -- the command
+    climbs toward the plan with nothing moving and the LLC gets a step on release. Stromovka
+    13_43_24 (2026-10-07): held 15 s while /cmd_vel rode at 1.4 m/s.
+
+    It caps the TARGET, not the tracker's state, so the command still moves only as the jerk limit
+    allows (pulling the state down instead broke the jerk limit ~10x, as Odin's noise stepped it).
+    Forward speed only: in twist mode the LLC's own yaw loop sets the wheel differential, and the
+    yaw a differential yields depends on the terrain alpha -- anchoring either cut 25-42% of spins
+    on the bags. Only ever lowers |speed| and never below body_v + max_lead, so it cannot brake the
+    robot. Replayed on 22 bags (2026-10-08): caps ~3.5% of driving, nearly all take-off, changing
+    the speed by ~0.01 m/s on average; no oscillation in closed-loop simulation even against an
+    LLC with 44% overshoot.
+    """
+    mean, half = 0.5 * (wl + wr), 0.5 * (wr - wl)
+    measured, lead = body_v / wheel_radius, max_lead / wheel_radius
+    capped = float(np.clip(mean, measured - lead, measured + lead))
+    if abs(capped) < abs(mean):
+        mean = capped
+    return mean - half, mean + half
+
+
+def traction_scale(heading_error: float, on_deg: float, off_deg: float) -> float:
+    """How much of the traction cost applies this frame: 1 while the route lies within `on_deg`
+    of the heading, 0 beyond `off_deg`, linear between; `off_deg` <= 0 = always 1.
+
+    Traction (CostParams.traction) makes a rolling turn cheaper than a spin, which is right while
+    the way on is roughly ahead and wrong when it lies behind: under the corner limit a rolling
+    U-turn needs a radius of ~1.7 m at 1 m/s, and in `tree2` (2026-09-30) goals 148-172 deg behind
+    took 25-29 m of driving for 10-15 m of straight line. Turned off there, MPPI plans the spin.
+    """
+    if off_deg <= 0.0:
+        return 1.0
+    e = abs(math.degrees(heading_error))
+    if e <= on_deg:
+        return 1.0
+    if e >= off_deg:
+        return 0.0
+    return (off_deg - e) / (off_deg - on_deg)
+
+
+def spin_side(prev_side: float, cmd: np.ndarray, planned: np.ndarray | None = None) -> float:
+    """Which way MPPI may spin next frame: +1 left, -1 right, 0 either.
+
+    `cmd` is the command just published ([L, rear, R]); `planned` the planner's first step
+    (wL, wR), when there is a fresh one. A spin -- barely advancing, clearly turning -- fixes the
+    side as soon as the PLANNER picks it; the published command would be too late, because under
+    the jerk limit a planner that flips side each frame never lets it ramp past the threshold
+    (drive_sim, goal straight behind: +-5 deg of dithering for 20 s, wheels at +-0.3 rad/s). The
+    side holds while the robot stands or keeps spinning and is released only once it drives off
+    (or the caller resets it for a new goal), so a spin finishes the way it started. With the
+    goal behind, left and right cost the same and the planner alternated every ~1.6 s on the
+    robot (`turns` bag, 2026-09-29).
+    """
+    mean = 0.5 * (float(cmd[0]) + float(cmd[2]))
+    diff = float(cmd[2]) - float(cmd[0])
+    if abs(mean) >= 0.5:  # [rad/s] driving: the turn is over
+        return 0.0
+    if abs(diff) > 1.0:  # [rad/s] a spin under way
+        return math.copysign(1.0, diff)
+    if prev_side == 0.0 and planned is not None:
+        p_mean = 0.5 * (float(planned[0]) + float(planned[1]))
+        p_diff = float(planned[1]) - float(planned[0])
+        if abs(p_mean) < 0.5 and abs(p_diff) > 1.0:  # the planner chose a spin
+            return math.copysign(1.0, p_diff)
+    return prev_side
+
+
 def condition_command(
     wl: float,
     wr: float,
@@ -62,6 +214,8 @@ def condition_command(
     turn_brake_a_max: float = 0.0,
     lat_gain: float = 0.0,
     turn_brake_scale: float = 1.0,
+    prev_accel: np.ndarray | None = None,
+    max_jerk: float = 0.0,
 ) -> np.ndarray:
     """Planner (wl, wr) -> conditioned [left, rear, right] wheel-velocity command for /cmd_joints.
 
@@ -80,6 +234,10 @@ def condition_command(
         = wheel_radius^2 / (2*half_track*alpha). Only read when turn_brake_a_max > 0.
     turn_brake_scale: extra speed scale in [0, 1] from the caller's LOOKAHEAD along the committed
         plan (1.0 = no anticipation). Applied the same way as the reactive brake.
+    prev_accel: [left, rear, right] acceleration of the previous command [rad/s^2], i.e.
+        (prev - the one before) / its dt. Only read when max_jerk > 0; None = at rest.
+    max_jerk: [rad/s^3] cap on how fast each joint's acceleration may change. 0 = off (plain
+        rate limit). With it on, max_slew and max_decel are the acceleration bounds.
     Returns [left, rear, right] velocities to publish. To STOP, call with wl = wr = 0 -- the slew
     limiter ramps the command down to rest.
     """
@@ -88,8 +246,9 @@ def condition_command(
     # outdoor bags). turn_boost amplifies the commanded differential to compensate so the wheels
     # actually deliver the yaw MPPI intended -- forward speed (mean) is untouched. 1.0 = no boost;
     # ~2.0 recovers the measured ~0.5 realization. Tune in the field.
-    # *** HOTFIX / stopgap for a drivetrain defect -- NOT a real fix. Read docs/turn_differential_hotfix.md
-    #     before changing/removing this: what it papers over, and what to actually fix. ***
+    # *** HOTFIX / stopgap for a drivetrain defect -- NOT a real fix. Read
+    #     docs/field/turn_differential_hotfix.md before changing/removing this: what it papers
+    #     over, and what to actually fix. ***
     mean = 0.5 * (wl + wr)  # forward speed; also the rear follower target (rear = mean of L/R)
     # GOAL BRAKE: the robot is forward-only (wmin=0) -- it cannot pivot in place to re-aim, so if it
     # arrives fast and slightly off it flies PAST the goal and orbits (a hard stop-radius misses an
@@ -122,12 +281,58 @@ def condition_command(
     # Asymmetric rate limit: a joint speeding UP (|cmd| growing) is capped by max_slew (accel); a
     # joint slowing DOWN toward rest (|cmd| shrinking, incl. the stop ramp) by max_decel. Per-joint
     # because in a turn one wheel accelerates while the other decelerates. None = symmetric.
-    d_acc = float(max_slew) * float(dt)
-    d_dec = float(max_slew if max_decel is None else max_decel) * float(dt)
-    lim = np.where(np.abs(target) >= np.abs(prev), d_acc, d_dec)  # per joint: accel vs decel cap
-    cmd = prev + np.clip(target - prev, -lim, lim)  # rate limit
+    decel = float(max_slew if max_decel is None else max_decel)
+    if max_jerk > 0.0:
+        accel = np.zeros(3, np.float32) if prev_accel is None else prev_accel
+        # Clamp the TARGET, so the tracker ramps into the limit; the backstop below cutting a
+        # ramp off at max_omega would be a jerk spike of its own.
+        target = np.clip(target, -float(max_omega), float(max_omega))
+        cmd = jerk_limited_step(target, prev, accel, float(max_slew), decel, max_jerk, dt)
+    else:
+        d_acc = float(max_slew) * float(dt)
+        d_dec = decel * float(dt)
+        lim = np.where(np.abs(target) >= np.abs(prev), d_acc, d_dec)  # per joint: accel vs decel
+        cmd = prev + np.clip(target - prev, -lim, lim)  # rate limit
     cmd = np.clip(cmd, -float(max_omega), float(max_omega))  # hard magnitude backstop
     return cmd.astype(np.float32)
+
+
+def jerk_limited_step(
+    target: np.ndarray,
+    prev: np.ndarray,
+    prev_accel: np.ndarray,
+    max_accel: float,
+    max_decel: float,
+    max_jerk: float,
+    dt: float,
+) -> np.ndarray:
+    """One tick of a per-joint tracker whose acceleration is bounded and changes at most max_jerk.
+
+    A plain rate limit bounds the acceleration but lets it flip from +max to -max in one tick,
+    and MPPI replanning every frame asks for exactly that: the `turns` bag reversed each front
+    wheel's acceleration 2.7 times a second, half the time at the cap. Here the acceleration
+    itself ramps. Mirrored on device by mppi._jerk_limited_step, so the rollouts plan with the
+    command the wheels will get; keep the two identical.
+
+    Returns the new command. Its acceleration is (cmd - prev) / dt, the caller's next prev_accel.
+    """
+    target = np.asarray(target, np.float32)
+    prev = np.asarray(prev, np.float32)
+    accel = np.asarray(prev_accel, np.float32)
+    error = target - prev
+    lim = np.where(np.abs(target) >= np.abs(prev), max_accel, max_decel)
+    # The largest acceleration from which ramping down to zero at max_jerk still ends ON the
+    # target: the ramp a, a - j*dt, ... moves the command by a^2/(2j) + a*dt/2.
+    reach = max_jerk * (np.sqrt(0.25 * dt * dt + 2.0 * np.abs(error) / max_jerk) - 0.5 * dt)
+    wanted = np.sign(error) * np.minimum(lim, reach)
+    new_accel = np.clip(wanted, accel - max_jerk * dt, accel + max_jerk * dt)
+    # Land exactly when both the landing tick and the stop after it are within the jerk limit;
+    # snapping otherwise would be the unbounded jerk this exists to prevent, so it overshoots a
+    # little and comes back instead.
+    land = error / dt
+    can_land = (np.abs(land - accel) <= max_jerk * dt) & (np.abs(land) <= max_jerk * dt)
+    new_accel = np.where(can_land, land, new_accel)
+    return (prev + new_accel * dt).astype(np.float32)
 
 
 def to_engine_order(cmd: np.ndarray) -> np.ndarray:

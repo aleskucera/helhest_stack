@@ -12,8 +12,9 @@ realized yaw equal the model's prediction, and low-pass it:
 
 Note diff_cmd cancels in the ideal (both numerator and yaw_meas scale with it), so this is a direct
 estimate of model_gain / real_gain -- exactly the multiplier condition_command needs. It is a smarter,
-self-tuning generalization of the fixed `plan_turn_boost` (docs/turn_differential_hotfix.md): it
-adapts to whatever terrain the robot is on instead of a hand-picked indoor/outdoor constant.
+self-tuning generalization of the fixed `plan_turn_boost`
+(docs/field/turn_differential_hotfix.md): it adapts to whatever terrain the robot is on instead of a
+hand-picked indoor/outdoor constant.
 
 Guardrails: only updates while genuinely turning (the gain is unobservable on straights, and a small
 yaw_meas would blow up the ratio); ignores steps where command and measurement disagree in sign

@@ -1,8 +1,18 @@
 # helhest_stack ROS
 
-The `elevation_node` (localization + accumulated mapping + MPPI planning viz) and the
-`elevation-demo` tmuxinator. Run via the apptainer container + `dev-shell.sh` (see the
-tmuxinator header). This file records **deployment gotchas** that are easy to lose hours to.
+Odin's on-robot stack: the `navigation_node` (belief mapping + cost-to-go / MPPI planning +
+driving) and what runs around it. Run via the apptainer container + `tools/dev-shell.sh` (see the
+`odin-demo` session's header). This file records **deployment gotchas** that are easy to lose hours
+to.
+
+```
+helhest_stack_ros/   the package: navigation_node, launch/odin_driver.launch.py, rviz/
+config/              odin.params.yaml (the robot), odin_follow.params.yaml (follow-me overlay),
+                     control_command_raw.yaml (driver), rosbag2_qos.yaml, fastdds_shm.xml
+sessions/            tmuxinator: odin-demo (a bag + node + RViz), bag-view, tmux-follow-odom
+tools/               record_nav.sh, record_motors.sh, calibrate_drive.py, traj_logger.py,
+                     radio_locator_odom.py, params.py, rviz.sh, dev-shell.sh, colcon-build.sh
+```
 
 ## KNOWN ISSUE: large LiDAR clouds silently dropped by DDS
 
@@ -25,15 +35,15 @@ dropped** — per message, regardless of playback rate. Defaults are far too sma
 segment is ~512 KB, so it silently falls back to the broken UDP path.
 
 **Fix (same machine — lidar driver + node + rviz on one host):** use the shared-memory
-transport profile `ros/fastdds_shm.xml` (64 MB SHM segment; SHM has no fragmentation and
+transport profile `ros/config/fastdds_shm.xml` (64 MB SHM segment; SHM has no fragmentation and
 ignores `rmem_max`). Point **every** participant at it:
 
 ```bash
-export FASTRTPS_DEFAULT_PROFILES_FILE="$REPO/ros/fastdds_shm.xml"
-export FASTDDS_DEFAULT_PROFILES_FILE="$REPO/ros/fastdds_shm.xml"
+export FASTRTPS_DEFAULT_PROFILES_FILE="$REPO/ros/config/fastdds_shm.xml"
+export FASTDDS_DEFAULT_PROFILES_FILE="$REPO/ros/config/fastdds_shm.xml"
 ```
 
-The `elevation-demo` tmuxinator already sets this in every pane. For any other launcher
+The `odin-demo` tmuxinator already sets this in every pane. For any other launcher
 (launch files, systemd, a robot bringup script) you must set it too, or clouds drop.
 
 **Fix (multi-host — lidar and node on different machines over the network):** SHM is
@@ -51,72 +61,22 @@ echo -e "net.core.rmem_max=134217728\nnet.core.rmem_default=8388608" \
 (325 clouds): before → 136/325 processed (58% dropped, ICP rejects); after SHM →
 318/325 (2%, 0 rejects). A do-nothing subscriber went 109/325 → 325/325.
 
-## KNOWN ISSUE: node runs but publishes nothing — cloud stamped in sensor time
-
-**Symptom:** the node starts (Warp init + the `ElevationNode:` banner) but never publishes
-`elevation_local`/`elevation_global`; RViz stays empty. `/odom_2d` and `/imu/data` are live.
-
-**Cause:** the cloud↔odom `ApproximateTimeSynchronizer` never matches a pair because the
-clocks differ. With the Ouster driver's `timestamp_mode` **unset (empty)** it falls back to
-`TIME_FROM_INTERNAL_OSC` — the sensor's internal oscillator (uptime), e.g. a header stamp of
-`7616 s` — while `/odom_2d` and `/imu/data` are in system time (`~1.78e9 s`). Off by ~1.78
-billion seconds, so no slop can bridge it and `_process()` never fires.
-
-**Fix:** launch the Ouster driver with `timestamp_mode:=TIME_FROM_ROS_TIME` so clouds carry
-the host ROS clock (same as odom/imu). It configures the sensor at startup, so `ros2 param
-set` won't take — **relaunch the driver**. Don't use `TIME_FROM_PTP_1588`: odom/imu here are
-plain system time, not PTP-disciplined, so PTP clouds still wouldn't match (the `ptp4l` on
-`eth_ouster` is not aligning the sensor to system UTC — the `7616 s` readback proves it).
-
-**Verify:** `ros2 topic echo --once --field header.stamp /ouster/points` should read ~`1.78e9`,
-matching `/odom_2d`.
-
 ## Other defaults worth knowing
 
-- **Rotation prior = integrated gyro**, not the fused `/imu/data` orientation (its yaw is
-  wrong-sign on this hardware — AHRS ENU/NED bug). See `elevation_node._gyro_orientation_base`.
-- **Gyro glitch guard (`max_gyro_rate_dps`, 600):** this robot's `/imu/data` angular_velocity
-  spikes to 1000–8000 deg/s for a SINGLE sample (real motion peaks ~300); `/ouster/imu` is the
-  same signal without the spikes. The deskew and the integrated rotation prior both read the gyro,
-  and one spike sample injects tens of degrees of phantom yaw — during a FAST turn this threw the
-  ICP prior 30–40° off, so ICP either rejected the frame or aliased, smearing the accumulated map
-  into a pinwheel. `_imu_callback` now drops any sample above the gate (the integrator bridges the
-  hole with its good neighbours). Symptom without it: `rotate_fast` gave ~9 ICP rejects and a
-  radially-smeared map; with it, 0 rejects and a coherent map.
-- **IMU source: keep `/imu/data`.** The gyro buffer is rotated into base via the static IMU-mount
-  TF (`_gyro_base_rotation`), and the IMU sub uses sensor (best-effort) QoS, so `/ouster/imu` is a
-  *selectable* fallback (`-p imu_topic:=/ouster/imu -p gravity_use_accel:=true` — its sensor QoS
-  and `os_imu` mount are handled). But it is NOT recommended: its gyro is spike-free, yet its fused
-  orientation is broken (gravity/up ~90° off), forcing accel-based gravity, which is polluted by
-  centripetal accel during fast turns. On `rotate_fast`, `/ouster/imu`+accel gave 2 rejects and 2×
-  larger ICP corrections (max 16° vs 8.6°) and a blobbier map than `/imu/data`+guard (0 rejects).
-- **Accumulator voxel grid is world-snapped** so the map does not erode under translation
-  (`DeviceMapAccumulator._min_corner`).
-- **Map maintenance:** consecutive-free visibility carve of dynamic obstacles ON — a point is
-  dropped only after the scan sees PAST it for `carve_persist_frames` (25) frames IN A ROW, so a
-  single ambiguous no-return can't delete static geometry, while a spot a moving person vacated
-  (seen through for 25 straight frames) IS carved. 25, not 8: driving PARALLEL to a wall makes the
-  beams graze along it and read as seen-through, but only intermittently (the 360° scan re-hits it
-  as the pose shifts), so a low threshold erodes corridor walls — at 8 both walls lost ~43% while
-  driving `slow_translate_long`, at 25 only ~24%, with the moving-person trail still carved (a
-  vacated spot on open ground is seen-through CONSECUTIVELY, never re-hit). Cost: a vacated spot
-  lingers ~2.5 s before clearing. Frontier no-return path ON (needed to carve a trail on open
-  ground, where the vacated spot has no solid background); persist is what makes it safe. Net: a
-  moving person keeps their current pose but leaves no trail. Between-beam-gap
-  age-out ON (`carve_gap_frames`, 8) but GATED to near + in-front space: a map point on a bearing
-  no beam ever re-hits, whose neighbours ARE scanned, is a stale fragment the discrete Ouster beams
-  can't confirm or carve normally (reads as "unobserved → keep" forever) — dropped after 8 frames.
-  This clears the sparse elevated specks that sit in the robot's path. The gate is essential:
-  ungated, the carve depth-image bins elevation coarser (128 bins / 180° = 1.4°/bin) than the beam
-  pitch (~0.35°), so a distant real point lands in an empty el-bin and reads as a gap — ungated it
-  erased 37% of the map (72% of structure past 8 m) and ate the wheel-occlusion shadows off to the
-  sides. `carve_gap_max_range_m` (2.5) limits it to near points and `carve_gap_fwd_deg` (45, half-
-  cone off the robot heading) to the front, cutting erosion to ~2% while still clearing the specks.
-  A point in a fully unscanned region (no scanned neighbour, outside the FOV) is always held. Also:
-  recency age-out OFF (erased static), reset-on-tracking-loss ON. `NO_FORGET=1` disables carve +
-  recency + reset; `RECENCY=1` re-enables the age-out.
-- **Node broadcasts `odom→base_link`** (`publish_odom_tf`, default on) at the full odom rate,
-  because `helhest_llc` publishes the `/odom_2d` message but no TF — without it `base_link`
-  is disconnected from `map` and RViz can't place/follow the robot. Set false only if the odom
-  source starts broadcasting it. RViz: world-up view = Fixed Frame `map` + view Target Frame
+- **Odin only** (since 2026-09-28): the pose is Odin's on-device SLAM (`/odin1/odometry`), trusted
+  as is -- there is no ICP, deskew, gyro rotation prior or accumulated point cloud any more. Every
+  planning map (MPPI terrain, routing grid with sigma and drift, coarse layer) is a crop of one
+  `elevation_belief` window, through the same helper the closed-loop sim uses
+  (`helhest/perception/belief_frame.py`); RViz shows it as `elevation_local` / `elevation_global`.
+  Moving objects are handled by the belief's own carve (`belief_carve_m`, 6 m), which has not yet
+  been checked on a real bag with people in it (studies/belief_mapping/STEP0.md). The Ouster-era
+  notes on ICP, the gyro prior, `/imu/data` vs `/ouster/imu` and the accumulator's carve rules are
+  in this file's git history before that date.
+- **Gyro glitch guard (`max_gyro_rate_dps`, 600):** the Ouster-era `/imu/data` spiked to 1000-8000
+  deg/s for a single sample (real motion peaks ~300). The yaw-rate loop, the turn adapter and the
+  mu estimate read the gyro, so `_imu_callback` still drops any sample above the gate.
+- **Node broadcasts `odom→base_link`** (`publish_odom_tf`, default on) at the full odom rate:
+  the odometry arrives as a message with no TF, and without it `odin1_base_link` is disconnected
+  from `map` and RViz can't place/follow the robot. Set false only if the odom source starts
+  broadcasting it. RViz: world-up view = Fixed Frame `map` + view Target Frame
   `base_link`; robot-up view = Fixed Frame `base_link` (needs the dense odom-rate TF above).

@@ -2,10 +2,10 @@
 
     <chrono-env>/bin/python scripts/chrono_vehicle_model.py --terrain rigid --out /tmp/veh.json
 
-Built to the spec in PREREG_chrono_vehicle.md. Every parameter is tagged MODEL (from RobotParams),
-BAG (measured on the robot, TIER1_REPORT.md section 3) or ASSUMED, and the two predictions being
-scored are the turn gain alpha = 2.20 and the forward gain 0.906-0.925 -- the pair our own traction
-fit could not satisfy simultaneously.
+Built to the spec in docs/engine/PREREG_chrono_vehicle.md. Every parameter is tagged MODEL (from
+RobotParams), BAG (measured on the robot, docs/engine/TIER1_REPORT.md section 3) or ASSUMED, and the
+two predictions being scored are the turn gain alpha = 2.20 and the forward gain 0.906-0.925 -- the
+pair our own traction fit could not satisfy simultaneously.
 
 NOT a ChWheeledVehicle. Those templates are built around suspensions, steering and a driveline,
 and this robot has none: three wheels bolted to the chassis, skid-steered. The idiomatic Chrono
@@ -16,8 +16,8 @@ still needed because SCMTerrain lives in it.
 Wheels are 48-gon convex-hull prisms rather than ChCollisionShapeCylinder. Chrono's default
 collision detection returns a SINGLE contact point for a cylinder on a plane, which is degenerate
 for what is physically a line contact -- it made a flat plane read asymmetric and transferred load
-the wrong way at 10 deg of bank (PREREG_chrono.md addendum). The hull gives a real manifold and
-reproduces the sphere's loads exactly on the flat.
+the wrong way at 10 deg of bank (docs/engine/PREREG_chrono.md addendum). The hull gives a real
+manifold and reproduces the sphere's loads exactly on the flat.
 """
 
 from __future__ import annotations

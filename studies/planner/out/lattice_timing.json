@@ -1,0 +1,71 @@
+{
+ "frame_ms": 68.96551724137932,
+ "configs": [
+  {
+   "window_m": 16.0,
+   "routing_cell": 0.24,
+   "n_theta": 24,
+   "cells": 4489,
+   "poses": 107736,
+   "median_ms": 7.858880999265239,
+   "p90_ms": 7.900428202992771,
+   "frame_frac": 0.11395377448934595,
+   "name": "deployed (coarsen 3)"
+  },
+  {
+   "window_m": 16.0,
+   "routing_cell": 0.32,
+   "n_theta": 24,
+   "cells": 2500,
+   "poses": 60000,
+   "median_ms": 3.5313194966875017,
+   "p90_ms": 3.8564444970688783,
+   "frame_frac": 0.05120413270196877,
+   "name": "coarsen 4"
+  },
+  {
+   "window_m": 16.0,
+   "routing_cell": 0.16,
+   "n_theta": 24,
+   "cells": 10000,
+   "poses": 240000,
+   "median_ms": 22.420967994548846,
+   "p90_ms": 22.821152498363517,
+   "frame_frac": 0.3251040359209582,
+   "name": "coarsen 2"
+  },
+  {
+   "window_m": 12.0,
+   "routing_cell": 0.24,
+   "n_theta": 24,
+   "cells": 2500,
+   "poses": 60000,
+   "median_ms": 3.6571884993463755,
+   "p90_ms": 4.0014333062572405,
+   "frame_frac": 0.05302923324052244,
+   "name": "12 m window"
+  },
+  {
+   "window_m": 16.0,
+   "routing_cell": 0.24,
+   "n_theta": 12,
+   "cells": 4489,
+   "poses": 53868,
+   "median_ms": 3.6899949991493486,
+   "p90_ms": 3.850185193005018,
+   "frame_frac": 0.05350492748766555,
+   "name": "optimistic solve, 12 headings"
+  },
+  {
+   "window_m": 16.0,
+   "routing_cell": 0.32,
+   "n_theta": 12,
+   "cells": 2500,
+   "poses": 30000,
+   "median_ms": 1.9996670016553253,
+   "p90_ms": 2.0208531044772826,
+   "frame_frac": 0.028995171524002213,
+   "name": "optimistic solve, coarse+12"
+  }
+ ]
+}

@@ -9,13 +9,20 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.4.4",
     "warp-lang>=1.13",
+    # The probabilistic elevation belief every planning map is built from (the robot's node and
+    # the closed-loop sim alike, through helhest.perception.belief_frame). A separate repo rather
+    # than a vendored copy: clark_paper uses it too, and a git pin has exactly one copy.
+    "elevation-belief",
 ]
 
 [project.optional-dependencies]
-# Interactive viewers (viz/) + figure/GIF export.
-viz = ["matplotlib>=3.8", "glfw>=2.6", "PyOpenGL>=3.1", "pillow>=10.0"]
-# Rosbag loading for calibration / eval (data.py).
-data = ["h5py>=3.0"]
+# Figure/GIF export (studies, audits).
+viz = ["matplotlib>=3.8", "pillow>=10.0"]
+# Rosbag loading for calibration / eval (data.py, scripts/fit_*.py).
+data = ["h5py>=3.0", "rosbags>=0.10"]
+# Map-uncertainty calibration harness (studies/calib): reads Odin .mcap bags directly, so no
+# ROS install is needed to replay them.
+calib = ["elevation-belief", "mcap>=1.2", "mcap-ros2-support>=0.5"]
 
 [tool.black]
 line-length = 100
@@ -28,5 +35,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/helhest"]
 
+[tool.uv.sources]
+elevation-belief = { git = "ssh://git@github.com/aleskucera/elevation_belief.git", rev = "8177bbd" }
+
 [dependency-groups]
-dev = ["matplotlib>=3.8", "pillow>=10.0", "h5py>=3.0", "plotly>=6.7.0"]
+dev = ["matplotlib>=3.8", "pillow>=10.0", "h5py>=3.0", "plotly>=6.7.0", "pytest>=7.0", "black>=24.0", "pyyaml>=6.0"]

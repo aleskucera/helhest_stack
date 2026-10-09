@@ -1,0 +1,306 @@
+"""Clearance speed governor: enforce the clearance law (planning/clearance.py) on the plan the
+robot drives.
+
+It reads the footprint's clearance to the nearest wall face along MPPI's next `lookahead_s` and
+scales both wheels by one factor, which keeps the plan's curvature and only slows it down. Plan
+step i is reached i * dt from now and the robot can brake on the way, so a step only limits the
+speed braking cannot shed by then; a plan that is tight only at its far end is not braked now.
+
+While the plan is about to sweep ground nobody has measured -- beside and behind the robot the
+sensor has never looked -- the fastest point is capped at `v_blind`: a wall there is invisible to
+the clearance. Ground under the footprint now is exempt; it is never measured.
+"""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import warp as wp
+
+from ..engine.robot import RobotParams
+from ..engine.terrain import Grid
+from ..planning.clearance import ClearanceParams
+from ..planning.clearance import is_wall_face
+
+
+@wp.func
+def _in_rect(
+    gx: float, gy: float, cx: float, cy: float, ca: float, sa: float, hx: float, hw: float
+) -> bool:
+    ex = gx - cx
+    ey = gy - cy
+    return wp.abs(ca * ex + sa * ey) <= hx and wp.abs(-sa * ex + ca * ey) <= hw
+
+
+@wp.func
+def _solid_face(
+    elevation: wp.array2d(dtype=wp.float32),
+    measured: wp.array2d(dtype=wp.float32),
+    r: int,
+    c: int,
+    face_h: float,
+    face_neighbours: int,
+    face_tall: float,
+) -> bool:
+    """A wall face (is_wall_face) that is part of something solid or tall; see
+    ClearanceParams.face_neighbours. The caller keeps r, c off the border."""
+    ny = elevation.shape[0]
+    nx = elevation.shape[1]
+    n = int(0)
+    for i in range(-1, 2):
+        for j in range(-1, 2):
+            rr = r + i
+            cc = c + j
+            if (i != 0 or j != 0) and rr >= 1 and rr < ny - 1 and cc >= 1 and cc < nx - 1:
+                if is_wall_face(elevation, measured, rr, cc, face_h):
+                    n += 1
+    if n >= face_neighbours:
+        return True
+    lowest = elevation[r, c]
+    for i in range(-2, 3):
+        for j in range(-2, 3):
+            rr = r + i
+            cc = c + j
+            if rr >= 0 and rr < ny and cc >= 0 and cc < nx:
+                lowest = wp.min(lowest, elevation[rr, cc])
+    return elevation[r, c] - lowest > face_tall
+
+
+@wp.kernel
+def _plan_clearance_kernel(
+    controlled: wp.array2d(dtype=wp.vec3f),  # [T+1, B] rollout poses (x, y, yaw) on `grid`
+    elevation: wp.array2d(dtype=wp.float32),
+    measured: wp.array2d(dtype=wp.float32),  # 1 = real data
+    grid: Grid,
+    x_lo: wp.float32,  # footprint in the body frame [m], origin at the drive axle
+    x_hi: wp.float32,
+    half_w: wp.float32,
+    face_h: wp.float32,
+    face_neighbours: int,
+    face_tall: wp.float32,
+    search: int,  # [cells] how far around the footprint to look
+    out: wp.array(dtype=wp.float32),  # [K] clearance per plan step, `search` cells if none
+    blind: wp.array(dtype=wp.float32),  # [K] never-measured area [m^2] the footprint newly covers
+):
+    """Per plan step k (rollout 0, MPPI's noise-free nominal): the clearance [m] from the footprint
+    rectangle to the nearest wall face, and the unseen area it covers that step 0 does not."""
+    k = wp.tid()
+    p = controlled[k, 0]
+    ca = wp.cos(p[2])
+    sa = wp.sin(p[2])
+    ny = elevation.shape[0]
+    nx = elevation.shape[1]
+    xm = 0.5 * (x_lo + x_hi)
+    hx = 0.5 * (x_hi - x_lo)
+    cx = p[0] + ca * xm
+    cy = p[1] + sa * xm
+    p0 = controlled[0, 0]
+    ca0 = wp.cos(p0[2])
+    sa0 = wp.sin(p0[2])
+    cx0 = p0[0] + ca0 * xm
+    cy0 = p0[1] + sa0 * xm
+    rc = int(wp.round((cy - grid.origin_y) / grid.cell_size))
+    cc = int(wp.round((cx - grid.origin_x) / grid.cell_size))
+    best = float(search) * grid.cell_size
+    unseen = float(0.0)
+    for i in range(-search, search + 1):
+        r = rc + i
+        if r < 1 or r >= ny - 1:
+            continue
+        for j in range(-search, search + 1):
+            c = cc + j
+            if c < 1 or c >= nx - 1:
+                continue
+            gx = grid.origin_x + float(c) * grid.cell_size
+            gy = grid.origin_y + float(r) * grid.cell_size
+            if measured[r, c] < 0.5:
+                if k > 0:
+                    if _in_rect(gx, gy, cx, cy, ca, sa, hx, half_w):
+                        if not _in_rect(gx, gy, cx0, cy0, ca0, sa0, hx, half_w):
+                            unseen += grid.cell_size * grid.cell_size
+                continue
+            if not is_wall_face(elevation, measured, r, c, face_h):
+                continue
+            if not _solid_face(elevation, measured, r, c, face_h, face_neighbours, face_tall):
+                continue
+            # signed distance from the wall cell to the rectangle, in the footprint's frame
+            dx = gx - cx
+            dy = gy - cy
+            u = wp.abs(ca * dx + sa * dy) - hx
+            v = wp.abs(-sa * dx + ca * dy) - half_w
+            d = wp.sqrt(wp.max(u, 0.0) * wp.max(u, 0.0) + wp.max(v, 0.0) * wp.max(v, 0.0))
+            best = wp.min(best, d + wp.min(wp.max(u, v), 0.0))
+    out[k] = best
+    blind[k] = unseen
+
+
+@wp.kernel
+def _straight_on_kernel(
+    controlled: wp.array2d(dtype=wp.vec3f),  # [T+1, B] rollout poses; rollout 0 = the plan
+    k: int,
+    out: wp.array2d(dtype=wp.vec3f),  # [k, 1] the start pose carried straight on
+):
+    """The robot carrying straight on along its current heading, covering the same distance per
+    step as the plan does."""
+    p0 = controlled[0, 0]
+    ca = wp.cos(p0[2])
+    sa = wp.sin(p0[2])
+    dist = float(0.0)
+    out[0, 0] = p0
+    for i in range(1, k):
+        a = controlled[i - 1, 0]
+        b = controlled[i, 0]
+        dist += wp.length(wp.vec2f(b[0] - a[0], b[1] - a[1]))
+        out[i, 0] = wp.vec3f(p0[0] + ca * dist, p0[1] + sa * dist, p0[2])
+
+
+class ClearanceGovernor:
+    """Scale MPPI's first command so the body's fastest point obeys the clearance law along the
+    next `params.lookahead_s` of the plan. One small kernel; the readback is a few floats."""
+
+    def __init__(
+        self,
+        robot: RobotParams,
+        plan_dt: float,
+        params: ClearanceParams,
+        device: str | None = None,
+    ) -> None:
+        self.device = wp.get_device(device)
+        self.params = params
+        self.plan_dt = float(plan_dt)
+        self.r = float(robot.wheel_radius)
+        self.half_track = float(robot.half_track)
+        self.tail = float(robot.rear_offset + robot.wheel_radius)
+        side = robot.half_track + 0.5 * (robot.wheel_width or 2.0 * robot.wheel_radius)
+        self.x_lo, self.x_hi, self.half_w = -self.tail, float(robot.wheel_radius), float(side)
+        self.face_h = float(robot.wheel_radius)
+        self.steps = max(1, int(math.ceil(params.lookahead_s / plan_dt)))
+        self._out = wp.zeros(self.steps + 1, dtype=wp.float32, device=self.device)
+        self._blind = wp.zeros(self.steps + 1, dtype=wp.float32, device=self.device)
+        self._straight = wp.zeros((self.steps + 1, 1), dtype=wp.vec3f, device=self.device)
+        self._out_straight = wp.zeros(self.steps + 1, dtype=wp.float32, device=self.device)
+        self._blind_straight = wp.zeros(self.steps + 1, dtype=wp.float32, device=self.device)
+        # last frame's readings, for logging
+        self.clearance = float("inf")
+        self.v_cap = float("inf")
+        self.v_cap_straight = float("inf")  # [m/s] the forward-speed cap from carrying straight on
+        self.blind = False
+
+    def _shed(self, t: np.ndarray) -> np.ndarray:
+        """[m/s] speed braking can shed within t [s]. Under the output's jerk limit the braking
+        ramps up for decel/jerk seconds first (0.6 s on the robot), which at 1 m/s^2 is the
+        difference between shedding 0.7 and 1.0 m/s in the first second."""
+        p = self.params
+        jerk = p.wheel_jerk * self.r  # [m/s^3] at the ground
+        if jerk <= 0.0:
+            return p.decel * t
+        ramp = p.decel / jerk
+        return np.where(t < ramp, 0.5 * jerk * t * t, p.decel * (t - 0.5 * ramp))
+
+    def cap(
+        self,
+        wl: float,
+        wr: float,
+        controlled: wp.array,
+        elevation: wp.array,
+        measured: wp.array,
+        grid: Grid,
+    ) -> tuple[float, float]:
+        """(wl, wr) [rad/s], scaled by one factor so the fastest body point obeys the law."""
+        p = self.params
+        k = min(self.steps + 1, controlled.shape[0])
+        search = max(1, int(math.ceil(p.search_m / float(grid.cell_size))))
+        wp.launch(
+            _plan_clearance_kernel,
+            dim=k,
+            inputs=[
+                controlled,
+                elevation,
+                measured,
+                grid,
+                self.x_lo,
+                self.x_hi,
+                self.half_w,
+                self.face_h,
+                int(p.face_neighbours),
+                float(p.face_tall_m),
+                search,
+            ],
+            outputs=[self._out, self._blind],
+            device=self.device,
+        )
+        per_step = self._out.numpy()[:k]
+        shed = self._shed(np.arange(k) * self.plan_dt)
+        unseen = self._blind.numpy()[:k] >= p.blind_area
+        allowed = np.maximum(p.v_min, (per_step - p.c0) / p.t_react)
+        if p.v_blind > 0.0:
+            allowed = np.where(unseen, np.minimum(allowed, p.v_blind), allowed)
+        self.clearance = float(np.min(per_step))
+        self.blind = bool(unseen.any())
+        self.v_cap = float(np.min(allowed + shed))
+        v = self.r * 0.5 * abs(wl + wr)
+        wz = self.r * abs(wr - wl) / (2.0 * self.half_track)  # alpha 1: over-estimates the swing
+        fastest = v + p.turn_ratio * self.tail * wz
+        if fastest > self.v_cap:
+            s = self.v_cap / fastest
+            wl, wr = wl * s, wr * s
+        if p.straight:
+            wl, wr = self._cap_straight_on(wl, wr, controlled, elevation, measured, grid, k, search)
+        return wl, wr
+
+    def _cap_straight_on(
+        self,
+        wl: float,
+        wr: float,
+        controlled: wp.array,
+        elevation: wp.array,
+        measured: wp.array,
+        grid: Grid,
+        k: int,
+        search: int,
+    ) -> tuple[float, float]:
+        """Cap FORWARD speed by the room along the robot carrying straight on, and leave the turn.
+
+        The plan alone is not enough: approaching a trunk, each replan bent a little closer to it,
+        so the plan always showed more room than the robot then had -- Stromovka 14_12_38, 0.55 m
+        seen 2.8 s out, 0.14 m driven -- and the governor braked only 0.5 s before it. Carrying
+        straight on shows the trunk at once. Only forward speed is capped: driving straight into a
+        wall is no reason not to turn away from it, and capping the turn too pinned the robot in
+        drive_sim's `pocket` corner for a minute.
+        """
+        p = self.params
+        wp.launch(
+            _straight_on_kernel,
+            dim=1,
+            inputs=[controlled, k],
+            outputs=[self._straight],
+            device=self.device,
+        )
+        wp.launch(
+            _plan_clearance_kernel,
+            dim=k,
+            inputs=[
+                self._straight,
+                elevation,
+                measured,
+                grid,
+                self.x_lo,
+                self.x_hi,
+                self.half_w,
+                self.face_h,
+                int(p.face_neighbours),
+                float(p.face_tall_m),
+                search,
+            ],
+            outputs=[self._out_straight, self._blind_straight],
+            device=self.device,
+        )
+        straight = self._out_straight.numpy()[:k]
+        allowed = np.maximum(p.v_min, (straight - p.c0) / p.t_react)
+        self.v_cap_straight = float(np.min(allowed + self._shed(np.arange(k) * self.plan_dt)))
+        mean, half = 0.5 * (wl + wr), 0.5 * (wr - wl)
+        if self.r * abs(mean) <= self.v_cap_straight:
+            return wl, wr
+        mean = math.copysign(self.v_cap_straight / self.r, mean)
+        return mean - half, mean + half

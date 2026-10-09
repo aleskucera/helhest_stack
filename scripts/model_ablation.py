@@ -1,6 +1,6 @@
 """Does the extra model fidelity change the DECISION, and what does it cost?
 
-IMPROVEMENTS.md section 10, run on the branch that implemented sections 1-5.
+docs/research/IMPROVEMENTS.md section 10, run on the branch that implemented sections 1-5.
 
 The Tier-1/2 work was verified against closed forms (each certificate crosses where algebra says
 it must) and against bags (yaw-rate RMS). Neither answers the question a planner cares about:

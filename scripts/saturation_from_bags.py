@@ -2,9 +2,9 @@
 
 Run:  python scripts/saturation_from_bags.py bags/out_experiment_goal_unreachable0 [more bags]
 
-Screening test for whether a better friction model could change anything (IMPROVEMENTS.md
-section 10). The certificate needs only tilt, body twist and mu, and all three are already in the
-bag -- no terrain, no perception, no simulator:
+Screening test for whether a better friction model could change anything
+(docs/research/IMPROVEMENTS.md section 10). The certificate needs only tilt, body twist and mu, and
+all three are already in the bag -- no terrain, no perception, no simulator:
 
     demand_long = m g sin(pitch)
     demand_lat  = m v psi_dot + m g cos(pitch) sin(roll)

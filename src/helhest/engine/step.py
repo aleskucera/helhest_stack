@@ -37,7 +37,15 @@ from .terrain import sample_normal
 # memory access at runtime). Verified via compute-sanitizer + an -O level sweep
 # (-O3 crashes; -O2/-O1/-O0 are correct). -O2 is correct and ~as fast as -O3, so
 # pin this module to it. CPU is unaffected (defaults to -O2).
-wp.set_module_options({"optimization_level": 2})
+#
+# No FMA contraction either. Warp emits a module's kernels in the iteration order of a WeakSet,
+# which varies per process (the module hash is taken over sorted kernels, so it does not change);
+# the compiler inlines differently depending on that order, and with contraction on, inlining
+# decides which multiply-adds fuse. So one module hash compiled to results that differed in the
+# last bits -- amplified at ill-conditioned settle poses to 3e-3 in the planner's margins, which
+# flipped studies/planning_refactor/golden.py in about one run in five. Unfused, every operation
+# rounds on its own and the result no longer depends on the inlining.
+wp.set_module_options({"optimization_level": 2, "fuse_fp": False})
 
 # Certificate denominators are floored at this fraction of the robot's weight: a near-unloaded
 # contact would otherwise report an enormous ratio while transmitting almost nothing.
@@ -126,11 +134,12 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     # used -- they already contain the 0.19 s actuator lag -- the body's yaw follows with no
     # further lag. Chrono has a lag the robot does not, which is also why this knob turned out
     # redundant with k_turn: both were absorbing the same simulator artifact. Kept at 0 as a
-    # documented negative; see CALIBRATION_RESULTS.md.
+    # documented negative; see docs/field/CALIBRATION_RESULTS.md.
     yaw_tau: float = 0.0
     # Relaxation LENGTH [m]: the same yaw lag keyed to distance, tau_eff = yaw_relax_len / v.
-    # REFUTED ON THE ROBOT alongside yaw_tau -- see that field and CALIBRATION_RESULTS.md. The
-    # reasoning that motivated it still stands (rigid-body yaw inertia CANNOT be the mechanism:
+    # REFUTED ON THE ROBOT alongside yaw_tau -- see that field and
+    # docs/field/CALIBRATION_RESULTS.md. The reasoning that motivated it still stands (rigid-body
+    # yaw inertia CANNOT be the mechanism:
     # mu m g b / I_zz = 30 rad/s^2 settles in 0.033 s, a third of a planner step), but the premise
     # that there is a lag to explain does not survive the measurement. 0 = off.
     yaw_relax_len: float = 0.0
@@ -139,7 +148,8 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     # Body momentum, IMPLICITLY integrated inside the same twist solve (requires shear_lk > 0).
     # Explicit integration is not an option here: the shear curve makes the contacts stiff, with
     # time constants near 20 ms in translation and 8 ms in yaw, so an explicit step would force
-    # dt ~ 5 ms and a 20x longer horizon -- the wall IMPROVEMENTS.md section 9(a) warns about.
+    # dt ~ 5 ms and a 20x longer horizon -- the wall docs/research/IMPROVEMENTS.md section 9(a)
+    # warns about.
     # Implicit Euler is unconditionally stable on this dissipative system and costs three extra
     # terms in a residual that is already being evaluated. False keeps the quasi-static solve,
     # which stays the reference case the numpy oracle in tests/engine/traction.py validates.
@@ -488,9 +498,9 @@ def normal_loads(
     the contacts also supply an in-plane friction force, and it acts at the ground, BELOW the CoM,
     so it carries a moment about the CoM. Balancing normals only -- which this function used to do
     -- gets the load split wrong as soon as the ground tilts. Measured against Project Chrono
-    (PREREG_chrono.md, scripts/chrono_compare.py): at 25 deg of pitch the least-loaded contact
-    came out at 0.291 m g against Chrono's 0.042, an error of 0.249 m g = 259 N. Worse, on a side
-    slope the old balance produced NO left/right transfer at all, and could not have: with
+    (docs/engine/PREREG_chrono.md, scripts/chrono_compare.py): at 25 deg of pitch the least-loaded
+    contact came out at 0.291 m g against Chrono's 0.042, an error of 0.249 m g = 259 N. Worse, on a
+    side slope the old balance produced NO left/right transfer at all, and could not have: with
     parallel normals the split collapses to the CoM's barycentric weight, and the CoM sits on the
     centreline. Chrono transfers 0.405 m g by 25 deg of bank.
 
@@ -499,8 +509,8 @@ def normal_loads(
     and the moment it contributes is LINEAR in N_i, so this stays a 3x3 solve at the same cost.
     Resolving the force balance along n_bar instead of vertically is what makes S right: friction
     has a vertical component on a slope, so the normals alone do not carry the full weight. The
-    old row gave Sum N_i = m g / (cos pitch cos roll), a 10% overshoot at 25 deg, where the truth
-    is m g cos(tilt) -- which Chrono confirms to 1e-4.
+    old row gave Sum N_i = m g / (cos pitch cos roll), where the truth is m g cos(tilt) -- which
+    Chrono confirms to 1e-4. At 25 deg of pitch that is 22% over the truth (10% over m g).
 
     On FLAT ground n_bar = z, S = m g and F_t = 0, so every coefficient reduces to the previous
     one and the result is bit-identical. Only sloped terrain moves.
@@ -599,11 +609,11 @@ def yaw_bin(yaw: float, n_yaw: int) -> int:
     2*PI stack recomputes and stores its own second half. Half the slices at the same angular
     resolution; the bin width is PI/n_yaw.
 
-    COUPLED CONSTRAINT (IMPROVEMENTS.md section 7): with a yaw-dependent envelope, `psi_dot * dt`
-    must stay inside one bin or the rollout aliases across slices. At 32 bins over PI (5.6 deg)
-    and dt = 0.1 s that holds up to psi_dot ~ 1 rad/s. omega_max is not recorded anywhere in this
-    repo; if it is near 8 rad/s the cylinder and a finer step have to land together. Not solved
-    here -- documented.
+    COUPLED CONSTRAINT (docs/research/IMPROVEMENTS.md section 7): with a yaw-dependent envelope,
+    `psi_dot * dt` must stay inside one bin or the rollout aliases across slices. At 32 bins over
+    PI (5.6 deg) and dt = 0.1 s that holds up to psi_dot ~ 1 rad/s. omega_max is not recorded
+    anywhere in this repo; if it is near 8 rad/s the cylinder and a finer step have to land
+    together. Not solved here -- documented.
     """
     if n_yaw == 1:
         return 0

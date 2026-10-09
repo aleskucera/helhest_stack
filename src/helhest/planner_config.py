@@ -1,0 +1,228 @@
+"""The ONE place `plan_*` parameters become planner objects.
+
+Before this there were four configurations and they disagreed: `mppi.py`'s dataclass defaults,
+the ROS node's declared defaults, the deployed params file, and `studies/closed_loop/drive_sim.py`,
+which built its planner from library defaults. So every stress-world result validated a controller
+the robot does not run -- `turn` 0.0 against the robot's 0.2, no spin prior, one friction replica
+instead of three -- and the bug that stopped the robot turning around was invisible in simulation
+because it lived in a value the simulation never set.
+
+Now the node declares its parameters with these defaults and builds its planner through
+`planner_config`, and so does `drive_sim`, reading the same params file the robot does. Rationale
+for individual values stays beside their declarations in `navigation_node.py`; only the numbers live
+here, so there is one of each.
+
+No ROS and no YAML here: the node passes its cached values, `drive_sim` parses the file itself.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
+
+from helhest.control.mppi import CostParams
+from helhest.control.mppi import SamplingConfig
+from helhest.planning.clearance import ClearanceParams
+
+# Everything the planner reads that the node and the simulator must agree on. Grid geometry and the
+# command chain after MPPI (turn boost, goal brake, yaw loop, consistency EMA) are NOT here: the
+# simulator deliberately uses its own windows. The output's acceleration and jerk limits ARE,
+# because the rollouts drive the command through the same tracker.
+PLAN_DEFAULTS: dict[str, Any] = {
+    # cost weights -> CostParams
+    "plan_goal_running": 0.3,
+    "plan_effort": 1e-3,
+    "plan_turn": 0.03,
+    "plan_traction": 0.0,  # yaw^2 / (|v| + 0.3) per step: turn while rolling (CostParams.traction)
+    # MPPI's charge on cornering past the output's turn brake (CostParams.lat_accel); 0 = off.
+    "plan_lat_accel": 0.0,
+    # [m/s^2] the turn brake's lateral limit -- the output brakes past it, MPPI is charged past it
+    "plan_turn_brake_a_max": 0.0,
+    # keep_away * max(0, keep_away_m - wall clearance)^2 per step (CostParams.keep_away); 0 = off
+    "plan_keep_away": 0.0,
+    "plan_keep_away_m": 0.6,
+    "plan_smooth": 0.04,
+    "plan_saturation": 300.0,
+    # MPPI's hard veto on the cost-to-go's HAZARD field: actual wall contact, without the router's
+    # margin, and never tilt. 1e6 is ten times the rollout-infeasibility weight. 0 = off.
+    "plan_wall_veto": 1e6,
+    # first-target charge for leaving last frame's plan (CostParams.commit). 0 = off.
+    "plan_commit": 0.0,
+    # sampler -> SamplingConfig
+    "plan_wmax": 4.0,
+    "plan_wmin": 0.0,
+    "plan_straight_frac": 0.2,
+    "plan_spin_frac": 0.12,
+    "plan_spin_min": 2.0,
+    "plan_spin_max": 0.0,  # [rad/s] ceiling on a spin's wheel speed; 0 = plan_wmax
+    "plan_elite_frac": 0.01,
+    "plan_n_mu": 1,
+    # the output tracker (control.command.condition_command), modelled in the rollouts too
+    "plan_max_slew": 6.0,  # [rad/s^2] acceleration cap per wheel
+    "plan_max_decel": 12.0,  # [rad/s^2] toward rest
+    "plan_max_jerk": 0.0,  # [rad/s^3]; 0 = a plain rate limit
+    # MPPI run
+    "plan_n_theta": 24,
+    "plan_horizon": 25,
+    "plan_batch": 4096,
+    "plan_nominal_reset": 1.5,
+    "plan_mu_span": 0.25,
+    # cost-to-go
+    "plan_robust_margin_m": 0.3,
+    "plan_robust_margin_deg": 0.0,
+    "plan_obstacle_step_m": 0.0,
+    "plan_pivot_cost": 0.0,
+    # The sigma path of the cost-to-go (planning/settle_producer.py): veto a pose holding fewer than
+    # z_veto sigmas of room, and charge charge_per_sigma per sigma short of CostToGo's z_charge. One
+    # setting for the node and the simulator -- the node used to run CostToGo's own 0.5 while
+    # drive_sim passed 0. Both 0 = the hard thresholds alone, the sigma has no say.
+    "plan_z_veto": 0.0,
+    "plan_charge_per_sigma": 0.0,
+    # THE CLEARANCE LAW (planning/clearance.py): near walls the robot is slowed, not kept out.
+    # plan_clear_t_react > 0 turns it on and replaces the spatial tube's veto; 0 = the tube vetoes.
+    "plan_clear_t_react": 0.0,  # [s] error per unit speed of the fastest body point
+    "plan_clear_c0": 0.15,  # [m] fixed margin (0.2 cost narrow corridors ~10% in sim)
+    "plan_clear_v_min": 0.15,  # [m/s] floor
+    "plan_clear_v_cruise": 1.5,  # [m/s] the route's time unit
+    "plan_clear_t_turn": 0.25,  # [s] the tail swing's own t_react
+    "plan_clear_route_turn": 1.0,  # 1 = the route charges turning arcs for their tail near walls
+    "plan_clear_mppi_weight": 1.0,  # MPPI's price for lost time; 1 = exact in goal units
+    "plan_clear_lookahead_s": 1.0,  # [s] of the plan the governor checks
+    "plan_clear_decel": 2.0,  # [m/s^2] braking the governor may count on
+    "plan_clear_v_blind": 0.3,  # [m/s] while the plan sweeps never-measured ground; 0 = off
+    "plan_clear_straight": 0.0,  # 1 = the governor also caps forward speed by carrying straight on
+    # False = the governor still measures clearance (turn-first reads it) but never caps speed
+    "plan_clear_governor": True,
+    # robot
+    "plan_wheel_width": 0.10,
+    # the coarse "which way" layer (planning/coarse.py) and the turn-first brake
+    # (control/command.turn_first). Block size 0 = no coarse layer; memory 0 = a layer bound to the
+    # window it is pooled from, which forgets what scrolls out of it; turn-first 0 = off.
+    "plan_coarse_block_m": 0.6,
+    "plan_coarse_memory_m": 60.0,
+    "plan_bridge_m": 1.2,
+    "plan_turn_first_deg": 45.0,
+    "plan_turn_first_reach_m": 1.5,
+    # [m] turn first only while a wall face is this close along the plan (the governor's
+    # clearance); in the open the robot turns while rolling. 0 = everywhere.
+    "plan_turn_first_clear_m": 0.0,
+    # traction applies fully while the route is within on_deg of the heading, not at all past
+    # off_deg (control.command.traction_scale); off_deg 0 = always fully
+    "plan_traction_on_deg": 60.0,
+    "plan_traction_off_deg": 0.0,
+}
+
+
+@dataclass(frozen=True)
+class PlannerConfig:
+    cost: CostParams
+    sampling: SamplingConfig
+    costtogo: dict[str, Any]  # CostToGo kwargs beyond grid / robot / solver / device
+    n_theta: int
+    horizon: int
+    batch: int
+    nominal_reset: float
+    mu_span: float  # the band MppiGpu.set_mu_band gets: 0 with a single friction replica
+    wheel_width: float
+    coarse: dict[str, float]  # block_m, memory_m, bridge_m -- CoarseRouter, sized by the caller
+    turn_first: dict[str, float]  # start_deg, reach_m -- control.command.turn_first
+    clearance: ClearanceParams | None  # the clearance law; None = the spatial tube vetoes
+
+
+def resolve(params: Mapping[str, Any]) -> dict[str, Any]:
+    """Defaults overlaid with `params`, restricted to the keys above -- the flat dict worth saving
+    next to a result, so the result can say which controller produced it."""
+    return {**PLAN_DEFAULTS, **{k: v for k, v in params.items() if k in PLAN_DEFAULTS}}
+
+
+def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
+    """`plan_*` values -> the objects the node and the simulator both build their planner from."""
+    p = resolve(params)
+    wmin = float(p["plan_wmin"])
+    n_mu = max(1, int(p["plan_n_mu"]))
+    # MppiGpu refuses a batch its friction replicas do not divide, and the deployed params set
+    # plan_n_mu 3 over the 4096 default -- so that file, read as written, could not start the node
+    # (sim-demo carried a hand-written `-p plan_batch:=4095` to get round it). Round down instead:
+    # it only changes configurations that could not start at all.
+    batch = int(p["plan_batch"])
+    batch -= batch % n_mu
+    clearance = (
+        ClearanceParams(
+            t_react=float(p["plan_clear_t_react"]),
+            c0=float(p["plan_clear_c0"]),
+            v_min=float(p["plan_clear_v_min"]),
+            v_cruise=float(p["plan_clear_v_cruise"]),
+            t_turn=float(p["plan_clear_t_turn"]),
+            route_turn=float(p["plan_clear_route_turn"]) > 0.0,
+            mppi_weight=float(p["plan_clear_mppi_weight"]),
+            lookahead_s=float(p["plan_clear_lookahead_s"]),
+            decel=float(p["plan_clear_decel"]),
+            wheel_jerk=float(p["plan_max_jerk"]),
+            v_blind=float(p["plan_clear_v_blind"]),
+            straight=float(p["plan_clear_straight"]) > 0.0,
+        )
+        if float(p["plan_clear_t_react"]) > 0.0
+        else None
+    )
+    return PlannerConfig(
+        cost=CostParams(
+            goal_running=float(p["plan_goal_running"]),
+            effort=float(p["plan_effort"]),
+            turn=float(p["plan_turn"]),
+            traction=float(p["plan_traction"]),
+            lat_accel=float(p["plan_lat_accel"]),
+            lat_accel_max=float(p["plan_turn_brake_a_max"]),
+            keep_away=float(p["plan_keep_away"]),
+            keep_away_m=float(p["plan_keep_away_m"]),
+            smoothness=float(p["plan_smooth"]),
+            saturation=float(p["plan_saturation"]),
+            veto=float(p["plan_wall_veto"]),
+            commit=float(p["plan_commit"]),
+            clearance=clearance,
+        ),
+        sampling=SamplingConfig(
+            wmax=float(p["plan_wmax"]),
+            # only the box the planner MAY use; the node gates the effective floor per frame on
+            # map coverage behind the robot
+            wmin=min(0.0, wmin),
+            straight_frac=float(p["plan_straight_frac"]),
+            # not conditioned on wmin: the spin band is exempt from the wmin clamp on purpose
+            spin_frac=float(p["plan_spin_frac"]),
+            spin_min=float(p["plan_spin_min"]),
+            spin_max=float(p["plan_spin_max"]),
+            pivot_frac=0.05 if wmin < 0.0 else 0.0,
+            elite_frac=float(p["plan_elite_frac"]),
+            n_mu=n_mu,
+            max_accel=float(p["plan_max_slew"]),
+            max_decel=float(p["plan_max_decel"]),
+            max_jerk=float(p["plan_max_jerk"]),
+        ),
+        costtogo=dict(
+            n_theta=int(p["plan_n_theta"]),
+            robust_margin_m=float(p["plan_robust_margin_m"]),
+            robust_margin_deg=float(p["plan_robust_margin_deg"]),
+            obstacle_step_m=float(p["plan_obstacle_step_m"]),
+            pivot_cost=float(p["plan_pivot_cost"]),
+            z_veto=float(p["plan_z_veto"]),
+            charge_per_sigma=float(p["plan_charge_per_sigma"]),
+            **({"clearance": clearance} if clearance is not None else {}),
+        ),
+        n_theta=int(p["plan_n_theta"]),
+        horizon=int(p["plan_horizon"]),
+        batch=batch,
+        nominal_reset=float(p["plan_nominal_reset"]),
+        mu_span=float(p["plan_mu_span"]) if n_mu > 1 else 0.0,
+        wheel_width=float(p["plan_wheel_width"]),
+        coarse=dict(
+            block_m=float(p["plan_coarse_block_m"]),
+            memory_m=float(p["plan_coarse_memory_m"]),
+            bridge_m=float(p["plan_bridge_m"]),
+        ),
+        turn_first=dict(
+            start_deg=float(p["plan_turn_first_deg"]),
+            reach_m=float(p["plan_turn_first_reach_m"]),
+            clear_m=float(p["plan_turn_first_clear_m"]),
+        ),
+        clearance=clearance,
+    )

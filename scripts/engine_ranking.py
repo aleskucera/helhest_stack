@@ -2,9 +2,9 @@
 
     python scripts/engine_ranking.py /tmp/chrono_rank.npz
 
-IMPROVEMENTS.md section 10's Level-1 vs Level-3 ablation. The controls are read out of Chrono's
-own output file rather than regenerated, so the two populations are identical by construction and
-no seed has to agree across two environments.
+docs/research/IMPROVEMENTS.md section 10's Level-1 vs Level-3 ablation. The controls are read out of
+Chrono's own output file rather than regenerated, so the two populations are identical by
+construction and no seed has to agree across two environments.
 
 `k_turn` is swept, because our alpha is a FITTED constant (alpha = 1 + k_turn * mu) while Chrono's
 emerges from geometry and friction. Comparing at the shipped k_turn = 0.6 would mostly measure that
