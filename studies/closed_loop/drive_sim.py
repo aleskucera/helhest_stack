@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import pathlib
 
 import numpy as np
@@ -44,7 +45,6 @@ import warp as wp
 from examples.helhest_junior.odin_sim.sensor import OdinSensor
 from examples.helhest_junior.odin_sim.sim import build_sim
 from examples.helhest_junior.odin_sim.sim import ODIN_MOUNT_XYZ
-
 from helhest import dynamics
 from helhest.control.command import condition_command
 from helhest.control.command import spin_side
@@ -53,6 +53,11 @@ from helhest.control.command import traction_scale
 from helhest.control.command import turn_first
 from helhest.control.governor import ClearanceGovernor
 from helhest.control.mppi import MppiGpu
+from helhest.control.qp_path import extend_route
+from helhest.control.qp_path import PathQp
+from helhest.control.qp_path import QpPathParams
+from helhest.control.qp_path import resample_reference
+from helhest.control.qp_path import trim_at_edge
 from helhest.control.terminal import dock_control
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
@@ -62,6 +67,7 @@ from helhest.perception.belief_frame import BeliefFrame
 from helhest.planner_config import PLAN_DEFAULTS
 from helhest.planner_config import planner_config
 from helhest.planner_config import resolve
+from helhest.planning.clearance import clearance_map_kernel
 from helhest.planning.coarse import CoarseRouter
 from helhest.planning.costtogo import CostToGo
 from helhest.planning.lattice_solver import trace_optimal
@@ -275,7 +281,9 @@ def drive(a: argparse.Namespace) -> dict:
     win_grid = GridParams(nw, nw, a.cell, 0.0, 0.0)
     route_grid = GridParams(nr, nr, a.cell, 0.0, 0.0)
     belief_grid = GridParams(n, n, a.cell, 0.0, 0.0)
-    mppi = a.controller == "mppi"
+    # the QP controller keeps the whole MPPI setup: MPPI is its fallback, and the wall-distance map
+    # it smooths against is the one MPPI builds every frame
+    mppi = a.controller in ("mppi", "qp")
     robot = dynamics.robot_params(a.wheel_width)
     plan_sim = (
         None
@@ -382,6 +390,26 @@ def drive(a: argparse.Namespace) -> dict:
     hist: dict[str, list] = {k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "meta")}
     # per frame with the governor: [frame, clearance m, cap m/s, scale, about to sweep unseen ground]
     gov_log: list = []
+    qp = None
+    qp_log: list = []  # per frame: [f, 1 = the QP path drove / 0 = MPPI, reason code]
+    qp_paths: list = []  # [f, x, y, v] of the optimised path, world frame, every history frame
+    qp_driven = None  # this frame's QP path as timed poses, when the QP drove (governor input)
+    if a.controller == "qp":
+        side_w = robot.half_track + 0.5 * (robot.wheel_width or 2.0 * robot.wheel_radius)
+        qp = PathQp(
+            QpPathParams(
+                horizon_m=a.qp_horizon, margin=a.qp_margin, w_off=a.qp_w_off, pin_end=a.qp_pin_end
+            ),
+            wheel_radius=robot.wheel_radius,
+            half_width=side_w,
+            tail=robot.rear_offset + robot.wheel_radius,
+            head=robot.wheel_radius,
+            device=a.device,
+        )
+        # the corridor's wall map over the whole belief window, in the MPPI window's frame (the
+        # two windows are centred crops of one belief, a fixed whole-cell offset apart)
+        qp_clear = wp.zeros((n, n), dtype=wp.float32, device=a.device)
+        qp_clear_grid = GridParams(n, n, a.cell, -off_w * a.cell, -off_w * a.cell).build()
     esc: list = []  # per recorded frame: [best rollout's worst violation, median, clean fraction]
     # WALL CLEARANCE, every frame, against the world's exact solids. "Reached" cannot see a robot
     # scraping a wall on its way through, and the robust margin exists precisely so that never
@@ -525,6 +553,122 @@ def drive(a: argparse.Namespace) -> dict:
             wl, wr = float(u[0, 0]), float(u[0, 1])
             if chain:
                 side = spin_side(side, prev_lrr, planned=u[0])
+            if qp is not None:
+                # the route's own path, walked in the routing window and moved to the MPPI window
+                # (where the wall-distance map lives), smoothed inside its corridor and followed.
+                # MPPI's command stands whenever there is no usable path. Reason codes:
+                # 1 = no path, 2 = facing away from it (spin first), 3 = QP failed, 0 = QP drove.
+                # start the walk from the heading the route itself prefers here -- the cheapest
+                # heading bin within 30 deg of the robot's -- not from the robot's heading rounded
+                # to the nearest bin: rounding -8 deg to -15 deg made every path set off 15 deg
+                # south, the robot followed, and on `trunks` it walked 4 m off the lane to the map
+                # edge in 15 m
+                dth = 2.0 * np.pi / a.n_theta
+                rc_r = int(round((ry - s0) / a.cell))
+                rc_c = int(round((rx - r0) / a.cell))
+                start_yaw = yaw
+                if 0 <= rc_r < nr and 0 <= rc_c < nr:
+                    v_here = V.numpy()[rc_r, rc_c]
+                    near = [
+                        t
+                        for t in range(a.n_theta)
+                        if abs((t * dth - yaw + np.pi) % (2.0 * np.pi) - np.pi) <= np.radians(30.0)
+                    ]
+                    if near and np.isfinite(v_here[near]).any():
+                        start_yaw = near[int(np.argmin(v_here[near]))] * dth
+                pts = trace_optimal(
+                    ctg, (rx - r0, ry - s0, start_yaw), a.n_theta, nr, nr, 0.0, 0.0, a.cell
+                )
+                pts = np.asarray(pts, np.float64) + np.array([r0 - wx0, s0 - wy0])
+                if a.qp_coarse and coarse is not None:
+                    edge = (r0 - wx0, s0 - wy0)
+                    pts = trim_at_edge(
+                        pts, edge, (edge[0] + nr * a.cell, edge[1] + nr * a.cell), 2.0 * a.cell
+                    )
+                    pts = extend_route(
+                        pts,
+                        vc.numpy()[:, :, 0],
+                        (cx0 - wx0, cy0 - wy0),
+                        float(coarse.grid.cell_size),
+                        qp.p.horizon_m,
+                    )
+                ref = resample_reference(pts, qp.p.ds, qp.p.horizon_m)
+                reason = 1
+                qp_driven = None
+                if ref is not None:
+                    psi0 = float((yaw - ref[0, 2] + np.pi) % (2.0 * np.pi) - np.pi)
+                    reason = 2
+                    if abs(psi0) < np.radians(qp.p.spin_deg):
+                        sx, sy = float(state_l[0]), float(state_l[1])
+                        e0 = -(sx - ref[0, 0]) * np.sin(ref[0, 2]) + (sy - ref[0, 1]) * np.cos(
+                            ref[0, 2]
+                        )
+                        end_at_goal = (
+                            float(np.hypot(goal_l[0] - ref[-1, 0], goal_l[1] - ref[-1, 1])) < 0.5
+                        )
+                        # too narrow at the full margin is not a reason to hand back to MPPI: retry
+                        # with less room first (at 0.6 m the box pass never solved, and MPPI stuck)
+                        path = None
+                        corridor_field, corridor_grid = planner.clear_field, plan_sim.grid
+                        if a.qp_coarse:
+                            # the MPPI window's wall map ends ~4.5 m out and clamps past it: a
+                            # longer route needs the walls of the whole belief window
+                            wp.launch(
+                                clearance_map_kernel,
+                                dim=qp_clear.shape,
+                                inputs=[
+                                    height_d,
+                                    measured_d,
+                                    float(a.cell),
+                                    float(robot.wheel_radius),
+                                    max(1, int(math.ceil(1.0 / a.cell))),
+                                ],
+                                outputs=[qp_clear],
+                                device=a.device,
+                            )
+                            corridor_field, corridor_grid = qp_clear, qp_clear_grid
+                        for m in (qp.p.margin, 0.66 * qp.p.margin, 0.15):
+                            lo, hi = qp.corridor(ref, corridor_field, corridor_grid, margin=m)
+                            path = qp.solve(ref, lo, hi, e0, psi0, speed or 0.0, end_at_goal)
+                            if path is not None:
+                                break
+                        reason = 3
+                        if path is not None:
+                            reason = 0
+                            alpha = (
+                                1.0 + float(plan_sim.solver.k_turn) * 0.8
+                            )  # the rollouts' friction
+                            if governor is not None:
+                                # plan the speed with the governor's own law and its own body
+                                # clearance, so the safety net has nothing left to cut
+                                at = np.c_[path.xy, path.heading].astype(np.float32)
+                                clear_path = governor.clearance_along(
+                                    wp.array(at.reshape(-1, 1, 3), dtype=wp.vec3f, device=a.device),
+                                    plan_sim.elevation,
+                                    planner.measured,
+                                    plan_sim.grid,
+                                )
+                                path.v = qp.speed_plan(
+                                    path.kappa,
+                                    clear_path,
+                                    speed or 0.0,
+                                    end_at_goal,
+                                    tail_swing=governor.params.turn_ratio * governor.tail,
+                                )
+                            wl, wr = qp.track(path, sx, sy, yaw, alpha, robot.half_track)
+                            # the governor must judge the path being DRIVEN, not MPPI's plan:
+                            # on `box` MPPI's plan hugged the box and the governor held the robot
+                            # at 0.2-0.4 m/s beside it while it followed a path 1.5 m out
+                            poses = qp.timed_poses(path, float(planner.cw.dt), governor.steps)
+                            qp_driven = wp.array(
+                                poses.astype(np.float32).reshape(-1, 1, 3),
+                                dtype=wp.vec3f,
+                                device=a.device,
+                            )
+                            if a.history and f % a.history == 0:
+                                for (px, py), pv in zip(path.xy, path.v):
+                                    qp_paths.append([f, px + wx0, py + wy0, pv])
+                qp_log.append([f, 1.0 if reason == 0 else 0.0, float(reason)])
             clear_m = a.cfg.turn_first["clear_m"]
             near_wall = clear_m <= 0.0 or governor is None or governor.clearance < clear_m
             if a.turn_first > 0.0 and near_wall:
@@ -544,8 +688,9 @@ def drive(a: argparse.Namespace) -> dict:
                     )
             if governor is not None:
                 wl_in = wl
+                checked = plan_sim.controlled if qp_driven is None else qp_driven
                 capped = governor.cap(
-                    wl, wr, plan_sim.controlled, plan_sim.elevation, planner.measured, plan_sim.grid
+                    wl, wr, checked, plan_sim.elevation, planner.measured, plan_sim.grid
                 )
                 if a.plan_params.get("plan_clear_governor", PLAN_DEFAULTS["plan_clear_governor"]):
                     wl, wr = capped
@@ -705,6 +850,8 @@ def drive(a: argparse.Namespace) -> dict:
             **{f"hist_{k}": np.asarray(v) for k, v in hist.items() if v},
             **({"escape": np.asarray(esc)} if esc else {}),
             **({"governor": np.asarray(gov_log)} if gov_log else {}),
+            **({"qp_log": np.asarray(qp_log)} if qp_log else {}),
+            **({"qp_paths": np.asarray(qp_paths)} if qp_paths else {}),
         )
         print(f"wrote {a.out}")
 
@@ -830,7 +977,23 @@ def main() -> None:
         default=0,
         help="also record every Nth frame into --out, for the scrub page; 0 = OFF",
     )
-    p.add_argument("--controller", choices=("mppi", "carrot"), default="mppi")
+    p.add_argument("--controller", choices=("mppi", "carrot", "qp"), default="mppi")
+    p.add_argument(
+        "--qp-horizon", type=float, default=8.0, help="[m] how far ahead the QP path runs"
+    )
+    p.add_argument(
+        "--qp-margin", type=float, default=0.45, help="[m] body clearance the corridor keeps"
+    )
+    p.add_argument("--qp-w-off", type=float, default=1.0, help="QP cost of being off the route")
+    p.add_argument(
+        "--qp-pin-end", action="store_true", help="end the QP path on the route, along it"
+    )
+    p.add_argument(
+        "--qp-coarse",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="continue the QP's route through the coarse layer, walls from the whole belief",
+    )
     p.add_argument("--look", type=float, default=1.2, help="[m] carrot lookahead along the plan")
     p.add_argument("--carrot-speed", type=float, default=0.8, help="[m/s] carrot cruise")
     p.add_argument(

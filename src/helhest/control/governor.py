@@ -185,6 +185,8 @@ class ClearanceGovernor:
         self.clearance = float("inf")
         self.v_cap = float("inf")
         self.v_cap_straight = float("inf")  # [m/s] the forward-speed cap from carrying straight on
+        self._along = None  # clearance_along's output, grown on demand
+        self._along_blind = None
         self.blind = False
 
     def _shed(self, t: np.ndarray) -> np.ndarray:
@@ -248,6 +250,39 @@ class ClearanceGovernor:
         if p.straight:
             wl, wr = self._cap_straight_on(wl, wr, controlled, elevation, measured, grid, k, search)
         return wl, wr
+
+    def clearance_along(
+        self, poses: wp.array, elevation: wp.array, measured: wp.array, grid: Grid
+    ) -> np.ndarray:
+        """[m] the body's clearance to the nearest wall face at each pose of `poses` ([K, 1]
+        (x, y, heading)) -- the same measurement the law is applied to, so a speed planned with it
+        is one the governor will not cut."""
+        p = self.params
+        k = int(poses.shape[0])
+        if self._along is None or self._along.shape[0] < k:
+            self._along = wp.zeros(k, dtype=wp.float32, device=self.device)
+            self._along_blind = wp.zeros(k, dtype=wp.float32, device=self.device)
+        search = max(1, int(math.ceil(p.search_m / float(grid.cell_size))))
+        wp.launch(
+            _plan_clearance_kernel,
+            dim=k,
+            inputs=[
+                poses,
+                elevation,
+                measured,
+                grid,
+                self.x_lo,
+                self.x_hi,
+                self.half_w,
+                self.face_h,
+                int(p.face_neighbours),
+                float(p.face_tall_m),
+                search,
+            ],
+            outputs=[self._along, self._along_blind],
+            device=self.device,
+        )
+        return self._along.numpy()[:k].astype(np.float64)
 
     def _cap_straight_on(
         self,
