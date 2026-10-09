@@ -65,6 +65,15 @@ def gap_world(cell=0.06):
     return Heightmap(H, (xlim[0], ylim[0]), cell)
 
 
+def box_world(cell=0.06):
+    xlim, ylim = (-2.0, 14.0), (-5.0, 5.0)
+    XX, YY = _grid(xlim, ylim, cell)
+    H = np.zeros_like(XX)
+    # one 1 m box on the straight line, halfway to the goal: the robot only has to drive around it
+    _box(H, XX, YY, 6.0, 0.0, 0.5, 0.5)
+    return Heightmap(H, (xlim[0], ylim[0]), cell)
+
+
 def slalom_world(cell=0.06):
     xlim, ylim = (-2.0, 19.0), (-5.0, 5.0)
     XX, YY = _grid(xlim, ylim, cell)
@@ -206,6 +215,7 @@ OBSTACLES: dict[str, tuple[Box, ...]] = {
         ),
     ),
     "bumpy": (),
+    "box": (Box(6.0, 0.0, 0.5, 0.5),),
     "false_door": (
         Box(5.0, -5.0, 0.2, 4.0),
         Box(5.0, 3.3, 0.2, 2.3),
@@ -306,6 +316,7 @@ WORLDS = {
     "ridge": (ridge_world, (0.0, -4.0, 0.0), (9.0, 2.5)),
     "bumpy": (bumpy_world, (0.0, 0.0, 0.0), (14.0, 0.0)),
     "false_door": (false_door_world, (0.0, 0.0, 0.0), (22.0, 0.0)),
+    "box": (box_world, (0.0, 0.0, 0.0), (12.0, 0.0)),
 }
 
 
@@ -320,7 +331,7 @@ def _plot_all(out):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(2, 4, figsize=(21, 8))  # 7 worlds, one axis left blank
+    fig, axes = plt.subplots(2, 4, figsize=(21, 8))  # 8 worlds
     for ax, (name, (builder, start, goal)) in zip(axes.ravel(), WORLDS.items()):
         hm = builder()
         ext = [hm.x0, hm.x0 + hm.nx * hm.cell, hm.y0, hm.y0 + hm.ny * hm.cell]
