@@ -32,12 +32,17 @@ import scipy.sparse as sp
 import warp as wp
 
 from ..engine.terrain import Grid
+from .qp_gpu import bands_to_csc
+from .qp_gpu import rows_to_csc
 from ..engine.terrain import sample_field
 
 
 @dataclass(frozen=True)
 class QpPathParams:
-    ds: float = 0.15  # [m] spacing of the optimised points
+    ds: float = 0.15  # [m] spacing of the samples the corridor and the cost are evaluated at
+    # [m] spacing of the spline knots the offset is built from (see spline_terms: one unknown per
+    # sample made the problem too stiff for any iterative solver to finish)
+    knot_m: float = 0.45
     # [m] how far ahead the path is optimised. Bending round an obstacle early and gently, tail
     # cleared, takes ~7 m (box: 4.5 m swerved late to a 2.7 m shelf). Past the routing window the
     # caller continues the route on the coarse layer (extend_route), or it stops at ~5 m.
@@ -248,6 +253,116 @@ def extend_route(
     return np.concatenate(out, 0)
 
 
+def _bspline(u: np.ndarray, order: int) -> np.ndarray:
+    """Uniform cubic B-spline basis [len(u), 4] at span parameter u in [0, 1], or its `order`-th
+    derivative with respect to u."""
+    if order == 0:
+        return (
+            np.stack(
+                [(1 - u) ** 3, 3 * u**3 - 6 * u**2 + 4, -3 * u**3 + 3 * u**2 + 3 * u + 1, u**3], 1
+            )
+            / 6.0
+        )
+    if order == 1:
+        return np.stack([-((1 - u) ** 2), 3 * u**2 - 4 * u, -3 * u**2 + 2 * u + 1, u**2], 1) / 2.0
+    if order == 2:
+        return np.stack([1 - u, 3 * u - 2, -3 * u + 1, u], 1)
+    return np.tile([-1.0, 3.0, -3.0, 1.0], (len(u), 1))
+
+
+@dataclass
+class SplineQp:
+    """The path QP over a cubic B-spline's control points, in the form both solvers take
+    (control/qp_gpu.py): P's upper bands, and constraint rows that each touch 4 neighbouring
+    control points (`a_col` .. `a_col` + 3). Scaled: cost by its largest diagonal, each row by its
+    largest coefficient -- neither changes the minimiser."""
+
+    p_band: np.ndarray  # [N, 4] P[i, i + d]
+    q: np.ndarray  # [N]
+    a_coef: np.ndarray  # [M, 4]
+    a_col: np.ndarray  # [M] int
+    lo: np.ndarray  # [M]
+    hi: np.ndarray  # [M]
+    span: np.ndarray  # [n] first control point of each fine sample
+    value: np.ndarray  # [n, 4] basis at each fine sample: offset
+    second: np.ndarray  # [n, 4] and its second derivative along s [1/m]
+
+    def offsets(self, c: np.ndarray) -> np.ndarray:
+        """[m] the path's offset from the reference at each fine sample."""
+        return (self.value * c[self.span[:, None] + np.arange(4)]).sum(1)
+
+    def curvature(self, c: np.ndarray) -> np.ndarray:
+        """[1/m] d2e/ds2 at each fine sample: the path's curvature minus the reference's."""
+        return (self.second * c[self.span[:, None] + np.arange(4)]).sum(1)
+
+
+def spline_terms(
+    kr: np.ndarray,
+    lo: np.ndarray,
+    hi: np.ndarray,
+    e0: float,
+    slope0: float,
+    ds: float,
+    p: QpPathParams,
+    pin_end: bool = False,
+) -> SplineQp:
+    """The path QP with the offset a cubic B-spline (knots ~`p.knot_m` apart) evaluated at the
+    reference's samples (`ds` apart): the cost and the corridor still live on every sample, only
+    the unknowns are fewer and coupled smoothly.
+
+    Why not one unknown per sample: the curvature-rate term scales as 1/ds^6, which at 0.15 m
+    made the cost ~1e8 stiffer sideways-wiggling than sideways-shifting. Every iterative solver
+    then stopped early along the shift -- OSQP at 1e-4 was within 5 mm of the optimum on only half
+    of a test set, up to ~1 m off on the rest. Knots 0.45 m apart cut that ratio ~700x."""
+    n = len(kr)
+    length = (n - 1) * ds
+    spans = max(1, int(math.ceil(length / p.knot_m - 1e-9)))
+    h = length / spans  # the knots stretched to end exactly on the last sample
+    nv = spans + 3
+    s = np.arange(n) * ds
+    span = np.minimum((s / h).astype(int), spans - 1)
+    u = s / h - span
+    b0, b1, b2, b3 = (_bspline(u, k) / h**k for k in range(4))
+    dkr = np.gradient(kr) / ds
+    # cost: the same per-sample sums as before -- curvature, its rate, the offset
+    P = np.zeros((nv, 4))
+    q = np.zeros(nv)
+    for basis, weight, target in ((b2, p.w_curv, kr), (b3, p.w_dcurv, dkr), (b0, p.w_off, None)):
+        for t1 in range(4):
+            if target is not None:
+                np.add.at(q, span + t1, 2.0 * weight * target * basis[:, t1])
+            for t2 in range(t1, 4):
+                np.add.at(P[:, t2 - t1], span + t1, 2.0 * weight * basis[:, t1] * basis[:, t2])
+    scale = 1.0 / P[:, 0].max()
+    # rows: the corridor at every sample, the curvature limit at every sample, then the start
+    # (offset and slope where the robot is) and, if asked, the end on the route along it
+    coef = [b0, b2]
+    col = [span, span]
+    low = [lo, -p.kappa_max - kr]
+    high = [hi, p.kappa_max - kr]
+    pins = [(b0[0], span[0], e0), (b1[0], span[0], slope0)]
+    if pin_end and lo[-2] <= 0.0 <= hi[-2] and lo[-1] <= 0.0 <= hi[-1]:
+        pins += [(b0[-1], span[-1], 0.0), (b1[-1], span[-1], 0.0)]
+    for c, k, v in pins:
+        coef.append(c[None])
+        col.append(np.array([k]))
+        low.append(np.array([v]))
+        high.append(np.array([v]))
+    a_coef = np.concatenate(coef, 0)
+    norm = np.abs(a_coef).max(1)
+    return SplineQp(
+        p_band=P * scale,
+        q=q * scale,
+        a_coef=a_coef / norm[:, None],
+        a_col=np.concatenate(col).astype(np.int32),
+        lo=np.concatenate(low) / norm,
+        hi=np.concatenate(high) / norm,
+        span=span,
+        value=b0,
+        second=b2,
+    )
+
+
 @dataclass
 class QpPath:
     """One optimised path, its speed plan, and what the solver said."""
@@ -338,32 +453,23 @@ class PathQp:
         if n < 8:
             return None
         kr = ref[:, 3]
-        # curvature at the interior points: kappa = kr + D2 e / ds^2 ; its rate: diff of that / ds
-        D2 = sp.diags([1.0, -2.0, 1.0], [0, 1, 2], shape=(n - 2, n)) / ds**2
-        D3 = sp.diags([-1.0, 1.0], [0, 1], shape=(n - 3, n - 2)) / ds
-        A3 = D3 @ D2
-        kr_mid = kr[1:-1]
-        dkr = np.diff(kr_mid) / ds
-        P = 2.0 * (p.w_curv * (D2.T @ D2) + p.w_dcurv * (A3.T @ A3) + p.w_off * sp.eye(n))
-        q = 2.0 * (p.w_curv * (D2.T @ kr_mid) + p.w_dcurv * (A3.T @ dkr))
-        e1 = e0 + ds * math.tan(max(-1.2, min(1.2, psi0)))
-        A = sp.vstack([sp.eye(n), D2], format="csc")
-        l = np.r_[lo, -p.kappa_max - kr_mid]
-        u = np.r_[hi, p.kappa_max - kr_mid]
-        l[0], u[0] = e0, e0
-        l[1], u[1] = e1, e1
-        if p.pin_end and n >= 8 and lo[-2] <= 0.0 <= hi[-2] and lo[-1] <= 0.0 <= hi[-1]:
-            l[n - 2 : n], u[n - 2 : n] = 0.0, 0.0
+        slope0 = math.tan(max(-1.2, min(1.2, psi0)))
+        terms = spline_terms(kr, lo, hi, e0, slope0, ds, p, p.pin_end)
+        nv = len(terms.q)
         solver = osqp.OSQP()
         solver.setup(
-            sp.triu(P, format="csc"),
-            q,
-            A,
-            l,
-            u,
+            sp.triu(bands_to_csc(terms.p_band, nv), format="csc"),
+            terms.q,
+            rows_to_csc(terms.a_coef, terms.a_col, nv),
+            terms.lo,
+            terms.hi,
             verbose=False,
-            eps_abs=1e-4,
-            eps_rel=1e-4,
+            # 1e-6, not OSQP's 1e-4: at 1e-4 ADMM has not settled which corridor sample the path
+            # touches, the polish guesses the wrong set and is dropped, and the rough iterate it
+            # returns was >10 cm off the optimum on 10 % of QPs recorded in drive_sim (0 % at
+            # 1e-6, 99.9 % within 5 mm; 0.26 ms median per QP)
+            eps_abs=1e-6,
+            eps_rel=1e-6,
             max_iter=20000,
             polishing=True,
         )
@@ -372,11 +478,12 @@ class PathQp:
         self.last_status = status
         if res.x is None or "solved" not in status or "inaccurate" in status:
             return None
-        e = np.asarray(res.x, np.float64)
+        c = np.asarray(res.x, np.float64)
+        e = terms.offsets(c)
         nx_, ny_ = -np.sin(ref[:, 2]), np.cos(ref[:, 2])
         xy = np.stack([ref[:, 0] + e * nx_, ref[:, 1] + e * ny_], 1)
         heading = np.unwrap(np.arctan2(np.gradient(xy[:, 1]), np.gradient(xy[:, 0])))
-        kappa = np.r_[kr[0], kr_mid + D2 @ e, kr[-1]]
+        kappa = kr + terms.curvature(c)
         # [m] body clearance: the corridor's own margin plus the room left inside it. A bound at the
         # search's reach is not a wall -- nothing was found that far out -- so it limits nothing.
         reach = p.max_offset - 1e-3
