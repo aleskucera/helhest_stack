@@ -630,6 +630,7 @@ def _cost_kernel(
     mg_w = robot.mass * robot.gravity  # robot weight [N]
     prev_l = float(0.0)
     prev_r = float(0.0)
+    tail = -robot.wheel_pos[2][0] + robot.wheel_radius  # [m] axle to the back of the body
     for t in range(horizon):
         pose = controlled[t + 1, r]  # (x, y, yaw) after step t (pose 0 is shared by all candidates)
         om = current_wheel_omega[t + 1, r]  # realized (lagged) omega that drove step t
@@ -715,14 +716,16 @@ def _cost_kernel(
             # pose is refused per heading, and a cell that is fine facing one way is not fine
             # facing another
             veto_sum += early * sample_lattice(veto_field, grid, n_theta, pose[0], pose[1], yaw_eff)
+        # one footprint read per step for both terms: a second inlined call that passes `robot`
+        # (a struct holding an array) read its array handle out of bounds of the local copy
+        # (compute-sanitizer, 2026-10-08) and crashed every plan with clear_time on
+        cmin = float(1.0e3)
+        if cw.keep_away > 0.0 or cw.clear_time > 0.0:
+            cmin = _footprint_clearance(clear_field, sgrid, robot, pose)
         if cw.keep_away > 0.0:
-            gap = wp.max(
-                cw.keep_away_m - _footprint_clearance(clear_field, sgrid, robot, pose), 0.0
-            )
+            gap = wp.max(cw.keep_away_m - cmin, 0.0)
             away_sum += gap * gap
         if cw.clear_time > 0.0:
-            tail = -robot.wheel_pos[2][0] + robot.wheel_radius
-            cmin = _footprint_clearance(clear_field, sgrid, robot, pose)
             fastest = wp.abs(v) + cw.clear_turn_ratio * tail * wp.abs(wz)
             allowed = allowed_speed(cmin, cw.clear_c0, cw.clear_t_react, cw.clear_v_min)
             v_here = wp.min(vl, cw.lattice_cap)
