@@ -10,6 +10,7 @@ from helhest.control.qp_path import extend_route
 from helhest.control.qp_path import PathQp
 from helhest.control.qp_path import QpPathParams
 from helhest.control.qp_path import resample_reference
+from helhest.control.qp_path import sharp_turn
 from helhest.control.qp_path import trim_at_edge
 from helhest.engine import GridParams
 from helhest.planning.clearance import clearance_map_kernel
@@ -225,3 +226,28 @@ def test_in_open_ground_the_comfort_pull_changes_nothing():
     a = q.solve(ref, lo, hi, 0.1, 0.1, 1.0, False)
     b = plain.solve(ref, lo, hi, 0.1, 0.1, 1.0, False)
     assert np.allclose(a.offset, b.offset, atol=1e-6)
+
+
+def test_a_pivot_in_the_route_is_found_and_an_arc_is_not():
+    # 3 m east, then straight north: the lattice's pivot, after smoothing still a ~90 deg corner
+    corner = np.r_[
+        np.stack([np.linspace(0.0, 3.0, 21), np.zeros(21)], 1),
+        np.stack([np.full(20, 3.0), np.linspace(0.15, 3.0, 20)], 1),
+    ]
+    ref = resample_reference(corner, DS, 6.0)
+    j = sharp_turn(ref, DS, 0.6, 60.0)
+    assert j is not None and 2.0 < j * DS < 3.0  # found just before the corner
+    a = np.linspace(0.0, np.pi / 2, 60)
+    arc = np.stack([2.0 * np.sin(a), 2.0 - 2.0 * np.cos(a)], 1)  # 2 m radius: an arc, not a pivot
+    assert sharp_turn(resample_reference(arc, DS, 6.0), DS, 0.6, 60.0) is None
+
+
+def test_turning_on_the_spot_stops_first_then_turns_the_way_it_is_told():
+    q = _qp()
+    assert q.pivot(1.0, 0.8, 1.0, 0.365, 0)[:2] == (0.0, 0.0)  # still moving: stop first
+    wl, wr, d = q.pivot(1.0, 0.0, 1.0, 0.365, 0)
+    assert wr > 0.0 > wl and wr == -wl and d == 1  # no side given: the shorter way, left
+    wl, wr, d = q.pivot(1.0, 0.0, 1.0, 0.365, -1)
+    assert wl > 0.0 > wr and d == -1  # told right: the long way round
+    sweep = q.pivot_sweep(0.0, 0.0, 0.0, 1.0, -1)
+    assert np.isclose(sweep[-1, 2], -(2.0 * np.pi - 1.0))  # ends at the target, going right

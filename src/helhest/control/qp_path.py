@@ -81,6 +81,22 @@ class QpPathParams:
     look_min: float = 0.8  # [m] pure-pursuit lookahead at rest
     look_gain: float = 0.5  # [s] lookahead grows with speed
     spin_deg: float = 60.0  # heading error past which the caller should turn on the spot instead
+    # turning on the spot (PathQp.pivot): once begun, it goes on until the heading is within
+    # resume_deg of the route; it waits for the robot to slow below stop_below first, since a
+    # spin begun at cruise carries the momentum sideways (control/command.py, turn_first)
+    resume_deg: float = 20.0
+    pivot_stop_below: float = 0.3  # [m/s]
+    pivot_gain: float = 1.5  # [1/s] yaw rate per rad of heading error
+    pivot_wz_min: float = 0.3  # [rad/s]
+    pivot_wz_max: float = 1.0  # [rad/s]
+    # a corner the path cannot round at the tightest turn: the route turns more than
+    # corner_deg within corner_m (at kappa_max 2 /m, 0.6 m of arc turns 69 deg). The lattice
+    # marks its pivots this way; the path is planned up to it and stops there
+    corner_m: float = 0.6
+    corner_deg: float = 60.0
+    # where to stop for such a corner: anywhere up to stop_search_m before it, wherever the turn
+    # sweeps the tail furthest from walls (drive_sim; the governor crawls a spin near a wall)
+    stop_search_m: float = 1.5
 
 
 @wp.func
@@ -191,6 +207,18 @@ def resample_reference(pts: np.ndarray, ds: float, length: float) -> np.ndarray 
     th = np.unwrap(np.arctan2(np.gradient(y), np.gradient(x)))
     kappa = np.gradient(th) / ds
     return np.stack([x, y, th, kappa], 1)
+
+
+def sharp_turn(ref: np.ndarray, ds: float, window_m: float, max_turn_deg: float) -> int | None:
+    """Index of the first sample from which the route turns more than `max_turn_deg` within the
+    next `window_m` -- a corner no path rounds at the robot's tightest turn, which is how the
+    lattice route shows a pivot. None if there is none."""
+    k = max(1, int(round(window_m / ds)))
+    if len(ref) <= k:
+        return None
+    turn = np.abs(ref[k:, 2] - ref[:-k, 2])  # headings are unwrapped along the route
+    hit = np.flatnonzero(turn > math.radians(max_turn_deg))
+    return int(hit[0]) if hit.size else None
 
 
 def consistent_length(lo: np.ndarray, hi: np.ndarray, overlap: float = 0.05) -> int:
@@ -610,6 +638,40 @@ class PathQp:
         x, y = np.interp(ts, t, path.xy[:, 0]), np.interp(ts, t, path.xy[:, 1])
         th = np.interp(ts, t, path.heading)
         return np.stack([x, y, th], 1)
+
+    def pivot(
+        self,
+        heading_error: float,
+        speed: float,
+        alpha: float,
+        half_track: float,
+        direction: int,
+    ) -> tuple[float, float, int]:
+        """(wl, wr) [rad/s] turning on the spot toward a heading `heading_error` [rad] away (+ =
+        left), and the direction turned (+1 left, -1 right). Stops first while the robot moves
+        faster than pivot_stop_below. `direction` is the caller's, decided once per turn (the
+        side whose pivot_sweep keeps the tail off walls); 0 takes the shorter way.
+        Turning the long way round, the remaining angle is 2 pi - |error|."""
+        p = self.p
+        if speed > p.pivot_stop_below:
+            return 0.0, 0.0, direction
+        d = direction or (1 if heading_error > 0 else -1)
+        remaining = (
+            abs(heading_error) if d * heading_error >= 0 else 2.0 * math.pi - abs(heading_error)
+        )
+        wz = d * min(p.pivot_wz_max, max(p.pivot_wz_min, p.pivot_gain * remaining))
+        half_diff = half_track * alpha * wz / self.r
+        return -half_diff, half_diff, d
+
+    @staticmethod
+    def pivot_sweep(x: float, y: float, yaw: float, heading_error: float, side: int) -> np.ndarray:
+        """Poses [k, 3] of turning on the spot from yaw to the target the `side` way round, every
+        5 deg -- for asking the governor how close the tail comes to a wall on the way."""
+        angle = (
+            abs(heading_error) if side * heading_error >= 0 else 2.0 * math.pi - abs(heading_error)
+        )
+        k = max(2, int(math.degrees(angle) / 5.0) + 1)
+        return np.array([[x, y, yaw + side * a] for a in np.linspace(0.0, angle, k)])
 
     def track(
         self, path: QpPath, x: float, y: float, yaw: float, alpha: float, half_track: float
