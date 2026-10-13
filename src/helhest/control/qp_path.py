@@ -484,6 +484,7 @@ class PathQp:
     ) -> None:
         self.p = params
         self.r = float(wheel_radius)
+        self.last_fixes = 0  # re-solves solve_checked needed last time
         self.half_width = float(half_width)
         self.device = wp.get_device(device)
         n_body = 9
@@ -601,6 +602,54 @@ class PathQp:
         slack = p.margin + np.minimum(room_hi, room_lo)
         v = self.speed_plan(kappa, slack, v0, stop_at_end)
         return QpPath(xy, heading, kappa, v, lo, hi, e, status)
+
+    def solve_checked(
+        self,
+        ref: np.ndarray,
+        lo: np.ndarray,
+        hi: np.ndarray,
+        e0: float,
+        psi0: float,
+        v0: float,
+        stop_at_end: bool,
+        clear: wp.array,
+        grid: Grid,
+        margin: float,
+        rounds: int = 2,
+    ) -> QpPath | None:
+        """solve(), then the corridor again along the solved path itself -- the body laid along the
+        PATH's heading, not the reference's -- tightened where the path's own pose is not free,
+        and solved again (`rounds` times); what is still not free after that, the plan stops short
+        of. `self.last_fixes` is how many re-solves it took (0: the plain solve was fine).
+
+        The corridor lays the body along the reference: where the path turns away from it, the
+        1.1 m tail sits up to 1.1 sin(angle) off where it was checked. false_door: rebuilt from the
+        belief, the planned poses that went 0.07 m into a wall end were not free along their own
+        heading, though the planner had accepted them at a 0.30 m margin."""
+        self.last_fixes = 0
+        path = self.solve(ref, lo, hi, e0, psi0, v0, stop_at_end)
+        for k in range(rounds + 1):
+            if path is None:
+                return None
+            n = len(path.xy)
+            lo2, hi2 = self.corridor(np.c_[path.xy, path.heading], clear, grid, margin)
+            bad = (lo2 > 1e-3) | (hi2 < -1e-3)
+            bad[:3] = False  # the robot is where it is
+            if not bad.any():
+                return path
+            self.last_fixes = k + 1
+            # offsets along the path's normal, taken along the reference's: equal to first order
+            lo_n = np.where(lo2 > 1e-3, np.maximum(path.lo, path.offset + lo2), path.lo)
+            hi_n = np.where(hi2 < -1e-3, np.minimum(path.hi, path.offset + hi2), path.hi)
+            if k == rounds:  # out of rounds: plan up to the first pose that is not free
+                cut = int(np.flatnonzero(bad)[0])
+                return (
+                    None
+                    if cut < 8
+                    else self.solve(ref[:cut], lo_n[:cut], hi_n[:cut], e0, psi0, v0, True)
+                )
+            path = self.solve(ref[:n], lo_n, hi_n, e0, psi0, v0, stop_at_end or n < len(ref))
+        return path
 
     def speed_plan(
         self,

@@ -251,3 +251,20 @@ def test_turning_on_the_spot_stops_first_then_turns_the_way_it_is_told():
     assert wl > 0.0 > wr and d == -1  # told right: the long way round
     sweep = q.pivot_sweep(0.0, 0.0, 0.0, 1.0, -1)
     assert np.isclose(sweep[-1, 2], -(2.0 * np.pi - 1.0))  # ends at the target, going right
+
+
+def test_a_checked_path_is_free_along_its_own_heading():
+    # routes past the box at several offsets and angles: whatever the plain solve gives, the
+    # checked one has every pose free with the body laid along the path, not the reference
+    clear, grid = _box_scene()  # 1 m box centred at (5, 5)
+    q = _qp(margin=0.15)
+    for y0 in (3.6, 3.9, 6.1, 6.4):
+        for slope in (-0.3, 0.0, 0.3):
+            x = np.linspace(2.0, 9.0, 60)
+            ref = resample_reference(np.stack([x, y0 + slope * (x - 5.0)], 1), DS, 6.5)
+            lo, hi = q.corridor(ref, clear, grid)
+            path = q.solve_checked(ref, lo, hi, 0.0, 0.0, 1.0, False, clear, grid, 0.15)
+            if path is None:
+                continue
+            lo2, hi2 = q.corridor(np.c_[path.xy, path.heading], clear, grid)
+            assert np.all((lo2[3:] <= 1e-3) & (hi2[3:] >= -1e-3)), (y0, slope)
