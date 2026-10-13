@@ -61,6 +61,12 @@ class QpPathParams:
     # end the path on the route, heading along it, when the corridor there allows. Without it the
     # cheapest plan defers its way back into the tail, which is never driven (replanned first).
     pin_end: bool = False
+    # stay clear of walls by more than the corridor's hard margin where the corridor allows: a pull
+    # (weight w_comfort, against w_off's 1) onto the corridor shrunk by comfort_m on each walled
+    # side, or onto its middle where that leaves nothing. Without it the path rides the margin of a
+    # narrow passage on whichever side the shortest route takes (ridge notch: 0.10 m, MPPI 0.28)
+    w_comfort: float = 10.0
+    comfort_m: float = 0.3
     # [1/m] tightest turn the path may ask for: the route lattice's own turn radius (0.5 m). A hard
     # limit. How fast the curvature may CHANGE is only a cost (w_dcurv): what the robot can follow
     # depends on its speed, and the speed plan below slows for it.
@@ -334,6 +340,23 @@ class SplineQp:
         return (self.second * c[self.span[:, None] + np.arange(4)]).sum(1)
 
 
+def comfort_targets(
+    lo: np.ndarray, hi: np.ndarray, reach: float, comfort_m: float, weight: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per sample, the offset the path would rather be at, and how hard it is pulled there: the
+    corridor shrunk by `comfort_m` on each side that is a wall (a bound at the search's `reach`
+    is open ground, not a wall). Where the route is already inside that, no pull; where it is
+    not, the nearest comfortable offset; where nothing is left, the corridor's middle."""
+    wall_lo, wall_hi = lo > -reach, hi < reach
+    c_lo = np.where(wall_lo, lo + comfort_m, -np.inf)
+    c_hi = np.where(wall_hi, hi - comfort_m, np.inf)
+    target = np.clip(0.0, c_lo, c_hi)
+    narrow = c_lo > c_hi
+    target = np.where(narrow, 0.5 * (lo + hi), target)
+    pulled = narrow | (c_lo > 0.0) | (c_hi < 0.0)
+    return np.where(pulled, target, 0.0), np.where(pulled, weight, 0.0)
+
+
 def spline_terms(
     kr: np.ndarray,
     lo: np.ndarray,
@@ -343,6 +366,7 @@ def spline_terms(
     ds: float,
     p: QpPathParams,
     pin_end: bool = False,
+    comfort: tuple[np.ndarray, np.ndarray] | None = None,
 ) -> SplineQp:
     """The path QP with the offset a cubic B-spline (knots ~`p.knot_m` apart) evaluated at the
     reference's samples (`ds` apart): the cost and the corridor still live on every sample, only
@@ -365,7 +389,10 @@ def spline_terms(
     # cost: the same per-sample sums as before -- curvature, its rate, the offset
     P = np.zeros((nv, 4))
     q = np.zeros(nv)
-    for basis, weight, target in ((b2, p.w_curv, kr), (b3, p.w_dcurv, dkr), (b0, p.w_off, None)):
+    terms = [(b2, p.w_curv, kr), (b3, p.w_dcurv, dkr), (b0, p.w_off, None)]
+    if comfort is not None:  # w * (e - target)^2 per sample, as (basis, weight, -target)
+        terms.append((b0, comfort[1], -comfort[0]))
+    for basis, weight, target in terms:
         for t1 in range(4):
             if target is not None:
                 np.add.at(q, span + t1, 2.0 * weight * target * basis[:, t1])
@@ -507,7 +534,8 @@ class PathQp:
             return None
         kr = ref[:, 3]
         slope0 = math.tan(max(-1.2, min(1.2, psi0)))
-        terms = spline_terms(kr, lo, hi, e0, slope0, ds, p, p.pin_end)
+        comfort = comfort_targets(lo, hi, p.max_offset - 1e-3, p.comfort_m, p.w_comfort)
+        terms = spline_terms(kr, lo, hi, e0, slope0, ds, p, p.pin_end, comfort)
         nv = len(terms.q)
         solver = osqp.OSQP()
         solver.setup(

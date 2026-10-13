@@ -191,3 +191,37 @@ def test_the_route_ends_at_the_goal_not_at_its_coarse_cell():
     out = extend_route(fine, coarse_v, origin, cell, 8.0, goal=(6.2, 0.1))
     assert np.allclose(out[-1], (6.2, 0.1))
     assert np.hypot(*(out - (6.2, 0.1)).T).min() < 1e-9 and out[:, 0].max() <= 6.2 + 1e-9
+
+
+def test_in_a_passage_the_path_keeps_off_the_wall_the_route_grazes():
+    # a passage whose walls sit 0.0 and 1.2 m left of the route: the route grazes one wall, the
+    # path should keep comfort_m (0.3 m) beyond the hard margin from it
+    q = _qp()
+    ref = _straight_through()
+    n = len(ref)
+    lo, hi = np.full(n, -3.0), np.full(n, 3.0)
+    lo[15:30], hi[15:30] = 0.0, 1.2
+    path = q.solve(ref, lo, hi, 0.0, 0.0, 1.0, False)
+    assert path is not None
+    assert path.offset[22] > 0.25
+
+
+def test_where_no_comfort_fits_the_path_takes_the_middle():
+    q = _qp()
+    ref = _straight_through()
+    n = len(ref)
+    lo, hi = np.full(n, -3.0), np.full(n, 3.0)
+    lo[15:30], hi[15:30] = 0.0, 0.4  # 0.4 m of room: less than twice comfort_m
+    path = q.solve(ref, lo, hi, 0.0, 0.0, 1.0, False)
+    assert path is not None
+    assert abs(path.offset[22] - 0.2) < 0.06
+
+
+def test_in_open_ground_the_comfort_pull_changes_nothing():
+    q, plain = _qp(), _qp(w_comfort=0.0)
+    ref = _straight_through()
+    n = len(ref)
+    lo, hi = np.full(n, -3.0), np.full(n, 3.0)
+    a = q.solve(ref, lo, hi, 0.1, 0.1, 1.0, False)
+    b = plain.solve(ref, lo, hi, 0.1, 0.1, 1.0, False)
+    assert np.allclose(a.offset, b.offset, atol=1e-6)
