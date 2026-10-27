@@ -23,6 +23,10 @@ from ..engine.terrain import Grid
 from ..planning.clearance import ClearanceParams
 from ..planning.clearance import is_wall_face
 
+# [m] a plan step counts as leaving the wall when its clearance exceeds the current one by this:
+# under it the difference is the sweep's own cell quantisation, not motion
+_ESCAPE_RISE_M = 0.02
+
 
 @wp.func
 def _in_rect(
@@ -236,6 +240,15 @@ class ClearanceGovernor:
         shed = self._shed(np.arange(k) * self.plan_dt)
         unseen = self._blind.numpy()[:k] >= p.blind_area
         allowed = np.maximum(p.v_min, (per_step - p.c0) / p.t_react)
+        if p.v_escape > p.v_min:
+            # LEAVING. The law floors every step inside c0, the ones that take the robot back out
+            # included, so a robot already inside the margin could only crawl, in every
+            # direction, for the rest of the run (ClearanceParams.v_escape). A step whose
+            # clearance is above the current one is on the way out; the current step is too
+            # when the plan's first steps rise from it. Approaching steps keep the floor.
+            leaving = per_step > per_step[0] + _ESCAPE_RISE_M
+            leaving[0] = bool(leaving[1:4].any())
+            allowed = np.where(leaving, np.maximum(allowed, p.v_escape), allowed)
         if p.v_blind > 0.0:
             allowed = np.where(unseen, np.minimum(allowed, p.v_blind), allowed)
         self.clearance = float(np.min(per_step))
@@ -243,7 +256,15 @@ class ClearanceGovernor:
         self.v_cap = float(np.min(allowed + shed))
         v = self.r * 0.5 * abs(wl + wr)
         wz = self.r * abs(wr - wl) / (2.0 * self.half_track)  # alpha 1: over-estimates the swing
-        fastest = v + p.turn_ratio * self.tail * wz
+        swing = p.turn_ratio
+        if not (per_step[1:4] < per_step[0] - _ESCAPE_RISE_M).any():
+            # NOT CLOSING IN. The tail's swing counts turn_ratio times because it is what sweeps
+            # into a wall; on a plan whose next steps do not close in, the plan's own sweep has
+            # been checked and does not, so it counts once and the law is on the body. Priced at
+            # turn_ratio, a slight turn away from a wall 0.07 m off left the body 0.02 m/s for
+            # 36 s, and a pivot 0.17 m off a wall stood 20 s at 5 % (drive_sim slalom, 2026-10-26).
+            swing = 1.0
+        fastest = v + swing * self.tail * wz
         if fastest > self.v_cap:
             s = self.v_cap / fastest
             wl, wr = wl * s, wr * s

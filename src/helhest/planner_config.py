@@ -84,6 +84,7 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_clear_t_react": 0.0,  # [s] error per unit speed of the fastest body point
     "plan_clear_c0": 0.15,  # [m] fixed margin (0.2 cost narrow corridors ~10% in sim)
     "plan_clear_v_min": 0.15,  # [m/s] floor
+    "plan_clear_v_escape": 0.5,  # [m/s] while the plan leaves a wall it is inside c0 of; 0 = floor
     "plan_clear_v_cruise": 1.5,  # [m/s] the route's time unit
     "plan_clear_t_turn": 0.25,  # [s] the tail swing's own t_react
     "plan_clear_route_turn": 1.0,  # 1 = the route charges turning arcs for their tail near walls
@@ -152,6 +153,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             t_react=float(p["plan_clear_t_react"]),
             c0=float(p["plan_clear_c0"]),
             v_min=float(p["plan_clear_v_min"]),
+            v_escape=float(p["plan_clear_v_escape"]),
             v_cruise=float(p["plan_clear_v_cruise"]),
             t_turn=float(p["plan_clear_t_turn"]),
             route_turn=float(p["plan_clear_route_turn"]) > 0.0,
