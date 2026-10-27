@@ -107,7 +107,10 @@ def pillars_world(cell=0.06):
 
 
 def pocket_world(cell=0.06):
-    xlim, ylim = (-2.0, 16.0), (-5.0, 5.0)
+    # y to +-7: the sim closes the arena with a wall at the extent, and at +-5 that left a 2.3 m
+    # slot between it and the pocket's outer slab, which the tricycle cannot turn in forward-only
+    # (three drive_sim runs wedged there, 2026-10-26); the real pocket has no such wall
+    xlim, ylim = (-2.0, 16.0), (-7.0, 7.0)
     XX, YY = _grid(xlim, ylim, cell)
     H = np.zeros_like(XX)
     H[(np.abs(XX - 7.0) <= 0.2) & (np.abs(YY) <= 2.5)] = _WALL  # closed side (faces start)
