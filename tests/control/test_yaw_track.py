@@ -107,3 +107,19 @@ def test_reference_lag_suppresses_the_startup_transient():
                 yaw_r, peak_r = yaw, max(peak_r, yaw)
     assert peak_l < peak_r  # the lagged reference overshoots less on the same plant
     assert peak_l < 0.65 * 1.05
+
+
+def test_correction_never_exceeds_the_commanded_turn():
+    trk = YawRateTracker(yaw_per_diff=YPD, max_correction=1.5, max_relative=1.0, tau_ref=0.0)
+    ref = 0.1  # a gentle turn the ground does not answer at all (the dead zone)
+    for _ in range(2000):
+        trk.update(ref, 0.0, DT)
+    assert abs(trk.correction) <= ref / YPD + 1e-6  # at most doubles the plan's own differential
+
+
+def test_integral_is_dropped_when_the_turn_reverses():
+    trk = YawRateTracker(yaw_per_diff=YPD, tau_ref=0.0)
+    _settle(trk, 0.5, 0.6)  # a left turn that under-realises builds a positive bias
+    assert trk.integral > 0.0
+    trk.update(-0.5, -0.5, DT)  # the first frame of a right turn the ground answers exactly
+    assert trk.integral <= 0.0 + 1e-9  # no carried left bias; only this frame's own error
