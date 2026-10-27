@@ -723,11 +723,21 @@ class PathQp:
         return np.array([[x, y, yaw + side * a] for a in np.linspace(0.0, angle, k)])
 
     def track(
-        self, path: QpPath, x: float, y: float, yaw: float, alpha: float, half_track: float
+        self,
+        path: QpPath,
+        x: float,
+        y: float,
+        yaw: float,
+        alpha: float,
+        half_track: float,
+        turn_dead: float = 0.0,
+        turn_gain: float = 1.0,
     ) -> tuple[float, float]:
         """Pure pursuit on the optimised path at the planned speed -> (wl, wr) [rad/s]. `alpha` is
         the turn model's resistance (yaw = R (wr - wl) / (2 b alpha)), so the asked-for yaw rate
-        is what the model expects the wheels to produce."""
+        is what the model expects the wheels to produce. `turn_dead` / `turn_gain` invert the
+        engine's dead zone (SolverParams.turn_dead): the differential a gentle turn needs is the
+        kinematic one over the gain, plus the part the ground swallows."""
         p = self.p
         d = np.hypot(path.xy[:, 0] - x, path.xy[:, 1] - y)
         i0 = int(np.argmin(d))
@@ -741,5 +751,7 @@ class PathQp:
         kappa = 2.0 * math.sin(ang) / reach
         wz = kappa * v
         mean = v / self.r
-        half_diff = half_track * alpha * wz / self.r
-        return mean - half_diff, mean + half_diff
+        diff = 2.0 * half_track * alpha * wz / (self.r * turn_gain)
+        if turn_dead > 0.0 and abs(wz) > 1e-3:
+            diff += math.copysign(turn_dead, diff)
+        return mean - 0.5 * diff, mean + 0.5 * diff

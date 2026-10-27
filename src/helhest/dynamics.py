@@ -74,7 +74,13 @@ def robot_params(wheel_width=None):
 
 
 def planning_solver(
-    dt=DT, k_turn=K_TURN, command_delay=COMMAND_DELAY, tau_motor=MOTOR_TAU, momentum=True
+    dt=DT,
+    k_turn=K_TURN,
+    command_delay=COMMAND_DELAY,
+    tau_motor=MOTOR_TAU,
+    momentum=True,
+    turn_dead=0.0,
+    turn_gain=1.0,
 ):
     """Solver for the MPPI rollouts (B in the thousands): shallow + loose settle, for speed.
 
@@ -94,6 +100,8 @@ def planning_solver(
         command_delay=command_delay,
         tau_motor=tau_motor,
         momentum=momentum,
+        turn_dead=turn_dead,
+        turn_gain=turn_gain,
     )
 
 

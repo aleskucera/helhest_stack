@@ -84,9 +84,12 @@ class Solver:
     shear_lk: wp.float32  # contact length / shear modulus; <= 0 = legacy kinematic traction
     yaw_tau: wp.float32  # [s] first-order yaw-rate lag on the legacy twist; 0 = off
     yaw_relax_len: wp.float32  # [m] relaxation LENGTH form of the same lag; 0 = off
+    turn_dead: wp.float32  # [rad/s] wheel differential the body does not answer; 0 = off
+    turn_gain: wp.float32  # yaw realised above it, as a fraction of the kinematic map; 1 = off
     contact_patch: wp.float32  # contact patch radius [m], torsional term of the shear model
     shear_iters: wp.int32  # Newton iterations for the shear twist solve
-    inertia_gain: wp.float32  # 1/dt when body momentum is on (the SHEAR model's momentum), 0 = quasi-static
+    # 1/dt when body momentum is on (the SHEAR model's momentum), 0 = quasi-static
+    inertia_gain: wp.float32
     rolling_resistance: wp.float32  # resistance to rolling as a fraction of normal load
     # LEGACY-model body-momentum flag (0/1): forward speed becomes a STATE whose change is capped
     # by the grip budget and pulled by gravity along the slope, instead of jumping to the
@@ -143,6 +146,15 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
     # mu m g b / I_zz = 30 rad/s^2 settles in 0.033 s, a third of a planner step), but the premise
     # that there is a lag to explain does not survive the measurement. 0 = off.
     yaw_relax_len: float = 0.0
+    # DEAD ZONE on the legacy twist. The kinematic map says any differential yaws the body; the
+    # tricycle does not: its fixed rear wheel has to slip sideways for the body to yaw, and below
+    # some lateral force it sticks. Measured in drive_sim's contact physics over 54 runs
+    # (2026-10-26, 5005 records): no yaw at all below ~0.3 rad/s of differential, and above it
+    # about half of what the map predicts at k_turn 0.6. The robot shows the same (user, bags).
+    # yaw = turn_gain * sign(d) * max(|d| - turn_dead, 0) * R / (2 b alpha). Both planners
+    # read this map, so neither asks for a gentle turn the ground will not make. Off by default.
+    turn_dead: float = 0.0  # [rad/s] of wheel differential (wR - wL)
+    turn_gain: float = 1.0
     contact_patch: float = 0.075
     shear_iters: int = 6
     # Body momentum, IMPLICITLY integrated inside the same twist solve (requires shear_lk > 0).
@@ -182,6 +194,8 @@ class SolverParams:  # settle/integration numerics — tuning, separate from the
         s.shear_lk = self.shear_lk
         s.yaw_tau = self.yaw_tau
         s.yaw_relax_len = self.yaw_relax_len
+        s.turn_dead = self.turn_dead
+        s.turn_gain = self.turn_gain
         s.contact_patch = self.contact_patch
         s.shear_iters = self.shear_iters
         s.inertia_gain = (1.0 / self.dt) if self.body_momentum else 0.0
@@ -903,6 +917,17 @@ def traction_twist(
             a_trac = wp.clamp((vx - previous[0]) / solver.dt - a_grav, -a_lim, a_lim)
             vx = previous[0] + (a_trac + a_grav) * solver.dt
         yaw_rate = legacy[1]
+        if solver.turn_dead > 0.0 or solver.turn_gain != 1.0:
+            # the rear wheel's stiction: see SolverParams.turn_dead
+            diff = om[1] - om[0]
+            live = wp.max(wp.abs(diff) - solver.turn_dead, 0.0)
+            yaw_rate = (
+                solver.turn_gain
+                * wp.sign(diff)
+                * live
+                * robot.wheel_radius
+                / (2.0 * robot.half_track * alpha)
+            )
         # YAW LAG. The kinematic map is a STEADY-STATE relation: it returns the yaw rate the robot
         # would eventually hold, and returns it instantly. Over a planning horizon the command
         # changes every step and the body never gets there, so the quasi-static model over-rotates
