@@ -99,7 +99,15 @@
     # speed at the same clearance. t_turn follows (0.25 -> 0.16) so the tail swing keeps its
     # weight t_turn / t_react = 2; alone, the ratio would rise to 3.1 and slow turns near walls.
     # Also re-prices the route's time near walls. Untested on the robot.
-    plan_clear_t_react: 0.08
+    # 0.08 -> 0.2 (2026-10-27, drive_sim at the robot's 0.08 m cells): every fast wall contact was
+    # MPPI asking a swerve at 1.0-1.6 m/s within 0.4 m of a trunk and the body not yawing; the
+    # plant (sim AND Stromovka bags) breaks a yaw loose from straight running within 0.5 s only
+    # about 60% of the time, so a reaction time of 0.08 s is not one the body has. 0.2 with
+    # CostParams.wall_body: trunks 11/11, slalom 11/11, pillars 11/11, pocket 6/6 with no MPPI
+    # contact and no stall over 5 s (trunks median 36.8 -> 40-45 s). t_turn stays 0.16, so the
+    # tail swing's ratio t_turn / t_react is 0.8, not 2 -- that pair is what was tested; the
+    # ratio-2 pair (0.2 / 0.4) was not. 0.3 was slower and lost a trunks run to a hold.
+    plan_clear_t_react: 0.2
     plan_clear_t_turn: 0.16
     # [m/s] allowed while the plan LEAVES a wall it is already inside c0 of. The law floors every
     # command inside the margin, the one that backs out included: a robot 0.08 m off a box

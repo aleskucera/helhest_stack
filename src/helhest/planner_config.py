@@ -14,7 +14,6 @@ here, so there is one of each.
 
 No ROS and no YAML here: the node passes its cached values, `drive_sim` parses the file itself.
 """
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -42,6 +41,10 @@ PLAN_DEFAULTS: dict[str, Any] = {
     # keep_away * max(0, keep_away_m - wall clearance)^2 per step (CostParams.keep_away); 0 = off
     "plan_keep_away": 0.0,
     "plan_keep_away_m": 0.6,
+    # track the reference path (control/reference_path.py) instead of descending V; 0 = off
+    "plan_track_lateral": 0.0,
+    "plan_track_heading": 0.0,
+    "plan_track_progress": 0.0,
     "plan_smooth": 0.04,
     "plan_saturation": 300.0,
     # MPPI's hard veto on the cost-to-go's HAZARD field: actual wall contact, without the router's
@@ -177,6 +180,9 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             lat_accel_max=float(p["plan_turn_brake_a_max"]),
             keep_away=float(p["plan_keep_away"]),
             keep_away_m=float(p["plan_keep_away_m"]),
+            track_lateral=float(p["plan_track_lateral"]),
+            track_heading=float(p["plan_track_heading"]),
+            track_progress=float(p["plan_track_progress"]),
             smoothness=float(p["plan_smooth"]),
             saturation=float(p["plan_saturation"]),
             veto=float(p["plan_wall_veto"]),
