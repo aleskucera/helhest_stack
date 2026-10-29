@@ -22,6 +22,7 @@ from typing import Any
 
 from helhest.control.mppi import CostParams
 from helhest.control.mppi import SamplingConfig
+from helhest.control.reference_path import ReferencePathParams
 from helhest.planning.clearance import ClearanceParams
 
 # Everything the planner reads that the node and the simulator must agree on. Grid geometry and the
@@ -45,6 +46,9 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_track_lateral": 0.0,
     "plan_track_heading": 0.0,
     "plan_track_progress": 0.0,
+    # [m] the reference curve's tightest turn, and the clothoid length into it. 1.0, not the
+    # stage's 1.5: it is what every tracking run in drive_sim used (all nine worlds, 2026-10-29)
+    "plan_track_radius": 1.0,
     "plan_smooth": 0.04,
     "plan_saturation": 300.0,
     # MPPI's hard veto on the cost-to-go's HAZARD field: actual wall contact, without the router's
@@ -132,6 +136,7 @@ class PlannerConfig:
     coarse: dict[str, float]  # block_m, memory_m, bridge_m -- CoarseRouter, sized by the caller
     turn_first: dict[str, float]  # start_deg, reach_m -- control.command.turn_first
     clearance: ClearanceParams | None  # the clearance law; None = the spatial tube vetoes
+    reference: ReferencePathParams | None  # the curve MPPI tracks; None = tracking off
 
 
 def resolve(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -233,4 +238,12 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             clear_m=float(p["plan_turn_first_clear_m"]),
         ),
         clearance=clearance,
+        reference=(
+            ReferencePathParams(
+                radius_min_m=float(p["plan_track_radius"]),
+                clothoid_m=float(p["plan_track_radius"]),
+            )
+            if float(p["plan_track_lateral"]) > 0.0
+            else None
+        ),
     )

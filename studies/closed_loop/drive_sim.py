@@ -61,7 +61,6 @@ from helhest.control.qp_path import sharp_turn
 from helhest.control.qp_path import trim_at_edge
 from helhest.control.reference_path import forbidden_distance
 from helhest.control.reference_path import ReferencePath
-from helhest.control.reference_path import ReferencePathParams
 from helhest.control.terminal import dock_control
 from helhest.control.yaw_track import YawRateTracker
 from helhest.engine import ForwardSimulator
@@ -348,9 +347,9 @@ def drive(a: argparse.Namespace) -> dict:
         planner.cw.lattice_cap = ctg._vcap
     # the reference curve MPPI tracks when the tracking weights are on (CostParams.track_*)
     refpath = None
-    if mppi and a.cfg.cost.track_lateral > 0.0:
+    if mppi and a.cfg.reference is not None:
         half_w = robot.half_track + 0.5 * (robot.wheel_width or 2.0 * robot.wheel_radius)
-        rprm = ReferencePathParams()
+        rprm = a.cfg.reference
         if a.ref_radius is not None:  # the oracle's R and clothoid together (reference.py)
             rprm = dataclasses.replace(rprm, radius_min_m=a.ref_radius, clothoid_m=a.ref_radius)
         refpath = ReferencePath(a.n_theta, half_w, robot.rear_offset, rprm, device=a.device)
@@ -1219,7 +1218,7 @@ def main() -> None:
         "--ref-radius",
         type=float,
         default=None,
-        help="[m] the tracked reference's minimum radius and clothoid length; default 1.5",
+        help="[m] the tracked reference's minimum radius and clothoid length; default plan_track_radius",
     )
     p.add_argument(
         "--turn-first",
