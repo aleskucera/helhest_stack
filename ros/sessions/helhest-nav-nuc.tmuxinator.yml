@@ -93,7 +93,7 @@ windows:
           ros2 launch robot_mission_planner gps_follower.launch <%= ENV["GPX"].to_s.empty? ? "" : "gps_file:=#{ENV['GPX']}" %>
         - |
           history -s 'ros2 service call /road_follower/abort std_srvs/srv/Trigger'
-          history -s 'ros2 service call /crl_commander/switch_mode crl_commander/srv/SwitchMode "{mode: stop}"'
+          history -s 'ros2 service call /crl_commander/switch_mode crl_commander_interfaces/srv/SwitchMode "{mode: stop}"'
           echo "press Up: STOP the robot through the bridge / ABORT the current leg"
   - qr:
       panes:

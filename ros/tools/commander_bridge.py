@@ -160,11 +160,16 @@ def main() -> None:
     from tf2_ros import Buffer
     from tf2_ros import TransformListener
 
+    # crl_commander moved its services to crl_commander_interfaces (crl_commander 06189f0)
     try:
-        from crl_commander.srv import ConfigureSequenceMode
-        from crl_commander.srv import SwitchMode
+        from crl_commander_interfaces.srv import ConfigureSequenceMode
+        from crl_commander_interfaces.srv import SwitchMode
     except ImportError:
-        ConfigureSequenceMode = SwitchMode = None  # noqa: N806
+        try:
+            from crl_commander.srv import ConfigureSequenceMode
+            from crl_commander.srv import SwitchMode
+        except ImportError:
+            ConfigureSequenceMode = SwitchMode = None  # noqa: N806
 
     class CommanderBridge(Node):
         def __init__(self) -> None:
