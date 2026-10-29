@@ -6,12 +6,10 @@ sealed, a diagonal move still passed between two vetoed orthogonal neighbours: t
 corner where two walls meet -- that rule now lives in `omni_control_set`, and its tests in
 tests/planning/terrain_value_field/test_control_set.py.
 """
-
 from __future__ import annotations
 
 import numpy as np
 import warp as wp
-
 from helhest.engine import GridParams
 from helhest.planning.coarse import CoarseRouter
 
@@ -224,3 +222,153 @@ def test_the_memory_scrolls_with_the_robot_and_keeps_what_it_saw():
     # and the columns that entered from the east are unknown
     assert (r.seen.numpy()[:, -10:] == 0).all()
     assert (r.floor.numpy()[:, -10:] >= 1e29).all()
+
+
+# ------------------------------------------------------------------------- the fine verdict
+
+
+def _memory_router() -> CoarseRouter:
+    fine = GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    mem = GridParams(cells_x=N, cells_y=N, cell_size=CELL, origin_x=0.0, origin_y=0.0)
+    return CoarseRouter(fine, factor=FACTOR, max_step_m=0.25, memory_grid=mem, device="cuda")
+
+
+N_THETA = 4
+WALL_BLOCK = 10  # block column; its fine cells are 30..32
+GOAL = (11.0, 6.0)
+
+
+def _feasibility(wall: bool) -> wp.array:
+    """A fine feasibility field [N, N, N_THETA] (1 = vetoed): open ground, with or without a
+    wall every pose on column 30..32 is vetoed for."""
+    f = np.zeros((N, N, N_THETA), np.float32)
+    if wall:
+        f[:, 30:33, :] = 1.0
+    return wp.array(f, dtype=wp.float32)
+
+
+def _inside() -> slice:
+    """The block rows the verdict judges at the default 1.0 m margin: every fine cell of the
+    block more than 5 cells inside the window, i.e. block rows 2..17 of 20."""
+    return slice(2, 18)
+
+
+def test_the_fine_layer_seals_a_block_the_pooling_left_open():
+    """Flat, fully measured ground pools open everywhere. The fine layer's settle vetoes every
+    pose on one column (a wall it can see and the pooling cannot): after apply_fine the column
+    is sealed in the memory, across the next solve, while the pooled fraction still reads open.
+    Blocks on the window's edge, inside the margin, are left alone."""
+    r = _memory_router()
+    flat = _dev(np.zeros((N, N), np.float32))
+    full = _dev(np.ones((N, N), np.float32))
+    r.solve(flat, full, GOAL, (0.0, 0.0))
+    assert (r._pose_cost.numpy()[:, WALL_BLOCK, 0] >= 0.0).all()
+    r.apply_fine(_feasibility(wall=True), full, (0.0, 0.0), CELL)
+    r.solve(flat, full, GOAL, (0.0, 0.0))
+    cost = r._pose_cost.numpy()[:, WALL_BLOCK, 0]
+    assert (cost[_inside()] < 0.0).all(), "the fine layer's wall did not seal the blocks"
+    assert (cost[:2] >= 0.0).all() and (cost[18:] >= 0.0).all(), "judged on the window's edge"
+    assert (r.passable.numpy()[:, WALL_BLOCK] >= 0.5).all(), "the pooled guess must be untouched"
+    assert (r._pose_cost.numpy()[:, WALL_BLOCK - 1, 0] >= 0.0).all(), "the ground beside it"
+
+
+def test_a_block_with_no_measured_cell_keeps_the_guess():
+    """The fine layer's veto over unmeasured cells is the belief's fill, not a judgement."""
+    r = _memory_router()
+    flat = _dev(np.zeros((N, N), np.float32))
+    unseen = np.ones((N, N), np.float32)
+    unseen[:, 30:33] = 0.0
+    r.solve(flat, _dev(unseen), GOAL, (0.0, 0.0))
+    r.apply_fine(_feasibility(wall=True), _dev(unseen), (0.0, 0.0), CELL)
+    assert (r.verdict.numpy()[:, WALL_BLOCK] < 0.5).all()
+
+
+def test_the_fine_layer_withdraws_its_seal_but_never_opens_a_pooled_wall():
+    """Seen free again, the fine layer's seal is withdrawn and the pooled guess rules. A block
+    the POOLING sealed -- a measured wall -- stays sealed when the fine layer finds a feasible
+    pose in it: "some pose fits" is weaker than "crossable"."""
+    r = _memory_router()
+    flat = _dev(np.zeros((N, N), np.float32))
+    full = _dev(np.ones((N, N), np.float32))
+    r.solve(flat, full, GOAL, (0.0, 0.0))
+    r.apply_fine(_feasibility(wall=True), full, (0.0, 0.0), CELL)
+    r.apply_fine(_feasibility(wall=False), full, (0.0, 0.0), CELL)
+    r.solve(flat, full, GOAL, (0.0, 0.0))
+    assert (r._pose_cost.numpy()[:, WALL_BLOCK, 0] >= 0.0).all(), "the seal was not withdrawn"
+    wall = np.zeros((N, N), np.float32)
+    wall[:, 31:33] = 1.0  # a measured wall in the same block: the pooling seals it
+    r.solve(_dev(wall), full, GOAL, (0.0, 0.0))
+    assert (r._pose_cost.numpy()[:, WALL_BLOCK, 0] < 0.0).all()
+    r.apply_fine(_feasibility(wall=False), full, (0.0, 0.0), CELL)
+    r.solve(_dev(wall), full, GOAL, (0.0, 0.0))
+    assert (r._pose_cost.numpy()[:, WALL_BLOCK, 0] < 0.0).all(), "a feasible pose opened a wall"
+
+
+def test_the_verdict_scrolls_with_the_memory():
+    r = _memory_router()
+    flat = _dev(np.zeros((N, N), np.float32))
+    full = _dev(np.ones((N, N), np.float32))
+    r.solve(flat, full, GOAL, (0.0, 0.0))
+    r.apply_fine(_feasibility(wall=True), full, (0.0, 0.0), CELL)
+    before = r.verdict.numpy().copy()
+    # four blocks east, so block 10 becomes 6; no slack, the shift is under the default quarter
+    assert r.recenter(6.0 + 4 * FACTOR * CELL, 6.0, slack_frac=0.0)
+    after = r.verdict.numpy()
+    assert (after[:, WALL_BLOCK - 4] == before[:, WALL_BLOCK]).all()
+    assert (after[:, WALL_BLOCK] < 0.5).all()
+
+
+def test_a_window_bound_layer_forgets_the_verdict():
+    r = _router()
+    flat = _dev(np.zeros((N, N), np.float32))
+    full = _dev(np.ones((N, N), np.float32))
+    r.solve(flat, full, GOAL)
+    r.apply_fine(_feasibility(wall=True), full, (0.0, 0.0), CELL)
+    assert (r.verdict.numpy()[_inside(), WALL_BLOCK] > 0.5).all()
+    r.solve(flat, full, GOAL)
+    assert (r.verdict.numpy() < 0.5).all()
+
+
+def test_a_wall_that_ends_inside_a_block_leaves_it_open():
+    """A vetoed line down column 31 that stops at row 31: the blocks it runs through are sealed,
+    the block holding its end is crossed in neither direction, and the blocks beyond are free."""
+    r = _memory_router()
+    flat = _dev(np.zeros((N, N), np.float32))
+    full = _dev(np.ones((N, N), np.float32))
+    r.solve(flat, full, GOAL, (0.0, 0.0))
+    f = np.zeros((N, N, N_THETA), np.float32)
+    f[:32, 31, :] = 1.0  # rows 0..31 of column 31; block row 10 holds rows 30..32
+    r.apply_fine(wp.array(f, dtype=wp.float32), full, (0.0, 0.0), CELL)
+    v = r.verdict.numpy()[:, WALL_BLOCK]
+    assert (v[2:10] > 0.5).all(), "the wall's own blocks must seal"
+    assert v[10] < 0.5, "the block the wall ends in was sealed"
+    assert (v[11:18] < 0.5).all()
+
+
+def test_a_doorway_in_the_fine_veto_stays_open():
+    """The same column vetoed except for one block's rows: a door. Only the door block is open."""
+    r = _memory_router()
+    flat = _dev(np.zeros((N, N), np.float32))
+    full = _dev(np.ones((N, N), np.float32))
+    r.solve(flat, full, GOAL, (0.0, 0.0))
+    f = np.zeros((N, N, N_THETA), np.float32)
+    f[:, 31, :] = 1.0
+    f[30:33, 31, :] = 0.0
+    r.apply_fine(wp.array(f, dtype=wp.float32), full, (0.0, 0.0), CELL)
+    v = r.verdict.numpy()[_inside(), WALL_BLOCK]
+    assert v[10 - 2] < 0.5, "the door block was sealed"
+    assert (np.delete(v, 10 - 2) > 0.5).all(), "the wall around the door must seal"
+
+
+def test_feasible_poses_beside_a_thin_wall_do_not_keep_it_open():
+    """The settle straddles a thin wall: cells beside it, even most cells of its own block, hold
+    feasible poses. What seals the block is the line of cells vetoed at every heading, not the
+    absence of feasible poses."""
+    r = _memory_router()
+    flat = _dev(np.zeros((N, N), np.float32))
+    full = _dev(np.ones((N, N), np.float32))
+    r.solve(flat, full, GOAL, (0.0, 0.0))
+    f = np.zeros((N, N, N_THETA), np.float32)
+    f[:, 31, :] = 1.0  # one vetoed column; columns 30 and 32 of the same block stay free
+    r.apply_fine(wp.array(f, dtype=wp.float32), full, (0.0, 0.0), CELL)
+    assert (r.verdict.numpy()[_inside(), WALL_BLOCK] > 0.5).all()

@@ -54,8 +54,20 @@ of this file got each point backwards, so each carries the measurement that corr
   and called it a route. Cells within `frontier_m` of measured ground stay free; past that each
   costs `void_penalty`. Still reachable -- a goal in terrain nobody has seen must stay reachable
   or the robot will never go and look at it -- but no longer cheaper than the real way round.
-"""
 
+  Where the fine layer has looked, it decides. The pooling above is a guess from the belief
+  alone, and a thin wall seen from one side beat it: two measured rows of top over a shadow that
+  is not counted pooled 24 climbable of 48, exactly `min_pass_fraction`, the block read open,
+  and this layer routed the whole false_door room out through that one block into ground nobody
+  had seen (drive_sim, 2026-10-28, 50 s of shuttling between the window's two edges). The fine
+  layer, whose settle had the wall solid, had no way to say so: its border takes this layer's
+  values and nothing flowed back. So after each fine solve, a block fully inside the routing
+  window that the fine layer's all-heading veto runs across -- the line its lattice cannot step
+  over -- is sealed here (`apply_fine`), and stays sealed over the pooled fraction until the fine
+  layer sees it again. Only sealing: the absence of such a line is weaker than "crossable", so it
+  withdraws an earlier seal but never opens a block the pooling closed. The guess stays optimistic
+  where nobody has looked, which is the point of it.
+"""
 from __future__ import annotations
 
 import numpy as np
@@ -236,6 +248,7 @@ def _pool_kernel(
 def _bridge_kernel(
     passable: wp.array2d(dtype=wp.float32),  # coarse [cy, cx]
     seen: wp.array2d(dtype=wp.float32),  # coarse [cy, cx]
+    verdict: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], 1 = the fine layer sealed it
     min_pass: wp.float32,
     reach: wp.int32,  # [cells] the longest unseen run a wall is carried across
     bridged: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], 1 = unseen, and a wall continues
@@ -254,7 +267,7 @@ def _bridge_kernel(
     """
     r, c = wp.tid()
     bridged[r, c] = 0.0
-    if seen[r, c] > 0.5:
+    if seen[r, c] > 0.5 or verdict[r, c] > 0.5:
         return
     rows = seen.shape[0]
     cols = seen.shape[1]
@@ -271,8 +284,8 @@ def _bridge_kernel(
                 cc = c + wp.where(axis == 0, step * k, 0)
                 if rr < 0 or rr >= rows or cc < 0 or cc >= cols:
                     break
-                if seen[rr, cc] > 0.5:
-                    hit = wp.where(passable[rr, cc] < min_pass, 1.0, 0.0)
+                if seen[rr, cc] > 0.5 or verdict[rr, cc] > 0.5:
+                    hit = wp.where(verdict[rr, cc] > 0.5 or passable[rr, cc] < min_pass, 1.0, 0.0)
                     run += k - 1
                     break
             if sgn == 0:
@@ -284,11 +297,85 @@ def _bridge_kernel(
             return
 
 
+@wp.func
+def _vetoed_at_every_heading(
+    feasibility: wp.array3d(dtype=wp.float32), r: int, c: int, n_theta: int
+) -> float:
+    for t in range(n_theta):
+        if feasibility[r, c, t] < 0.5:
+            return 0.0
+    return 1.0
+
+
+@wp.kernel
+def _verdict_kernel(
+    feasibility: wp.array3d(dtype=wp.float32),  # fine [ny, nx, n_theta], 1 = the pose is vetoed
+    measured: wp.array2d(dtype=wp.float32),  # fine [ny, nx], 1 = observed
+    fine_cell: wp.float32,
+    fine_x0: wp.float32,  # the fine window's min corner, from this layer's grid origin
+    fine_y0: wp.float32,
+    margin: wp.int32,  # [fine cells] a border the settle reads off clamped terrain
+    coarse_cell: wp.float32,
+    verdict: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], 1 = sealed by the fine layer
+):
+    """The fine layer's verdict on a block: sealed when the cells it vetoes at EVERY heading run
+    right across the block, one in each of its columns or one in each of its rows; withdrawn (0)
+    otherwise.
+
+    A line of such cells is what the fine lattice cannot step over, so it is the fine layer's own
+    "no way through". It is not "no feasible pose in the block": the settle knows wheels and belly,
+    so a pose beside a 0.16 m wall ribbon, or straddling it, is feasible, and a block holding a
+    wall still has feasible poses in nearly every cell (false_door: no block in the window ever
+    had all its poses vetoed, and the first version of this kernel sealed nothing). A doorway has
+    no vetoed line across its block, and a wall that ends inside a block crosses it in neither
+    direction, so both stay open.
+
+    Only blocks whose cells all lie inside the window by more than `margin` are judged: the
+    settle clamps its footprint samples to the window's edge, so a verdict near it is read off the
+    edge cell repeated. A block with no measured cell keeps what it had -- the fine layer's veto
+    there is the belief's fill, not a judgement."""
+    r, c = wp.tid()
+    ny = feasibility.shape[0]
+    nx = feasibility.shape[1]
+    nt = feasibility.shape[2]
+    # the fine cells whose CENTRES fall in the block; c1 / r1 exclusive. Both corners are
+    # measured from this grid's origin, so an anchored memory and a window-bound layer read alike
+    x_lo = float(c) * coarse_cell
+    y_lo = float(r) * coarse_cell
+    c0 = int(wp.ceil((x_lo - fine_x0) / fine_cell - 0.5))
+    r0 = int(wp.ceil((y_lo - fine_y0) / fine_cell - 0.5))
+    c1 = int(wp.ceil((x_lo + coarse_cell - fine_x0) / fine_cell - 0.5))
+    r1 = int(wp.ceil((y_lo + coarse_cell - fine_y0) / fine_cell - 0.5))
+    if r0 < margin or c0 < margin or r1 > ny - margin or c1 > nx - margin:
+        return
+    if r1 <= r0 or c1 <= c0:
+        return
+    seen = float(0.0)
+    cols_hit = int(0)  # columns of the block holding a cell vetoed at every heading
+    for fc in range(c0, c1):
+        hit = float(0.0)
+        for fr in range(r0, r1):
+            if measured[fr, fc] > 0.5:
+                seen = 1.0
+            hit = wp.max(hit, _vetoed_at_every_heading(feasibility, fr, fc, nt))
+        cols_hit += int(hit)
+    rows_hit = int(0)
+    for fr in range(r0, r1):
+        hit = float(0.0)
+        for fc in range(c0, c1):
+            hit = wp.max(hit, _vetoed_at_every_heading(feasibility, fr, fc, nt))
+        rows_hit += int(hit)
+    if seen > 0.5:
+        crossed = cols_hit == c1 - c0 or rows_hit == r1 - r0
+        verdict[r, c] = wp.where(crossed, 1.0, 0.0)
+
+
 @wp.kernel
 def _cost_kernel(
     passable: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], climbable fraction
     seen: wp.array2d(dtype=wp.float32),  # coarse [cy, cx]
     bridged: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], from _bridge_kernel
+    verdict: wp.array2d(dtype=wp.float32),  # coarse [cy, cx], from _verdict_kernel
     min_pass: wp.float32,  # climbable fraction a block needs to count as crossable
     frontier: wp.int32,  # [cells] how far past measured ground stays free
     void_penalty: wp.float32,  # [m] charged per cell beyond that
@@ -301,8 +388,12 @@ def _cost_kernel(
     free or vetoed outright. Unmeasured ground is free near the frontier and priced beyond it,
     never vetoed -- a goal in terrain nobody has seen has to stay reachable, or the robot will
     not go and look at it -- except where a sealed wall continues through it (`_bridge_kernel`).
+    A block the fine layer sealed is vetoed before any of that (`_verdict_kernel`).
     """
     r, c, _t = wp.tid()
+    if verdict[r, c] > 0.5:
+        pose_cost[r, c, 0] = -1.0
+        return
     if seen[r, c] > 0.5:
         pose_cost[r, c, 0] = wp.where(passable[r, c] >= min_pass, 0.0, -1.0)
         return
@@ -417,6 +508,7 @@ class CoarseRouter:
             self.coverage = wp.zeros((cy, cx), dtype=wp.float32)
             self.bridged = wp.zeros((cy, cx), dtype=wp.float32)
             self.floor = wp.full((cy, cx), 1.0e30, dtype=wp.float32)
+            self.verdict = wp.zeros((cy, cx), dtype=wp.float32)  # apply_fine
             self._goal_rc = wp.zeros(2, dtype=wp.int32)
             self._goal_xy = wp.zeros(2, dtype=wp.float32)
         # heading-free, and fed a pose cost directly: this layer's passability is its own pooling
@@ -462,6 +554,7 @@ class CoarseRouter:
             (self.seen, 0.0),
             (self.coverage, 0.0),
             (self.floor, 1.0e30),
+            (self.verdict, 0.0),
         ):
             old = wp.clone(layer)
             wp.launch(
@@ -505,6 +598,7 @@ class CoarseRouter:
             self.seen.zero_()
             self.coverage.zero_()
             self.floor.fill_(1.0e30)
+            self.verdict.zero_()
         wp.launch(
             _floor_kernel,
             dim=self.floor.shape,
@@ -538,7 +632,7 @@ class CoarseRouter:
         wp.launch(
             _bridge_kernel,
             dim=self.bridged.shape,
-            inputs=[self.passable, self.seen, self.min_pass_fraction, self.bridge],
+            inputs=[self.passable, self.seen, self.verdict, self.min_pass_fraction, self.bridge],
             outputs=[self.bridged],
             device=self.device,
         )
@@ -549,6 +643,7 @@ class CoarseRouter:
                 self.passable,
                 self.seen,
                 self.bridged,
+                self.verdict,
                 self.min_pass_fraction,
                 self.frontier,
                 self.void_penalty,
@@ -579,3 +674,36 @@ class CoarseRouter:
         )
         self.V = self.field.iterate()
         return self.V
+
+    def apply_fine(
+        self,
+        feasibility: wp.array,
+        measured: wp.array,
+        window_xy: tuple[float, float],
+        fine_cell: float,
+        margin_m: float = 1.0,
+    ) -> None:
+        """Seal every block fully inside the fine layer's routing window that its veto -- the
+        cells vetoed at every heading -- runs across, and withdraw the seal where it no longer
+        does (`_verdict_kernel` has the rule and why). `feasibility` [ny, nx,
+        n_theta] (1 = vetoed) and `measured` [ny, nx] are the window's, `window_xy` its min
+        corner measured FROM THIS GRID'S ORIGIN -- the offset the fine solve was given as
+        `coarse_origin`, negated -- and `fine_cell` its cell. Called after the fine solve, so the
+        seal prices the NEXT frame's border; a window-bound layer forgets it with the rest.
+        `margin_m` keeps the judgement off the window's edge, where the settle's footprint reads
+        clamped terrain. See the module docstring for why only sealing flows back."""
+        wp.launch(
+            _verdict_kernel,
+            dim=self.verdict.shape,
+            inputs=[
+                feasibility,
+                measured,
+                float(fine_cell),
+                float(window_xy[0]),
+                float(window_xy[1]),
+                int(round(float(margin_m) / float(fine_cell))),
+                self.grid.cell_size,
+            ],
+            outputs=[self.verdict],
+            device=self.device,
+        )
