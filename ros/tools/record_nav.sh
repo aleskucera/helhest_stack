@@ -27,6 +27,8 @@ TOPICS=(
   # --- planning I/O (plan_actuate on: a goal drives) ---
   /goal_pose                # planning goal (the input)
   /planned_path             # what MPPI committed to, each frame
+  /reference_path_marker    # the curve MPPI tracked (plan_track_* > 0) -- as it ran, not as a
+                            # replay with later code would rebuild it
   /cmd_joints               # wheel command the node sends to the LLC (the drive output)
   /cmd_vel                  # the other LLC input: (v, yaw rate), used when cmd_output:=twist
   # --- the LLC's own yaw loop on /cmd_vel (its internals, as it publishes them) ---

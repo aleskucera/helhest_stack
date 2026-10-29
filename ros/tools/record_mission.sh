@@ -15,6 +15,9 @@ TOPICS=(
   /tf /tf_static
   /goal_pose                # the goals navigation_node was given (RViz or the bridge)
   /planned_path             # what MPPI committed to, each frame
+  /reference_path_marker    # the curve MPPI tracked (plan_track_* > 0)
+  /yaw_track                # inner yaw loop (reference, gyro, correction); the correction is not
+                            # recoverable from /cmd_joints
   /cmd_vel /cmd_joints      # the drive output (cmd_output twist -> /cmd_vel)
   /joint_setpoints /joint_states /estop_active
   /debug/angle /debug/setpoint /debug/error

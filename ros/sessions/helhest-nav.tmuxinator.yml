@@ -75,9 +75,11 @@ windows:
   - record:
       panes:
         - |
-          cd
+          cd /home/robot/workspaces/helhest_ws/src/helhest_stack
           history -s ~/rec.sh
-          echo "press Up: ./rec.sh (full jetson bag)"
+          history -s 'ros/tools/record_mission.sh run_$(date +%y%m%d_%H%M%S)'
+          echo "press Up: ros/tools/record_mission.sh (navigation + mission -> ~/bags/run_<time>)"
+          echo "Up twice: ~/rec.sh (the robot's full jetson bag)"
         - |
           cd
           history -s ~/lucid_rec.sh
