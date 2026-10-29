@@ -5,13 +5,11 @@ x = 16 m. The fine window spans +-6.9 m about the robot, so BOTH the wall and th
 outside it and every cell the fine solve can see is free. Any preference it shows for one exit
 over another therefore came from the coarse layer, and nowhere else.
 """
-
 from __future__ import annotations
 
 import numpy as np
 import pytest
 import warp as wp
-
 from helhest.grid import build_grid
 from helhest.planning.terrain_value_field import omni_control_set
 from helhest.planning.terrain_value_field import TerrainValueField
@@ -151,3 +149,51 @@ def test_a_heading_bearing_coarse_layer_is_refused(layers):
     _, fine, cg, fg, _ = layers
     with pytest.raises(ValueError, match="heading-free"):
         fine.seed_from_coarse(fine.V, cg, fg, GOAL_XY)  # fine.V has 16 headings
+
+
+def _walled_window(free_blocked_seeds: bool) -> tuple[TerrainValueField, Constraints, int]:
+    """A wall across the whole window, ring included, with cheap exits only beyond it."""
+    fine = TerrainValueField(
+        FINE_N,
+        FINE_N,
+        FINE_CELL,
+        n_theta=16,
+        z_veto=2.0,
+        turn_radius=0.6,
+        free_blocked_seeds=free_blocked_seeds,
+    )
+    wall_rows = slice(30, 34)
+    blocked = np.zeros((FINE_N, FINE_N), bool)
+    blocked[wall_rows, :] = True
+    band = fine.solver.reach_cells
+    ring = np.zeros((FINE_N, FINE_N), bool)
+    ring[:band, :] = ring[-band:, :] = ring[:, :band] = ring[:, -band:] = True
+    # the far side of the wall and the wall itself are cheap to leave from, the near side is not
+    price = np.where(np.arange(FINE_N)[:, None] < wall_rows.stop, 1.0, 50.0)
+    seeds = np.where(ring, price, fine.solver_inf).astype(np.float32)
+    fine.seed_values(np.repeat(seeds[:, :, None], 16, axis=2))
+    return fine, _constraints(blocked, 16), wall_rows.stop
+
+
+@pytest.mark.parametrize("free_blocked_seeds", [True, False])
+def test_a_wall_across_the_ring_is_not_an_exit(free_blocked_seeds):
+    """A priced ring cell the fine layer blocks is no way out, whatever the coarse layer says lies
+    beyond it -- even with seed freeing on, which a single field seeding both a goal and a ring
+    needs for the goal. Freed, the ring cells inside the wall carried the cheap far-side price
+    along the window's edge and through the wall."""
+    fine, walls, above = _walled_window(free_blocked_seeds)
+    v = fine.solve(walls).numpy()
+    near_side = v[above + 10, FINE_N // 2, :].min()
+    assert near_side < UNREACHABLE
+    assert near_side >= 50.0, f"{near_side:.1f}: routed through the wall at the window's edge"
+
+
+def test_a_goal_on_blocked_ground_is_still_reachable():
+    """Zero-cost seeds are targets, and are freed: a goal on marginal ground is where the robot
+    was told to go."""
+    fine, walls, above = _walled_window(True)
+    seeds = np.full((FINE_N, FINE_N, 16), fine.solver_inf, np.float32)
+    seeds[above - 1, FINE_N // 2, :] = 0.0  # on the wall's near face
+    fine.seed_values(seeds)
+    v = fine.solve(walls).numpy()
+    assert v[above + 6, FINE_N // 2, :].min() < UNREACHABLE

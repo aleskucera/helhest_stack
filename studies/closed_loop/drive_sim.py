@@ -32,11 +32,12 @@ failure has been diagnosed twice on real bags and it is not worth a third time.
 
 Runs on dasenka, which is where the simulator lives -- see this directory's README.
 """
-
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
+import math
 import pathlib
 
 import numpy as np
@@ -44,7 +45,6 @@ import warp as wp
 from examples.helhest_junior.odin_sim.sensor import OdinSensor
 from examples.helhest_junior.odin_sim.sim import build_sim
 from examples.helhest_junior.odin_sim.sim import ODIN_MOUNT_XYZ
-
 from helhest import dynamics
 from helhest.control.command import condition_command
 from helhest.control.command import spin_side
@@ -53,7 +53,10 @@ from helhest.control.command import traction_scale
 from helhest.control.command import turn_first
 from helhest.control.governor import ClearanceGovernor
 from helhest.control.mppi import MppiGpu
+from helhest.control.reference_path import forbidden_distance
+from helhest.control.reference_path import ReferencePath
 from helhest.control.terminal import dock_control
+from helhest.control.yaw_track import YawRateTracker
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 from helhest.perception import ScanPreprocessor
@@ -277,6 +280,9 @@ def drive(a: argparse.Namespace) -> dict:
     belief_grid = GridParams(n, n, a.cell, 0.0, 0.0)
     mppi = a.controller == "mppi"
     robot = dynamics.robot_params(a.wheel_width)
+    # the robot's turn resistance: `k_turn` is a node parameter, not a plan_* one, so the
+    # planner_config mapping never carried it and the sim's planner ran the module default
+    k_turn = float(a.plan_params.get("k_turn", dynamics.K_TURN))
     plan_sim = (
         None
         if not mppi
@@ -284,7 +290,13 @@ def drive(a: argparse.Namespace) -> dict:
             robot,
             # command_delay 0: nothing here feeds sim.command_history, and rolling out against an
             # all-zero history is worse than not modelling the dead time at all
-            dynamics.planning_solver(dt=dt, command_delay=0.0),
+            dynamics.planning_solver(
+                dt=dt,
+                k_turn=k_turn,
+                command_delay=0.0,
+                turn_dead=a.turn_dead,
+                turn_gain=a.turn_gain,
+            ),
             win_grid,
             a.batch,
             a.horizon,
@@ -313,7 +325,7 @@ def drive(a: argparse.Namespace) -> dict:
     ctg = CostToGo(
         route_grid,
         robot,
-        dynamics.planning_solver(dt=dt, command_delay=0.0),
+        dynamics.planning_solver(dt=dt, k_turn=k_turn, command_delay=0.0),
         **{
             **a.cfg.costtogo,
             # the robot's setting (planner_config) unless overridden on the command line
@@ -324,6 +336,18 @@ def drive(a: argparse.Namespace) -> dict:
     )
     if mppi:
         planner.cw.lattice_cap = ctg._vcap
+    # the reference curve MPPI tracks when the tracking weights are on (CostParams.track_*)
+    refpath = None
+    if mppi and a.cfg.reference is not None:
+        half_w = robot.half_track + 0.5 * (robot.wheel_width or 2.0 * robot.wheel_radius)
+        rprm = a.cfg.reference
+        if a.ref_radius is not None:  # the oracle's R and clothoid together (reference.py)
+            rprm = dataclasses.replace(rprm, radius_min_m=a.ref_radius, clothoid_m=a.ref_radius)
+        refpath = ReferencePath(a.n_theta, half_w, robot.rear_offset, rprm, device=a.device)
+        # what it keeps clear of: the settle's every-heading veto on the routing grid, as a
+        # distance (forbidden_distance) -- walls, slopes past the envelope and ditches alike
+        ref_mask = wp.zeros((nr, nr), dtype=wp.float32, device=a.device)
+        ref_clear = wp.zeros((nr, nr), dtype=wp.float32, device=a.device)
     # the routing field expressed in the MPPI window's frame: a constant cell offset apart
     sgrid = GridParams(nr, nr, a.cell, (off_r - off_w) * a.cell, (off_r - off_w) * a.cell).build()
 
@@ -379,9 +403,13 @@ def drive(a: argparse.Namespace) -> dict:
     trail, closest, reached, body_z = [], 1.0e9, False, []
     # Opt-in, strided history for the scrub page. Host reads, so it is off by default and never
     # on the measured path -- with --history 0 the loop below is byte-identical to before.
-    hist: dict[str, list] = {k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "meta")}
+    hist: dict[str, list] = {
+        k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "verdict", "meta")
+    }
     # per frame with the governor: [frame, clearance m, cap m/s, scale, about to sweep unseen ground]
     gov_log: list = []
+    mppi_paths: list = []  # [f, x, y] of MPPI's nominal rollout, world frame, every history frame
+    ref_paths: list = []  # [f, x, y] of the reference curve, world frame, every history frame
     esc: list = []  # per recorded frame: [best rollout's worst violation, median, clean fraction]
     # WALL CLEARANCE, every frame, against the world's exact solids. "Reached" cannot see a robot
     # scraping a wall on its way through, and the robust margin exists precisely so that never
@@ -404,6 +432,27 @@ def drive(a: argparse.Namespace) -> dict:
     max_decel = float(a.plan_params.get("plan_max_decel", PLAN_DEFAULTS["plan_max_decel"]))
     max_jerk = float(a.plan_params.get("plan_max_jerk", PLAN_DEFAULTS["plan_max_jerk"]))
     turn_boost = float(a.plan_params.get("plan_turn_boost", 1.0))
+    # the output's turn brake (navigation_node): forward speed and differential scaled together
+    # past a lateral acceleration; alpha = 1 + k_turn, the mu = 1 worst case, as the node has it
+    turn_brake_a_max = float(
+        a.plan_params.get("plan_turn_brake_a_max", PLAN_DEFAULTS["plan_turn_brake_a_max"])
+    )
+    lat_gain = robot.wheel_radius**2 / (2.0 * robot.half_track * (1.0 + k_turn))
+    # the robot's inner yaw-rate loop (navigation_node): the turn model is feedforward, and the
+    # ground's dead zone eats small differentials -- without it a gentle turn is not made at all
+    yaw_track = None
+    if chain and mppi and a.plan_params.get("plan_yaw_track", False):
+        alpha_plan = 1.0 + float(plan_sim.solver.k_turn) * 0.8  # the rollouts' friction
+        yaw_per_diff = robot.wheel_radius / (2.0 * robot.half_track * alpha_plan)
+        yaw_track = YawRateTracker(
+            yaw_per_diff=yaw_per_diff,
+            kp=float(a.plan_params.get("plan_yaw_track_kp", 0.4)),
+            ki=float(a.plan_params.get("plan_yaw_track_ki", 1.0)),
+            deadband=float(a.plan_params.get("plan_yaw_track_deadband", 0.05)),
+            max_correction=float(a.plan_params.get("plan_yaw_track_max", 1.5)),
+        )
+    yaw_log: list = []  # per frame: [f, yaw_ref, yaw_meas, correction] while the loop runs
+    yaw_meas = 0.0  # [rad/s] body yaw rate as the loop sees it, low-passed (see below)
     prev_pose = None
     prev_xy = None  # last frame's position: the brake stops before it spins while still moving
     for f in range(a.frames):
@@ -466,12 +515,17 @@ def drive(a: argparse.Namespace) -> dict:
             coarse_value=vc,
             coarse_origin=None if coarse is None else (cx0 - r0, cy0 - s0),
         )
+        if coarse is not None:
+            # WHAT THE FINE LAYER DECIDED flows back: a block of the routing window it found no
+            # feasible pose in is sealed in the coarse memory (CoarseRouter.apply_fine)
+            coarse.apply_fine(ctg.feasibility, m_r, (r0 - cx0, s0 - cy0), a.cell)
 
         # CONTROL -- fine window, cropped from the same belief
         wx0 = belief.xmin + off_w * a.cell
         wy0 = belief.ymin + off_w * a.cell
         state_l = np.array([rx - wx0, ry - wy0, yaw], np.float32)
         goal_l = (goal[0] - wx0, goal[1] - wy0)
+        gov_scale = 1.0  # the governor's speed scale this frame; the yaw loop idles under a hold
         if d < a.dock:
             cmd = dock_control(state_l, goal_l)
         elif mppi:
@@ -509,8 +563,28 @@ def drive(a: argparse.Namespace) -> dict:
                 # to be its own term. Walls only, and without the router's margin (CostToGo.hazard)
                 planner.set_veto(ctg.hazard, sgrid)
             # the wall-distance map the clearance-time and keep-away costs read
-            if a.cfg.clearance is not None or a.cfg.cost.keep_away > 0.0:
-                planner.update_clearance()
+            if (
+                a.cfg.clearance is not None
+                or a.cfg.cost.keep_away > 0.0
+                or a.cfg.cost.wall_body > 0.0
+                or refpath is not None
+            ):
+                # the reference keeps clearance + half-width (1.2 m) from a face, so its map has
+                # to read that far; the governor's terms are content with 1 m
+                planner.update_clearance(1.6 if refpath is not None else 1.0)
+            if refpath is not None:
+                # WHAT TO TRACK: V's descent, pulled taut and smoothed into the clothoid-bounded
+                # curve at the asked clearance (control/reference_path.py); MPPI's goal term
+                # becomes the distance to it
+                # V itself, not V_escape: the escape field gives every vetoed cell a finite way
+                # out so MPPI can leave a wall, and a descent of it walks through walls (slalom)
+                forbidden_distance(ctg.blocked, a.n_theta, a.cell, 1.6, ref_mask, ref_clear)
+                if refpath.update(
+                    ctg.V, sgrid, ref_clear, sgrid, state_l, goal_xy=goal_l, blocked=ctg.blocked
+                ):
+                    planner.set_reference(refpath)
+                else:
+                    planner.clear_reference()
             off_deg = float(a.plan_params.get("plan_traction_off_deg", 0.0))
             scale = 1.0
             if off_deg > 0.0:
@@ -542,6 +616,10 @@ def drive(a: argparse.Namespace) -> dict:
                         prev_diff=prev_diff,
                         speed=speed,
                     )
+            if mppi and a.history and f % a.history == 0:
+                # rollout 0 is the noise-free nominal: what MPPI intends, as the governor reads it
+                for x_, y_, _ in plan_sim.controlled.numpy()[:, 0]:
+                    mppi_paths.append([f, x_ + wx0, y_ + wy0])
             if governor is not None:
                 wl_in = wl
                 capped = governor.cap(
@@ -549,14 +627,9 @@ def drive(a: argparse.Namespace) -> dict:
                 )
                 if a.plan_params.get("plan_clear_governor", PLAN_DEFAULTS["plan_clear_governor"]):
                     wl, wr = capped
+                gov_scale = wl / wl_in if wl_in != 0.0 else 1.0
                 gov_log.append(
-                    [
-                        f,
-                        governor.clearance,
-                        governor.v_cap,
-                        wl / wl_in if wl_in != 0.0 else 1.0,
-                        float(governor.blind),
-                    ]
+                    [f, governor.clearance, governor.v_cap, gov_scale, float(governor.blind)]
                 )
             cmd = np.array([wl, wr, 0.5 * (wl + wr)], np.float32)
         else:
@@ -571,18 +644,58 @@ def drive(a: argparse.Namespace) -> dict:
                 path, local, robot, a.look, a.carrot_speed, a.spin_deg, a.spin_rate, bearing
             )
         if chain:
-            lrr = condition_command(
-                float(cmd[0]),
-                float(cmd[1]),
-                prev_lrr,
-                max_omega=max_omega,
-                max_slew=max_slew,
-                max_decel=max_decel,
-                dt=dt,
-                turn_boost=turn_boost,
-                prev_accel=prev_accel,
-                max_jerk=max_jerk,
-            )
+
+            def conditioned(wl: float, wr: float) -> np.ndarray:
+                return condition_command(
+                    wl,
+                    wr,
+                    prev_lrr,
+                    max_omega=max_omega,
+                    max_slew=max_slew,
+                    max_decel=max_decel,
+                    dt=dt,
+                    turn_boost=turn_boost,
+                    prev_accel=prev_accel,
+                    max_jerk=max_jerk,
+                    turn_brake_a_max=turn_brake_a_max,
+                    lat_gain=lat_gain,
+                )
+
+            ref_lrr = None
+            if yaw_track is not None and mppi and d >= a.dock:
+                # the reference is the uncorrected command through the same conditioner (the
+                # node's rule: referencing the corrected one lets the loop inflate every turn)
+                ref_lrr = conditioned(float(cmd[0]), float(cmd[1]))
+                half = 0.5 * yaw_track.correction
+                cmd = np.array([cmd[0] - half, cmd[1] + half, cmd[2]], np.float32)
+            elif yaw_track is not None:
+                yaw_track.reset()  # docking: do not carry an integrator over
+            lrr = conditioned(float(cmd[0]), float(cmd[1]))
+            if ref_lrr is not None and prev_pose is not None:
+                # measured yaw rate from the pose delta (the node reads the gyro), through the
+                # loop's own reference lag: this physics' contact yaw stick-slips by +-15 deg/s
+                # from one 69 ms frame to the next at a constant differential (body_qd confirms
+                # it is motion, not measurement), which a 400 Hz gyro on the robot averages away
+                # but the integrator here read as under-turn and wound to its clamp
+                # the reference is what the MODEL says the sent differential yaws, dead zone
+                # included -- otherwise the loop would chase the part the ground swallows
+                ref_diff = float(ref_lrr[2] - ref_lrr[0]) / turn_boost
+                yaw_ref = (
+                    a.turn_gain
+                    * math.copysign(max(abs(ref_diff) - a.turn_dead, 0.0), ref_diff)
+                    * yaw_per_diff
+                )
+                yaw_now = ((yaw - prev_pose[2] + np.pi) % (2.0 * np.pi) - np.pi) / dt
+                yaw_meas += dt / (dt + yaw_track._tau_ref) * (yaw_now - yaw_meas)
+                corr = yaw_track.update(
+                    yaw_ref,
+                    yaw_meas,
+                    dt,
+                    saturated=bool(np.max(np.abs(lrr)) >= max_omega - 1e-3),
+                    # a spin (CostParams.turn_spin_th) or a governor hold: nothing to recover
+                    hold=abs(0.5 * (lrr[0] + lrr[2])) < 0.25 or gov_scale < 0.5,
+                )
+                yaw_log.append([f, yaw_ref, yaw_meas, corr])
             prev_accel = (lrr - prev_lrr) / dt
             prev_lrr = lrr
             side = spin_side(side, lrr)
@@ -611,6 +724,9 @@ def drive(a: argparse.Namespace) -> dict:
                     float((per_rollout <= 1e-6).mean()),
                 ]
             )
+        if a.history and f % a.history == 0 and refpath is not None:
+            for x_, y_ in refpath.curve():
+                ref_paths.append([f, float(x_) + wx0, float(y_) + wy0])
         if a.history and f % a.history == 0:
             hist["h"].append(height_d.numpy().copy())
             hist["seen"].append((measured_d.numpy() > 0.5).astype(np.uint8))
@@ -626,6 +742,9 @@ def drive(a: argparse.Namespace) -> dict:
             hist["route"].append((vh < 0.9 * ctg._vcap).mean(2).astype(np.float32))
             hist["cv"].append(
                 np.zeros((1, 1), np.float32) if coarse is None else coarse.V.numpy()[:, :, 0]
+            )
+            hist["verdict"].append(
+                np.zeros((1, 1), np.float32) if coarse is None else coarse.verdict.numpy()
             )
             # the belief window recenters in whole cells as the robot moves, so every frame
             # carries the origin its own maps are expressed in
@@ -705,6 +824,9 @@ def drive(a: argparse.Namespace) -> dict:
             **{f"hist_{k}": np.asarray(v) for k, v in hist.items() if v},
             **({"escape": np.asarray(esc)} if esc else {}),
             **({"governor": np.asarray(gov_log)} if gov_log else {}),
+            **({"yaw_log": np.asarray(yaw_log)} if yaw_log else {}),
+            **({"mppi_paths": np.asarray(mppi_paths)} if mppi_paths else {}),
+            **({"ref_paths": np.asarray(ref_paths)} if ref_paths else {}),
         )
         print(f"wrote {a.out}")
 
@@ -765,7 +887,15 @@ def main() -> None:
         "default plan_bridge_m",
     )
     p.add_argument("--void-penalty", type=float, default=1.0, help="[m] per cell of unseen beyond")
-    p.add_argument("--cell", type=float, default=0.2)
+    # the robot maps at 0.08 m; at 0.2 the belief's wall faces sat ~0.12 m closer than truth
+    # (half a cell) and the feasible zone round a trunk ended 0.3 m further out
+    p.add_argument("--cell", type=float, default=0.08)
+    p.add_argument(
+        "--ref-radius",
+        type=float,
+        default=None,
+        help="[m] the tracked reference's minimum radius and clothoid length; default plan_track_radius",
+    )
     p.add_argument(
         "--turn-first",
         type=float,
@@ -831,6 +961,25 @@ def main() -> None:
         help="also record every Nth frame into --out, for the scrub page; 0 = OFF",
     )
     p.add_argument("--controller", choices=("mppi", "carrot"), default="mppi")
+    p.add_argument(
+        "--turn-dead",
+        type=float,
+        default=0.0,
+        help="[rad/s] wheel differential the body does not answer (SolverParams.turn_dead); "
+        "0 = the plain kinematic map",
+    )
+    p.add_argument(
+        "--turn-gain",
+        type=float,
+        default=1.0,
+        help="yaw realised above the dead zone, as a fraction of the kinematic map",
+    )
+    p.add_argument(
+        "--wall-body",
+        type=float,
+        default=None,
+        help="MPPI's body-through-wall infeasibility weight (CostParams.wall_body); 0 = off",
+    )
     p.add_argument("--look", type=float, default=1.2, help="[m] carrot lookahead along the plan")
     p.add_argument("--carrot-speed", type=float, default=0.8, help="[m/s] carrot cruise")
     p.add_argument(
@@ -866,6 +1015,10 @@ def main() -> None:
     a = p.parse_args()
     a.plan_params = _plan_params(a)
     a.cfg = planner_config(a.plan_params)
+    if a.wall_body is not None:  # not a plan_* key: the robot runs CostParams' default
+        a.cfg = dataclasses.replace(
+            a.cfg, cost=dataclasses.replace(a.cfg.cost, wall_body=a.wall_body)
+        )
     a.n_theta, a.horizon, a.batch = a.cfg.n_theta, a.cfg.horizon, a.cfg.batch
     a.wmax, a.wheel_width = a.cfg.sampling.wmax, a.cfg.wheel_width
 

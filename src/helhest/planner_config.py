@@ -14,7 +14,6 @@ here, so there is one of each.
 
 No ROS and no YAML here: the node passes its cached values, `drive_sim` parses the file itself.
 """
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -23,6 +22,7 @@ from typing import Any
 
 from helhest.control.mppi import CostParams
 from helhest.control.mppi import SamplingConfig
+from helhest.control.reference_path import ReferencePathParams
 from helhest.planning.clearance import ClearanceParams
 
 # Everything the planner reads that the node and the simulator must agree on. Grid geometry and the
@@ -42,6 +42,13 @@ PLAN_DEFAULTS: dict[str, Any] = {
     # keep_away * max(0, keep_away_m - wall clearance)^2 per step (CostParams.keep_away); 0 = off
     "plan_keep_away": 0.0,
     "plan_keep_away_m": 0.6,
+    # track the reference path (control/reference_path.py) instead of descending V; 0 = off
+    "plan_track_lateral": 0.0,
+    "plan_track_heading": 0.0,
+    "plan_track_progress": 0.0,
+    # [m] the reference curve's tightest turn, and the clothoid length into it. 1.0, not the
+    # stage's 1.5: it is what every tracking run in drive_sim used (all nine worlds, 2026-10-29)
+    "plan_track_radius": 1.0,
     "plan_smooth": 0.04,
     "plan_saturation": 300.0,
     # MPPI's hard veto on the cost-to-go's HAZARD field: actual wall contact, without the router's
@@ -84,6 +91,7 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_clear_t_react": 0.0,  # [s] error per unit speed of the fastest body point
     "plan_clear_c0": 0.15,  # [m] fixed margin (0.2 cost narrow corridors ~10% in sim)
     "plan_clear_v_min": 0.15,  # [m/s] floor
+    "plan_clear_v_escape": 0.5,  # [m/s] while the plan leaves a wall it is inside c0 of; 0 = floor
     "plan_clear_v_cruise": 1.5,  # [m/s] the route's time unit
     "plan_clear_t_turn": 0.25,  # [s] the tail swing's own t_react
     "plan_clear_route_turn": 1.0,  # 1 = the route charges turning arcs for their tail near walls
@@ -128,6 +136,7 @@ class PlannerConfig:
     coarse: dict[str, float]  # block_m, memory_m, bridge_m -- CoarseRouter, sized by the caller
     turn_first: dict[str, float]  # start_deg, reach_m -- control.command.turn_first
     clearance: ClearanceParams | None  # the clearance law; None = the spatial tube vetoes
+    reference: ReferencePathParams | None  # the curve MPPI tracks; None = tracking off
 
 
 def resolve(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -152,6 +161,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             t_react=float(p["plan_clear_t_react"]),
             c0=float(p["plan_clear_c0"]),
             v_min=float(p["plan_clear_v_min"]),
+            v_escape=float(p["plan_clear_v_escape"]),
             v_cruise=float(p["plan_clear_v_cruise"]),
             t_turn=float(p["plan_clear_t_turn"]),
             route_turn=float(p["plan_clear_route_turn"]) > 0.0,
@@ -175,6 +185,9 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             lat_accel_max=float(p["plan_turn_brake_a_max"]),
             keep_away=float(p["plan_keep_away"]),
             keep_away_m=float(p["plan_keep_away_m"]),
+            track_lateral=float(p["plan_track_lateral"]),
+            track_heading=float(p["plan_track_heading"]),
+            track_progress=float(p["plan_track_progress"]),
             smoothness=float(p["plan_smooth"]),
             saturation=float(p["plan_saturation"]),
             veto=float(p["plan_wall_veto"]),
@@ -225,4 +238,12 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             clear_m=float(p["plan_turn_first_clear_m"]),
         ),
         clearance=clearance,
+        reference=(
+            ReferencePathParams(
+                radius_min_m=float(p["plan_track_radius"]),
+                clothoid_m=float(p["plan_track_radius"]),
+            )
+            if float(p["plan_track_lateral"]) > 0.0
+            else None
+        ),
     )

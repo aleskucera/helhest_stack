@@ -105,9 +105,10 @@ def test_a_longer_turn_allowance_slows_a_pivot_more_but_not_a_straight_drive():
     elev, meas, grid = _scene(wall_y=4.8)
     plain = ClearanceGovernor(ROBOT, plan_dt=0.1, params=ClearanceParams(t_turn=0.125))
     turn = ClearanceGovernor(ROBOT, plan_dt=0.1, params=ClearanceParams(t_turn=0.25))
+    closing = _plan_at([4.0 + 0.03 * i for i in range(12)])  # the swing counts only on these
     assert (
-        turn.cap(-2.0, 2.0, _plan(y=4.0), elev, meas, grid)[1]
-        < plain.cap(-2.0, 2.0, _plan(y=4.0), elev, meas, grid)[1]
+        turn.cap(-2.0, 2.0, closing, elev, meas, grid)[1]
+        < plain.cap(-2.0, 2.0, closing, elev, meas, grid)[1]
     )
     assert turn.cap(3.0, 3.0, _plan(y=4.0), elev, meas, grid) == plain.cap(
         3.0, 3.0, _plan(y=4.0), elev, meas, grid
@@ -283,3 +284,69 @@ def test_a_low_one_cell_thick_wall_is_still_a_wall():
     gov = _gov()
     gov.cap(4.0, 4.0, _plan(y=4.0), elev, meas, grid)
     assert gov.clearance < 0.5
+
+
+def _plan_at(ys: list[float], yaw: float = 0.0) -> wp.array:
+    """Rollout 0 driving +x from x = 3, one y per step."""
+    p = np.zeros((len(ys), 2, 3), np.float32)
+    p[:, 0, 0] = 3.0 + 0.05 * np.arange(len(ys))
+    p[:, 0, 1] = ys
+    p[:, 0, 2] = yaw
+    return wp.array(p, dtype=wp.vec3f)
+
+
+def test_inside_the_margin_a_plan_that_leaves_the_wall_is_let_out():
+    elev, meas, grid = _scene(wall_y=5.0)
+    side = ROBOT.half_track + 0.5 * ROBOT.wheel_width
+    y0 = 5.0 + 0.5 * CELL - side - 0.08  # 0.08 m off the wall: inside c0, at the floor
+    gov = _gov()
+    # hugging the wall at the same distance: the floor, as before
+    wl, wr = gov.cap(1.0, 1.0, _plan_at([y0] * 12), elev, meas, grid)
+    assert ROBOT.wheel_radius * wl == pytest.approx(gov.params.v_min, abs=1e-3)
+    # the same command, but the plan moves away from the wall: the escape speed stands
+    wl, wr = gov.cap(1.0, 1.0, _plan_at([y0 - 0.05 * i for i in range(12)]), elev, meas, grid)
+    assert ROBOT.wheel_radius * wl == pytest.approx(0.35, abs=1e-3)  # 1.0 rad/s, unscaled
+    # and a plan moving further in keeps the floor
+    wl, wr = gov.cap(1.0, 1.0, _plan_at([y0 + 0.01 * i for i in range(12)]), elev, meas, grid)
+    assert ROBOT.wheel_radius * wl == pytest.approx(gov.params.v_min, abs=1e-3)
+
+
+def test_escape_is_off_at_the_floor():
+    elev, meas, grid = _scene(wall_y=5.0)
+    side = ROBOT.half_track + 0.5 * ROBOT.wheel_width
+    y0 = 5.0 + 0.5 * CELL - side - 0.08
+    params = dataclasses.replace(_gov().params, v_escape=0.0)
+    gov = ClearanceGovernor(ROBOT, plan_dt=0.1, params=params)
+    wl, wr = gov.cap(1.0, 1.0, _plan_at([y0 - 0.05 * i for i in range(12)]), elev, meas, grid)
+    assert ROBOT.wheel_radius * wl == pytest.approx(gov.params.v_min, abs=1e-3)
+
+
+def test_above_the_floor_a_pivot_on_a_plan_that_does_not_close_in_counts_its_swing_once():
+    elev, meas, grid = _scene(wall_y=5.0)
+    side = ROBOT.half_track + 0.5 * ROBOT.wheel_width
+    y0 = 5.0 + 0.5 * CELL - side - 0.20  # 0.2 m off: above c0, the law is above its floor
+    gov = ClearanceGovernor(ROBOT, plan_dt=0.1, params=ClearanceParams(t_react=0.08, t_turn=0.16))
+    wl, wr = gov.cap(2.0, -1.0, _plan_at([y0] * 12), elev, meas, grid)  # a near-pivot
+    assert gov.v_cap > gov.params.v_min + 1e-3
+    v = ROBOT.wheel_radius * 0.5 * abs(wl + wr)
+    wz = ROBOT.wheel_radius * abs(wr - wl) / (2.0 * ROBOT.half_track)
+    assert v + gov.tail * wz == pytest.approx(gov.v_cap, abs=1e-3)  # the swing once, not twice
+    # the same command on a plan that closes in: the swing counts turn_ratio times, as before
+    wl2, wr2 = gov.cap(2.0, -1.0, _plan_at([y0 + 0.03 * i for i in range(12)]), elev, meas, grid)
+    assert abs(wl2) < abs(wl)
+
+
+def test_hugging_a_wall_inside_the_margin_puts_the_floor_on_the_body():
+    elev, meas, grid = _scene(wall_y=5.0)
+    side = ROBOT.half_track + 0.5 * ROBOT.wheel_width
+    y0 = 5.0 + 0.5 * CELL - side - 0.08  # inside c0; the plan runs along the wall
+    # t_turn 1.0: the swing counts twice, as on the robot (0.16 / 0.08)
+    gov = ClearanceGovernor(ROBOT, plan_dt=0.1, params=ClearanceParams(t_react=0.5, t_turn=1.0))
+    wl, wr = gov.cap(1.0, 1.4, _plan_at([y0] * 12), elev, meas, grid)  # a slight turn, rolling
+    v = ROBOT.wheel_radius * 0.5 * (wl + wr)
+    wz = ROBOT.wheel_radius * (wr - wl) / (2.0 * ROBOT.half_track)
+    assert v + gov.tail * wz == pytest.approx(gov.params.v_min, abs=1e-3)  # the tail at its speed
+    assert wr / wl == pytest.approx(1.4)  # the same arc, slower
+    # the same command on a plan that closes in: the swing counts turn_ratio times, as before
+    wl2, wr2 = gov.cap(1.0, 1.4, _plan_at([y0 + 0.03 * i for i in range(12)]), elev, meas, grid)
+    assert wl2 < wl

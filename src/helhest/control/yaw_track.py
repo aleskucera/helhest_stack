@@ -63,6 +63,7 @@ class YawRateTracker:
         ki: float = 1.0,  # [1/s] integral gain, in yaw-rate units
         deadband: float = 0.05,  # [rad/s] below this the loop idles -- see the module docstring
         max_correction: float = 1.5,  # [rad/s] hard clamp on the differential correction
+        max_relative: float = 1.0,  # correction <= this x the commanded differential (see below)
         stale_s: float = 0.15,  # [s] measurements older than this are not trusted
         tau_ref: float = 0.19,  # [s] actuator lag the reference is passed through (MOTOR_TAU)
     ) -> None:
@@ -73,11 +74,19 @@ class YawRateTracker:
         self._ki = float(ki)
         self._deadband = float(deadband)
         self._max = float(max_correction)
+        # The absolute clamp alone let the loop add a turn as large as the plan's own: at crawl
+        # speed beside a wall the ground alternates stuck and slipping, the integrator reads the
+        # stuck frames as under-turn and parks at the clamp, and that turn goes out AFTER the
+        # clearance governor checked the command (drive_sim, pocket/false_door: 0/3 with wall
+        # contact). Bounding the correction by the commanded differential keeps the loop a
+        # corrector of the plan's turn, never a source of one.
+        self._max_relative = max(float(max_relative), 0.0)
         self._stale_s = float(stale_s)
         self._tau_ref = max(float(tau_ref), 0.0)
         self._integral = 0.0  # [rad/s] of yaw, converted to a differential only on output
         self._correction = 0.0
         self._ref_lagged = 0.0  # the reference seen through the actuator's own first-order lag
+        self._ref_sign = 0.0  # direction of the last turn the integrator learned on
 
     @property
     def correction(self) -> float:
@@ -104,6 +113,11 @@ class YawRateTracker:
         self._integral = 0.0
         self._correction = 0.0
         self._ref_lagged = 0.0
+        self._ref_sign = 0.0
+
+    def _limit(self) -> float:
+        """The correction clamp [rad/s of yaw] in force for the current reference."""
+        return min(self._max * self._yaw_per_diff, self._max_relative * abs(self._ref_lagged))
 
     def update(
         self,
@@ -113,8 +127,18 @@ class YawRateTracker:
         *,
         age: float = 0.0,  # [s] how old the measurement is
         saturated: bool = False,  # any wheel at its omega clamp -> the loop has no authority
+        hold: bool = False,  # spinning in place, or held slow by the clearance governor
     ) -> float:
         if dt <= 0.0:
+            return self._correction
+        if hold:
+            # A spin's differential is far above the ground's dead zone, so there is nothing for
+            # this loop to recover there; and a spin the governor has slowed for the tail's
+            # clearance under-realises BY DESIGN. Learning on it doubled the spin after the
+            # governor's wall check (drive_sim: every first wall contact at ~0.02 m/s, correction
+            # 0.8-1.5 rad/s). Bleed instead, as for a stale measurement.
+            self._integral *= 0.5 ** (dt / 0.25)
+            self._correction *= 0.5 ** (dt / 0.25)
             return self._correction
         if yaw_meas is None or age > self._stale_s:
             # No trustworthy measurement: bleed toward feedforward rather than hold a correction
@@ -141,12 +165,19 @@ class YawRateTracker:
             self._correction = self._integral / self._yaw_per_diff
             return self._correction
 
+        # A bias learned turning one way is wrong for the other: the ground resists both
+        # directions alike, so carrying a left turn's integral into a right turn over-turns it.
+        sign = 1.0 if self._ref_lagged > 0.0 else -1.0
+        if sign != self._ref_sign:
+            self._integral = 0.0
+            self._ref_sign = sign
+        limit = self._limit()
         if not saturated:  # anti-windup: no authority means no learning
             self._integral += self._ki * error * dt
-            # Bound the integral in yaw units so the clamp means the same thing at every gain.
-            limit = self._max * self._yaw_per_diff
-            self._integral = max(-limit, min(limit, self._integral))
+        # Bound the integral in yaw units so the clamp means the same thing at every gain.
+        self._integral = max(-limit, min(limit, self._integral))
 
         corr = (self._kp * error + self._integral) / self._yaw_per_diff
-        self._correction = max(-self._max, min(self._max, corr))
+        bound = limit / self._yaw_per_diff
+        self._correction = max(-bound, min(bound, corr))
         return self._correction

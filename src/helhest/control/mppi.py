@@ -12,7 +12,6 @@ Kernels (all suffixed _kernel):
   _minmax/_bisect_*/_count_below/_elite_u   CEM reweight (top-k elite mean) of U, on device
   _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
 """
-
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,6 +28,8 @@ from ..planning.clearance import allowed_speed
 from ..planning.clearance import clearance_map_kernel
 from ..planning.clearance import ClearanceParams
 from ..profiling import StageProfiler
+
+REF_MAX = 128  # reference curve points the cost kernel can hold (ReferencePathParams.n_knots + 1)
 
 
 def _n_bisect(n_cand: int) -> int:
@@ -151,6 +152,10 @@ class CostWeights:
     clear_time: float  # weight; 1 = a second lost costs exactly what it costs in goal terms
     keep_away: float  # CostParams.keep_away
     keep_away_m: float
+    wall_body: float  # CostParams.wall_body
+    track_lateral: float  # CostParams.track_lateral
+    track_heading: float
+    track_progress: float
     clear_t_react: float
     clear_v_min: float
     clear_c0: float  # [m] the law's fixed margin
@@ -223,6 +228,27 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
     # 0 = off.
     keep_away: float = 0.0
     keep_away_m: float = 0.6  # [m]
+    # BODY THROUGH A WALL FACE is infeasible, graded by the depth like the other hard terms. The
+    # settle knows wheels and belly only, so a wall at the tail's corner or along the flank was a
+    # legal pose that paid keep_away alone, ~5 goal units a step against infeasible's 1e5: the
+    # nominal plan ran through a belief wall in 17 % of trunks frames and 33 % of false_door's, and
+    # every wall contact began with the plan inside one (drive_sim, 2026-10-27). Weight on the
+    # metres a perimeter point is inside the face's cell BEYOND where the start pose already is:
+    # after a wall hug the body often stands inside the belief's fringe, and an absolute charge
+    # priced every motion like standing still, so MPPI stood still (false_door, half the run at
+    # governor scale 1). 0 = off (keep_away only).
+    wall_body: float = 1.0
+    # TRACK THE REFERENCE PATH (control/reference_path.py) instead of descending V. With the
+    # route field as the goal term, MPPI's 1.7 s horizon sees a flat field along every straight
+    # and turns in late and hard at each corner, never on the same line twice (box world,
+    # 2026-10-28: 0.3-0.45 m mean offset and 0.7-1.2 m mirror error against the reference).
+    # With a reference set (MppiGpu.set_reference) and track_lateral > 0, each step pays
+    # track_lateral * (signed distance to the curve)^2 + track_heading * (1 - cos(heading error
+    # to its tangent)), and the horizon's end is rewarded track_progress per metre of arc length
+    # reached along it; the V terms are not charged. 0 = off (the goal term as before).
+    track_lateral: float = 0.0
+    track_heading: float = 0.0
+    track_progress: float = 0.0
     # friction-saturation certificate weight (per unit demand/grip overshoot, early-weighted sum).
     # ~300 makes a sustained 20% overshoot compete with real routing differences and a 2x overshoot
     # dominate; the certificate is exact at tan(pitch) = mu for station-holding (see test).
@@ -292,6 +318,10 @@ class CostParams:  # host-side cost weights -- what you tune; build() -> the dev
         cw.lat_accel_max = self.lat_accel_max
         cw.keep_away = self.keep_away
         cw.keep_away_m = self.keep_away_m
+        cw.wall_body = self.wall_body
+        cw.track_lateral = self.track_lateral
+        cw.track_heading = self.track_heading
+        cw.track_progress = self.track_progress
         cw.saturation = self.saturation
         cw.tip = self.tip
         cw.unknown = self.unknown
@@ -582,6 +612,19 @@ def _rate_limit_kernel(
 
 
 @wp.kernel
+def _start_clear_kernel(
+    start_pose: wp.array(dtype=wp.vec3),  # [B] every rollout starts from the same pose
+    clear_field: wp.array2d(dtype=float),
+    sgrid: Grid,
+    robot: Robot,
+    out: wp.array(dtype=float),  # [1]
+):
+    """The start pose's footprint clearance, for the body term's relative depth. Its own kernel:
+    a second inlined _footprint_clearance call inside _cost_kernel is the crash noted there."""
+    out[0] = _footprint_clearance(clear_field, sgrid, robot, start_pose[0])
+
+
+@wp.kernel
 def _cost_kernel(
     controlled: wp.array2d(dtype=wp.vec3),
     derived: wp.array2d(dtype=wp.vec3),
@@ -603,6 +646,13 @@ def _cost_kernel(
     ),  # [ny, nx, n_theta] cost-to-go V(x,y,theta); the goal cost
     veto_field: wp.array3d(dtype=float),  # [ny, nx, n_theta] 1 = the cost-to-go refuses this pose
     clear_field: wp.array2d(dtype=float),  # [ny, nx] on sgrid: distance to the nearest wall face
+    start_clear: wp.array(
+        dtype=float
+    ),  # [1] the start pose's footprint clearance (_start_clear_kernel)
+    ref_pts: wp.array(dtype=wp.vec2),  # [M] the reference curve, sim-grid frame (set_reference)
+    ref_tan: wp.array(dtype=wp.vec2),  # [M] its unit tangents
+    ref_s: wp.array(dtype=float),  # [M] its arc length
+    ref_n: wp.array(dtype=int),  # [1] valid points; < 3 = no reference this frame
     n_theta: int,
     cw: CostWeights,
     robot: Robot,  # envelope + feasibility thresholds (shared with the cost-to-go feasibility)
@@ -628,6 +678,13 @@ def _cost_kernel(
     time_sum = float(0.0)
     unk_sum = float(0.0)
     rev_sum = float(0.0)
+    track_sum = float(0.0)
+    head_sum = float(0.0)
+    progress = float(0.0)
+    use_ref = int(0)
+    if cw.track_lateral > 0.0:
+        if ref_n[0] >= 3:
+            use_ref = 1
     edge = float(0.4)  # soft-wall margin inside the grid border
     x_lo = grid.origin_x + edge
     x_hi = grid.origin_x + float(grid.cells_x) * grid.cell_size - edge
@@ -661,7 +718,30 @@ def _cost_kernel(
         if v < 0.0:
             yaw_eff += 3.14159265
         vl = sample_lattice(lattice_field, grid, n_theta, pose[0], pose[1], yaw_eff)
-        if cw.explore_fallback > 0.0 and vl >= cw.lattice_cap * 0.9:
+        if use_ref == 1:
+            # TRACK THE REFERENCE (CostParams.track_lateral): the nearest curve point, the signed
+            # distance to the curve across its tangent, the heading against the tangent, and
+            # the arc length reached. The V terms are not charged: the curve already descends V.
+            nref = ref_n[0]
+            bd = float(1.0e30)
+            jb = int(0)
+            for j in range(nref):
+                ddx = pose[0] - ref_pts[j][0]
+                ddy = pose[1] - ref_pts[j][1]
+                dd = ddx * ddx + ddy * ddy
+                if dd < bd:
+                    bd = dd
+                    jb = j
+            q = ref_pts[jb]
+            tq = ref_tan[jb]
+            dpx = pose[0] - q[0]
+            dpy = pose[1] - q[1]
+            lat = tq[0] * dpy - tq[1] * dpx
+            track_sum += lat * lat
+            head_sum += 1.0 - (wp.cos(yaw_eff) * tq[0] + wp.sin(yaw_eff) * tq[1])
+            progress = ref_s[jb] + (tq[0] * dpx + tq[1] * dpy)  # the last step sticks
+            goal_cost = float(0.0)
+        elif cw.explore_fallback > 0.0 and vl >= cw.lattice_cap * 0.9:
             dx = pose[0] - goal[0]
             dy = pose[1] - goal[1]
             goal_cost = cw.lattice_cap * cw.lattice_cap + cw.explore_fallback * (dx * dx + dy * dy)
@@ -726,8 +806,15 @@ def _cost_kernel(
         # (a struct holding an array) read its array handle out of bounds of the local copy
         # (compute-sanitizer, 2026-10-08) and crashed every plan with clear_time on
         cmin = float(1.0e3)
-        if cw.keep_away > 0.0 or cw.clear_time > 0.0:
+        if cw.keep_away > 0.0 or cw.clear_time > 0.0 or cw.wall_body > 0.0:
             cmin = _footprint_clearance(clear_field, sgrid, robot, pose)
+        if cw.wall_body > 0.0:
+            # one cell: a face is the cell the wall's returns land in, so a perimeter point within
+            # a cell of it is on the face; only deeper than the start pose pays, so a body already
+            # on a face is free to leave it (CostParams.wall_body)
+            depth = wp.max(sgrid.cell_size - cmin, 0.0)
+            depth0 = wp.max(sgrid.cell_size - start_clear[0], 0.0)
+            penalty_sum += early * cw.wall_body * wp.max(depth - depth0, 0.0)
         if cw.keep_away > 0.0:
             gap = wp.max(cw.keep_away_m - cmin, 0.0)
             away_sum += gap * gap
@@ -775,6 +862,9 @@ def _cost_kernel(
         + cw.keep_away * away_sum
         + cw.reverse * rev_sum
         + cw.clear_time * time_sum
+        + cw.track_lateral * track_sum
+        + cw.track_heading * head_sum
+        - cw.track_progress * progress
         + safe
     )
 
@@ -1087,6 +1177,12 @@ class MppiGpu:
             self.U_ref = wp.zeros((self.horizon, 2), dtype=wp.float32)  # last frame's plan
             self.spin_side = wp.zeros(1, dtype=wp.float32)  # set_spin_side; 0 = either way
             self.traction_scale = wp.ones(1, dtype=wp.float32)  # set_traction_scale
+            self.start_clear = wp.full(1, 1.0e3, dtype=wp.float32)  # _start_clear_kernel
+            # the reference curve (set_reference); ref_n 0 = none, so the tracking terms are inert
+            self.ref_pts = wp.zeros(REF_MAX, dtype=wp.vec2)
+            self.ref_tan = wp.zeros(REF_MAX, dtype=wp.vec2)
+            self.ref_s = wp.zeros(REF_MAX, dtype=wp.float32)
+            self.ref_n = wp.zeros(1, dtype=wp.int32)
         self.set_mu_band()  # nominal mu (fills sim.mu_scale for the replica layout)
 
         # the grid the cost kernel samples the lattice field on: defaults to the sim grid, but a COARSER
@@ -1164,6 +1260,19 @@ class MppiGpu:
             wp.copy(self.measured, mask)
         else:
             self.measured.assign(np.ascontiguousarray(mask, np.float32))
+
+    def set_reference(self, path) -> None:
+        """Copy the frame's reference curve (control/reference_path.ReferencePath, in the SIM
+        grid's frame) into the stable buffers the cost kernel reads; call every frame before
+        replan when CostParams.track_lateral > 0. `clear_reference` makes the terms inert."""
+        n = min(path.params.n_knots + 1, REF_MAX)
+        wp.copy(self.ref_pts, path.pts, 0, 0, n)
+        wp.copy(self.ref_tan, path.tan, 0, 0, n)
+        wp.copy(self.ref_s, path.s, 0, 0, n)
+        wp.copy(self.ref_n, path.n_valid)
+
+    def clear_reference(self) -> None:
+        self.ref_n.zero_()
 
     def set_lattice(self, V, grid=None):
         """Copy the orientation-aware cost-to-go V[ny', nx', n_theta] into the stable buffer the cost
@@ -1265,6 +1374,14 @@ class MppiGpu:
         self._prof.mark(1)  # sample done
         self.sim.rollout_launch()
         self._prof.mark(2)  # rollout done
+        if self.cw.wall_body > 0.0:
+            wp.launch(
+                _start_clear_kernel,
+                1,
+                inputs=[self.sim.start_pose, self.clear_field, self.sim.grid, self.robot],
+                outputs=[self.start_clear],
+                device=self.device,
+            )
         wp.launch(
             _cost_kernel,
             self.n_rollouts,
@@ -1285,6 +1402,11 @@ class MppiGpu:
                 self.lattice_field,
                 self.veto_field,
                 self.clear_field,
+                self.start_clear,
+                self.ref_pts,
+                self.ref_tan,
+                self.ref_s,
+                self.ref_n,
                 self.n_theta,
                 self.cw,
                 self.robot,

@@ -16,7 +16,6 @@ A state from which the seeds are unreachable under the control set keeps cost +i
 forward-only robot that is not a failure but information: it is exactly the misaligned approach
 a 2-D geodesic cannot express.
 """
-
 from __future__ import annotations
 
 import math
@@ -31,7 +30,6 @@ from .control_set import closing_step
 @wp.kernel
 def _free_seeds_kernel(
     seeds: wp.array(dtype=wp.float32, ndim=3),
-    inf: wp.float32,
     pose_cost: wp.array(dtype=wp.float32, ndim=3),
 ):
     """Lift the veto on seeded states, so the iteration has somewhere to start.
@@ -42,10 +40,14 @@ def _free_seeds_kernel(
     Whether this SHOULD run depends on what the seeds mean. A single goal cell on marginal ground
     is still where the robot was told to go, so freeing it is right. A ring of boundary seeds
     handed down from a coarser layer is not: a blocked boundary cell is not a usable exit, and
-    freeing it would invent one. Hence `ValueSolver(free_blocked_seeds=...)`.
+    freeing it would invent one. Hence `ValueSolver(free_blocked_seeds=...)`, and hence only
+    ZERO-cost seeds are freed even when it is on: a target costs nothing to stand on, a priced
+    seed is an exit. CostToGo seeds both kinds through one field and left the flag on, so where a
+    wall crossed the ring its cells became exits at the coarse layer's price -- on false_door the
+    window edge carried the cheap outside route through the bottom wall into the room's corner.
     """
     r, c, t = wp.tid()
-    if seeds[r, c, t] < inf and pose_cost[r, c, t] < 0.0:
+    if seeds[r, c, t] == 0.0 and pose_cost[r, c, t] < 0.0:
         pose_cost[r, c, t] = -1.0 - pose_cost[r, c, t]
 
 
@@ -401,7 +403,7 @@ class ValueSolver:
             wp.launch(
                 _free_seeds_kernel,
                 dim=grid_dim,
-                inputs=[seeds, self._inf],
+                inputs=[seeds],
                 outputs=[pose_cost],
                 device=self.device,
             )

@@ -50,6 +50,10 @@
     # Turn first (brake to a spin when the route is > 45 deg off) only within 1.2 m of a wall face;
     # in the open it forced the crawl-and-turn the motors hate. Live-tunable, 0 = everywhere.
     plan_turn_first_clear_m: 1.2
+    # 45 -> 0 = off (2026-10-26, drive_sim): with the turn costs off MPPI turns early by itself,
+    # and the brake-to-a-spin near walls cost time without buying clearance (pocket 22-36 s vs
+    # 28-40 s, pillars 13.6-15.2 s, best clearance of the tested settings). Live-tunable.
+    plan_turn_first_deg: 0.0
     # Turn gain. alpha = 1 + k_turn*mu sets how much the skid-steer resists yaw, and alpha
     # DIVIDES the predicted yaw rate -- too high and the planner expects less yaw than it gets, so
     # the robot overshoots turns. MEASURED 2026-08-10 on flat tarmac: alpha = 1.50 from three
@@ -95,8 +99,20 @@
     # speed at the same clearance. t_turn follows (0.25 -> 0.16) so the tail swing keeps its
     # weight t_turn / t_react = 2; alone, the ratio would rise to 3.1 and slow turns near walls.
     # Also re-prices the route's time near walls. Untested on the robot.
-    plan_clear_t_react: 0.08
+    # 0.08 -> 0.2 (2026-10-27, drive_sim at the robot's 0.08 m cells): every fast wall contact was
+    # MPPI asking a swerve at 1.0-1.6 m/s within 0.4 m of a trunk and the body not yawing; the
+    # plant (sim AND Stromovka bags) breaks a yaw loose from straight running within 0.5 s only
+    # about 60% of the time, so a reaction time of 0.08 s is not one the body has. 0.2 with
+    # CostParams.wall_body: trunks 11/11, slalom 11/11, pillars 11/11, pocket 6/6 with no MPPI
+    # contact and no stall over 5 s (trunks median 36.8 -> 40-45 s). t_turn stays 0.16, so the
+    # tail swing's ratio t_turn / t_react is 0.8, not 2 -- that pair is what was tested; the
+    # ratio-2 pair (0.2 / 0.4) was not. 0.3 was slower and lost a trunks run to a hold.
+    plan_clear_t_react: 0.2
     plan_clear_t_turn: 0.16
+    # [m/s] allowed while the plan LEAVES a wall it is already inside c0 of. The law floors every
+    # command inside the margin, the one that backs out included: a robot 0.08 m off a box
+    # corner stood 75 s at 4 % speed with its plan pointing away (drive_sim, 2026-10-26). 0 = floor.
+    plan_clear_v_escape: 0.5
     # 2026-09-30: MPPI no longer prices lost time near walls; distance comes from plan_keep_away
     # instead (a wider berth, not a slower pass). The governor still caps speed near walls --
     # with it off the robot touched walls in 4 of 6 drive_sim pocket/slalom runs -- but no
@@ -111,6 +127,15 @@
     # pocket did not reach at 10 but did at 40 -- noisy, tune on the robot.
     plan_keep_away: 10.0
     plan_keep_away_m: 0.6
+    # Track the reference curve (control/reference_path.py) instead of descending V: lateral and
+    # heading error to it, progress along it; 0.0 for all three = off (descend V). What drive_sim
+    # ran (2026-10-29, all nine worlds reached): lateral 30, heading 30, progress 15, radius 1.0.
+    # The stage adds ~2.5 ms a frame (5.6 p95) on dasenka; not yet timed on the Jetson. RViz:
+    # reference_path_marker (orange) beside planned_path_marker. Rebuilds the planner on change.
+    plan_track_lateral: 30.0
+    plan_track_heading: 30.0
+    plan_track_progress: 15.0
+    plan_track_radius: 1.0
     # [m/s^2] braking the governor counts on: plan_max_decel 3 rad/s^2 x 0.35 m wheel = 1.05.
     # It also ramps in under plan_max_jerk (0.6 s), so the governor looks over the whole plan:
     # in its default 1 s it could shed only ~0.7 m/s and not see far enough to stop from cruise.
@@ -163,10 +188,18 @@
     # overshot its turns by 99-174 deg. Back on now that it saturates at 1 m/s
     # (CostParams.traction_v_sat) and plan_lat_accel below caps the corners; it is the only
     # term that discourages spinning in place. Rebuilds the planner on change.
-    plan_traction: 0.1
+    # 0.1 -> 0 (2026-10-26, drive_sim at the robot's 0.08 m cell, the output chain and turn brake
+    # modelled): the quadratic per-step turn terms (this, plan_lat_accel, plan_smooth) favour
+    # gentle turns, and the ground's dead zone (wheel differential < ~0.3 rad/s yaws nothing)
+    # eats those -- the robot drove straight at a box for 2.5 m and turned hard late. With all
+    # three at 0: box 12.4 s (was 15+), pocket 6/6 reached (was 3/6), no contact in 27 runs.
+    # Straightness still comes free from the goal term; smoothness at the wheels from the output
+    # chain (plan_max_slew / decel / jerk) and the turn brake. Spins stay bounded by plan_spin_max.
+    plan_traction: 0.0
     # MPPI pays for cornering past plan_turn_brake_a_max, the limit the output brakes at, so it
     # plans only turns the robot makes. Rebuilds the planner on change.
-    plan_lat_accel: 20.0
+    # 20 -> 0 (2026-10-26): see plan_traction; the output turn brake alone holds the corners.
+    plan_lat_accel: 0.0
     # Wheel-speed CHANGE penalty -- the anti-jerk knob, and the right one for wobble. plan_turn
     # above penalises the SIZE of a turn, which cannot tell a deliberate 90 deg repositioning from
     # a wobble; this penalises CHANGING YOUR MIND, which is what wobble is. It expands to
@@ -180,7 +213,9 @@
     # For comparison the old plan_turn 0.8 gave 0.32 / 0.027 / 0.03 m on straights -- so this
     # recovers nearly all of that smoothness while turning still works. Past 1e-1 it inverts:
     # corrections get deferred and come out larger, so jerk rises again AND turning degrades.
-    plan_smooth: 0.1
+    # 0.1 -> 0 (2026-10-26): see plan_traction. The output chain's jerk limit (plan_max_jerk)
+    # is what the motors feel; MPPI's sent commands stayed smooth without this term in drive_sim.
+    plan_smooth: 0.0
     # Accel cap on the published command [rad/s^2]. Raised 2.0 -> 6.0 (the node default). The
     # justification is the drivetrain's own lag: tau = 0.19 s means a 1 rad/s step is already
     # answered at only ~5.3 rad/s^2 by the motors, so a 2.0 clamp was TIGHTER THAN THE HARDWARE

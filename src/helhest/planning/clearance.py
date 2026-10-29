@@ -35,6 +35,11 @@ class ClearanceParams:
     t_react: float = 0.125  # [s] error per unit speed of the fastest body point
     c0: float = 0.15  # [m] fixed margin
     v_min: float = 0.15  # [m/s] the law never asks for less than a crawl
+    # [m/s] allowed while the plan is LEAVING a wall it is already inside c0 of. The law is a
+    # limit for approaching; it has no direction, so inside c0 it floored every command alike,
+    # the one that would back out included: a robot 0.08 m off a box corner stood 75 s at 4 %
+    # speed with its plan pointing away (drive_sim, 2026-10-26). 0 = the floor, as before.
+    v_escape: float = 0.5
     v_cruise: float = 1.5  # [m/s] the route's time unit
     t_turn: float = 0.25  # [s] the tail swing's own t_react
     route_turn: bool = True  # the route charges turning arcs for their tail near walls

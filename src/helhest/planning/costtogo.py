@@ -35,7 +35,6 @@ a flat step for arcs that covered different ground, took heading bins at their m
 move ran along a grid axis, and checked every swept cell at the heading the arc STARTED in even
 where the arc had turned 45 degrees by the time it got there.
 """
-
 from __future__ import annotations
 
 import math
@@ -773,6 +772,9 @@ class CostToGo:
             )
             self.clearance_route.charge(self.hazard, self._loose_blocked, self._loose_tilt)
             feas, tilt = self._loose_blocked, self._loose_tilt
+        # the veto the solve routes on, whichever buffer that is: what the coarse layer takes as
+        # this layer's verdict on its blocks (CoarseRouter.apply_fine)
+        self.feasibility = feas
         wp.launch(
             goal_cell_kernel,
             dim=1,
