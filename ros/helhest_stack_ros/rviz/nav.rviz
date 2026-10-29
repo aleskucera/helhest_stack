@@ -94,6 +94,35 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /planned_path_marker
       Value: true
+    # The reference curve MPPI tracks (orange; only while plan_track_lateral > 0).
+    - Class: rviz_default_plugins/Marker
+      Name: reference_path_marker
+      Enabled: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        Value: /reference_path_marker
+      Value: true
+    # The coarse layer's cost-to-go [m] as a height grid; unreachable blocks are left out.
+    - Alpha: 1
+      Axis: Z
+      Class: rviz_default_plugins/PointCloud2
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Enabled: false
+      Name: coarse_value
+      Position Transformer: XYZ
+      Size (m): 0.5
+      Style: Boxes
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /coarse_value
+      Use Fixed Frame: true
+      Value: false
     # The planning goal set by the "2D Nav Goal" tool — a persistent arrow at the target.
     - Class: rviz_default_plugins/Pose
       Name: goal_pose
