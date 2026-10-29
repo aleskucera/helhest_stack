@@ -92,6 +92,8 @@ windows:
           source /home/robot/workspaces/adam_ws/install/setup.bash
           ros2 launch robot_mission_planner gps_follower.launch <%= ENV["GPX"].to_s.empty? ? "" : "gps_file:=#{ENV['GPX']}" %>
         - |
+          # the STOP call needs crl_commander_interfaces (adam_ws) to know its service type
+          source /home/robot/workspaces/adam_ws/install/setup.bash
           history -s 'ros2 service call /road_follower/abort std_srvs/srv/Trigger'
           history -s 'ros2 service call /crl_commander/switch_mode crl_commander_interfaces/srv/SwitchMode "{mode: stop}"'
           echo "press Up: STOP the robot through the bridge / ABORT the current leg"
