@@ -64,6 +64,8 @@ from helhest.control.command import to_engine_order
 from helhest.control.command import traction_scale
 from helhest.control.command import llc_not_driving
 from helhest.control.mppi import MppiGpu
+from helhest.control.reference_path import forbidden_distance
+from helhest.control.reference_path import ReferencePath
 from helhest.control.terminal import dock_control
 from helhest.control.turn_adapt import AdaptiveTurnBoost
 from helhest.control.turn_adapt import TurnGainEstimator
@@ -116,6 +118,10 @@ _PLAN_BUILD = frozenset(
         "plan_lat_accel",
         "plan_keep_away",
         "plan_keep_away_m",
+        "plan_track_lateral",
+        "plan_track_heading",
+        "plan_track_progress",
+        "plan_track_radius",
         "plan_turn_brake_a_max",
         "plan_wmax",
         "plan_wmin",
@@ -137,6 +143,7 @@ _PLAN_BUILD = frozenset(
         "plan_clear_t_react",
         "plan_clear_v_cruise",
         "plan_clear_v_min",
+        "plan_clear_v_escape",
         "plan_clear_lookahead_s",
         "plan_clear_mppi_weight",
         "plan_clear_decel",
@@ -272,6 +279,7 @@ class NavigationNode(Node):
         self.plan_sim: ForwardSimulator | None = None
         self.ctg: CostToGo | None = None
         self.sgrid = None  # routing lattice grid (built)
+        self.refpath: ReferencePath | None = None  # the curve MPPI tracks; None = tracking off
         self._plan_kr: int = 1
         self._plan_dims: tuple[int, int, int, int, int, int] | None = None
         # (t_sec, quaternion xyzw, angular_velocity xyz in base) -- the yaw-rate loop, the
@@ -336,6 +344,7 @@ class NavigationNode(Node):
         self.pub_coarse = self.create_publisher(PointCloud2, "coarse_value", 10)
         self.pub_path = self.create_publisher(Path, "planned_path", 10)
         self.pub_path_marker = self.create_publisher(Marker, "planned_path_marker", 10)
+        self.pub_ref_marker = self.create_publisher(Marker, "reference_path_marker", 10)
         self.pub_frame = self.create_publisher(Marker, "frame_marker", 1)
         self.pub_cmd = self.create_publisher(JointState, self.get_parameter("cmd_topic").value, 10)
         self._pub_twist = None  # the /cmd_vel publisher, made on first use (cmd_output twist)
@@ -546,6 +555,13 @@ class NavigationNode(Node):
         # shortfall (CostParams.keep_away): a wider berth where there is room. 0 = off.
         d("plan_keep_away", PLAN_DEFAULTS["plan_keep_away"])
         d("plan_keep_away_m", PLAN_DEFAULTS["plan_keep_away_m"])
+        # Track the reference path (control/reference_path.py) instead of descending V: lateral
+        # and heading error to the curve, progress along it (CostParams.track_*). 0 = off.
+        d("plan_track_lateral", PLAN_DEFAULTS["plan_track_lateral"])
+        d("plan_track_heading", PLAN_DEFAULTS["plan_track_heading"])
+        d("plan_track_progress", PLAN_DEFAULTS["plan_track_progress"])
+        # [m] the reference curve's tightest turn and the clothoid length into it
+        d("plan_track_radius", PLAN_DEFAULTS["plan_track_radius"])
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
         # NEVER commands above this regardless of the cost. This is the real top-speed knob.
         # ~1.4 m/s at 4.0; ~1.75 m/s at 5.0 (r=0.35). plan_wmax maps to the REAL wheel speed -- the
@@ -589,6 +605,7 @@ class NavigationNode(Node):
         d("plan_clear_t_react", PLAN_DEFAULTS["plan_clear_t_react"])
         d("plan_clear_v_cruise", PLAN_DEFAULTS["plan_clear_v_cruise"])
         d("plan_clear_v_min", PLAN_DEFAULTS["plan_clear_v_min"])
+        d("plan_clear_v_escape", PLAN_DEFAULTS["plan_clear_v_escape"])
         d("plan_clear_lookahead_s", PLAN_DEFAULTS["plan_clear_lookahead_s"])
         d("plan_clear_mppi_weight", PLAN_DEFAULTS["plan_clear_mppi_weight"])
         # False: the governor keeps measuring clearance (turn-first needs it) but no longer caps
@@ -867,6 +884,10 @@ class NavigationNode(Node):
         self.plan_lat_accel: float = g("plan_lat_accel")
         self.plan_keep_away: float = g("plan_keep_away")
         self.plan_keep_away_m: float = g("plan_keep_away_m")
+        self.plan_track_lateral: float = g("plan_track_lateral")
+        self.plan_track_heading: float = g("plan_track_heading")
+        self.plan_track_progress: float = g("plan_track_progress")
+        self.plan_track_radius: float = g("plan_track_radius")
         self.plan_smooth: float = g("plan_smooth")
         self.plan_straight_frac: float = g("plan_straight_frac")
         self.plan_debug_cmd: int = int(g("plan_debug_cmd"))
@@ -886,6 +907,7 @@ class NavigationNode(Node):
         self.plan_clear_t_react: float = g("plan_clear_t_react")
         self.plan_clear_v_cruise: float = g("plan_clear_v_cruise")
         self.plan_clear_v_min: float = g("plan_clear_v_min")
+        self.plan_clear_v_escape: float = g("plan_clear_v_escape")
         self.plan_clear_lookahead_s: float = g("plan_clear_lookahead_s")
         self.plan_clear_mppi_weight: float = g("plan_clear_mppi_weight")
         self.plan_clear_governor: bool = g("plan_clear_governor")
@@ -1124,6 +1146,22 @@ class NavigationNode(Node):
         self.sgrid = GridParams(
             rcnx, rcny, rccell, (ww // 2 - rww // 2) * cell, (wh // 2 - rwh // 2) * cell
         ).build()
+        # THE CURVE MPPI TRACKS when plan_track_lateral > 0 (control/reference_path.py), on the
+        # routing grid and kept clear of the settle's every-heading veto, as drive_sim builds it
+        self.refpath = None
+        if cfg.reference is not None:
+            robot = dynamics.robot_params(cfg.wheel_width)
+            half_w = robot.half_track + 0.5 * (robot.wheel_width or 2.0 * robot.wheel_radius)
+            self.refpath = ReferencePath(
+                cfg.n_theta, half_w, robot.rear_offset, cfg.reference, device=self.device
+            )
+            self._ref_mask = wp.zeros((rcny, rcnx), dtype=wp.float32, device=self.device)
+            self._ref_clear = wp.zeros((rcny, rcnx), dtype=wp.float32, device=self.device)
+            self.get_logger().info(
+                f"reference tracking ON: R {cfg.reference.radius_min_m:.1f} m, clearance "
+                f"{cfg.reference.clearance_m:.1f} m, weights lateral {self.plan_track_lateral} "
+                f"heading {self.plan_track_heading} progress {self.plan_track_progress}"
+            )
         self._plan_kr = kr
         self._plan_dims = (ww, wh, rww, rwh, rcnx, rcny)
 
@@ -1748,6 +1786,15 @@ class NavigationNode(Node):
                 coarse_value=vc,
                 coarse_origin=coarse_origin,
             )
+            if self.coarse is not None:
+                # what the fine layer decided flows back: a block of the routing window it found
+                # no feasible pose in is sealed in the coarse memory (CoarseRouter.apply_fine)
+                self.coarse.apply_fine(
+                    self.ctg.feasibility,
+                    Mc,
+                    (mf.rxmin - cx0, mf.rymin - cy0),
+                    self.ctg.grid.cell_size,
+                )
             self._ck("plan:ctg")
             if vc is not None:
                 # for RViz: the coarse cost-to-go as a height grid, unreachable blocks left out
@@ -1799,10 +1846,43 @@ class NavigationNode(Node):
             self.planner.set_lattice(self.ctg.V_escape, self.sgrid)
             if self.planner.cw.veto > 0.0:  # walls are a hard no for the controller too
                 self.planner.set_veto(self.ctg.hazard, self.sgrid)
-            # the wall-distance map the clearance and keep-away costs read
-            if self.planner.cw.clear_time > 0.0 or self.planner.cw.keep_away > 0.0:
-                self.planner.update_clearance()
+            # the wall-distance map the clearance, keep-away and body-through-wall costs read
+            if (
+                self.planner.cw.clear_time > 0.0
+                or self.planner.cw.keep_away > 0.0
+                or self.planner.cw.wall_body > 0.0
+                or self.refpath is not None
+            ):
+                # read as far as drive_sim does when tracking: what its tracking runs were given
+                self.planner.update_clearance(1.6 if self.refpath is not None else 1.0)
                 self._ck("plan:clear_map")
+            if self.refpath is not None:
+                # WHAT TO TRACK: V's descent, pulled taut and smoothed into the clothoid-bounded
+                # curve; MPPI's goal term becomes the distance to it. V itself, not V_escape: the
+                # escape field gives every vetoed cell a way out, and a descent of it walks
+                # through walls (drive_sim slalom, 2026-10-28)
+                forbidden_distance(
+                    self.ctg.blocked,
+                    self.refpath.n_theta,
+                    float(self.sgrid.cell_size),
+                    1.6,
+                    self._ref_mask,
+                    self._ref_clear,
+                )
+                n_ref = self.refpath.update(
+                    self.ctg.V,
+                    self.sgrid,
+                    self._ref_clear,
+                    self.sgrid,
+                    state_l,
+                    goal_xy=np.asarray(goal_l, np.float32),
+                    blocked=self.ctg.blocked,
+                )
+                if n_ref >= 3:
+                    self.planner.set_reference(self.refpath)
+                else:
+                    self.planner.clear_reference()  # no curve this frame: MPPI descends V
+                self._ck("plan:reference")
             self._load_command_history()
             # how far the route lies off the heading decides whether a rolling turn is preferred
             scale = 1.0
@@ -1845,6 +1925,9 @@ class NavigationNode(Node):
         self._ck("plan:readback")
         origin = np.array([mf.lxmin, mf.lymin], np.float32)
         self._publish_path(nominal_xy[:, :2] + origin, ez, stamp)
+        if self.refpath is not None:
+            # the curve MPPI tracked this frame, in the same window frame as the nominal
+            self._publish_reference(self.refpath.curve() + origin, ez, stamp)
         if self._rec is not None and getattr(self, "_rec_this", False):
             # the plan of a recorded frame, in the map frame; path_i = its row in the other hist_*
             self._rec["path"].append((nominal_xy[:, :2] + origin).astype(np.float32))
@@ -2242,6 +2325,21 @@ class NavigationNode(Node):
         m.pose.orientation.w = 1.0
         m.points = [Point(x=float(x), y=float(y), z=z) for x, y in xy]
         self.pub_path_marker.publish(m)
+
+    def _publish_reference(self, xy: np.ndarray, z: float, stamp) -> None:
+        """The tracked reference curve as an orange LINE_STRIP; cleared on a frame without one."""
+        m = Marker()
+        m.header.stamp = stamp
+        m.header.frame_id = self.map_frame
+        m.ns = "reference_path"
+        m.id = 0
+        m.type = Marker.LINE_STRIP
+        m.action = Marker.ADD if len(xy) >= 3 else Marker.DELETE
+        m.scale.x = float(self.plan_path_width)
+        m.color = ColorRGBA(r=1.0, g=0.55, b=0.0, a=1.0)  # orange, beside the magenta plan
+        m.pose.orientation.w = 1.0
+        m.points = [Point(x=float(x), y=float(y), z=z) for x, y in xy]
+        self.pub_ref_marker.publish(m)
 
     # ------------------------------------------------------------------
     # IMU gravity vector -> up-in-base
