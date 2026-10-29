@@ -16,7 +16,6 @@ slightly different from frame to frame, which the page states rather than hides.
 
   python studies/closed_loop/build_scrub.py --dir studies/closed_loop/out/sweep2
 """
-
 from __future__ import annotations
 
 import argparse
@@ -28,7 +27,7 @@ import numpy as np
 from PIL import Image
 
 # `pocket_wall` is optional: a pocket run that touched a wall, kept beside a clean one to compare
-ORDER = ["gap", "slalom", "pillars", "pocket", "ridge", "bumpy", "false_door"]
+ORDER = ["box", "gap", "slalom", "pillars", "pocket", "ridge", "bumpy", "false_door", "trunks"]
 LAYERS = ("h", "seen", "blk", "v", "route", "cv")
 
 
@@ -64,9 +63,19 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path, rate: float) -> 
     cap = float(v[np.isfinite(v)].max()) if np.isfinite(v).any() else 1.0
     goals = d["hist_goal"] if "hist_goal" in d.files else None
     # the clearance speed governor, per simulated frame: [frame, clearance m, cap m/s, scale]
-    gov = (
-        {int(row[0]): row[1:] for row in d["governor"]} if "governor" in d.files else {}
-    )
+    gov = {int(row[0]): row[1:] for row in d["governor"]} if "governor" in d.files else {}
+
+    # what the robot meant to do at each recorded frame, world frame: MPPI's nominal rollout and
+    # the online reference curve it tracks. Runs recorded without them carry none.
+    plans = {}
+    for key, short in (("mppi_paths", "mp"), ("ref_paths", "rf")):
+        if key in d.files:
+            rows = d[key]
+            for f in np.unique(rows[:, 0]).astype(int):
+                pts = rows[rows[:, 0] == f][:, 1:3]
+                plans.setdefault(f, {})[short] = [
+                    [round(float(x), 2), round(float(y), 2)] for x, y in pts
+                ]
 
     strips = {k: [] for k in LAYERS}
     frames = []
@@ -139,15 +148,12 @@ def build(world: str, npz: pathlib.Path, out_dir: pathlib.Path, rate: float) -> 
                     if clear is None or int(f) >= len(clear) or not np.isfinite(clear[int(f)])
                     else round(float(clear[int(f)]), 3)
                 ),
+                **plans.get(int(f), {}),
                 # the goal this frame planned toward, where it changed over the run (real bags)
                 **({} if goals is None else dict(g=[round(float(x), 2) for x in goals[i]])),
                 # what the governor saw and did this frame: clearance along the next second of the
                 # plan [m], the speed it allowed [m/s], and the factor it scaled the wheels by
-                **(
-                    dict(gv=[round(float(x), 3) for x in gov[int(f)]])
-                    if int(f) in gov
-                    else {}
-                ),
+                **(dict(gv=[round(float(x), 3) for x in gov[int(f)]]) if int(f) in gov else {}),
             )
         )
     nbytes = 0
@@ -215,6 +221,7 @@ def main() -> None:
     rp = RobotParams()
     from helhest import dynamics
     from helhest.worlds import footprint
+
     manifest = {
         "layers": list(LAYERS),
         "limits": {

@@ -32,10 +32,10 @@ failure has been diagnosed twice on real bags and it is not worth a third time.
 
 Runs on dasenka, which is where the simulator lives -- see this directory's README.
 """
-
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import pathlib
@@ -59,8 +59,11 @@ from helhest.control.qp_path import QpPathParams
 from helhest.control.qp_path import resample_reference
 from helhest.control.qp_path import sharp_turn
 from helhest.control.qp_path import trim_at_edge
-from helhest.control.yaw_track import YawRateTracker
+from helhest.control.reference_path import forbidden_distance
+from helhest.control.reference_path import ReferencePath
+from helhest.control.reference_path import ReferencePathParams
 from helhest.control.terminal import dock_control
+from helhest.control.yaw_track import YawRateTracker
 from helhest.engine import ForwardSimulator
 from helhest.engine import GridParams
 from helhest.perception import ScanPreprocessor
@@ -343,6 +346,18 @@ def drive(a: argparse.Namespace) -> dict:
     )
     if mppi:
         planner.cw.lattice_cap = ctg._vcap
+    # the reference curve MPPI tracks when the tracking weights are on (CostParams.track_*)
+    refpath = None
+    if mppi and a.cfg.cost.track_lateral > 0.0:
+        half_w = robot.half_track + 0.5 * (robot.wheel_width or 2.0 * robot.wheel_radius)
+        rprm = ReferencePathParams()
+        if a.ref_radius is not None:  # the oracle's R and clothoid together (reference.py)
+            rprm = dataclasses.replace(rprm, radius_min_m=a.ref_radius, clothoid_m=a.ref_radius)
+        refpath = ReferencePath(a.n_theta, half_w, robot.rear_offset, rprm, device=a.device)
+        # what it keeps clear of: the settle's every-heading veto on the routing grid, as a
+        # distance (forbidden_distance) -- walls, slopes past the envelope and ditches alike
+        ref_mask = wp.zeros((nr, nr), dtype=wp.float32, device=a.device)
+        ref_clear = wp.zeros((nr, nr), dtype=wp.float32, device=a.device)
     # the routing field expressed in the MPPI window's frame: a constant cell offset apart
     sgrid = GridParams(nr, nr, a.cell, (off_r - off_w) * a.cell, (off_r - off_w) * a.cell).build()
 
@@ -398,13 +413,16 @@ def drive(a: argparse.Namespace) -> dict:
     trail, closest, reached, body_z = [], 1.0e9, False, []
     # Opt-in, strided history for the scrub page. Host reads, so it is off by default and never
     # on the measured path -- with --history 0 the loop below is byte-identical to before.
-    hist: dict[str, list] = {k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "meta")}
+    hist: dict[str, list] = {
+        k: [] for k in ("h", "seen", "blk", "v", "route", "cv", "verdict", "meta")
+    }
     # per frame with the governor: [frame, clearance m, cap m/s, scale, about to sweep unseen ground]
     gov_log: list = []
     qp = None
     qp_log: list = []  # per frame: [f, 1 = the QP path drove / 0 = MPPI, reason code, margin]
     qp_paths: list = []  # [f, x, y, v] of the optimised path, world frame, every history frame
     mppi_paths: list = []  # [f, x, y] of MPPI's nominal rollout, world frame, every history frame
+    ref_paths: list = []  # [f, x, y] of the reference curve, world frame, every history frame
     qp_pivot = 0  # turning on the spot: the direction (+1 left, -1 right), 0 when not
     qp_stop_at = None  # (x, y, heading to turn to) of the spot chosen for the next turn, world
     qp_blocked_until = -1  # frame until which turns are handed to MPPI (one could not be made)
@@ -533,6 +551,10 @@ def drive(a: argparse.Namespace) -> dict:
             coarse_value=vc,
             coarse_origin=None if coarse is None else (cx0 - r0, cy0 - s0),
         )
+        if coarse is not None:
+            # WHAT THE FINE LAYER DECIDED flows back: a block of the routing window it found no
+            # feasible pose in is sealed in the coarse memory (CoarseRouter.apply_fine)
+            coarse.apply_fine(ctg.feasibility, m_r, (r0 - cx0, s0 - cy0), a.cell)
 
         # CONTROL -- fine window, cropped from the same belief
         wx0 = belief.xmin + off_w * a.cell
@@ -577,8 +599,28 @@ def drive(a: argparse.Namespace) -> dict:
                 # to be its own term. Walls only, and without the router's margin (CostToGo.hazard)
                 planner.set_veto(ctg.hazard, sgrid)
             # the wall-distance map the clearance-time and keep-away costs read
-            if a.cfg.clearance is not None or a.cfg.cost.keep_away > 0.0:
-                planner.update_clearance()
+            if (
+                a.cfg.clearance is not None
+                or a.cfg.cost.keep_away > 0.0
+                or a.cfg.cost.wall_body > 0.0
+                or refpath is not None
+            ):
+                # the reference keeps clearance + half-width (1.2 m) from a face, so its map has
+                # to read that far; the governor's terms are content with 1 m
+                planner.update_clearance(1.6 if refpath is not None else 1.0)
+            if refpath is not None:
+                # WHAT TO TRACK: V's descent, pulled taut and smoothed into the clothoid-bounded
+                # curve at the asked clearance (control/reference_path.py); MPPI's goal term
+                # becomes the distance to it
+                # V itself, not V_escape: the escape field gives every vetoed cell a finite way
+                # out so MPPI can leave a wall, and a descent of it walks through walls (slalom)
+                forbidden_distance(ctg.blocked, a.n_theta, a.cell, 1.6, ref_mask, ref_clear)
+                if refpath.update(
+                    ctg.V, sgrid, ref_clear, sgrid, state_l, goal_xy=goal_l, blocked=ctg.blocked
+                ):
+                    planner.set_reference(refpath)
+                else:
+                    planner.clear_reference()
             off_deg = float(a.plan_params.get("plan_traction_off_deg", 0.0))
             scale = 1.0
             if off_deg > 0.0:
@@ -1004,6 +1046,9 @@ def drive(a: argparse.Namespace) -> dict:
                     float((per_rollout <= 1e-6).mean()),
                 ]
             )
+        if a.history and f % a.history == 0 and refpath is not None:
+            for x_, y_ in refpath.curve():
+                ref_paths.append([f, float(x_) + wx0, float(y_) + wy0])
         if a.history and f % a.history == 0:
             hist["h"].append(height_d.numpy().copy())
             hist["seen"].append((measured_d.numpy() > 0.5).astype(np.uint8))
@@ -1019,6 +1064,9 @@ def drive(a: argparse.Namespace) -> dict:
             hist["route"].append((vh < 0.9 * ctg._vcap).mean(2).astype(np.float32))
             hist["cv"].append(
                 np.zeros((1, 1), np.float32) if coarse is None else coarse.V.numpy()[:, :, 0]
+            )
+            hist["verdict"].append(
+                np.zeros((1, 1), np.float32) if coarse is None else coarse.verdict.numpy()
             )
             # the belief window recenters in whole cells as the robot moves, so every frame
             # carries the origin its own maps are expressed in
@@ -1102,6 +1150,7 @@ def drive(a: argparse.Namespace) -> dict:
             **({"yaw_log": np.asarray(yaw_log)} if yaw_log else {}),
             **({"qp_paths": np.asarray(qp_paths)} if qp_paths else {}),
             **({"mppi_paths": np.asarray(mppi_paths)} if mppi_paths else {}),
+            **({"ref_paths": np.asarray(ref_paths)} if ref_paths else {}),
             **({"qp_stop": np.asarray(qp_stop_log)} if qp_stop_log else {}),
         )
         print(f"wrote {a.out}")
@@ -1166,6 +1215,12 @@ def main() -> None:
     # the robot maps at 0.08 m; at 0.2 the belief's wall faces sat ~0.12 m closer than truth
     # (half a cell) and the feasible zone round a trunk ended 0.3 m further out
     p.add_argument("--cell", type=float, default=0.08)
+    p.add_argument(
+        "--ref-radius",
+        type=float,
+        default=None,
+        help="[m] the tracked reference's minimum radius and clothoid length; default 1.5",
+    )
     p.add_argument(
         "--turn-first",
         type=float,
@@ -1250,6 +1305,12 @@ def main() -> None:
         default=1.0,
         help="yaw realised above the dead zone, as a fraction of the kinematic map",
     )
+    p.add_argument(
+        "--wall-body",
+        type=float,
+        default=None,
+        help="MPPI's body-through-wall infeasibility weight (CostParams.wall_body); 0 = off",
+    )
     p.add_argument("--qp-w-off", type=float, default=1.0, help="QP cost of being off the route")
     p.add_argument(
         "--qp-pin-end", action="store_true", help="end the QP path on the route, along it"
@@ -1295,6 +1356,10 @@ def main() -> None:
     a = p.parse_args()
     a.plan_params = _plan_params(a)
     a.cfg = planner_config(a.plan_params)
+    if a.wall_body is not None:  # not a plan_* key: the robot runs CostParams' default
+        a.cfg = dataclasses.replace(
+            a.cfg, cost=dataclasses.replace(a.cfg.cost, wall_body=a.wall_body)
+        )
     a.n_theta, a.horizon, a.batch = a.cfg.n_theta, a.cfg.horizon, a.cfg.batch
     a.wmax, a.wheel_width = a.cfg.sampling.wmax, a.cfg.wheel_width
 

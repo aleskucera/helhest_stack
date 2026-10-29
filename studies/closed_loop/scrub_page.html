@@ -14,6 +14,8 @@
     --accent: #0f8a7e;
     --accent-ink: #ffffff;
     --goal: #b5179e;
+    --plan: #1d4ed8;
+    --ref: #d97706;
     --alarm: #c2410c;
     --ok: #0b6b4f;
     --shadow: 0 1px 2px rgba(16, 22, 26, .06), 0 8px 24px rgba(16, 22, 26, .05);
@@ -33,6 +35,8 @@
       --accent: #2bb5a3;
       --accent-ink: #06201d;
       --goal: #e879d0;
+      --plan: #7aa7ff;
+      --ref: #fbbf24;
       --alarm: #f2884f;
       --ok: #45c08f;
       --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .35);
@@ -50,6 +54,8 @@
     --accent: #2bb5a3;
     --accent-ink: #06201d;
     --goal: #e879d0;
+    --plan: #7aa7ff;
+    --ref: #fbbf24;
     --alarm: #f2884f;
     --ok: #45c08f;
     --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .35);
@@ -211,6 +217,8 @@
         <h2>Overlay</h2>
         <div class="legend">
           <div><span class="sw line" style="background:var(--accent)"></span> driven so far</div>
+          <div><span class="sw line" style="background:var(--ref)"></span> reference curve it tracks (dashed)</div>
+          <div><span class="sw line" style="background:var(--plan)"></span> MPPI's chosen rollout</div>
           <div><span class="sw" style="background:var(--goal)"></span> goal</div>
           <div><span class="sw" style="background:var(--ink-3)"></span> robot, facing</div>
           <div><span class="sw" style="background:var(--alarm)"></span> no route from here</div>
@@ -243,7 +251,7 @@
     { k: "v",    name: "cost-to-go",  unit: "m",  grid: "route"  },
     { k: "route", name: "headings with a route", unit: "", grid: "route" },
   ];
-  let ORDER = ["gap", "slalom", "pillars", "pocket", "ridge", "bumpy", "false_door"];
+  let ORDER = ["box", "gap", "slalom", "pillars", "pocket", "ridge", "bumpy", "false_door", "trunks"];
   const LABEL = { false_door: "false door", cornerL24: "L-bend 2.4 m", corridor24: "corridor 2.4 m", corridor26: "corridor 2.6 m", corridor24_nearmiss: "corridor 2.4 m, near-miss" };
   const labelOf = (name) => LABEL[name] || name.replace(/_/g, " ");
 
@@ -278,7 +286,7 @@
   // one recorded every frame then play at the same pace, and 1x is the robot's own speed.
   const SPEEDS = [1, 2, 4, 8];
   let speed = 1, clock = null;
-  const show = { trail: true, goal: true, footprint: true };
+  const show = { trail: true, goal: true, footprint: true, ref: true, plan: true };
   const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
   const off = document.createElement("canvas"), octx = off.getContext("2d");
   const $ = (id) => document.getElementById(id);
@@ -342,6 +350,20 @@
         i === 0 ? ctx.moveTo(px(p[0]), py(p[1])) : ctx.lineTo(px(p[0]), py(p[1]));
       }
       ctx.stroke();
+    }
+    // what it planned this frame: the reference curve it tracks, then MPPI's nominal rollout on
+    // top, each with a dark halo so it reads over every layer's ramp
+    for (const [key, field, dash] of [["ref", "rf", [7, 5]], ["plan", "mp", []]]) {
+      const pts = meta[field];
+      if (!show[key] || !pts || pts.length < 2) continue;
+      ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.setLineDash(dash);
+      for (const [style, width] of [["rgba(0,0,0,.45)", 5], [cssVar("--" + key), 2.5]]) {
+        ctx.strokeStyle = style; ctx.lineWidth = width;
+        ctx.beginPath();
+        pts.forEach((p, i) => (i === 0 ? ctx.moveTo(px(p[0]), py(p[1])) : ctx.lineTo(px(p[0]), py(p[1]))));
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
     }
     if (show.goal) {
       const goal = meta.g || w.goal;  // a recording with a goal per frame draws that frame's
@@ -491,7 +513,7 @@
       h.appendChild(b);
     }
     const sp = document.createElement("span"); sp.className = "spacer"; h.appendChild(sp);
-    for (const [key, label] of [["trail", "path"], ["goal", "goal"], ["footprint", "footprint"]]) {
+    for (const [key, label] of [["trail", "path"], ["ref", "reference"], ["plan", "MPPI plan"], ["goal", "goal"], ["footprint", "footprint"]]) {
       const b = document.createElement("button");
       b.className = "chip"; b.id = "tg-" + key; b.textContent = label;
       b.onclick = () => { show[key] = !show[key]; syncLayers(); draw(); };
@@ -501,7 +523,7 @@
   }
   function syncLayers() {
     for (const L of LAYERS) $("lay-" + L.k).setAttribute("aria-pressed", String(L.k === layer));
-    for (const key of ["trail", "goal", "footprint"]) $("tg-" + key).setAttribute("aria-pressed", String(show[key]));
+    for (const key of ["trail", "ref", "plan", "goal", "footprint"]) $("tg-" + key).setAttribute("aria-pressed", String(show[key]));
   }
 
   async function selectWorld(name) {
