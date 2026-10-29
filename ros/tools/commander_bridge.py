@@ -209,6 +209,10 @@ def main() -> None:
             self.seq_fresh = False
             self.sent_xy: tuple[float, float] | None = None
             self.sent_key = None
+            # /goal_pose is volatile and send() only publishes on change, so a navigation_node
+            # (re)started after the goal went out would never get it: the robot holds, never
+            # reaches the waypoint, and the sequence never advances. Re-send on a new subscriber.
+            self.goal_subs = 0
             self.create_timer(0.2, self.tick)
             self.create_timer(1.0, self.publish_state)
             self.get_logger().info(
@@ -338,6 +342,10 @@ def main() -> None:
 
         # ---------------------------------------------------------------- loop
         def tick(self) -> None:
+            subs = self.pub_goal.get_subscription_count()
+            if subs > self.goal_subs:
+                self.sent_key = None
+            self.goal_subs = subs
             if self.mode == "STOP":
                 return
             r = self.robot()

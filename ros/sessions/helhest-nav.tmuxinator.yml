@@ -11,14 +11,12 @@
 # from the URDF on the NUC (base_link -> imu); an imu_link -> imu here would give it a second
 # parent. Without the NUC session `imu` has no transform and the gyro is dropped.
 #
-# The code runs from its own checkout, ~/workspaces/helhest_stack_nav, kept on this branch: the
-# checkout in helhest_ws/src/helhest_stack is shared with other work and changes branch under us
-# (2026-09-30: switched to main, which has no navigation_node). Outside helhest_ws/src so colcon
-# does not see a second helhest_stack_ros; the nav pane puts this checkout first on PYTHONPATH.
+# The code runs from the helhest_ws checkout, ~/workspaces/helhest_ws/src/helhest_stack, on main
+# (a separate ~/workspaces/helhest_stack_nav clone was used 2026-09-30 .. 2026-10-29 and removed);
+# the nav pane puts this checkout first on PYTHONPATH.
 #
-#   git clone -b study/tvf-migration <repo> ~/workspaces/helhest_stack_nav
-#   cd ~/workspaces/helhest_stack_nav && uv venv --system-site-packages && uv pip install -e .
-#   ln -sf ~/workspaces/helhest_stack_nav/ros/sessions/helhest-nav.tmuxinator.yml \
+#   cd ~/workspaces/helhest_ws/src/helhest_stack && uv venv --system-site-packages && uv pip install -e .
+#   ln -sf ~/workspaces/helhest_ws/src/helhest_stack/ros/sessions/helhest-nav.tmuxinator.yml \
 #          ~/.tmuxinator/helhest-nav.yml
 #   tmuxinator start helhest-nav
 #
@@ -39,6 +37,7 @@ windows:
         - |
           export ZENOH_CONFIG_OVERRIDE="$ZENOH_CONFIG_OVERRIDE_ROUTER"
           ros2 run rmw_zenoh_cpp rmw_zenohd
+        - rp run
   - odin:
       panes:
         - |
@@ -56,7 +55,7 @@ windows:
       panes:
         - |
           sleep 12
-          cd /home/robot/workspaces/helhest_stack_nav
+          cd /home/robot/workspaces/helhest_ws/src/helhest_stack
           source ros/tools/dev-shell.sh
           export PYTHONPATH="$PWD/ros/helhest_stack_ros:$PYTHONPATH"
           python3 -m helhest_stack_ros.navigation_node --ros-args \
@@ -69,6 +68,20 @@ windows:
           sleep 14; ros2 topic echo /crl_commander/state
         - |
           sleep 14; ros2 topic echo /goal_pose --field pose.position
+  - lucid:
+      panes:
+        - /home/robot/lucid_run.sh
+        - /home/robot/lucid_repub.sh
+  - record:
+      panes:
+        - |
+          cd
+          history -s ~/rec.sh
+          echo "press Up: ./rec.sh (full jetson bag)"
+        - |
+          cd
+          history -s ~/lucid_rec.sh
+          echo "press Up: ./lucid_rec.sh (Lucid camera)"
   - shell:
       panes:
-        - cd /home/robot/workspaces/helhest_stack_nav
+        - cd /home/robot/workspaces/helhest_ws/src/helhest_stack
