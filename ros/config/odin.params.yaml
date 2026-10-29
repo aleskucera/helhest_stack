@@ -128,13 +128,13 @@
     plan_keep_away: 10.0
     plan_keep_away_m: 0.6
     # Track the reference curve (control/reference_path.py) instead of descending V: lateral and
-    # heading error to it, progress along it. OFF on the robot until tried there. What drive_sim
+    # heading error to it, progress along it; 0.0 for all three = off (descend V). What drive_sim
     # ran (2026-10-29, all nine worlds reached): lateral 30, heading 30, progress 15, radius 1.0.
     # The stage adds ~2.5 ms a frame (5.6 p95) on dasenka; not yet timed on the Jetson. RViz:
     # reference_path_marker (orange) beside planned_path_marker. Rebuilds the planner on change.
-    plan_track_lateral: 0.0
-    plan_track_heading: 0.0
-    plan_track_progress: 0.0
+    plan_track_lateral: 30.0
+    plan_track_heading: 30.0
+    plan_track_progress: 15.0
     plan_track_radius: 1.0
     # [m/s^2] braking the governor counts on: plan_max_decel 3 rad/s^2 x 0.35 m wheel = 1.05.
     # It also ramps in under plan_max_jerk (0.6 s), so the governor looks over the whole plan:
