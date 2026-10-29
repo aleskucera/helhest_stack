@@ -354,7 +354,11 @@
     # Field call 2026-08-10: OFF (0.0) -- brake AT the corner, do not pre-slow on the approach.
     plan_turn_brake_lookahead_s: 0.0
 
-    # --- INNER YAW-RATE LOOP (control/yaw_track.py) -- ON since the 2026-08-10 field call ---
+    # --- INNER YAW-RATE LOOP (control/yaw_track.py) -- OFF since 2026-10-29 ---
+    # OFF: with cmd_output twist the LLC already closes its own yaw-rate loop on /cmd_vel, so
+    # this one stacked a second loop on top. karlak_new1 (2026-10-29) weaved +-12 deg at
+    # 1.9 m/s on a clear straight line: the gyro followed the commanded turn 0.34 s late at
+    # 1.18x the asked rate. Was ON from the 2026-08-10 field call.
     # Everything downstream of MPPI is feedforward: the planner maps a differential to a yaw rate
     # through alpha = 1 + k_turn*plan_friction and publishes it. alpha DIVIDES the yaw rate, so
     # ground softer than plan_friction turns MORE than asked -- 19% at mu 0.4, 32% at mu 0.2 in
@@ -373,7 +377,7 @@
     #   real mu     0.80    0.40    0.20
     #   open        0.0%   19.4%   32.1%   steady-state yaw error
     #   closed      0.4%    1.0%    1.1%   and peak yaw DROPS, 0.617 -> 0.597 at mu 0.4
-    plan_yaw_track: true
+    plan_yaw_track: false
     plan_yaw_track_kp: 0.4
     plan_yaw_track_ki: 1.0
     plan_yaw_track_deadband: 0.05   # [rad/s] idle band, so a straight line is not regulated
