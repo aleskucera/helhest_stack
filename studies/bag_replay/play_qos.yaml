@@ -1,0 +1,11 @@
+# QoS for replaying robot bags through navigation_node (run_bag.sh).
+# Bags recorded over Zenoh mark some topics avoid_ros_namespace_conventions: true. Played back
+# with that flag a topic is invisible to every ordinary subscriber, so the node gets no odometry,
+# no TF and no wheel state. Every replayed topic is offered as a plain ROS topic instead.
+/tf_static: {history: keep_last, depth: 100, reliability: reliable, durability: transient_local, avoid_ros_namespace_conventions: false}
+/odin1/odometry: {history: keep_last, depth: 100, reliability: reliable, durability: volatile, avoid_ros_namespace_conventions: false}
+/odin1/imu: {history: keep_last, depth: 4000, reliability: reliable, durability: volatile, avoid_ros_namespace_conventions: false}
+/odin1/cloud_filtered: {history: keep_last, depth: 10, reliability: reliable, durability: volatile, avoid_ros_namespace_conventions: false}
+/odin1/cloud_raw: {history: keep_last, depth: 10, reliability: reliable, durability: volatile, avoid_ros_namespace_conventions: false}
+/joint_states: {history: keep_last, depth: 100, reliability: reliable, durability: volatile, avoid_ros_namespace_conventions: false}
+/goal_pose: {history: keep_last, depth: 10, reliability: reliable, durability: volatile, avoid_ros_namespace_conventions: false}
