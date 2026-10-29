@@ -53,12 +53,6 @@ from helhest.control.command import traction_scale
 from helhest.control.command import turn_first
 from helhest.control.governor import ClearanceGovernor
 from helhest.control.mppi import MppiGpu
-from helhest.control.qp_path import extend_route
-from helhest.control.qp_path import PathQp
-from helhest.control.qp_path import QpPathParams
-from helhest.control.qp_path import resample_reference
-from helhest.control.qp_path import sharp_turn
-from helhest.control.qp_path import trim_at_edge
 from helhest.control.reference_path import forbidden_distance
 from helhest.control.reference_path import ReferencePath
 from helhest.control.terminal import dock_control
@@ -71,7 +65,6 @@ from helhest.perception.belief_frame import BeliefFrame
 from helhest.planner_config import PLAN_DEFAULTS
 from helhest.planner_config import planner_config
 from helhest.planner_config import resolve
-from helhest.planning.clearance import clearance_map_kernel
 from helhest.planning.coarse import CoarseRouter
 from helhest.planning.costtogo import CostToGo
 from helhest.planning.lattice_solver import trace_optimal
@@ -285,9 +278,7 @@ def drive(a: argparse.Namespace) -> dict:
     win_grid = GridParams(nw, nw, a.cell, 0.0, 0.0)
     route_grid = GridParams(nr, nr, a.cell, 0.0, 0.0)
     belief_grid = GridParams(n, n, a.cell, 0.0, 0.0)
-    # the QP controller keeps the whole MPPI setup: MPPI is its fallback, and the wall-distance map
-    # it smooths against is the one MPPI builds every frame
-    mppi = a.controller in ("mppi", "qp")
+    mppi = a.controller == "mppi"
     robot = dynamics.robot_params(a.wheel_width)
     # the robot's turn resistance: `k_turn` is a node parameter, not a plan_* one, so the
     # planner_config mapping never carried it and the sim's planner ran the module default
@@ -417,34 +408,8 @@ def drive(a: argparse.Namespace) -> dict:
     }
     # per frame with the governor: [frame, clearance m, cap m/s, scale, about to sweep unseen ground]
     gov_log: list = []
-    qp = None
-    qp_log: list = []  # per frame: [f, 1 = the QP path drove / 0 = MPPI, reason code, margin]
-    qp_paths: list = []  # [f, x, y, v] of the optimised path, world frame, every history frame
     mppi_paths: list = []  # [f, x, y] of MPPI's nominal rollout, world frame, every history frame
     ref_paths: list = []  # [f, x, y] of the reference curve, world frame, every history frame
-    qp_pivot = 0  # turning on the spot: the direction (+1 left, -1 right), 0 when not
-    qp_stop_at = None  # (x, y, heading to turn to) of the spot chosen for the next turn, world
-    qp_blocked_until = -1  # frame until which turns are handed to MPPI (one could not be made)
-    qp_pivot_since = (0, 0.0)  # (frame, heading) a turn's progress is measured from
-    block_frames = int(round(2.5 / dt))  # [frames] judge a turn's progress / hand over this long
-    qp_stop_log: list = []  # [f, x, y, room m, chosen] per stop candidate, every history frame
-    qp_driven = None  # this frame's QP path as timed poses, when the QP drove (governor input)
-    if a.controller == "qp":
-        side_w = robot.half_track + 0.5 * (robot.wheel_width or 2.0 * robot.wheel_radius)
-        qp = PathQp(
-            QpPathParams(
-                horizon_m=a.qp_horizon, margin=a.qp_margin, w_off=a.qp_w_off, pin_end=a.qp_pin_end
-            ),
-            wheel_radius=robot.wheel_radius,
-            half_width=side_w,
-            tail=robot.rear_offset + robot.wheel_radius,
-            head=robot.wheel_radius,
-            device=a.device,
-        )
-        # the corridor's wall map over the whole belief window, in the MPPI window's frame (the
-        # two windows are centred crops of one belief, a fixed whole-cell offset apart)
-        qp_clear = wp.zeros((n, n), dtype=wp.float32, device=a.device)
-        qp_clear_grid = GridParams(n, n, a.cell, -off_w * a.cell, -off_w * a.cell).build()
     esc: list = []  # per recorded frame: [best rollout's worst violation, median, clean fraction]
     # WALL CLEARANCE, every frame, against the world's exact solids. "Reached" cannot see a robot
     # scraping a wall on its way through, and the robust margin exists precisely so that never
@@ -634,294 +599,9 @@ def drive(a: argparse.Namespace) -> dict:
             wl, wr = float(u[0, 0]), float(u[0, 1])
             if chain:
                 side = spin_side(side, prev_lrr, planned=u[0])
-            if qp is not None:
-                # the route's own path, walked in the routing window and moved to the MPPI window
-                # (where the wall-distance map lives), smoothed inside its corridor and followed.
-                # MPPI's command stands whenever there is no usable path. Reason codes:
-                # 1 = no path, 2 = facing away from it (spin first), 3 = QP failed, 0 = QP drove.
-                # start the walk from the heading the route itself prefers here -- the cheapest
-                # heading bin within 30 deg of the robot's -- not from the robot's heading rounded
-                # to the nearest bin: rounding -8 deg to -15 deg made every path set off 15 deg
-                # south, the robot followed, and on `trunks` it walked 4 m off the lane to the map
-                # edge in 15 m
-                dth = 2.0 * np.pi / a.n_theta
-                rc_r = int(round((ry - s0) / a.cell))
-                rc_c = int(round((rx - r0) / a.cell))
-                start_yaw = yaw
-                if 0 <= rc_r < nr and 0 <= rc_c < nr:
-                    v_here = V.numpy()[rc_r, rc_c]
-                    near = [
-                        t
-                        for t in range(a.n_theta)
-                        if abs((t * dth - yaw + np.pi) % (2.0 * np.pi) - np.pi) <= np.radians(30.0)
-                    ]
-                    if near and np.isfinite(v_here[near]).any():
-                        start_yaw = near[int(np.argmin(v_here[near]))] * dth
-                pts = trace_optimal(
-                    ctg, (rx - r0, ry - s0, start_yaw), a.n_theta, nr, nr, 0.0, 0.0, a.cell
-                )
-                pts = np.asarray(pts, np.float64) + np.array([r0 - wx0, s0 - wy0])
-                if a.qp_coarse and coarse is not None:
-                    edge = (r0 - wx0, s0 - wy0)
-                    pts = trim_at_edge(
-                        pts, edge, (edge[0] + nr * a.cell, edge[1] + nr * a.cell), 2.0 * a.cell
-                    )
-                    pts = extend_route(
-                        pts,
-                        vc.numpy()[:, :, 0],
-                        (cx0 - wx0, cy0 - wy0),
-                        float(coarse.grid.cell_size),
-                        qp.p.horizon_m,
-                        goal=(goal[0] - wx0, goal[1] - wy0),
-                    )
-                ref = resample_reference(pts, qp.p.ds, qp.p.horizon_m)
-                reason = 1
-                qp_margin = float("nan")  # the corridor margin the solved path kept
-                qp.last_fixes = 0
-                qp_driven = None
-                if ref is not None:
-                    psi0 = float((yaw - ref[0, 2] + np.pi) % (2.0 * np.pi) - np.pi)
-                    sx, sy = float(state_l[0]), float(state_l[1])
-                    alpha = 1.0 + float(plan_sim.solver.k_turn) * 0.8  # the rollouts' friction
-                    # turn on the spot, not by handing the robot to MPPI at speed (false_door:
-                    # three runs out of the dead end at 1.4-1.7 m/s into a door's edge): when the
-                    # route points well away, or a corner no arc rounds is about to be reached
-                    k_c = max(1, int(round(qp.p.corner_m / qp.p.ds)))
-                    corner = sharp_turn(ref, qp.p.ds, qp.p.corner_m, qp.p.corner_deg)
-                    pivot_to = None
-                    away = qp.p.resume_deg if qp_pivot else qp.p.spin_deg
-                    wrap = lambda ang: float((ang + np.pi) % (2.0 * np.pi) - np.pi)  # noqa: E731
-                    if corner is not None and corner < 8:
-                        after = float(ref[min(corner + k_c, len(ref) - 1), 2])
-                        # only if the robot must still turn to face past the corner: one it
-                        # already faces is driven, and a stop for it was a stop for nothing
-                        if abs(wrap(after - yaw)) > np.radians(qp.p.resume_deg):
-                            pivot_to = after
-                    if pivot_to is None and qp_stop_at is not None:
-                        # arrived at the spot chosen for the turn (stopped, close to it)
-                        near = np.hypot(rx - qp_stop_at[0], ry - qp_stop_at[1]) < 0.35
-                        if near and (speed or 0.0) <= qp.p.pivot_stop_below:
-                            if abs(wrap(qp_stop_at[2] - yaw)) > np.radians(qp.p.resume_deg):
-                                pivot_to = qp_stop_at[2]
-                    if pivot_to is None and abs(psi0) >= np.radians(away):
-                        pivot_to = float(ref[0, 2])
-                    # a turn that cannot be made here goes to MPPI for a while: in a doorway the
-                    # governor holds the tail off the jambs and the spin never starts (false_door:
-                    # 60 s pivoting at 129 deg, not one degree turned)
-                    handover = pivot_to is not None and f < qp_blocked_until
-                    if handover:
-                        reason, qp_pivot = 2, 0
-                    elif pivot_to is not None:
-                        reason = 4
-                        err = wrap(pivot_to - yaw)
-                        if (
-                            not qp_pivot
-                            and governor is not None
-                            and (speed or 0.0) <= qp.p.pivot_stop_below
-                        ):
-                            # decide the side once, by where the tail sweeps: the shorter way can
-                            # swing it into a wall the governor then holds the spin off (pocket:
-                            # 22 s at 9 % of the spin, 1 deg turned). Ties go the shorter way
-                            sweep = {}
-                            for side in (1, -1):
-                                at = qp.pivot_sweep(sx, sy, yaw, err, side).astype(np.float32)
-                                sweep[side] = float(
-                                    governor.clearance_along(
-                                        wp.array(
-                                            at.reshape(-1, 1, 3), dtype=wp.vec3f, device=a.device
-                                        ),
-                                        plan_sim.elevation,
-                                        planner.measured,
-                                        plan_sim.grid,
-                                    ).min()
-                                )
-                            short = 1 if err > 0 else -1
-                            qp_pivot = -short if sweep[-short] > sweep[short] + 0.1 else short
-                            qp_pivot_since = (f, yaw)
-                            if max(sweep.values()) < governor.params.c0 + 0.05:
-                                # neither side keeps the tail off the walls: no turn here
-                                qp_blocked_until, qp_pivot, handover = f + block_frames, 0, True
-                        elif qp_pivot and f - qp_pivot_since[0] >= block_frames:
-                            # a turn under way that is not turning: give it up for a while
-                            if abs(wrap(yaw - qp_pivot_since[1])) < np.radians(10.0):
-                                qp_blocked_until, qp_pivot, handover = f + block_frames, 0, True
-                            else:
-                                qp_pivot_since = (f, yaw)
-                    if handover:
-                        reason = 2
-                    elif pivot_to is not None:
-                        wl, wr, qp_pivot = qp.pivot(
-                            err, speed or 0.0, alpha, robot.half_track, qp_pivot
-                        )
-                        # the governor judges the robot turning where it stands
-                        wz = robot.wheel_radius * (wr - wl) / (2.0 * robot.half_track * alpha)
-                        dt_p = float(planner.cw.dt)
-                        poses = np.array(
-                            [
-                                [sx, sy, yaw + i * dt_p * wz]
-                                for i in range((governor.steps if governor else 1) + 1)
-                            ]
-                        )
-                        qp_driven = wp.array(
-                            poses.astype(np.float32).reshape(-1, 1, 3),
-                            dtype=wp.vec3f,
-                            device=a.device,
-                        )
-                    else:
-                        qp_pivot = 0
-                        stop_here = False
-                        if corner is None:
-                            qp_stop_at = None  # no turn ahead: nothing to stop for
-                        else:
-                            # plan up to the corner and stop there, the pivot follows -- or a
-                            # little before it, where the turn has room: within ~0.3 m of a wall
-                            # the governor lets a spin's tail move at its floor, ~0.07 rad/s
-                            # (pocket: 46 s for 171 deg). Each candidate's room is the closest
-                            # the tail comes to a wall over the turn, the better of both sides
-                            after = float(ref[min(corner + k_c, len(ref) - 1), 2])
-                            stop_i = corner
-                            if governor is not None and corner >= 2:
-                                back = int(round(qp.p.stop_search_m / qp.p.ds))
-                                cands = list(range(corner, max(1, corner - back) - 1, -2))
-                                sweeps, owner = [], []
-                                for i in cands:
-                                    e_i = wrap(after - float(ref[i, 2]))
-                                    for side in (1, -1):
-                                        sw = qp.pivot_sweep(
-                                            ref[i, 0], ref[i, 1], ref[i, 2], e_i, side
-                                        )
-                                        sweeps.append(sw)
-                                        owner += [(i, side)] * len(sw)
-                                at = np.concatenate(sweeps).astype(np.float32)
-                                cl = governor.clearance_along(
-                                    wp.array(at.reshape(-1, 1, 3), dtype=wp.vec3f, device=a.device),
-                                    plan_sim.elevation,
-                                    planner.measured,
-                                    plan_sim.grid,
-                                )
-                                room = {}
-                                for (i, side), c in zip(owner, cl):
-                                    room[(i, side)] = min(room.get((i, side), np.inf), float(c))
-                                best = {i: max(room[(i, 1)], room[(i, -1)]) for i in cands}
-                                top = max(best.values())
-                                # the latest point within 5 cm of the roomiest: no stop earlier
-                                # than the room is worth
-                                stop_i = max(i for i in cands if best[i] >= top - 0.05)
-                                if a.history and f % a.history == 0:
-                                    for i in cands:
-                                        qp_stop_log.append(
-                                            [
-                                                f,
-                                                ref[i, 0] + wx0,
-                                                ref[i, 1] + wy0,
-                                                best[i],
-                                                float(i == stop_i),
-                                            ]
-                                        )
-                            qp_stop_at = (ref[stop_i, 0] + wx0, ref[stop_i, 1] + wy0, after)
-                            ref, stop_here = ref[: stop_i + 1], True
-                        e0 = -(sx - ref[0, 0]) * np.sin(ref[0, 2]) + (sy - ref[0, 1]) * np.cos(
-                            ref[0, 2]
-                        )
-                        end_at_goal = stop_here or (
-                            float(np.hypot(goal_l[0] - ref[-1, 0], goal_l[1] - ref[-1, 1])) < 0.5
-                        )
-                        # too narrow at the full margin is not a reason to hand back to MPPI: retry
-                        # with less room first (at 0.6 m the box pass never solved, and MPPI stuck)
-                        path = None
-                        corridor_field, corridor_grid = planner.clear_field, plan_sim.grid
-                        if a.qp_coarse:
-                            # the MPPI window's wall map ends ~4.5 m out and clamps past it: a
-                            # longer route needs the walls of the whole belief window
-                            wp.launch(
-                                clearance_map_kernel,
-                                dim=qp_clear.shape,
-                                inputs=[
-                                    height_d,
-                                    measured_d,
-                                    float(a.cell),
-                                    float(robot.wheel_radius),
-                                    max(1, int(math.ceil(1.0 / a.cell))),
-                                ],
-                                outputs=[qp_clear],
-                                device=a.device,
-                            )
-                            corridor_field, corridor_grid = qp_clear, qp_clear_grid
-                        for m in (qp.p.margin, 0.66 * qp.p.margin, 0.15):
-                            lo, hi = qp.corridor(ref, corridor_field, corridor_grid, margin=m)
-                            path = qp.solve_checked(
-                                ref,
-                                lo,
-                                hi,
-                                e0,
-                                psi0,
-                                speed or 0.0,
-                                end_at_goal,
-                                corridor_field,
-                                corridor_grid,
-                                m,
-                            )
-                            if path is not None:
-                                qp_margin = m
-                                break
-                        reason = 3
-                        if path is not None:
-                            reason = 0
-                            if governor is not None:
-                                # plan the speed with the governor's own law and its own body
-                                # clearance, so the safety net has nothing left to cut
-                                at = np.c_[path.xy, path.heading].astype(np.float32)
-                                clear_path = governor.clearance_along(
-                                    wp.array(at.reshape(-1, 1, 3), dtype=wp.vec3f, device=a.device),
-                                    plan_sim.elevation,
-                                    planner.measured,
-                                    plan_sim.grid,
-                                )
-                                path.v = qp.speed_plan(
-                                    path.kappa,
-                                    clear_path,
-                                    speed or 0.0,
-                                    end_at_goal,
-                                    tail_swing=governor.params.turn_ratio * governor.tail,
-                                )
-                            wl, wr = qp.track(
-                                path,
-                                sx,
-                                sy,
-                                yaw,
-                                alpha,
-                                robot.half_track,
-                                turn_dead=a.turn_dead,
-                                turn_gain=a.turn_gain,
-                            )
-                            # the governor must judge the path being DRIVEN, not MPPI's plan:
-                            # on `box` MPPI's plan hugged the box and the governor held the robot
-                            # at 0.2-0.4 m/s beside it while it followed a path 1.5 m out
-                            poses = qp.timed_poses(path, float(planner.cw.dt), governor.steps)
-                            qp_driven = wp.array(
-                                poses.astype(np.float32).reshape(-1, 1, 3),
-                                dtype=wp.vec3f,
-                                device=a.device,
-                            )
-                            if a.history and f % a.history == 0:
-                                for (px, py), pv in zip(path.xy, path.v):
-                                    qp_paths.append([f, px + wx0, py + wy0, pv])
-                # reason: 0 the QP path drove, 4 it turned on the spot; 1 no route and 3 no
-                # feasible path handed the frame to MPPI
-                qp_log.append(
-                    [
-                        f,
-                        1.0 if reason in (0, 4) else 0.0,
-                        float(reason),
-                        qp_margin,
-                        float(qp.last_fixes),
-                    ]
-                )
             clear_m = a.cfg.turn_first["clear_m"]
             near_wall = clear_m <= 0.0 or governor is None or governor.clearance < clear_m
-            # not over the QP's own turns: past 90 deg the brake keeps a spin's direction, and it
-            # reversed the QP's right turn into a left spin toward pocket's wall (62 s deadlock)
-            if a.turn_first > 0.0 and near_wall and qp_driven is None:
+            if a.turn_first > 0.0 and near_wall:
                 # spin first when the route lies well behind: an arc that turns while advancing
                 # ends inside the robot's own turning clearance of a wall (control/command.py)
                 bearing = ctg.descent_bearing(rx - r0, ry - s0, a.turn_first_reach)
@@ -942,9 +622,8 @@ def drive(a: argparse.Namespace) -> dict:
                     mppi_paths.append([f, x_ + wx0, y_ + wy0])
             if governor is not None:
                 wl_in = wl
-                checked = plan_sim.controlled if qp_driven is None else qp_driven
                 capped = governor.cap(
-                    wl, wr, checked, plan_sim.elevation, planner.measured, plan_sim.grid
+                    wl, wr, plan_sim.controlled, plan_sim.elevation, planner.measured, plan_sim.grid
                 )
                 if a.plan_params.get("plan_clear_governor", PLAN_DEFAULTS["plan_clear_governor"]):
                     wl, wr = capped
@@ -1145,12 +824,9 @@ def drive(a: argparse.Namespace) -> dict:
             **{f"hist_{k}": np.asarray(v) for k, v in hist.items() if v},
             **({"escape": np.asarray(esc)} if esc else {}),
             **({"governor": np.asarray(gov_log)} if gov_log else {}),
-            **({"qp_log": np.asarray(qp_log)} if qp_log else {}),
             **({"yaw_log": np.asarray(yaw_log)} if yaw_log else {}),
-            **({"qp_paths": np.asarray(qp_paths)} if qp_paths else {}),
             **({"mppi_paths": np.asarray(mppi_paths)} if mppi_paths else {}),
             **({"ref_paths": np.asarray(ref_paths)} if ref_paths else {}),
-            **({"qp_stop": np.asarray(qp_stop_log)} if qp_stop_log else {}),
         )
         print(f"wrote {a.out}")
 
@@ -1284,13 +960,7 @@ def main() -> None:
         default=0,
         help="also record every Nth frame into --out, for the scrub page; 0 = OFF",
     )
-    p.add_argument("--controller", choices=("mppi", "carrot", "qp"), default="mppi")
-    p.add_argument(
-        "--qp-horizon", type=float, default=8.0, help="[m] how far ahead the QP path runs"
-    )
-    p.add_argument(
-        "--qp-margin", type=float, default=0.45, help="[m] body clearance the corridor keeps"
-    )
+    p.add_argument("--controller", choices=("mppi", "carrot"), default="mppi")
     p.add_argument(
         "--turn-dead",
         type=float,
@@ -1309,16 +979,6 @@ def main() -> None:
         type=float,
         default=None,
         help="MPPI's body-through-wall infeasibility weight (CostParams.wall_body); 0 = off",
-    )
-    p.add_argument("--qp-w-off", type=float, default=1.0, help="QP cost of being off the route")
-    p.add_argument(
-        "--qp-pin-end", action="store_true", help="end the QP path on the route, along it"
-    )
-    p.add_argument(
-        "--qp-coarse",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="continue the QP's route through the coarse layer, walls from the whole belief",
     )
     p.add_argument("--look", type=float, default=1.2, help="[m] carrot lookahead along the plan")
     p.add_argument("--carrot-speed", type=float, default=0.8, help="[m/s] carrot cruise")
