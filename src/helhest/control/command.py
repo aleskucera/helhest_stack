@@ -153,6 +153,25 @@ def cap_forward_target(
     return mean - half, mean + half
 
 
+def predict_pose(
+    x: float, y: float, yaw: float, v: float, yaw_rate: float, horizon_s: float
+) -> tuple[float, float, float]:
+    """Carry a planar pose `horizon_s` [s] forward at a constant body speed `v` [m/s] and
+    `yaw_rate` [rad/s] (unicycle, heading at the interval's midpoint).
+
+    A plan starts from a pose that is already old when its command acts: on the robot the pose is
+    ~0.22 s old when the command is published and the body answers a turn 0.2-0.4 s after that
+    (karlak bags, 2026-10-29/30). Planning from where the robot WILL be stops the planner re-aiming
+    every frame against corrections that land late -- the 1-5 s weave.
+    """
+    mid = yaw + 0.5 * yaw_rate * horizon_s
+    return (
+        x + v * math.cos(mid) * horizon_s,
+        y + v * math.sin(mid) * horizon_s,
+        yaw + yaw_rate * horizon_s,
+    )
+
+
 def traction_scale(heading_error: float, on_deg: float, off_deg: float) -> float:
     """How much of the traction cost applies this frame: 1 while the route lies within `on_deg`
     of the heading, 0 beyond `off_deg`, linear between; `off_deg` <= 0 = always 1.

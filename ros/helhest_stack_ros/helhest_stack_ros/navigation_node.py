@@ -59,6 +59,7 @@ from helhest.control.governor import ClearanceGovernor
 from helhest.control.command import in_flight_history
 from helhest.control.command import JOINT_NAMES
 from helhest.control.command import joint_states_to_model
+from helhest.control.command import predict_pose
 from helhest.control.command import spin_side
 from helhest.control.command import to_engine_order
 from helhest.control.command import traction_scale
@@ -801,6 +802,11 @@ class NavigationNode(Node):
         # and goal-brake resolution, and the LLC stays fed if a cloud is dropped. It does NOT reduce
         # the ~175 ms actuator delay, which lives in the LLC velocity loop.
         d("plan_command_delay", dynamics.COMMAND_DELAY)
+        # [s] start BOTH planners from the pose carried this far forward at Odin's measured twist
+        # (control.command.predict_pose): the pose is ~0.22 s old when its command goes out and
+        # the body turns 0.2-0.4 s after that. Unlike plan_command_delay it reaches the neural
+        # planner too. Read every frame, so `ros2 param set` takes effect at once. 0 = off.
+        d("plan_predict_s", 0.0)
         d("plan_turn_boost", 1.0)
         # OPTIONAL: self-tune plan_turn_boost online from gyro feedback (control/turn_adapt.py) so the
         # realized yaw matches the plan across terrains + the drivetrain defect -- makes the fixed
@@ -960,6 +966,7 @@ class NavigationNode(Node):
         self.plan_max_jerk: float = g("plan_max_jerk")
         self.plan_cmd_max_lead: float = g("plan_cmd_max_lead")
         self.plan_command_delay: float = g("plan_command_delay")
+        self.plan_predict_s: float = g("plan_predict_s")
         self.plan_turn_boost: float = g("plan_turn_boost")
         self.plan_turn_boost_adapt: bool = g("plan_turn_boost_adapt")
         self.plan_turn_boost_tau: float = g("plan_turn_boost_tau")
@@ -1678,6 +1685,28 @@ class NavigationNode(Node):
         _, _, _, _, rcnx, rcny = self._plan_dims
         kr = self._plan_kr
         state_l = np.array([mf.ex - mf.lxmin, mf.ey - mf.lymin, eyaw], np.float32)
+        # The pose both planners start from: carried plan_predict_s forward at Odin's measured
+        # twist, to where the robot will be when this frame's command acts. Goal distance, turn-
+        # first and the maps keep the measured pose. The neural planner reads the full attitude,
+        # so its pose turns about world z (roll and pitch stay as measured).
+        plan_T_base = world_T_base
+        fresh = self.get_clock().now().nanoseconds * 1e-9 - self._twist_meas_t < 0.3
+        if self.plan_predict_s > 0.0 and self._twist_meas is not None and fresh:
+            px, py, pyaw = predict_pose(
+                mf.ex,
+                mf.ey,
+                eyaw,
+                float(self._twist_meas[0]),
+                float(self._twist_meas[2]),
+                self.plan_predict_s,
+            )
+            state_l = np.array([px - mf.lxmin, py - mf.lymin, pyaw], np.float32)
+            c, s = np.cos(pyaw - eyaw), np.sin(pyaw - eyaw)
+            plan_T_base = world_T_base.copy()
+            plan_T_base[:3, :3] = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]) @ (
+                world_T_base[:3, :3]
+            )
+            plan_T_base[0, 3], plan_T_base[1, 3] = px, py
         goal_l = (gx - mf.lxmin, gy - mf.lymin)
         goal_r = (gx - mf.rxmin, gy - mf.rymin)
 
@@ -1929,7 +1958,7 @@ class NavigationNode(Node):
             if isinstance(self.planner, NeuralMppi):
                 # the model starts from the full state: attitude, body twist, wheel speeds
                 self.planner.set_robot_state(
-                    world_T_base, (mf.lxmin, mf.lymin), twist_seed, wheel_seed
+                    plan_T_base, (mf.lxmin, mf.lymin), twist_seed, wheel_seed
                 )
             self.planner.replan(state_l, goal_l, int(self.plan_n_refine))
             self._ck("plan:replan")

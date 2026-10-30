@@ -5,6 +5,7 @@ import numpy as np
 from helhest.control.command import condition_command
 from helhest.control.command import in_flight_history
 from helhest.control.command import plan_control_at
+from helhest.control.command import predict_pose
 from helhest.control.command import to_engine_order
 from helhest.control.command import JOINT_NAMES
 
@@ -214,3 +215,25 @@ def test_cap_turns_a_held_ramp_into_a_smooth_release():
     speed, jerk = hold(True)
     assert speed <= 0.5 + 1e-3
     assert jerk <= 5.0 + 1e-3
+
+
+def test_predict_pose_straight_ahead():
+    x, y, yaw = predict_pose(1.0, 2.0, np.pi / 2, v=1.5, yaw_rate=0.0, horizon_s=0.4)
+    assert np.allclose([x, y, yaw], [1.0, 2.6, np.pi / 2], atol=1e-9)
+
+
+def test_predict_pose_follows_the_arc():
+    # a quarter circle of radius 1 m (v = 1 m/s, yaw_rate = 1 rad/s for pi/2 s) ends at (1, 1); the
+    # one-step midpoint rule walks the arc length along the mean heading, so it lands at
+    # (pi/2) cos(pi/4) = 1.11 on both axes -- 11 % long over a quarter turn, negligible over the
+    # 0.2-0.4 s it is used for
+    x, y, yaw = predict_pose(0.0, 0.0, 0.0, v=1.0, yaw_rate=1.0, horizon_s=np.pi / 2)
+    assert np.isclose(yaw, np.pi / 2)
+    assert np.allclose([x, y], [np.pi / 2 * np.cos(np.pi / 4)] * 2)
+    x, y, _ = predict_pose(0.0, 0.0, 0.0, v=1.5, yaw_rate=1.0, horizon_s=0.4)
+    exact = (1.5 * np.sin(0.4), 1.5 * (1 - np.cos(0.4)))  # the arc's true end
+    assert np.hypot(x - exact[0], y - exact[1]) < 0.01  # 4 mm of a 0.6 m step
+
+
+def test_predict_pose_zero_horizon_is_the_pose():
+    assert predict_pose(3.0, -1.0, 0.7, v=2.0, yaw_rate=0.5, horizon_s=0.0) == (3.0, -1.0, 0.7)
