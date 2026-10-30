@@ -654,9 +654,7 @@ def _taper_kernel(
     c1 = sample_field(clear_field, sgrid, end[0], end[1])
     for q in range(n_knots):
         s_q = (float(q) + 0.5) * ds0
-        # 0.1 m above each end's own clearance: the rejection floor sits 0.05 m below the
-        # start's, and a curve aimed AT it crossed it (facing_wall: 81% of frames rejected)
-        cap = wp.min(c0 + 0.1 + taper * s_q, c1 + 0.1 + taper * wp.max(t_len[0] - s_q, 0.0))
+        cap = wp.min(c0 + taper * s_q, c1 + taper * wp.max(t_len[0] - s_q, 0.0))
         clear_target[q] = wp.min(clear_target[q], cap)
 
 
