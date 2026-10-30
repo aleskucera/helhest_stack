@@ -109,9 +109,7 @@ class Kalman:
             np.linalg.inv(np.matmul(np.matmul(self.H, self.x_cov), self.H.T) + self.R),
         )
         self.x = self.x + np.matmul(K, measurement - np.matmul(self.H, self.x))
-        self.x_cov = np.matmul(
-            np.eye(self.x_cov.shape[0]) - np.matmul(K, self.H), self.x_cov
-        )
+        self.x_cov = np.matmul(np.eye(self.x_cov.shape[0]) - np.matmul(K, self.H), self.x_cov)
         return self.x, self.x_cov
 
     def step(self, measurement, dt):
@@ -125,7 +123,9 @@ class Kalman:
         return self.correct(measurement)
 
 
-def declare_kalman_parameters(node, prefix="kalman", q=1.0, r=1.0, gate_threshold=9.0, max_inflation=200.0):
+def declare_kalman_parameters(
+    node, prefix="kalman", q=1.0, r=1.0, gate_threshold=9.0, max_inflation=200.0
+):
     """Declare a Kalman filter's tuning knobs as ROS params and return them as a dict.
     (Copied from follow_me.utils.)"""
     node.declare_parameter(f"{prefix}_q", q)
@@ -239,9 +239,7 @@ class Locator(Node):
         self.mount_height = self.get_parameter("mount_height").value
         self.max_msg_delay = self.get_parameter("max_msg_delay").value
         if not self.use_3d:
-            self.get_logger().warning(
-                "radio localisation is set to operate just in the x-y plane"
-            )
+            self.get_logger().warning("radio localisation is set to operate just in the x-y plane")
         self.br = TransformBroadcaster(self)
         self.t = TransformStamped()
         self.t.header.frame_id = self.filter_frame  # CHANGED: broadcast human_frame under odom
@@ -320,9 +318,7 @@ class Locator(Node):
         self.pub = self.create_publisher(Bool, "/detection_ready", 1)
         self.estimate_pub = self.create_publisher(PositionEstimate, "estimate", 1)
         self.pose_pub = self.create_publisher(PoseStamped, "estimate_pose", 1)
-        self.pose_cov_pub = self.create_publisher(
-            PoseWithCovarianceStamped, "estimate_pose_cov", 1
-        )
+        self.pose_cov_pub = self.create_publisher(PoseWithCovarianceStamped, "estimate_pose_cov", 1)
         self.sound_pub = self.create_publisher(String, "/log_sound", 1)
 
         self.get_logger().info(
@@ -438,7 +434,9 @@ class Locator(Node):
         for i in range(len(valid_ids)):
             if age[i] < 1.0:
                 w_t[i, 0] = min(age) / age[i]
-        w_t = np.minimum(w_t, 0.5)  # let the maximum difference in magnitude be 2 -> otherwise it could happen, that one measurement overtakes all just because of unlucky timing
+        w_t = np.minimum(
+            w_t, 0.5
+        )  # let the maximum difference in magnitude be 2 -> otherwise it could happen, that one measurement overtakes all just because of unlucky timing
         # # w_t = 0.01*np.ones((len(valid_ids), 1))
 
         print(f"age weights {w_t}")
@@ -450,12 +448,7 @@ class Locator(Node):
                 f = (x - x_t) ** 2 + (y - y_t) ** 2 + (z - z_t) ** 2 - d**2
             else:
                 x, y = g
-                f = (
-                    (x - x_t) ** 2
-                    + (y - y_t) ** 2
-                    + (self.mount_height - z_t) ** 2
-                    - d**2
-                )
+                f = (x - x_t) ** 2 + (y - y_t) ** 2 + (self.mount_height - z_t) ** 2 - d**2
 
             f = w_t * f  # weighting based on the age of the measurement
 
@@ -503,18 +496,10 @@ class Locator(Node):
         if np.any(np.isnan(self.last_pos)):
             p = self.positions[self.ids[0]]
             if self.use_3d:
-                p_init += [
-                    np.array([p[0][0] + self.ranges_avg[self.ids[0]], p[1][0], p[2][0]])
-                ]
-                p_init += [
-                    np.array([p[0][0], p[1][0] + self.ranges_avg[self.ids[0]], p[2][0]])
-                ]
-                p_init += [
-                    np.array([p[0][0] - self.ranges_avg[self.ids[0]], p[1][0], p[2][0]])
-                ]
-                p_init += [
-                    np.array([p[0][0], p[1][0] - self.ranges_avg[self.ids[0]], p[2][0]])
-                ]
+                p_init += [np.array([p[0][0] + self.ranges_avg[self.ids[0]], p[1][0], p[2][0]])]
+                p_init += [np.array([p[0][0], p[1][0] + self.ranges_avg[self.ids[0]], p[2][0]])]
+                p_init += [np.array([p[0][0] - self.ranges_avg[self.ids[0]], p[1][0], p[2][0]])]
+                p_init += [np.array([p[0][0], p[1][0] - self.ranges_avg[self.ids[0]], p[2][0]])]
             else:
                 p_init += [np.array([p[0][0] + self.ranges_avg[self.ids[0]], p[1][0]])]
                 p_init += [np.array([p[0][0], p[1][0] + self.ranges_avg[self.ids[0]]])]

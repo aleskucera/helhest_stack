@@ -80,8 +80,10 @@ def generate_launch_description() -> LaunchDescription:
         executable="static_transform_publisher",
         name="odin1_imu_tf",
         arguments=[
-            "--frame-id", "odin1_base_link",
-            "--child-frame-id", "imu_link",
+            "--frame-id",
+            "odin1_base_link",
+            "--child-frame-id",
+            "imu_link",
         ],
     )
 

@@ -44,6 +44,7 @@ behind the rear axle) are not modelled beyond those discs; the simulator's own c
 (worlds.obstacle_clearance) uses the full rectangle, so its number can sit a few centimetres
 below the reference's at a corner.
 """
+
 from __future__ import annotations
 
 import argparse

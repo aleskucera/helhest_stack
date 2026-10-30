@@ -16,6 +16,7 @@ slightly different from frame to frame, which the page states rather than hides.
 
   python studies/closed_loop/build_scrub.py --dir studies/closed_loop/out/sweep2
 """
+
 from __future__ import annotations
 
 import argparse

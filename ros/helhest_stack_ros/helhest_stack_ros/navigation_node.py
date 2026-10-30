@@ -122,6 +122,8 @@ _PLAN_BUILD = frozenset(
         "plan_track_heading",
         "plan_track_progress",
         "plan_track_radius",
+        "plan_ref_cold_on_divergence",
+        "plan_ref_clear_taper",
         "plan_turn_brake_a_max",
         "plan_wmax",
         "plan_wmin",
@@ -565,6 +567,8 @@ class NavigationNode(Node):
         d("plan_track_progress", PLAN_DEFAULTS["plan_track_progress"])
         # [m] the reference curve's tightest turn and the clothoid length into it
         d("plan_track_radius", PLAN_DEFAULTS["plan_track_radius"])
+        d("plan_ref_cold_on_divergence", PLAN_DEFAULTS["plan_ref_cold_on_divergence"])
+        d("plan_ref_clear_taper", PLAN_DEFAULTS["plan_ref_clear_taper"])
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
         # NEVER commands above this regardless of the cost. This is the real top-speed knob.
         # ~1.4 m/s at 4.0; ~1.75 m/s at 5.0 (r=0.35). plan_wmax maps to the REAL wheel speed -- the
@@ -892,6 +896,8 @@ class NavigationNode(Node):
         self.plan_track_heading: float = g("plan_track_heading")
         self.plan_track_progress: float = g("plan_track_progress")
         self.plan_track_radius: float = g("plan_track_radius")
+        self.plan_ref_cold_on_divergence: float = g("plan_ref_cold_on_divergence")
+        self.plan_ref_clear_taper: float = g("plan_ref_clear_taper")
         self.plan_smooth: float = g("plan_smooth")
         self.plan_straight_frac: float = g("plan_straight_frac")
         self.plan_debug_cmd: int = int(g("plan_debug_cmd"))

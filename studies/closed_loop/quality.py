@@ -13,6 +13,7 @@ of yaw reversals and of stops, and the command slew RMS from the recorded comman
 The curvature of the driven path is taken from the trail, smoothed over `--window` seconds
 first: at 14.5 Hz the raw trail's second difference is noise.
 """
+
 from __future__ import annotations
 
 import argparse

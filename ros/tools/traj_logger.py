@@ -66,8 +66,8 @@ def _plot(rows: list[tuple[float, float, float, float]], out: pathlib.Path) -> N
 
     # Row 3: x-y trajectory
     axes[2].plot(x, y, color="tab:green", linewidth=0.8)
-    axes[2].plot(x[0], y[0], "o", color="tab:blue",  markersize=8, label="start")
-    axes[2].plot(x[-1], y[-1], "s", color="tab:red",  markersize=8, label="end")
+    axes[2].plot(x[0], y[0], "o", color="tab:blue", markersize=8, label="start")
+    axes[2].plot(x[-1], y[-1], "s", color="tab:red", markersize=8, label="end")
     axes[2].set_xlabel("x [m]")
     axes[2].set_ylabel("y [m]")
     axes[2].set_aspect("equal")
@@ -97,15 +97,11 @@ class TrajLogger(Node):
 
         period = 1.0 / rate_hz
         self.create_timer(period, self._tick)
-        self.get_logger().info(
-            f"traj_logger: {map_frame}→{base_frame} @ {rate_hz} Hz  →  {out}"
-        )
+        self.get_logger().info(f"traj_logger: {map_frame}→{base_frame} @ {rate_hz} Hz  →  {out}")
 
     def _tick(self) -> None:
         try:
-            tf = self._buf.lookup_transform(
-                self._map_frame, self._base_frame, rclpy.time.Time()
-            )
+            tf = self._buf.lookup_transform(self._map_frame, self._base_frame, rclpy.time.Time())
         except tf2_ros.LookupException:
             return  # frame not yet available — wait silently
         except Exception as exc:
@@ -130,9 +126,7 @@ class TrajLogger(Node):
             writer = csv.writer(f)
             writer.writerow(["t_sec", "x_m", "y_m", "psi_rad"])
             writer.writerows(self._rows)
-        self.get_logger().info(
-            f"Wrote {len(self._rows)} rows to {self._out}"
-        )
+        self.get_logger().info(f"Wrote {len(self._rows)} rows to {self._out}")
 
     @property
     def rows(self) -> list[tuple[float, float, float, float]]:
@@ -143,11 +137,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Log map→base_link trajectory from /tf to CSV and plot on exit."
     )
-    parser.add_argument("--map-frame",  default="map",       help="World/map frame (default: map)")
-    parser.add_argument("--base-frame", default="base_link", help="Robot frame (default: base_link)")
-    parser.add_argument("--rate",       type=float, default=10.0, help="Poll rate in Hz (default: 10)")
+    parser.add_argument("--map-frame", default="map", help="World/map frame (default: map)")
     parser.add_argument(
-        "--out", default=None,
+        "--base-frame", default="base_link", help="Robot frame (default: base_link)"
+    )
+    parser.add_argument("--rate", type=float, default=10.0, help="Poll rate in Hz (default: 10)")
+    parser.add_argument(
+        "--out",
+        default=None,
         help="CSV output path (default: <repo>/data/traj_YYYYMMDD_HHMMSS.csv)",
     )
     # parse_known_args so any leftover ROS args (--ros-args ...) pass through to rclpy

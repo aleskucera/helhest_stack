@@ -49,8 +49,12 @@ def program(name: str) -> list[tuple[float, float, float]]:
             out += [block(5.0, mean, 0.0), block(2.0, 0.0, 0.0)]
         for mean in (1.0, 2.0):  # steady-state turn gain, both directions
             for diff in (0.5, 1.0, 2.0):
-                out += [block(5.0, mean, diff), block(2.0, mean, 0.0),
-                        block(5.0, mean, -diff), block(2.0, mean, 0.0)]
+                out += [
+                    block(5.0, mean, diff),
+                    block(2.0, mean, 0.0),
+                    block(5.0, mean, -diff),
+                    block(2.0, mean, 0.0),
+                ]
             out.append(block(2.0, 0.0, 0.0))
         for _ in range(3):  # standing starts: the actuator step response, tau_motor
             out += [block(3.0, 2.0, 0.0), block(3.0, 0.0, 0.0)]
@@ -63,8 +67,12 @@ def program(name: str) -> list[tuple[float, float, float]]:
         for mean in (0.5, 1.0, 2.0):
             out.append(block(3.0, mean, 0.0))
             for _ in range(3):
-                out += [block(4.0, mean, 1.5), block(3.0, mean, 0.0),
-                        block(4.0, mean, -1.5), block(3.0, mean, 0.0)]
+                out += [
+                    block(4.0, mean, 1.5),
+                    block(3.0, mean, 0.0),
+                    block(4.0, mean, -1.5),
+                    block(3.0, mean, 0.0),
+                ]
             out.append(block(2.0, 0.0, 0.0))
     elif name == "compact":
         # `relax` needs a sports field: 41 x 29 m, measured by running it through the engine. This
@@ -84,8 +92,7 @@ def program(name: str) -> list[tuple[float, float, float]]:
             hold = max(2.0, 8.0 * 0.15 / (0.35 * w))  # ~8 relaxation lengths of contact travel
             out.append(block(2.0, 0.0, 0.0))
             for _ in range(3):
-                out += [(hold, -w, w), block(2.0, 0.0, 0.0),
-                        (hold, w, -w), block(2.0, 0.0, 0.0)]
+                out += [(hold, -w, w), block(2.0, 0.0, 0.0), (hold, w, -w), block(2.0, 0.0, 0.0)]
     elif name == "steps":
         # MOTOR IDENTIFICATION. Run this program TWICE -- wheels OFF the ground, then ON it -- and
         # the pair separates the actuator from everything the terrain adds. In the air there is no
@@ -103,28 +110,44 @@ def program(name: str) -> list[tuple[float, float, float]]:
         # ~2.8 m at the largest amplitude, not the sum of them.
         for amp in (1.0, 2.0, 3.0, 4.0):  # amplitude sweep: is the response even linear?
             for _ in range(2):
-                out += [block(2.0, amp, 0.0), block(2.0, 0.0, 0.0),
-                        block(2.0, -amp, 0.0), block(2.0, 0.0, 0.0)]
+                out += [
+                    block(2.0, amp, 0.0),
+                    block(2.0, 0.0, 0.0),
+                    block(2.0, -amp, 0.0),
+                    block(2.0, 0.0, 0.0),
+                ]
         for sign in (1.0, -1.0):
             # LEVEL TO LEVEL, wheels already rolling. The cleanest actuator data on the ground:
             # breakaway is out of the way, so what is left is the motor answering a step. Mirrored
             # so the pair nets to zero displacement; each half runs out ~4 m and comes back.
-            out += [block(1.5, sign * 2.0, 0.0), block(1.5, sign * 4.0, 0.0),
-                    block(1.5, sign * 2.0, 0.0), block(2.0, 0.0, 0.0)]
+            out += [
+                block(1.5, sign * 2.0, 0.0),
+                block(1.5, sign * 4.0, 0.0),
+                block(1.5, sign * 2.0, 0.0),
+                block(2.0, 0.0, 0.0),
+            ]
         for amp in (0.3, 0.6, 1.0):
             # SMALL steps: in the air every one of these should move the wheel. On the ground the
             # ones below breakaway will not, which puts a number on the threshold that the 2 rad/s
             # spin floor only bracketed. Mirrored, so these cost no ground either.
-            out += [block(2.0, amp, 0.0), block(1.5, 0.0, 0.0),
-                    block(2.0, -amp, 0.0), block(1.5, 0.0, 0.0)]
+            out += [
+                block(2.0, amp, 0.0),
+                block(1.5, 0.0, 0.0),
+                block(2.0, -amp, 0.0),
+                block(1.5, 0.0, 0.0),
+            ]
     elif name == "slope":
         # Driven ON a slope of 10 deg or more; the operator points the robot, this holds the
         # command steady. Across-slope is the case that matters -- zero lateral load transfer in
         # the old model against 0.405 m g in Chrono.
         for _ in range(2):
             out += [block(5.0, 1.5, 0.0), block(3.0, 0.0, 0.0)]
-        out += [block(5.0, 1.5, 1.0), block(3.0, 0.0, 0.0),
-                block(5.0, 1.5, -1.0), block(3.0, 0.0, 0.0)]
+        out += [
+            block(5.0, 1.5, 1.0),
+            block(3.0, 0.0, 0.0),
+            block(5.0, 1.5, -1.0),
+            block(3.0, 0.0, 0.0),
+        ]
     else:
         raise SystemExit(f"unknown program '{name}'")
     return out
@@ -133,8 +156,10 @@ def program(name: str) -> list[tuple[float, float, float]]:
 def describe(blocks, max_omega: float) -> float:
     total = sum(b[0] for b in blocks)
     peak = max(max(abs(b[1]), abs(b[2])) for b in blocks)
-    print(f"  {len(blocks)} held commands, {total:.0f} s total, "
-          f"peak wheel |omega| {peak:.2f} rad/s")
+    print(
+        f"  {len(blocks)} held commands, {total:.0f} s total, "
+        f"peak wheel |omega| {peak:.2f} rad/s"
+    )
     print(f"  peak ground speed ~{0.35 * peak:.2f} m/s; clamp is {max_omega:.2f} rad/s")
     if peak > max_omega:
         print(f"  NOTE: {peak:.2f} exceeds the clamp and will be limited to {max_omega:.2f}")
@@ -162,8 +187,11 @@ class Driver(Node):
         t_start = time.monotonic()
         for i, (dur, wl, wr) in enumerate(self.blocks):
             t_end = time.monotonic() + dur
-            print(f"  [{time.monotonic() - t_start:6.1f}s] block {i + 1}/{len(self.blocks)}: "
-                  f"wL {wl:+5.2f}  wR {wr:+5.2f}  ({dur:.1f} s)", flush=True)
+            print(
+                f"  [{time.monotonic() - t_start:6.1f}s] block {i + 1}/{len(self.blocks)}: "
+                f"wL {wl:+5.2f}  wR {wr:+5.2f}  ({dur:.1f} s)",
+                flush=True,
+            )
             if pause and i > 0:
                 self.stop()
                 input("      [paused] reposition if needed, then press Enter...")
@@ -185,8 +213,11 @@ def main() -> None:
     ap.add_argument("--go", action="store_true", help="actually publish (default is a dry run)")
     ap.add_argument("--max-omega", type=float, default=4.0, help="per-wheel clamp [rad/s]")
     ap.add_argument("--countdown", type=int, default=5)
-    ap.add_argument("--pause", action="store_true",
-                    help="wait for Enter between blocks, to reposition on a small patch")
+    ap.add_argument(
+        "--pause",
+        action="store_true",
+        help="wait for Enter between blocks, to reposition on a small patch",
+    )
     args = ap.parse_args()
 
     blocks = program(args.program)

@@ -127,6 +127,9 @@ def _plan_params(a: argparse.Namespace) -> dict:
     ):
         if getattr(a, flag) is not None:
             params[key] = getattr(a, flag)
+    for kv in a.set or []:  # any plan_* key, last word
+        k, v = kv.split("=", 1)
+        params[k] = float(v)
     return params
 
 
@@ -999,6 +1002,7 @@ def main() -> None:
     p.add_argument(
         "--ref-record", default=None, help="npz of the reference stage's inputs, every frame"
     )
+    p.add_argument("--set", nargs="*", default=None, help="plan_* overrides, key=value")
     p.add_argument(
         "--ref-record-full",
         action="store_true",
