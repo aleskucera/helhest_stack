@@ -133,6 +133,23 @@ dense trees: sim forest stray 0.6 -> 8.9%; at 2.0 a small real gain, kept option
 always-cold, `stop_tol`, `cold_on_repivot` (negligible), the taper's 0.1 m margin (facing_wall's
 rejections were a pivot's tail swing from a pose already against the wall).
 
+## Live in the node (patek1 replayed with the parameters set)
+
+| | deployed | fix set | fix set + policy descent |
+|---|---|---|---|
+| loops | 4.34% | 0.04% | 0.07% |
+| > 1 m off string | 12.74% | 0.14% | 0.21% |
+| no curve, goal > 1.5 m | 0.17% | 0.03% | 0.83% |
+| clearance p5 | 0.47 m | 0.44 m | 0.49 m |
+
+The live fix-set run matches the offline rerun exactly. The policy descent's empty frames are
+one 2 s stretch (t 182.8-184.8 s) where its route flipped north/south of a tree cluster and the
+southern curve's start pivot swung the tail into it: it needs route hysteresis first.
+
+Two more real runs, offline (deployed -> fix set): delay_neural0 stray 11.5 -> 0.06%, detour
+p95 1.68 -> 1.03, clearance p5 0.68 -> 0.82 m; new3 stray 10.5 -> 2.8%, deviation p95 0.84 ->
+0.09 m, frame jumps 2.8 -> 4.1% (the one metric that got worse).
+
 ## Closed loop, robot-faithful (`--route-coarsen 3 --fine 12 --dock 1.5`), 2 runs each
 
 | | R0 baseline | R6 fixes | R7 fixes + policy descent |
