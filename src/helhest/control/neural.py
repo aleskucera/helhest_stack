@@ -14,7 +14,8 @@ The plan loss is the cost-to-go at the end, its running mean, the footprint's wa
 effort and the command rate (BundleSim macro_terrain_worlds.plan_loss with the final config of graph_planner).
 
 Everything runs on the device as one captured CUDA graph: Warp kernels for the features, the mixture head and the
-loss with hand-written adjoints, and the MLP's GEMMs as Warp tile GEMMs (default) or through cuBLAS (torch). The kernels are BundleSim's warp_planner.py, whose loss and gradient match the torch rollout to float32
+loss with hand-written adjoints, and the MLP's GEMMs as Warp tile GEMMs (default) or through cuBLAS (torch).
+The kernels are BundleSim's warp_planner.py, whose loss and gradient match the torch rollout to float32
 (cosine >= 0.9999999). The MLP runs in float32, the geometry and the loss in float64.
 
 NeuralMppi subclasses MppiGpu so the node keeps every setter (set_lattice, set_reference, update_clearance, ...);
