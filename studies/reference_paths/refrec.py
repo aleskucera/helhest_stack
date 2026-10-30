@@ -9,15 +9,26 @@ import numpy as np
 
 
 class RefRecorder:
-    def __init__(self) -> None:
+    """`full` keeps V and the veto at every heading (what replay_ref.py needs to rerun the stage);
+    without it a frame keeps their heading-minimum / every-heading planes, small enough for a
+    1500-frame sim run at 0.08 m (3 MB a frame in full)."""
+
+    def __init__(self, full: bool = True) -> None:
+        self.full = full
         self.rows: dict[str, list] = {}
 
     def add(self, refpath, V, blocked, clear, sgrid, state_l, goal_l, n_ref, origin, t) -> None:
         rows = {
             "t": float(t),
-            "V": V.numpy(),
-            "blocked": (blocked.numpy() > 0.5).astype(np.uint8),
-            "clear": clear.numpy(),
+            **(
+                {"V": V.numpy(), "blocked": (blocked.numpy() > 0.5).astype(np.uint8)}
+                if self.full
+                else {
+                    "vmin": V.numpy().min(2).astype(np.float16),
+                    "forbid": (blocked.numpy() > 0.5).all(2).astype(np.uint8),
+                }
+            ),
+            "clear": clear.numpy().astype(np.float32 if self.full else np.float16),
             "state": np.asarray(state_l, np.float32)[:3],
             "goal": np.asarray(goal_l, np.float32)[:2],
             "sgrid": np.array(

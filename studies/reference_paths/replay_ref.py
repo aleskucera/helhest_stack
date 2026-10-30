@@ -95,16 +95,19 @@ def metrics(curve, taut, d, i, half_width, rear, prev_world) -> dict:
     if m["empty"]:
         return m
     g = d["sgrid"][i]
-    clear = d["clear"][i]
-    V = d["V"][i]
-    vmin = V.min(2)
+    clear = d["clear"][i].astype(np.float32)
+    full = "V" in d.files
+    vmin = d["V"][i].min(2) if full else d["vmin"][i].astype(np.float32)
     q = resample(curve, 0.1)
     dq = np.diff(q, axis=0)
     th = np.arctan2(dq[:, 1], dq[:, 0])
     rear_pts = q[1:] - rear * np.stack([np.cos(th), np.sin(th)], 1)
     wall = np.concatenate([sample(clear, g, q[1:]), sample(clear, g, rear_pts)]) - half_width
     m["wall_m"] = float(wall.min())
-    m["veto"] = veto_count(d["blocked"][i], g, curve)
+    if full:
+        m["veto"] = veto_count(d["blocked"][i], g, curve)
+    else:  # a light recording keeps only the every-heading veto
+        m["veto"] = veto_count(d["forbid"][i][:, :, None], g, curve)
     L = float(np.linalg.norm(np.diff(curve, axis=0), axis=1).sum())
     Lt = float(np.linalg.norm(np.diff(taut, axis=0), axis=1).sum()) if len(taut) > 1 else 0.0
     m["detour"] = L / Lt if Lt > 0.5 else float("nan")
@@ -165,6 +168,25 @@ def run(rec: Path, overrides: dict, check: bool = True) -> list[dict]:
     return out
 
 
+def score_recorded(rec: Path) -> list[dict]:
+    """The recorded curves as they are, no rerun: for light recordings (drive_sim without
+    --ref-record-full), and to judge what the robot actually tracked."""
+    d = np.load(rec)
+    hw, rear = float(d["half_width"]), float(d["rear"])
+    curves, tauts = ragged(d, "curve"), ragged(d, "taut")
+    out, prev_world = [], None
+    for i in range(len(d["t"])):
+        c = curves[i] if len(curves[i]) >= 3 else np.zeros((0, 2), np.float32)
+        m = metrics(c, tauts[i], d, i, hw, rear, prev_world)
+        st = d["state"][i]
+        m.update(i=i, t=float(d["t"][i] - d["t"][0]), ms=0.0, cold=int(d["cold"][i]))
+        m.update(x=float(st[0] + d["origin"][i][0]), y=float(st[1] + d["origin"][i][1]))
+        out.append(m)
+        if not m["empty"]:
+            prev_world = c + d["origin"][i][None]
+    return out
+
+
 def summarize(fr: list[dict]) -> dict:
     full = [f for f in fr if not f["empty"]]
 
@@ -199,6 +221,7 @@ def main() -> None:
     p.add_argument("rec", nargs="+")
     p.add_argument("--set", nargs="*", default=[])
     p.add_argument("--out", default=None)
+    p.add_argument("--recorded", action="store_true", help="score the recorded curves, no rerun")
     a = p.parse_args()
     ov = {}
     for kv in a.set:
@@ -207,7 +230,7 @@ def main() -> None:
     wp.init()
     allfr = {}
     for r in a.rec:
-        fr = run(Path(r), ov)
+        fr = score_recorded(Path(r)) if a.recorded else run(Path(r), ov)
         allfr[Path(r).stem] = fr
         s = summarize(fr)
         print(Path(r).stem, " ".join(f"{k}={v:.2f}" for k, v in s.items()))

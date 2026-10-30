@@ -419,7 +419,7 @@ def drive(a: argparse.Namespace) -> dict:
         sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "reference_paths"))
         from refrec import RefRecorder
 
-        ref_rec = RefRecorder()
+        ref_rec = RefRecorder(full=a.ref_record_full)
     esc: list = []  # per recorded frame: [best rollout's worst violation, median, clean fraction]
     # WALL CLEARANCE, every frame, against the world's exact solids. "Reached" cannot see a robot
     # scraping a wall on its way through, and the robust margin exists precisely so that never
@@ -998,6 +998,11 @@ def main() -> None:
     p.add_argument("--out", default=None, help="npz of the final map + trail, for the figure")
     p.add_argument(
         "--ref-record", default=None, help="npz of the reference stage's inputs, every frame"
+    )
+    p.add_argument(
+        "--ref-record-full",
+        action="store_true",
+        help="keep V and the veto at every heading (replayable), not just their planes",
     )
     p.add_argument(
         "--history",
