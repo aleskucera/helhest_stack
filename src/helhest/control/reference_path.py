@@ -199,6 +199,15 @@ def _min_over_theta(V: wp.array3d(dtype=float), r: int, c: int, n_theta: int) ->
     return best
 
 
+@wp.kernel
+def _vmin_kernel(V: wp.array3d(dtype=float), out: wp.array3d(dtype=float)):
+    """V's minimum over headings, once a frame, as a one-heading field: the descent and the
+    visibility test read it per cell instead of taking 24 loads each time (0.9 ms of a frame was
+    the single-thread descent's loads, A500)."""
+    r, c = wp.tid()
+    out[r, c, 0] = _min_over_theta(V, r, c, V.shape[2])
+
+
 @wp.func
 def _clear_along(
     field: wp.array2d(dtype=float), grid: Grid, a: wp.vec2, b: wp.vec2, step: float
@@ -572,6 +581,67 @@ def _field_grad(field: wp.array2d(dtype=float), grid: Grid, p: wp.vec2, h: float
     return wp.vec2(gx, gy)
 
 
+@wp.func
+def _room_at(clear_field: wp.array2d(dtype=float), sgrid: Grid, p: wp.vec2, offset: float) -> float:
+    """The room: the largest wall distance on three rings around the point."""
+    room = sample_field(clear_field, sgrid, p[0], p[1])
+    for ring in range(1, 4):
+        rad = offset * float(ring) / 3.0
+        for a in range(12):
+            ang = 0.5235988 * float(a)
+            room = wp.max(
+                room,
+                sample_field(
+                    clear_field, sgrid, p[0] + rad * wp.cos(ang), p[1] + rad * wp.sin(ang)
+                ),
+            )
+    return room
+
+
+@wp.kernel
+def _room_kernel(
+    samp_p: wp.array(dtype=wp.vec2),
+    samp_q: wp.array(dtype=int),
+    n_samp: wp.array(dtype=int),
+    clear_field: wp.array2d(dtype=float),
+    sgrid: Grid,
+    offset: float,
+    clear_target: wp.array(dtype=float),  # [N] in/out: lowered to each sample's room
+):
+    """`_targets_kernel`'s room test, one thread a sample: it was 37 field reads a sample in a
+    single thread, 0.6 ms of a frame (A500). A min is order-free, so the result is the same."""
+    k = wp.tid()
+    if k < n_samp[0]:
+        room = _room_at(clear_field, sgrid, samp_p[k], offset)
+        wp.atomic_min(clear_target, samp_q[k], wp.min(offset, room - 0.01))
+
+
+@wp.kernel
+def _taper_kernel(
+    taut: wp.array(dtype=wp.vec2),
+    n_taut: wp.array(dtype=int),
+    target: wp.array(dtype=wp.vec2),
+    t_len: wp.array(dtype=float),  # [1] the taut string's length
+    clear_field: wp.array2d(dtype=float),
+    sgrid: Grid,
+    ds0: float,
+    n_knots: int,
+    taper: float,
+    clear_target: wp.array(dtype=float),  # [N] in/out
+):
+    """ReferencePathParams.clear_taper: cap the clearance asked by each end's own plus the taper
+    times the distance from it."""
+    if n_taut[0] < 2:
+        return
+    c0 = sample_field(clear_field, sgrid, taut[0][0], taut[0][1])
+    end = target[0]
+    c1 = sample_field(clear_field, sgrid, end[0], end[1])
+    for q in range(n_knots):
+        s_q = (float(q) + 0.5) * ds0
+        cap = wp.min(c0 + taper * s_q, c1 + taper * wp.max(t_len[0] - s_q, 0.0))
+        clear_target[q] = wp.min(clear_target[q], cap)
+
+
 @wp.kernel
 def _targets_kernel(
     taut: wp.array(dtype=wp.vec2),
@@ -582,10 +652,13 @@ def _targets_kernel(
     offset: float,
     ds0: float,
     n_knots: int,
-    taper: float,  # [m per m] 0 = off: the clearance asked grows from each end's own at this rate
     target: wp.array(dtype=wp.vec2),  # [1] out: the taut string's end, moved out to the offset
     taut_at: wp.array(dtype=wp.vec2),  # [N] out: the taut point at each knot's arc length
     clear_target: wp.array(dtype=float),  # [N] out: the clearance asked at each knot
+    samp_p: wp.array(dtype=wp.vec2),  # [S] out: the points whose room `_room_kernel` tests
+    samp_q: wp.array(dtype=int),  # [S] out: the knot each one lowers
+    n_samp: wp.array(dtype=int),  # [1] out
+    t_len: wp.array(dtype=float),  # [1] out: the taut string's length
 ):
     """Every frame: the end to reach, the taut point under each knot (the fallback pull where a
     point has strayed inside a wall, where the distance map has no gradient), and the clearance
@@ -612,8 +685,12 @@ def _targets_kernel(
                 break
             end = end + 0.1 * wp.normalize(gr)
     target[0] = end
+    n_samp[0] = 0
+    t_len[0] = 0.0
     if n < 2:
         return
+    max_s = samp_p.shape[0]
+    k = int(0)
     s_c = float(0.0)
     for i in range(n - 1):
         seg = taut[i + 1] - taut[i]
@@ -625,27 +702,16 @@ def _targets_kernel(
             q = wp.clamp(int(s_here / ds0), 0, n_knots - 1)
             if j == 0 or q != wp.clamp(int((s_here - length / float(ns)) / ds0), 0, n_knots - 1):
                 taut_at[q] = p
-            # the room: the largest wall distance on three rings around the point
-            room = sample_field(clear_field, sgrid, p[0], p[1])
-            for ring in range(1, 4):
-                rad = offset * float(ring) / 3.0
-                for a in range(12):
-                    ang = 0.5235988 * float(a)
-                    room = wp.max(
-                        room,
-                        sample_field(
-                            clear_field, sgrid, p[0] + rad * wp.cos(ang), p[1] + rad * wp.sin(ang)
-                        ),
-                    )
-            clear_target[q] = wp.min(clear_target[q], wp.min(offset, room - 0.01))
+            if k < max_s:  # the room is tested in parallel (_room_kernel)
+                samp_p[k] = p
+                samp_q[k] = q
+                k += 1
+            else:  # past the buffer: here, as before
+                room = _room_at(clear_field, sgrid, p, offset)
+                clear_target[q] = wp.min(clear_target[q], wp.min(offset, room - 0.01))
         s_c += length
-    if taper > 0.0:
-        c0 = sample_field(clear_field, sgrid, taut[0][0], taut[0][1])
-        c1 = sample_field(clear_field, sgrid, end[0], end[1])
-        for q in range(n_knots):
-            s_q = (float(q) + 0.5) * ds0
-            cap = wp.min(c0 + taper * s_q, c1 + taper * wp.max(s_c - s_q, 0.0))
-            clear_target[q] = wp.min(clear_target[q], cap)
+    n_samp[0] = k
+    t_len[0] = s_c
 
 
 @wp.func
@@ -1269,6 +1335,7 @@ class ReferencePath:
             self.start = wp.zeros(3, dtype=wp.float32)
             self.goal = wp.zeros(3, dtype=wp.float32)
             self.desc = wp.zeros(256, dtype=wp.vec2)
+            self.vmin = wp.zeros((1, 1, 1), dtype=wp.float32)  # sized to V on the first frame
             self.prev_dist = wp.zeros((1, 1), dtype=wp.float32)  # sized to V on the first frame
             self.n_desc = wp.zeros(1, dtype=wp.int32)
             mv = params.n_taut
@@ -1285,6 +1352,10 @@ class ReferencePath:
             self.target = wp.zeros(1, dtype=wp.vec2)
             self.taut_at = wp.zeros(N, dtype=wp.vec2)
             self.clear_target = wp.zeros(N, dtype=wp.float32)
+            self.samp_p = wp.zeros(1024, dtype=wp.vec2)
+            self.samp_q = wp.zeros(1024, dtype=wp.int32)
+            self.n_samp = wp.zeros(1, dtype=wp.int32)
+            self.t_len = wp.zeros(1, dtype=wp.float32)
             self.m = wp.zeros(N + 2, dtype=wp.float32)
             self.v = wp.zeros(N + 2, dtype=wp.float32)
             self.phi = wp.zeros(1, dtype=wp.float32)
@@ -1323,6 +1394,13 @@ class ReferencePath:
         """The whole frame as launches, every decision on the device, so it is captured once."""
         prm = self.params
         N = prm.n_knots
+        wp.launch(
+            _vmin_kernel,
+            (V.shape[0], V.shape[1]),
+            inputs=[V],
+            outputs=[self.vmin],
+            device=self.device,
+        )
         if prm.sticky_tol_m > 0.0:
             wp.launch(
                 _prev_dist_kernel,
@@ -1335,9 +1413,9 @@ class ReferencePath:
             _descent_kernel,
             1,
             inputs=[
-                V,
+                self.vmin,
                 route_grid,
-                self.n_theta,
+                1,
                 self.start,
                 self.goal,
                 clear_field,
@@ -1389,9 +1467,9 @@ class ReferencePath:
                 self.n_verts,
                 clear_field,
                 sim_grid,
-                V,
+                self.vmin,
                 route_grid,
-                self.n_theta,
+                1,
                 prm.v_tol,
                 self.offset,
             ],
@@ -1437,11 +1515,43 @@ class ReferencePath:
                 self.offset,
                 prm.spacing_m,
                 N,
-                prm.clear_taper,
             ],
-            outputs=[self.target, self.taut_at, self.clear_target],
+            outputs=[
+                self.target,
+                self.taut_at,
+                self.clear_target,
+                self.samp_p,
+                self.samp_q,
+                self.n_samp,
+                self.t_len,
+            ],
             device=self.device,
         )
+        wp.launch(
+            _room_kernel,
+            self.samp_p.shape[0],
+            inputs=[self.samp_p, self.samp_q, self.n_samp, clear_field, sim_grid, self.offset],
+            outputs=[self.clear_target],
+            device=self.device,
+        )
+        if prm.clear_taper > 0.0:
+            wp.launch(
+                _taper_kernel,
+                1,
+                inputs=[
+                    self.taut,
+                    self.n_taut,
+                    self.target,
+                    self.t_len,
+                    clear_field,
+                    sim_grid,
+                    prm.spacing_m,
+                    N,
+                    prm.clear_taper,
+                ],
+                outputs=[self.clear_target],
+                device=self.device,
+            )
         wp.launch(
             _init_kernel,
             1,
@@ -1599,6 +1709,9 @@ class ReferencePath:
             self.prev_dist = wp.zeros(
                 (route_grid.cells_y, route_grid.cells_x), dtype=wp.float32, device=self.device
             )
+            self._graph = None
+        if self.vmin.shape != (V.shape[0], V.shape[1], 1):
+            self.vmin = wp.zeros((V.shape[0], V.shape[1], 1), dtype=wp.float32, device=self.device)
             self._graph = None
         if self._graph is None or key != self._graph_key:
             with wp.ScopedCapture(device=self.device) as cap:
