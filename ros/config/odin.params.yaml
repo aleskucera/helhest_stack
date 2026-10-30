@@ -291,13 +291,18 @@
     # 0 would force the legacy instantaneous model. With the lag modeled, plan_max_slew is a
     # safety backstop, not the smoothness mechanism.
     plan_tau_motor: -1.0
-    # [s] command dead time inside the MPPI rollouts: the first steps replay the commands already
-    # sent, so a plan starts from where the robot will be when its own command acts. 0.4 = the
-    # LLC's measured turn delay (karlak bags 2026-10-29/30: gyro 0.2-0.4 s behind /cmd_vel, pose
-    # 0.22 s old at publish); the old 0.04 rounded to 0 rollout steps, i.e. off. Without it the
-    # planner re-aims every frame against corrections that land late -- the 1-5 s weave. Launch-
-    # time only (not in _PLAN_BUILD). MPPI only: the neural planner has no command history.
-    plan_command_delay: 0.4
+    # The robot's delay chain, split so nothing is counted twice (karlak bags 2026-10-29/30): the
+    # pose is ~0.22 s old when its command is published, and the body answers 0.2-0.4 s after
+    # /cmd_vel, of which the motor lag above (0.19 s) is already modelled in the rollouts. Without
+    # compensation the planner re-aims every frame against corrections that land late -- the
+    # 1-5 s weave.
+    # [s] both planners start from the pose carried this far forward at Odin's measured twist:
+    # the pose age. Read every frame, so `ros2 param set` takes effect at once.
+    plan_predict_s: 0.2
+    # [s] the dead time left after the motor lag: MPPI's rollouts replay the commands already sent
+    # for this long (0.2 = 2 rollout steps; the old 0.04 rounded to 0, i.e. off). Launch-time only
+    # (not in _PLAN_BUILD). MPPI only: the neural planner has no command history.
+    plan_command_delay: 0.2
 
     # --- TURN BRAKE: slow into a corner, then accelerate out (both knobs 0 = off) ---
     # Live-tunable, no node restart:
