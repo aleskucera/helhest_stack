@@ -32,6 +32,7 @@ failure has been diagnosed twice on real bags and it is not worth a third time.
 
 Runs on dasenka, which is where the simulator lives -- see this directory's README.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -53,6 +54,7 @@ from helhest.control.command import traction_scale
 from helhest.control.command import turn_first
 from helhest.control.governor import ClearanceGovernor
 from helhest.control.mppi import MppiGpu
+from helhest.control.neural import NeuralMppi
 from helhest.control.reference_path import forbidden_distance
 from helhest.control.reference_path import ReferencePath
 from helhest.control.terminal import dock_control
@@ -308,12 +310,22 @@ def drive(a: argparse.Namespace) -> dict:
         plan_sim.set_uniform_friction(0.8)
         # The robot's controller, not library defaults: same cost weights, sampler priors, friction
         # replicas and cost-to-go settings, through the one function the node uses too.
-        planner = MppiGpu(
-            plan_sim,
-            a.cfg.cost,
-            sampling=a.cfg.sampling,
-            n_theta=a.n_theta,
-        )
+        if a.planner == "neural":
+            planner = NeuralMppi(
+                plan_sim,
+                a.cfg.cost,
+                sampling=a.cfg.sampling,
+                n_theta=a.n_theta,
+                weights=a.neural_weights,
+                steps=a.neural_steps,
+            )
+        else:
+            planner = MppiGpu(
+                plan_sim,
+                a.cfg.cost,
+                sampling=a.cfg.sampling,
+                n_theta=a.n_theta,
+            )
         planner.reset_nominal(a.cfg.nominal_reset)
         planner.set_mu_band(1.0, a.cfg.mu_span)
     # the clearance speed governor: drive only as fast as the room along the plan allows
@@ -594,6 +606,19 @@ def drive(a: argparse.Namespace) -> dict:
                     err = (bearing - yaw + np.pi) % (2.0 * np.pi) - np.pi
                     scale = traction_scale(err, on_deg, off_deg)
             planner.set_traction_scale(scale)
+            if isinstance(planner, NeuralMppi):
+                # the node's inputs: the full pose, the odometry twist (here from the pose delta)
+                # and the wheel speeds (here the last command)
+                world_T_base = np.eye(4)
+                world_T_base[:3, :3] = R
+                world_T_base[:3, 3] = body[:3]
+                twist = np.zeros(3)
+                if prev_pose is not None:
+                    dx, dy = rx - prev_pose[0], ry - prev_pose[1]
+                    twist[0] = (dx * np.cos(yaw) + dy * np.sin(yaw)) / dt
+                    twist[1] = (-dx * np.sin(yaw) + dy * np.cos(yaw)) / dt
+                    twist[2] = ((yaw - prev_pose[2] + np.pi) % (2.0 * np.pi) - np.pi) / dt
+                planner.set_robot_state(world_T_base, (wx0, wy0), twist, to_engine_order(prev_lrr))
             planner.replan(state_l, goal_l, a.refine)
             u = planner.nominal()
             wl, wr = float(u[0, 0]), float(u[0, 1])
@@ -961,6 +986,15 @@ def main() -> None:
         help="also record every Nth frame into --out, for the scrub page; 0 = OFF",
     )
     p.add_argument("--controller", choices=("mppi", "carrot"), default="mppi")
+    p.add_argument(
+        "--planner",
+        choices=("mppi", "neural"),
+        default="mppi",
+        help="the controller's replan: MPPI on the kinematic twin, or the learned terrain model "
+        "(control/neural.py)",
+    )
+    p.add_argument("--neural-weights", default="", help=".npz for --planner neural")
+    p.add_argument("--neural-steps", type=int, default=20, help="Adam steps per re-plan")
     p.add_argument(
         "--turn-dead",
         type=float,

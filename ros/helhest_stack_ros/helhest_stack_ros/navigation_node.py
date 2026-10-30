@@ -64,6 +64,7 @@ from helhest.control.command import to_engine_order
 from helhest.control.command import traction_scale
 from helhest.control.command import llc_not_driving
 from helhest.control.mppi import MppiGpu
+from helhest.control.neural import NeuralMppi
 from helhest.control.reference_path import forbidden_distance
 from helhest.control.reference_path import ReferencePath
 from helhest.control.terminal import dock_control
@@ -476,6 +477,15 @@ class NavigationNode(Node):
         d("plan_n_theta", PLAN_DEFAULTS["plan_n_theta"])
         d("plan_lat_coarsen", 3)  # routing/cost-to-go grid coarsening vs the map cell
         d("plan_n_refine", 3)  # MPPI refine iterations per frame
+        # "neural": MPPI's replan done by gradient descent through the learned terrain model
+        # (control/neural.py); everything downstream of the plan is the same. Commands stay in
+        # [0, 4] rad/s, no reverse.
+        d("plan_planner", "mppi")
+        d("plan_neural_weights", "")  # the .npz from BundleSim's export_stack_planner.py
+        d("plan_neural_gemm", "auto")  # the MLP's GEMMs: auto (cuBLAS if torch imports) | tile
+        # Adam steps per re-plan; the time is about linear in it. The study re-planned once per
+        # second with 20; re-planning every frame from the last plan needs fewer.
+        d("plan_neural_steps", 20)
         d("plan_friction", 0.8)  # uniform rollout friction
         # Wheel envelope half-width [m]. DEFAULT 0.10 = the measured tread, as a yaw-binned
         # CYLINDER: honest laterally, where the sphere reached 0.35 m sideways and refused gaps the
@@ -867,6 +877,10 @@ class NavigationNode(Node):
         self.plan_n_theta: int = g("plan_n_theta")
         self.plan_lat_coarsen: int = g("plan_lat_coarsen")
         self.plan_n_refine: int = g("plan_n_refine")
+        self.plan_planner: str = g("plan_planner")
+        self.plan_neural_weights: str = g("plan_neural_weights")
+        self.plan_neural_gemm: str = g("plan_neural_gemm")
+        self.plan_neural_steps: int = g("plan_neural_steps")
         self.plan_friction: float = g("plan_friction")
         _ww = float(g("plan_wheel_width"))
         self.plan_wheel_width: float | None = _ww if _ww > 0.0 else None
@@ -1015,7 +1029,20 @@ class NavigationNode(Node):
         self._cmd_in_flight = deque(
             self._cmd_in_flight, maxlen=max(self.plan_sim.command_delay_steps, 1)
         )
-        self.planner = MppiGpu(self.plan_sim, cfg.cost, sampling=cfg.sampling, n_theta=cfg.n_theta)
+        if self.plan_planner == "neural":
+            self.planner = NeuralMppi(
+                self.plan_sim,
+                cfg.cost,
+                sampling=cfg.sampling,
+                n_theta=cfg.n_theta,
+                weights=self.plan_neural_weights,
+                gemm=self.plan_neural_gemm,
+                steps=self.plan_neural_steps,
+            )
+        else:
+            self.planner = MppiGpu(
+                self.plan_sim, cfg.cost, sampling=cfg.sampling, n_theta=cfg.n_theta
+            )
         self.planner.reset_nominal(cfg.nominal_reset)
         self.planner.set_mu_band(1.0, cfg.mu_span)
         self.governor: ClearanceGovernor | None = None
@@ -1896,6 +1923,11 @@ class NavigationNode(Node):
                         err, self.plan_traction_on_deg, self.plan_traction_off_deg
                     )
             self.planner.set_traction_scale(scale)
+            if isinstance(self.planner, NeuralMppi):
+                # the model starts from the full state: attitude, body twist, wheel speeds
+                self.planner.set_robot_state(
+                    world_T_base, (mf.lxmin, mf.lymin), twist_seed, wheel_seed
+                )
             self.planner.replan(state_l, goal_l, int(self.plan_n_refine))
             self._ck("plan:replan")
         # PLAN CONSISTENCY: EMA the nominal toward last frame's plan, shifted one step forward (the
