@@ -132,6 +132,12 @@ class ReferencePathParams:
     # under the 270 deg test, a swing out past the goal and back -- stays a local minimum
     # (patek1 t 41-45 s: 4-5 m loops the loop test and the re-pivot test both let through).
     cold_on_detour: float = 0.0
+    # Per m^2 of each point's distance to the taut string, up to the arrival. The length term
+    # prices the KNOT COUNT to arrival, an integer, so it has no gradient on the curve's shape:
+    # once a curve reaches its target nothing but the tiny curvature weights shapes it, and a
+    # gentle bulge drifts freely -- 1.3 m off a straight string through a gap, growing frame by
+    # frame while the robot crawled (gap), the sag after a turn (uturn). 0 = off.
+    w_taut: float = 0.0
 
     @property
     def kappa_max(self) -> float:
@@ -1077,6 +1083,9 @@ def _optimise_kernel(
     w_veto: float,
     rear: float,
     n_knots: int,
+    taut: wp.array(dtype=wp.vec2),  # the taut string, for `w_taut`
+    n_taut: wp.array(dtype=int),
+    w_taut: float,
     kappa: wp.array(dtype=float),  # [N] in/out
     ds: wp.array(dtype=float),  # [1] in/out
     phi: wp.array(dtype=float),  # [1] in/out
@@ -1171,6 +1180,21 @@ def _optimise_kernel(
         if i == cut:
             gpx += 2.0 * w_end * (p_i[0] - tgt[0])
             gpy += 2.0 * w_end * (p_i[1] - tgt[1])
+        if w_taut > 0.0 and on and i >= 1 and i <= cut:
+            # toward the nearest point of the taut string
+            t_near = p_i
+            t_best = float(1.0e30)
+            for t_k in range(n_taut[0] - 1):
+                t_a = taut[t_k]
+                t_ab = taut[t_k + 1] - t_a
+                t_f = wp.dot(p_i - t_a, t_ab) / wp.max(wp.dot(t_ab, t_ab), 1.0e-12)
+                t_q = t_a + wp.clamp(t_f, 0.0, 1.0) * t_ab
+                t_d = wp.length_sq(p_i - t_q)
+                if t_d < t_best:
+                    t_best = t_d
+                    t_near = t_q
+            gpx += 2.0 * w_taut * (p_i[0] - t_near[0])
+            gpy += 2.0 * w_taut * (p_i[1] - t_near[1])
         # the adjoint: dp_m/dtheta_i = d (-sin, cos)(theta_i) and dp_m/dd = sum_{j<m} t(theta_j)
         # for m > i, so each knot needs the gradient summed over the points after it
         incx = wp.tile_scan_inclusive(wp.tile(gpx))
@@ -1643,6 +1667,9 @@ class ReferencePath:
                 prm.w_veto,
                 self.rear,
                 N,
+                self.taut,
+                self.n_taut,
+                prm.w_taut,
             ],
             outputs=[
                 self.kappa,
