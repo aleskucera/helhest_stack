@@ -105,6 +105,48 @@ per neighbour) and the clearance-room test run one thread per sample: 2.91 -> 2.
 the A500, 0 of 127 replayed curves differ. The optimiser (1.87 ms, 100 Adam steps) is now nearly
 all of it.
 
+## Recommended set (opt-in, all defaults unchanged)
+
+    -p plan_ref_cold_on_divergence:=1.0 -p plan_ref_clear_taper:=0.5 -p plan_ref_cold_on_loop:=1.0 \
+    -p plan_ref_w_pivot:=0.5 -p plan_ref_w_taut:=3.0
+
+Offline on the robot's own frames (node replay, stage rerun):
+
+| metric | patek1 deployed | fixed | patek0 deployed | fixed |
+|---|---|---|---|---|
+| loop | 4.3% | 0.04% | 2.0% | 0.09% |
+| > 1 m off the taut string | 12.7% | 0.14% | 14.8% | 0.43% |
+| detour p95 | 2.36 | 1.06 | 2.15 | 1.06 |
+| deviation p95 | 2.44 m | 0.11 m | 1.72 m | 0.13 m |
+| no curve, goal > 1.5 m | 0.17% | 0.03% | 0.29% | 0.08% |
+| clearance p5 | 0.47 m | 0.44 m | 0.53 m | 0.37 m |
+
+patek0's lower clearance p5 is the taper letting the curve approach goals beside obstacles
+(the tightest frames are 1.6-2.4 m from such a goal, where the deployed stage had no curve or
+a hook).
+
+`w_taut` pulls only where the point already has its clearance (the taut string hugs what it
+bends round; an unrestricted pull cost clearance near trunks).
+
+Rejected: `sticky_tol_m` (more loops on real data), `cold_on_detour` 1.3 (repeated colds in
+dense trees: sim forest stray 0.6 -> 8.9%; at 2.0 a small real gain, kept optional),
+always-cold, `stop_tol`, `cold_on_repivot` (negligible), the taper's 0.1 m margin (facing_wall's
+rejections were a pivot's tail swing from a pose already against the wall).
+
+## Closed loop, robot-faithful (`--route-coarsen 3 --fine 12 --dock 1.5`), 2 runs each
+
+| | R0 baseline | R6 fixes | R7 fixes + policy descent |
+|---|---|---|---|
+| reached | 43/46 | 41/46 | 43/46 |
+| total frames | 19165 | 18380 | 16818 |
+
+Clear wins for the fixes: facing_wall 672 -> 293 frames, goal_at_wall 808 -> 124, gap 613 ->
+162. The policy descent fixes cornerL24 (2/2 at 293 frames vs 1/2) and false_door (2/2 at 754
+vs 1/2 at 1278). corridor24/26 (2.4/2.6 m) fail in most runs of every configuration: at 0.24 m
+routing the start pose 0.5 m off the centre line is already vetoed, no route exists on the first
+frame, the robot drifts into the wall -- a router/resolution limit, not the reference. Final
+set with 4 runs (R8) and 4 baseline runs: running.
+
 ## Changes under test (all opt-in, default off)
 
 | param | fixes |
