@@ -113,6 +113,7 @@ def metrics(curve, taut, d, i, half_width, rear, prev_world) -> dict:
     """The map-aware score of one frame's curve."""
     m: dict = {"empty": len(curve) < 3}
     st = d["state"][i]
+    m["goal_dist"] = float(np.linalg.norm(d["goal"][i] - st[:2]))
     if m["empty"]:
         return m
     g = d["sgrid"][i]
@@ -234,6 +235,8 @@ def summarize(fr: list[dict]) -> dict:
     return dict(
         frames=len(fr),
         empty=100.0 * float(np.mean([f["empty"] for f in fr])),
+        # without a curve while the goal is still more than 1.5 m off: not just arrival
+        empty_far=100.0 * float(np.mean([f["empty"] and f.get("goal_dist", 9) > 1.5 for f in fr])),
         wall_neg=frac(lambda f: f["wall_m"] < 0.0),
         wall_p5=pct("wall_m", 5),
         veto=frac(lambda f: f["veto"] > 0),
