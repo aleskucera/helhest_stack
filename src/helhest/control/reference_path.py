@@ -41,6 +41,7 @@ The point-based objective the oracle uses needs L-BFGS: its curvature-rate hinge
 any gradient step (prototyped 2026-10-28, every step diverged). The curvature parameterisation
 makes the bounds free and the rest smooth; its cost is a lever-arm coupling that Adam handles.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -92,6 +93,15 @@ class ReferencePathParams:
     # (box: 0.6 m too wide). Measured on drive_sim's box and slalom, 2026-10-28: 0.34 m past the
     # box, up to 0.44 past the slabs. Subtracted from the half-width the stage measures with.
     forbidden_growth_m: float = 0.3
+    # STUDY (studies/reference_paths). A cold start when the taut string leaves last frame's
+    # curve, whether or not its end moved: with the end fixed (the goal in the window) a curve
+    # warm-started on the other side of an obstacle was kept for good (forest, facing_wall).
+    cold_on_divergence: bool = False
+    # [m of clearance per m of path] 0 = off. The clearance asked at a knot is capped at the start
+    # pose's own clearance plus this times the path length from it, and likewise from the end:
+    # a goal 0.6 m from a wall cannot be reached at 1.2 m, and asking for it bent the curve into
+    # a hook (goal_at_wall); a robot already beside a wall had every curve rejected (facing_wall).
+    clear_taper: float = 0.0
 
     @property
     def kappa_max(self) -> float:
@@ -441,6 +451,7 @@ def _targets_kernel(
     offset: float,
     ds0: float,
     n_knots: int,
+    taper: float,  # [m per m] 0 = off: the clearance asked grows from each end's own at this rate
     target: wp.array(dtype=wp.vec2),  # [1] out: the taut string's end, moved out to the offset
     taut_at: wp.array(dtype=wp.vec2),  # [N] out: the taut point at each knot's arc length
     clear_target: wp.array(dtype=float),  # [N] out: the clearance asked at each knot
@@ -497,6 +508,13 @@ def _targets_kernel(
                     )
             clear_target[q] = wp.min(clear_target[q], wp.min(offset, room - 0.01))
         s_c += length
+    if taper > 0.0:
+        c0 = sample_field(clear_field, sgrid, taut[0][0], taut[0][1])
+        c1 = sample_field(clear_field, sgrid, end[0], end[1])
+        for q in range(n_knots):
+            s_q = (float(q) + 0.5) * ds0
+            cap = wp.min(c0 + taper * s_q, c1 + taper * wp.max(s_c - s_q, 0.0))
+            clear_target[q] = wp.min(clear_target[q], cap)
 
 
 @wp.func
@@ -531,6 +549,7 @@ def _mode_kernel(
     taut_step: float,
     iterations: int,
     iterations_cold: int,
+    any_end: int,  # 1: test the divergence every frame, not only when the end moved
     last_end: wp.array(dtype=wp.vec2),  # [1] in/out: the taut string's end last frame
     cold: wp.array(dtype=int),  # [1] out: 1 cold, 0 warm, -1 no string (no curve this frame)
     limit: wp.array(dtype=int),  # [1] out: Adam steps this frame
@@ -552,7 +571,7 @@ def _mode_kernel(
     c = int(0)
     if warm[0] == 0 or nv < 2:
         c = 1
-    elif wp.length(end - last_end[0]) > rebase_m:
+    elif any_end == 1 or wp.length(end - last_end[0]) > rebase_m:
         prev_len = float(0.0)
         for j in range(nv - 1):
             prev_len += wp.length(pts[j + 1] - pts[j])
@@ -986,6 +1005,7 @@ def _finish_kernel(
     half_width: float,
     rear: float,
     reject_m: float,
+    taper: float,  # ReferencePathParams.clear_taper: the floor eases toward each end too
     blocked: wp.array3d(dtype=float),
     rgrid: Grid,
     n_theta: int,
@@ -1023,13 +1043,20 @@ def _finish_kernel(
     # and rear axle discs along it, against the floor or what the start pose already has
     c0 = sample_field(clear_field, sgrid, start[0], start[1]) - half_width
     floor_m = wp.min(reject_m, c0 - 0.05)
-    worst = float(1.0e30)
+    c1 = sample_field(clear_field, sgrid, pts[jb][0], pts[jb][1]) - half_width
+    reject = int(0)
     for i in range(1, jb + 1):
-        worst = wp.min(worst, sample_field(clear_field, sgrid, pts[i][0], pts[i][1]) - half_width)
+        here = sample_field(clear_field, sgrid, pts[i][0], pts[i][1]) - half_width
         if i < N:
             q = pts[i] - rear * tan[i]
-            worst = wp.min(worst, sample_field(clear_field, sgrid, q[0], q[1]) - half_width)
-    if worst < floor_m:
+            here = wp.min(here, sample_field(clear_field, sgrid, q[0], q[1]) - half_width)
+        f = floor_m
+        if taper > 0.0:
+            ease = wp.min(c0 + taper * s_out[i], c1 + taper * (s_out[jb] - s_out[i])) - 0.05
+            f = wp.min(reject_m, ease)
+        if here < f:
+            reject = 1
+    if reject == 1:
         n_valid[0] = 0
     # and a pose the settle forbids at the curve's own heading (past the first two: the robot may
     # already stand on one)
@@ -1189,6 +1216,7 @@ class ReferencePath:
                 prm.taut_step_m,
                 prm.iterations,
                 prm.iterations_cold,
+                int(prm.cold_on_divergence),
             ],
             outputs=[self.last_end, self.cold, self.limit],
             device=self.device,
@@ -1205,6 +1233,7 @@ class ReferencePath:
                 self.offset,
                 prm.spacing_m,
                 N,
+                prm.clear_taper,
             ],
             outputs=[self.target, self.taut_at, self.clear_target],
             device=self.device,
@@ -1282,6 +1311,7 @@ class ReferencePath:
                 self.half_width,
                 self.rear,
                 prm.reject_m,
+                prm.clear_taper,
                 blocked,
                 route_grid,
                 self.n_theta,
