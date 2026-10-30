@@ -483,7 +483,7 @@ class NavigationNode(Node):
         # param: they build the planner, and a `ros2 param set` on a running node does nothing.
         d("plan_planner", "mppi")
         d("plan_neural_weights", "")  # the .npz from BundleSim's export_stack_planner.py
-        # the MLP's GEMMs: cublas (torch; 1.5x tile on a 3090) | tile (Warp) | auto (cublas w/ torch)
+        # the MLP's GEMMs: cublas (torch; 1.5x tile on a 3090) | tile (Warp) | auto
         d("plan_neural_gemm", "cublas")
         # Adam steps per re-plan; the time is about linear in it (3090: 3.4 ms + 1.6 ms a step).
         # The study re-planned once per second with 20; re-planning every frame from the last
