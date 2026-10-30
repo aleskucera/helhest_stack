@@ -244,6 +244,9 @@ class NavigationNode(Node):
             else None
         )
         self._rec_planned: int = 0  # planned frames so far, for the every-Nth rule
+        # the reference stage's inputs and outputs, EVERY frame (studies/reference_paths): enough
+        # to rerun ReferencePath offline on what the node saw, warm starts included
+        self._ref_rec: dict[str, list] | None = {} if self.plan_ref_record else None
         # Latest map->odom correction, cached from the last processed cloud and re-broadcast
         # at the full odom rate (see _odom_tf_callback) so base_link stays dense for TF lookups.
         self._map_T_odom: np.ndarray | None = None
@@ -767,6 +770,7 @@ class NavigationNode(Node):
         # memory's final layers, written as one npz to this path when the node shuts down. "" = off.
         d("plan_debug_record", "")
         d("plan_debug_record_every", 4)
+        d("plan_ref_record", "")
         # deceleration cap [rad/s^2] -- separate from accel so stops can be firmer than the gentle
         # launch. 12.0 = ground ~4.2 m/s^2, stops from cruise in ~0.32s. None/<=0 would mean symmetric.
         d("plan_max_decel", PLAN_DEFAULTS["plan_max_decel"])
@@ -894,6 +898,7 @@ class NavigationNode(Node):
         self.plan_debug_dump: int = int(g("plan_debug_dump"))
         self.plan_debug_record: str = str(g("plan_debug_record"))
         self.plan_debug_record_every: int = max(1, int(g("plan_debug_record_every")))
+        self.plan_ref_record: str = str(g("plan_ref_record"))
         self.plan_spin_frac: float = g("plan_spin_frac")
         self.plan_spin_min: float = g("plan_spin_min")
         self.plan_spin_max: float = g("plan_spin_max")
@@ -1579,7 +1584,48 @@ class NavigationNode(Node):
             f"plan recording -> {self.plan_debug_record} ({len(rec['meta'])} frames)"
         )
 
+    def _ref_record(self, state_l, goal_l, n_ref: int, mf: _MapFrame, stamp) -> None:
+        """Keep this frame's reference-stage inputs and outputs (plan_ref_record)."""
+        rp, g = self.refpath, self.sgrid
+        rows = {
+            "t": stamp.sec + 1e-9 * stamp.nanosec,
+            "V": self.ctg.V.numpy(),
+            "blocked": (self.ctg.blocked.numpy() > 0.5).astype(np.uint8),
+            "clear": self._ref_clear.numpy(),
+            "state": np.asarray(state_l, np.float32)[:3],
+            "goal": np.asarray(goal_l, np.float32)[:2],
+            "sgrid": np.array([g.origin_x, g.origin_y, g.cell_size, g.cells_x, g.cells_y]),
+            "origin": np.array([mf.lxmin, mf.lymin]),
+            "n_ref": n_ref,
+            "curve": rp.pts.numpy()[: max(n_ref, 0)],
+            "taut": rp.taut.numpy()[: int(rp.n_taut.numpy()[0])],
+            "desc": rp.desc.numpy()[: int(rp.n_desc.numpy()[0])],
+            "cold": int(rp.cold.numpy()[0]),
+        }
+        for k, v in rows.items():
+            self._ref_rec.setdefault(k, []).append(v)
+
+    def _ref_record_save(self) -> None:
+        rec = self._ref_rec
+        out = {}
+        for k, v in rec.items():
+            if k in ("curve", "taut", "desc"):  # ragged: concatenated, with the row lengths
+                out[f"{k}_n"] = np.array([len(a) for a in v], np.int32)
+                out[k] = np.concatenate(v) if v else np.zeros((0, 2), np.float32)
+            else:
+                out[k] = np.asarray(v)
+        out["params"] = np.array(json.dumps(self.refpath.params.__dict__))
+        out["half_width"] = np.array(self.refpath.half_width)
+        out["rear"] = np.array(self.refpath.rear)
+        np.savez_compressed(self.plan_ref_record, **out)
+        self.get_logger().info(f"ref recording -> {self.plan_ref_record} ({len(rec['t'])} frames)")
+
     def destroy_node(self) -> bool:
+        if self._ref_rec is not None and self._ref_rec:
+            try:
+                self._ref_record_save()
+            except Exception as e:  # a diagnostic must never block the shutdown
+                self.get_logger().warn(f"ref recording failed: {e}")
         if self._rec is not None:
             try:
                 self._record_save()
@@ -1878,6 +1924,8 @@ class NavigationNode(Node):
                     goal_xy=np.asarray(goal_l, np.float32),
                     blocked=self.ctg.blocked,
                 )
+                if self._ref_rec is not None:
+                    self._ref_record(state_l, goal_l, n_ref, mf, stamp)
                 if n_ref >= 3:
                     self.planner.set_reference(self.refpath)
                 else:
