@@ -1151,10 +1151,10 @@ def _optimise_kernel(
             gt = g3[2] + d * (-wp.sin(th_i) * after_x + wp.cos(th_i) * after_y)
             dds = wp.cos(th_i) * after_x + wp.sin(th_i) * after_y + gt * cum_i + w_k * k_i * k_i
         gds = w_len * float(cut) + wp.tile_sum(wp.tile(dds))[0]
-        gphi = 2.0 * w_pivot * ph + wp.tile_sum(wp.tile(gt))[0]
+        gt_tot = wp.tile_sum(wp.tile(gt))[0]
+        gphi = 2.0 * w_pivot * ph + gt_tot
         # dJ/dkappa_j = d sum_{k>j} dJ/dtheta_k + the curvature and curvature-rate terms
         gt_inc = wp.tile_scan_inclusive(wp.tile(gt))
-        gt_tot = wp.tile_sum(wp.tile(gt))[0]
         tk = wp.tile(kk)
         n_it += 1
         bias_m = 1.0 - wp.pow(0.9, float(n_it))
