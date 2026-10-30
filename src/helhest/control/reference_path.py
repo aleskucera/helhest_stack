@@ -108,6 +108,9 @@ class ReferencePathParams:
     # the map's every update (facing_wall: north, south, north -- into the wall).
     sticky_tol_m: float = 0.0
     sticky_w: float = 0.5  # [m of V per m off last frame's string]
+    # [1/m] 0 = off. Stop a frame's Adam steps once a step moves no curvature knot by more than
+    # this (nor the spacing or the start pivot by the like): a warm start is mostly converged.
+    stop_tol: float = 0.0
 
     @property
     def kappa_max(self) -> float:
@@ -885,6 +888,8 @@ def _optimise_kernel(
     it: wp.array(dtype=int),  # [1]
     th: wp.array(dtype=float),  # [N] out: the final profile's heading at each knot
     scratch: wp.array(dtype=float),  # [BLOCK] work: the rate projection, lane 0 to the rest
+    stop_tol: float,  # 0 = run all `limit` steps
+    used: wp.array(dtype=int),  # [1] out: the steps this frame took
 ):
     """Every Adam step of the frame in one launch, one block, one lane per point.
 
@@ -921,7 +926,12 @@ def _optimise_kernel(
     m_ph = m[N + 1]
     v_ph = v[N + 1]
     n_it = it[0]
+    n_used = int(0)
     for _ in range(limit[0]):
+        k_old = k_i
+        d_old = d
+        ph_old = ph
+        n_used += 1
         # the curve: theta_i = theta_0 + d sum_{j<i} kappa_j, p_i = p_0 + d sum_{j<i} t(theta_j)
         kk = wp.where(knot, k_i, 0.0)
         cum = wp.tile_scan_exclusive(wp.tile(kk))
@@ -1025,6 +1035,11 @@ def _optimise_kernel(
         if knot:
             k_i = scratch[i]
         _sync(i)  # every lane has read before lane 0 writes the next step's
+        if stop_tol > 0.0:
+            moved = wp.tile_max(wp.tile(wp.where(knot, wp.abs(k_i - k_old), 0.0)))[0]
+            moved = wp.max(moved, wp.max(wp.abs(d - d_old), wp.abs(ph - ph_old)))
+            if moved < stop_tol:
+                break
     if knot:
         kappa[i] = k_i
         m[i] = m_i
@@ -1035,6 +1050,7 @@ def _optimise_kernel(
     if knot:
         th[i] = start[2] + ph + d * cum[i]
     if i == 0:
+        used[0] = n_used
         ds[0] = d
         phi[0] = ph
         m[N] = m_ds
@@ -1186,6 +1202,7 @@ class ReferencePath:
             self.cold = wp.zeros(1, dtype=wp.int32)
             self.limit = wp.zeros(1, dtype=wp.int32)
             self.scratch = wp.zeros(BLOCK, dtype=wp.float32)
+            self.used = wp.zeros(1, dtype=wp.int32)
         # The frame is ~300-1200 tiny single-thread launches, so on CUDA it runs as one captured
         # graph: launched eagerly it cost 17.6 ms median and 54 ms on a cold start (false_door on
         # dasenka, 2026-10-29), as much as the whole cost-to-go solve. The graph bakes in the
@@ -1356,7 +1373,18 @@ class ReferencePath:
                 self.rear,
                 N,
             ],
-            outputs=[self.kappa, self.ds, self.phi, self.m, self.v, self.it, self.th, self.scratch],
+            outputs=[
+                self.kappa,
+                self.ds,
+                self.phi,
+                self.m,
+                self.v,
+                self.it,
+                self.th,
+                self.scratch,
+                prm.stop_tol,
+                self.used,
+            ],
             block_dim=BLOCK,
             device=self.device,
         )

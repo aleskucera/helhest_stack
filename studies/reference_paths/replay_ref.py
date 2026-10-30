@@ -191,6 +191,7 @@ def run(rec: Path, overrides: dict, check: bool = True, keep: list | None = None
             keep.append(curve)
         m = metrics(curve, taut, d, i, hw, float(d["rear"]), prev_world)
         m.update(i=i, t=float(d["t"][i] - d["t"][0]), ms=ms, cold=int(rp.cold.numpy()[0]))
+        m["iters"] = int(rp.used.numpy()[0]) if hasattr(rp, "used") else -1
         st = d["state"][i]
         m.update(x=float(st[0] + d["origin"][i][0]), y=float(st[1] + d["origin"][i][1]))
         out.append(m)
@@ -249,6 +250,7 @@ def summarize(fr: list[dict]) -> dict:
         cold=frac(lambda f: f["cold"] == 1),
         dev_mean=pct("taut_dev_mean", 50),
         dev_p95=pct("taut_dev_mean", 95),
+        iters=float(np.mean([f.get("iters", -1) for f in fr])),
         ms_p50=float(np.median([f["ms"] for f in fr[1:]])),  # frame 0 builds the graph
         ms_p95=float(np.percentile([f["ms"] for f in fr[1:]], 95)),
         ms_max=float(np.max([f["ms"] for f in fr[1:]])),
