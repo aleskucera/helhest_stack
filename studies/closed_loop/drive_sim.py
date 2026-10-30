@@ -317,6 +317,7 @@ def drive(a: argparse.Namespace) -> dict:
                 sampling=a.cfg.sampling,
                 n_theta=a.n_theta,
                 weights=a.neural_weights,
+                gemm=a.neural_gemm,
                 steps=a.neural_steps,
             )
         else:
@@ -1002,6 +1003,12 @@ def main() -> None:
     )
     p.add_argument("--neural-weights", default="", help=".npz for --planner neural")
     p.add_argument("--neural-steps", type=int, default=5, help="Adam steps per re-plan")
+    p.add_argument(
+        "--neural-gemm",
+        choices=("tile", "cublas", "auto"),
+        default="tile",
+        help="the MLP's GEMMs: Warp tile, cuBLAS through torch, or cuBLAS if torch imports",
+    )
     p.add_argument(
         "--turn-dead",
         type=float,
