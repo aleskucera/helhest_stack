@@ -32,6 +32,7 @@ failure has been diagnosed twice on real bags and it is not worth a third time.
 
 Runs on dasenka, which is where the simulator lives -- see this directory's README.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -411,6 +412,14 @@ def drive(a: argparse.Namespace) -> dict:
     gov_log: list = []
     mppi_paths: list = []  # [f, x, y] of MPPI's nominal rollout, world frame, every history frame
     ref_paths: list = []  # [f, x, y] of the reference curve, world frame, every history frame
+    ref_rec = None
+    if a.ref_record:  # the reference stage every frame (studies/reference_paths)
+        import sys
+
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "reference_paths"))
+        from refrec import RefRecorder
+
+        ref_rec = RefRecorder()
     esc: list = []  # per recorded frame: [best rollout's worst violation, median, clean fraction]
     # WALL CLEARANCE, every frame, against the world's exact solids. "Reached" cannot see a robot
     # scraping a wall on its way through, and the robust margin exists precisely so that never
@@ -589,9 +598,23 @@ def drive(a: argparse.Namespace) -> dict:
                 # V itself, not V_escape: the escape field gives every vetoed cell a finite way
                 # out so MPPI can leave a wall, and a descent of it walks through walls (slalom)
                 forbidden_distance(ctg.blocked, a.n_theta, a.cell, 1.6, ref_mask, ref_clear)
-                if refpath.update(
+                n_ref = refpath.update(
                     ctg.V, sgrid, ref_clear, sgrid, state_l, goal_xy=goal_l, blocked=ctg.blocked
-                ):
+                )
+                if ref_rec is not None:
+                    ref_rec.add(
+                        refpath,
+                        ctg.V,
+                        ctg.blocked,
+                        ref_clear,
+                        sgrid,
+                        state_l,
+                        goal_l,
+                        n_ref,
+                        (wx0, wy0),
+                        f * dt,
+                    )
+                if n_ref:
                     planner.set_reference(refpath)
                 else:
                     planner.clear_reference()
@@ -845,6 +868,9 @@ def drive(a: argparse.Namespace) -> dict:
             **({"ref_paths": np.asarray(ref_paths)} if ref_paths else {}),
         )
         print(f"wrote {a.out}")
+    if ref_rec is not None and ref_rec.rows:
+        ref_rec.save(a.ref_record, refpath, world=np.array(a.world), trail=np.asarray(trail))
+        print(f"wrote {a.ref_record}")
 
     return dict(
         reached=reached,
@@ -970,6 +996,9 @@ def main() -> None:
     )
     p.add_argument("--report", type=int, default=25)
     p.add_argument("--out", default=None, help="npz of the final map + trail, for the figure")
+    p.add_argument(
+        "--ref-record", default=None, help="npz of the reference stage's inputs, every frame"
+    )
     p.add_argument(
         "--history",
         type=int,
