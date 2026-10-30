@@ -136,6 +136,10 @@
     plan_track_heading: 30.0
     plan_track_progress: 15.0
     plan_track_radius: 1.0
+    # The neural planner (control/neural.py), chosen at launch with -p plan_planner:=neural; MPPI
+    # stays the default. The weights are gitignored: copy BundleSim's export into data/neural/ of
+    # the checkout the node runs from (helhest-nav cds there, so the relative path resolves).
+    plan_neural_weights: data/neural/neural_terrain_v5.npz
     # [m/s^2] braking the governor counts on: plan_max_decel 3 rad/s^2 x 0.35 m wheel = 1.05.
     # It also ramps in under plan_max_jerk (0.6 s), so the governor looks over the whole plan:
     # in its default 1 s it could shed only ~0.7 m/s and not see far enough to stop from cruise.
