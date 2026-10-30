@@ -479,13 +479,15 @@ class NavigationNode(Node):
         d("plan_n_refine", 3)  # MPPI refine iterations per frame
         # "neural": MPPI's replan done by gradient descent through the learned terrain model
         # (control/neural.py); everything downstream of the plan is the same. Commands stay in
-        # [0, 4] rad/s, no reverse.
+        # [0, 4] rad/s, no reverse. Launch-time only, like plan_planner and every plan_neural_*
+        # param: they build the planner, and a `ros2 param set` on a running node does nothing.
         d("plan_planner", "mppi")
         d("plan_neural_weights", "")  # the .npz from BundleSim's export_stack_planner.py
         d("plan_neural_gemm", "auto")  # the MLP's GEMMs: auto (cuBLAS if torch imports) | tile
-        # Adam steps per re-plan; the time is about linear in it. The study re-planned once per
-        # second with 20; re-planning every frame from the last plan needs fewer.
-        d("plan_neural_steps", 20)
+        # Adam steps per re-plan; the time is about linear in it (3090: 3.4 ms + 1.6 ms a step).
+        # The study re-planned once per second with 20; re-planning every frame from the last
+        # plan, 5 drove the six drive_sim worlds as well as 20 did.
+        d("plan_neural_steps", 5)
         d("plan_friction", 0.8)  # uniform rollout friction
         # Wheel envelope half-width [m]. DEFAULT 0.10 = the measured tread, as a yaw-binned
         # CYLINDER: honest laterally, where the sphere reached 0.35 m sideways and refused gaps the

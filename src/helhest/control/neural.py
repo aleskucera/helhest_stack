@@ -1317,7 +1317,7 @@ class NeuralMppi(MppiGpu):
         n_theta: int = 16,
         weights: str = "",
         gemm: str = "auto",
-        steps: int = 20,
+        steps: int = 5,
         **kw,
     ) -> None:
         super().__init__(sim, cost, sampling=sampling, n_theta=n_theta, **kw)
@@ -1386,6 +1386,15 @@ class NeuralMppi(MppiGpu):
                 inputs=[p.KNOTS, yaw0, float(self.cw.dt), self.sim.controlled],
             )
         return self.U
+
+    def plan_particles(self) -> np.ndarray:
+        """The chosen plan's scoring particles, (N_SEG + 1, M_final, 3) = (x, y, yaw) in the window frame, after
+        replan(). A host readback: for recording, not for the control loop."""
+        p = self.neural
+        best = int(np.argmin(p.final.PL.numpy()))
+        P = p.final.P.numpy()[:, best * p.M_final : (best + 1) * p.M_final]
+        yaw = p.final.YAW.numpy()[:, best * p.M_final : (best + 1) * p.M_final]
+        return np.concatenate([P[..., :2], yaw[..., None]], -1)
 
     def _yaw_sc(self) -> tuple[float, float]:
         """(sin, cos) of the state's heading, for unwrapping the path's headings."""

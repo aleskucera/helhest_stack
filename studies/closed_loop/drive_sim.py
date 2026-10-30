@@ -422,6 +422,8 @@ def drive(a: argparse.Namespace) -> dict:
     gov_log: list = []
     mppi_paths: list = []  # [f, x, y] of MPPI's nominal rollout, world frame, every history frame
     ref_paths: list = []  # [f, x, y] of the reference curve, world frame, every history frame
+    # [f, k, particle, x, y] of the neural plan's scoring particles at its 1 s knots, world frame
+    neural_particles: list = []
     esc: list = []  # per recorded frame: [best rollout's worst violation, median, clean fraction]
     # WALL CLEARANCE, every frame, against the world's exact solids. "Reached" cannot see a robot
     # scraping a wall on its way through, and the robust margin exists precisely so that never
@@ -645,6 +647,10 @@ def drive(a: argparse.Namespace) -> dict:
                 # rollout 0 is the noise-free nominal: what MPPI intends, as the governor reads it
                 for x_, y_, _ in plan_sim.controlled.numpy()[:, 0]:
                     mppi_paths.append([f, x_ + wx0, y_ + wy0])
+                if isinstance(planner, NeuralMppi):
+                    for k, knot in enumerate(planner.plan_particles()):
+                        for m, (x_, y_, _) in enumerate(knot):
+                            neural_particles.append([f, k, m, x_ + wx0, y_ + wy0])
             if governor is not None:
                 wl_in = wl
                 capped = governor.cap(
@@ -852,6 +858,7 @@ def drive(a: argparse.Namespace) -> dict:
             **({"yaw_log": np.asarray(yaw_log)} if yaw_log else {}),
             **({"mppi_paths": np.asarray(mppi_paths)} if mppi_paths else {}),
             **({"ref_paths": np.asarray(ref_paths)} if ref_paths else {}),
+            **({"neural_particles": np.asarray(neural_particles)} if neural_particles else {}),
         )
         print(f"wrote {a.out}")
 
@@ -994,7 +1001,7 @@ def main() -> None:
         "(control/neural.py)",
     )
     p.add_argument("--neural-weights", default="", help=".npz for --planner neural")
-    p.add_argument("--neural-steps", type=int, default=20, help="Adam steps per re-plan")
+    p.add_argument("--neural-steps", type=int, default=5, help="Adam steps per re-plan")
     p.add_argument(
         "--turn-dead",
         type=float,
