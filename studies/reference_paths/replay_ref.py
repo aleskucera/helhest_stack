@@ -43,7 +43,28 @@ from score import shape  # noqa: E402
 from score import wrap  # noqa: E402
 
 
-def ragged(d: np.lib.npyio.NpzFile, key: str) -> list[np.ndarray]:
+def load(rec: Path) -> dict[str, np.ndarray]:
+    """Every array at once: an NpzFile decompresses a whole array on each access."""
+    with np.load(rec) as f:
+        return {k: f[k] for k in f.files}
+
+
+def turn_signs(p: np.ndarray, min_deg: float = 10.0) -> list[int]:
+    """The turn direction at each corner of a polyline that turns more than `min_deg`."""
+    if len(p) < 3:
+        return []
+    d = np.diff(p, axis=0)
+    d = d[np.linalg.norm(d, axis=1) > 1e-6]
+    h = np.arctan2(d[:, 1], d[:, 0])
+    t = wrap(np.diff(h))
+    return [int(np.sign(x)) for x in t if abs(x) > np.radians(min_deg)]
+
+
+def sign_changes(s: list[int]) -> int:
+    return sum(1 for a, b in zip(s, s[1:]) if a != b)
+
+
+def ragged(d: dict, key: str) -> list[np.ndarray]:
     n = d[f"{key}_n"]
     off = np.concatenate([[0], np.cumsum(n)])
     return [d[key][off[i] : off[i + 1]] for i in range(len(n))]
@@ -96,7 +117,7 @@ def metrics(curve, taut, d, i, half_width, rear, prev_world) -> dict:
         return m
     g = d["sgrid"][i]
     clear = d["clear"][i].astype(np.float32)
-    full = "V" in d.files
+    full = "V" in d
     vmin = d["V"][i].min(2) if full else d["vmin"][i].astype(np.float32)
     q = resample(curve, 0.1)
     dq = np.diff(q, axis=0)
@@ -114,6 +135,14 @@ def metrics(curve, taut, d, i, half_width, rear, prev_world) -> dict:
     m["end_gap"] = float(np.linalg.norm(curve[-1] - taut[-1])) if len(taut) else float("nan")
     m["v_drop"] = float(sample(vmin, g, st[None, :2])[0] - sample(vmin, g, curve[-1:])[0])
     m.update(shape(curve))
+    # against the taut string: wiggles it does not have, and how far the curve strays from it
+    if len(taut) >= 2:
+        m["taut_dev"] = float(dist_to_polyline(q, taut).max())
+        q25 = resample(curve, 0.25)
+        dk = np.diff(np.unwrap(np.arctan2(*np.diff(q25, axis=0).T[::-1])))
+        dk = np.convolve(dk, np.ones(4) / 4, mode="same") if len(dk) >= 4 else dk
+        cs = [int(np.sign(x)) for x in dk if abs(x) > 0.25 * 0.15]
+        m["excess_bends"] = sign_changes(cs) - sign_changes(turn_signs(taut))
     d0 = curve[min(2, len(curve) - 1)] - curve[0]
     m["start_err_deg"] = float(np.degrees(wrap(np.arctan2(d0[1], d0[0]) - st[2])))
     world = curve + d["origin"][i][None]
@@ -125,7 +154,7 @@ def metrics(curve, taut, d, i, half_width, rear, prev_world) -> dict:
 
 
 def run(rec: Path, overrides: dict, check: bool = True) -> list[dict]:
-    d = np.load(rec)
+    d = load(rec)
     base = json.loads(str(d["params"]))
     fields = {f.name for f in dataclasses.fields(ReferencePathParams)}
     prm = ReferencePathParams(**{k: v for k, v in base.items() if k in fields})
@@ -171,7 +200,7 @@ def run(rec: Path, overrides: dict, check: bool = True) -> list[dict]:
 def score_recorded(rec: Path) -> list[dict]:
     """The recorded curves as they are, no rerun: for light recordings (drive_sim without
     --ref-record-full), and to judge what the robot actually tracked."""
-    d = np.load(rec)
+    d = load(rec)
     hw, rear = float(d["half_width"]), float(d["rear"])
     curves, tauts = ragged(d, "curve"), ragged(d, "taut")
     out, prev_world = [], None
@@ -210,6 +239,9 @@ def summarize(fr: list[dict]) -> dict:
         kmax_p95=pct("kmax", 95),
         flick_p95=pct("flick", 95),
         jump=frac(lambda f: f.get("flick", 0) > 0.3),
+        excess=frac(lambda f: f.get("excess_bends", 0) >= 1),
+        stray=frac(lambda f: f.get("taut_dev", 0) > 1.0),
+        far_end=frac(lambda f: f.get("end_gap", 0) > 1.0),
         cold=frac(lambda f: f["cold"] == 1),
         ms_p50=float(np.median([f["ms"] for f in fr])),
         ms_max=float(np.max([f["ms"] for f in fr])),
