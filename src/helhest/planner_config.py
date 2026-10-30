@@ -56,6 +56,7 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_ref_w_pivot": 2.0,
     "plan_ref_sticky_tol_m": 0.0,
     "plan_ref_cold_on_loop": 0.0,
+    "plan_ref_policy_descent": 0.0,
     "plan_smooth": 0.04,
     "plan_saturation": 300.0,
     # MPPI's hard veto on the cost-to-go's HAZARD field: actual wall contact, without the router's
@@ -254,6 +255,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
                 w_pivot=float(p["plan_ref_w_pivot"]),
                 sticky_tol_m=float(p["plan_ref_sticky_tol_m"]),
                 cold_on_loop=bool(float(p["plan_ref_cold_on_loop"])),
+                policy_descent=bool(float(p["plan_ref_policy_descent"])),
             )
             if float(p["plan_track_lateral"]) > 0.0
             else None

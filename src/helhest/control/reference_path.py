@@ -115,6 +115,13 @@ class ReferencePathParams:
     # turns: a loop. The curvature profile cannot unwind one by small steps, so a warm start kept
     # a full circle beside the robot for seconds (false_door).
     cold_on_loop: bool = False
+    # THE WAY ROUND FROM THE ROBOT'S OWN HEADING. False: walk down V's minimum over headings, so
+    # the route is the one for the best heading at every cell, and the start's heading is the
+    # curve's own business (a pivot priced at w_pivot). True: roll the lattice's own policy out
+    # from the robot's cell AND heading bin -- the move each state's V was computed from -- so
+    # whether to pivot, which way, or to arc round is what the cost-to-go itself decided. Needs
+    # `update(policy=...)` (the solver's move costs); without them the old walk runs.
+    policy_descent: bool = False
 
     @property
     def kappa_max(self) -> float:
@@ -348,6 +355,71 @@ def _descent_kernel(
                 out[n] = g
                 n += 1
     n_out[0] = n
+
+
+@wp.kernel
+def _policy_kernel(
+    V: wp.array3d(dtype=float),  # [ny, nx, n_theta] the route field (clamped at its cap)
+    edge_cost: wp.array4d(dtype=float),  # [ny, nx, n_theta, n_prim] the solver's move costs
+    prim_dr: wp.array2d(dtype=int),
+    prim_dc: wp.array2d(dtype=int),
+    prim_heading: wp.array2d(dtype=int),
+    n_prim: int,
+    rgrid: Grid,
+    start: wp.array(dtype=float),  # [3]
+    goal: wp.array(dtype=float),  # [3]
+    clear_field: wp.array2d(dtype=float),
+    cgrid: Grid,
+    half_width: float,
+    max_pts: int,
+    out: wp.array(dtype=wp.vec2),  # [max_pts] in/out: kept as the greedy walk left it on failure
+    n_out: wp.array(dtype=int),  # [1] in/out
+):
+    """The lattice policy from the robot's state: at each state the move whose cost plus the
+    next state's V is least -- exactly V's own minimiser -- until no move improves on V (a seed:
+    the goal, or the coarse layer's ring at the window's edge). Moves that stay in the cell
+    (pivots) leave no point. When the robot's own state has no route (V capped), the greedy walk
+    the descent kernel already wrote stands."""
+    cell = rgrid.cell_size
+    nt = V.shape[2]
+    c = wp.clamp(int(wp.floor((start[0] - rgrid.origin_x) / cell + 0.5)), 0, rgrid.cells_x - 1)
+    r = wp.clamp(int(wp.floor((start[1] - rgrid.origin_y) / cell + 0.5)), 0, rgrid.cells_y - 1)
+    yaw = start[2] - wp.floor(start[2] / 6.2831853) * 6.2831853
+    t = int(wp.floor(yaw / (6.2831853 / float(nt)) + 0.5)) % nt
+    if V[r, c, t] >= 80.0:
+        return
+    out[0] = wp.vec2(start[0], start[1])
+    n = int(1)
+    for _ in range(4 * max_pts):
+        cur = V[r, c, t]
+        best = float(1.0e30)
+        bp = int(-1)
+        for p in range(n_prim):
+            e = edge_cost[r, c, t, p]
+            if e < 1.0e29:
+                val = e + V[r + prim_dr[t, p], c + prim_dc[t, p], prim_heading[t, p]]
+                if val < best:
+                    best = val
+                    bp = p
+        if bp < 0 or best > cur + 1.0e-4 or best >= 80.0:
+            break  # a seed: nothing beats standing here
+        nr = r + prim_dr[t, bp]
+        nc = c + prim_dc[t, bp]
+        t = prim_heading[t, bp]
+        if nr != r or nc != c:
+            r = nr
+            c = nc
+            if n < max_pts:
+                out[n] = wp.vec2(rgrid.origin_x + float(c) * cell, rgrid.origin_y + float(r) * cell)
+                n += 1
+    if goal[2] > 0.5 and n < max_pts:
+        g = wp.vec2(goal[0], goal[1])
+        if wp.length(out[n - 1] - g) >= 0.05:
+            if _clear_along(clear_field, cgrid, out[n - 1], g, 0.05) >= half_width + 0.05:
+                out[n] = g
+                n += 1
+    if n >= 2:
+        n_out[0] = n
 
 
 @wp.func
@@ -1234,6 +1306,7 @@ class ReferencePath:
         # input arrays and grids, so it is rebuilt when they change.
         self._graph = None
         self._graph_key: tuple | None = None
+        self._policy = None
 
     @property
     def offset(self) -> float:
@@ -1278,6 +1351,29 @@ class ReferencePath:
             outputs=[self.desc, self.n_desc],
             device=self.device,
         )
+        if prm.policy_descent and self._policy is not None:
+            ec, pdr, pdc, ph, n_prim = self._policy
+            wp.launch(
+                _policy_kernel,
+                1,
+                inputs=[
+                    V,
+                    ec,
+                    pdr,
+                    pdc,
+                    ph,
+                    n_prim,
+                    route_grid,
+                    self.start,
+                    self.goal,
+                    clear_field,
+                    sim_grid,
+                    self.half_width,
+                    256,
+                ],
+                outputs=[self.desc, self.n_desc],
+                device=self.device,
+            )
         wp.launch(
             _resample_kernel,
             1,
@@ -1450,6 +1546,7 @@ class ReferencePath:
         warm: bool = True,
         goal_xy: np.ndarray | None = None,
         blocked: wp.array | None = None,
+        policy=None,
     ) -> int:
         """One frame: descend `V` (on `route_grid`, both in the MPPI window's frame) from
         `start_xyz`, pull taut against `clear_field` (on `sim_grid`), then refine the curvature
@@ -1464,6 +1561,21 @@ class ReferencePath:
         (`warm`) unless the taut string left last frame's curve (`_mode_kernel`), which is a new
         way out of the window and a cold start with `iterations_cold` steps instead of
         `iterations`. The returned count is the frame's one read back from the device."""
+        # the solver whose move costs the policy walk follows (params.policy_descent)
+        pol = None
+        if policy is not None:
+            pol = (
+                policy._edge_cost,
+                policy._prim_dr,
+                policy._prim_dc,
+                policy._prim_heading,
+                int(policy.n_prim),
+            )
+        if (pol is None) != (getattr(self, "_policy", None) is None) or (
+            pol is not None and pol[0].ptr != self._policy[0].ptr
+        ):
+            self._graph = None
+        self._policy = pol
         if blocked is None:  # no settle verdict given: a field of zeros, the heading terms inert
             if getattr(self, "_no_veto", None) is None or self._no_veto.shape != V.shape:
                 self._no_veto = wp.zeros(V.shape, dtype=wp.float32, device=self.device)

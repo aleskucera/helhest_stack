@@ -602,7 +602,14 @@ def drive(a: argparse.Namespace) -> dict:
                 # out so MPPI can leave a wall, and a descent of it walks through walls (slalom)
                 forbidden_distance(ctg.blocked, a.n_theta, a.cell, 1.6, ref_mask, ref_clear)
                 n_ref = refpath.update(
-                    ctg.V, sgrid, ref_clear, sgrid, state_l, goal_xy=goal_l, blocked=ctg.blocked
+                    ctg.V,
+                    sgrid,
+                    ref_clear,
+                    sgrid,
+                    state_l,
+                    goal_xy=goal_l,
+                    blocked=ctg.blocked,
+                    policy=ctg.solver,
                 )
                 if ref_rec is not None:
                     ref_rec.add(
