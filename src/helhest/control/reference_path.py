@@ -111,6 +111,10 @@ class ReferencePathParams:
     # [1/m] 0 = off. Stop a frame's Adam steps once a step moves no curvature knot by more than
     # this (nor the spacing or the start pivot by the like): a warm start is mostly converged.
     stop_tol: float = 0.0
+    # A cold start when last frame's curve turned more than 270 deg beyond what the taut string
+    # turns: a loop. The curvature profile cannot unwind one by small steps, so a warm start kept
+    # a full circle beside the robot for seconds (false_door).
+    cold_on_loop: bool = False
 
     @property
     def kappa_max(self) -> float:
@@ -605,6 +609,8 @@ def _mode_kernel(
     iterations: int,
     iterations_cold: int,
     any_end: int,  # 1: test the divergence every frame, not only when the end moved
+    th: wp.array(dtype=float),  # [N] last frame's heading at each knot
+    loop_check: int,  # 1: a curve turning 270 deg more than the string is a cold start
     last_end: wp.array(dtype=wp.vec2),  # [1] in/out: the taut string's end last frame
     cold: wp.array(dtype=int),  # [1] out: 1 cold, 0 warm, -1 no string (no curve this frame)
     limit: wp.array(dtype=int),  # [1] out: Adam steps this frame
@@ -626,6 +632,25 @@ def _mode_kernel(
     c = int(0)
     if warm[0] == 0 or nv < 2:
         c = 1
+    if c == 0 and loop_check == 1:
+        turned = float(0.0)
+        for j in range(wp.min(nv - 1, th.shape[0]) - 1):
+            turned += wp.abs(th[j + 1] - th[j])
+        bends = float(0.0)
+        h_prev = float(0.0)
+        first = int(1)
+        for i in range(n - 1):
+            seg = taut[i + 1] - taut[i]
+            if wp.length(seg) > 1.0e-6:
+                h = wp.atan2(seg[1], seg[0])
+                if first == 0:
+                    bends += wp.abs(_wrap(h - h_prev))
+                h_prev = h
+                first = 0
+        if turned > bends + 4.712389:
+            c = 1
+    if c == 1:
+        pass
     elif any_end == 1 or wp.length(end - last_end[0]) > rebase_m:
         prev_len = float(0.0)
         for j in range(nv - 1):
@@ -1298,6 +1323,8 @@ class ReferencePath:
                 prm.iterations,
                 prm.iterations_cold,
                 int(prm.cold_on_divergence),
+                self.th,
+                int(prm.cold_on_loop),
             ],
             outputs=[self.last_end, self.cold, self.limit],
             device=self.device,

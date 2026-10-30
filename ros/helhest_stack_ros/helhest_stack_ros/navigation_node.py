@@ -126,6 +126,7 @@ _PLAN_BUILD = frozenset(
         "plan_ref_clear_taper",
         "plan_ref_w_pivot",
         "plan_ref_sticky_tol_m",
+        "plan_ref_cold_on_loop",
         "plan_turn_brake_a_max",
         "plan_wmax",
         "plan_wmin",
@@ -573,6 +574,7 @@ class NavigationNode(Node):
         d("plan_ref_clear_taper", PLAN_DEFAULTS["plan_ref_clear_taper"])
         d("plan_ref_w_pivot", PLAN_DEFAULTS["plan_ref_w_pivot"])
         d("plan_ref_sticky_tol_m", PLAN_DEFAULTS["plan_ref_sticky_tol_m"])
+        d("plan_ref_cold_on_loop", PLAN_DEFAULTS["plan_ref_cold_on_loop"])
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
         # NEVER commands above this regardless of the cost. This is the real top-speed knob.
         # ~1.4 m/s at 4.0; ~1.75 m/s at 5.0 (r=0.35). plan_wmax maps to the REAL wheel speed -- the
@@ -904,6 +906,7 @@ class NavigationNode(Node):
         self.plan_ref_clear_taper: float = g("plan_ref_clear_taper")
         self.plan_ref_w_pivot: float = g("plan_ref_w_pivot")
         self.plan_ref_sticky_tol_m: float = g("plan_ref_sticky_tol_m")
+        self.plan_ref_cold_on_loop: float = g("plan_ref_cold_on_loop")
         self.plan_smooth: float = g("plan_smooth")
         self.plan_straight_frac: float = g("plan_straight_frac")
         self.plan_debug_cmd: int = int(g("plan_debug_cmd"))
