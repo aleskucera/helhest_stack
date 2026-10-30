@@ -53,6 +53,8 @@ PLAN_DEFAULTS: dict[str, Any] = {
     # studies/reference_paths: ReferencePathParams fields, the study's options (0 = as before)
     "plan_ref_cold_on_divergence": 0.0,
     "plan_ref_clear_taper": 0.0,
+    "plan_ref_w_pivot": 2.0,
+    "plan_ref_sticky_tol_m": 0.0,
     "plan_smooth": 0.04,
     "plan_saturation": 300.0,
     # MPPI's hard veto on the cost-to-go's HAZARD field: actual wall contact, without the router's
@@ -248,6 +250,8 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
                 clothoid_m=float(p["plan_track_radius"]),
                 cold_on_divergence=bool(float(p["plan_ref_cold_on_divergence"])),
                 clear_taper=float(p["plan_ref_clear_taper"]),
+                w_pivot=float(p["plan_ref_w_pivot"]),
+                sticky_tol_m=float(p["plan_ref_sticky_tol_m"]),
             )
             if float(p["plan_track_lateral"]) > 0.0
             else None

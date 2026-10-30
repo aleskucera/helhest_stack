@@ -12,6 +12,7 @@ Kernels (all suffixed _kernel):
   _minmax/_bisect_*/_count_below/_elite_u   CEM reweight (top-k elite mean) of U, on device
   _bump_seed/_reset_minmax     device-side RNG counter + reduction resets (graph-safe)
 """
+
 import math
 from collections.abc import Callable
 from dataclasses import dataclass

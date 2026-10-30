@@ -35,6 +35,7 @@ a flat step for arcs that covered different ground, took heading bins at their m
 move ran along a grid axis, and checked every swept cell at the heading the arc STARTED in even
 where the arc had turned 45 degrees by the time it got there.
 """
+
 from __future__ import annotations
 
 import math

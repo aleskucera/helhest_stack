@@ -102,6 +102,12 @@ class ReferencePathParams:
     # a goal 0.6 m from a wall cannot be reached at 1.2 m, and asking for it bent the curve into
     # a hook (goal_at_wall); a robot already beside a wall had every curve rejected (facing_wall).
     clear_taper: float = 0.0
+    # [m of V] 0 = off. HYSTERESIS ON THE WAY ROUND: among the strictly lower neighbours within
+    # this much of the lowest, the descent takes the one nearest last frame's taut string, scored
+    # V + sticky_w * distance. Two ways round an obstacle that cost nearly the same swapped with
+    # the map's every update (facing_wall: north, south, north -- into the wall).
+    sticky_tol_m: float = 0.0
+    sticky_w: float = 0.5  # [m of V per m off last frame's string]
 
     @property
     def kappa_max(self) -> float:
@@ -193,6 +199,31 @@ def _clear_along(
 
 
 @wp.kernel
+def _prev_dist_kernel(
+    taut: wp.array(dtype=wp.vec2),  # last frame's taut string (read before this frame's)
+    n_taut: wp.array(dtype=int),
+    rgrid: Grid,
+    cap: float,
+    out: wp.array2d(dtype=float),  # [ny, nx] distance of each cell centre to it, capped
+):
+    r, c = wp.tid()
+    p = wp.vec2(
+        rgrid.origin_x + float(c) * rgrid.cell_size, rgrid.origin_y + float(r) * rgrid.cell_size
+    )
+    n = n_taut[0]
+    best = cap
+    if n < 2:
+        best = 0.0  # nothing to stick to
+    for i in range(n - 1):
+        a = taut[i]
+        ab = taut[i + 1] - a
+        L2 = wp.max(wp.dot(ab, ab), 1.0e-12)
+        t = wp.clamp(wp.dot(p - a, ab) / L2, 0.0, 1.0)
+        best = wp.min(best, wp.length(p - (a + t * ab)))
+    out[r, c] = best
+
+
+@wp.kernel
 def _descent_kernel(
     V: wp.array3d(dtype=float),  # [ny, nx, n_theta] the route field, in this frame's window
     rgrid: Grid,  # the grid V lives on, expressed in the MPPI window's frame
@@ -203,6 +234,9 @@ def _descent_kernel(
     cgrid: Grid,
     half_width: float,
     max_pts: int,
+    prev_dist: wp.array2d(dtype=float),  # [ny, nx] off last frame's string (_prev_dist_kernel)
+    sticky_tol: float,  # 0 = off (ReferencePathParams.sticky_tol_m)
+    sticky_w: float,
     out: wp.array(dtype=wp.vec2),  # [max_pts] cell centres, the robot's first
     n_out: wp.array(dtype=int),  # [1]
 ):
@@ -253,11 +287,29 @@ def _descent_kernel(
                                 eq_score = score
                                 eq_r = rr
                                 eq_c = cc
+        if sticky_tol > 0.0 and (br != r or bc != c):
+            # among the lower neighbours near the lowest, the one nearest last frame's way
+            sbest = best + sticky_w * prev_dist[br, bc]
+            for dr in range(-1, 2):
+                for dc in range(-1, 2):
+                    rr = r + dr
+                    cc = c + dc
+                    if (dr != 0 or dc != 0) and rr >= 0 and rr < rgrid.cells_y:
+                        if cc >= 0 and cc < rgrid.cells_x and not (rr == pr and cc == pc):
+                            v = _min_over_theta(V, rr, cc, n_theta)
+                            if v < cur - 1.0e-6 and v <= best + sticky_tol:
+                                sc = v + sticky_w * prev_dist[rr, cc]
+                                if sc < sbest:
+                                    sbest = sc
+                                    br = rr
+                                    bc = cc
         if br == r and bc == c:
             if eq_r < 0 or cur >= 80.0:
                 break
             br = eq_r
             bc = eq_c
+        if sticky_tol > 0.0:  # the sticky choice may not be the lowest
+            best = _min_over_theta(V, br, bc, n_theta)
         if best >= 80.0:  # the cap: a vetoed cell is not on the way
             break
         ddr = br - r
@@ -1104,6 +1156,7 @@ class ReferencePath:
             self.start = wp.zeros(3, dtype=wp.float32)
             self.goal = wp.zeros(3, dtype=wp.float32)
             self.desc = wp.zeros(256, dtype=wp.vec2)
+            self.prev_dist = wp.zeros((1, 1), dtype=wp.float32)  # sized to V on the first frame
             self.n_desc = wp.zeros(1, dtype=wp.int32)
             mv = params.n_taut
             self.verts = wp.zeros(mv, dtype=wp.vec2)
@@ -1155,6 +1208,14 @@ class ReferencePath:
         """The whole frame as launches, every decision on the device, so it is captured once."""
         prm = self.params
         N = prm.n_knots
+        if prm.sticky_tol_m > 0.0:
+            wp.launch(
+                _prev_dist_kernel,
+                (route_grid.cells_y, route_grid.cells_x),
+                inputs=[self.taut, self.n_taut, route_grid, 5.0],
+                outputs=[self.prev_dist],
+                device=self.device,
+            )
         wp.launch(
             _descent_kernel,
             1,
@@ -1168,6 +1229,9 @@ class ReferencePath:
                 sim_grid,
                 self.half_width,
                 256,
+                self.prev_dist,
+                prm.sticky_tol_m,
+                prm.sticky_w,
             ],
             outputs=[self.desc, self.n_desc],
             device=self.device,
@@ -1361,6 +1425,14 @@ class ReferencePath:
         self.goal.assign(g)
         self.warm.assign(np.array([int(warm)], np.int32))
         key = (V.ptr, clear_field.ptr, blocked.ptr, _grid_key(route_grid), _grid_key(sim_grid))
+        if self.params.sticky_tol_m > 0.0 and self.prev_dist.shape != (
+            route_grid.cells_y,
+            route_grid.cells_x,
+        ):
+            self.prev_dist = wp.zeros(
+                (route_grid.cells_y, route_grid.cells_x), dtype=wp.float32, device=self.device
+            )
+            self._graph = None
         if self._graph is None or key != self._graph_key:
             with wp.ScopedCapture(device=self.device) as cap:
                 self._record(V, route_grid, clear_field, sim_grid, blocked)

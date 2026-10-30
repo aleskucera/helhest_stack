@@ -68,6 +68,7 @@ of this file got each point backwards, so each carries the measurement that corr
   withdraws an earlier seal but never opens a block the pooling closed. The guess stays optimistic
   where nobody has looked, which is the point of it.
 """
+
 from __future__ import annotations
 
 import numpy as np
