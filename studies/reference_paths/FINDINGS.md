@@ -48,9 +48,22 @@ straight; a curvature profile cannot unwind a loop by small steps, and the warm 
 **P7 -- the curve leaves the window.** false_door: bulges ~1 m past the string beyond the routing
 window, where the clearance map has no information.
 
-**Sim vs robot.** drive_sim routes on 0.08 m cells (200x200 over 16 m); the robot routes on
+**P8 -- facing away, the warm curve never re-pivots.** A cold start pivots outright when the way
+on is > `pivot_init_rad` (60 deg) off, but warm frames never ask again: with the robot facing away
+from the goal the curve swung metres out and back instead of turning (patek1 t 41-45 s, 163 s).
+
+**Arrival frames are not failures.** The 3% of patek1 frames without a curve are all within 0.5 m
+of a goal (the curve is < 3 points; MPPI brakes onto it). Metric `empty_far` excludes them.
+
+**Sim vs robot (2).** drive_sim hands over to the dock controller at 3.0 m (its `--dock` default),
+the robot at 1.5 m (`plan_dock_radius` node default): the robot builds references over the last
+1.5-3 m, the sim never does -- which is exactly where patek1's end-of-run loop happened. drive_sim routes on 0.08 m cells (200x200 over 16 m); the robot routes on
 0.24 m (`plan_lat_coarsen` 3, 66x66). The stage's descent, staircase and distance map are 3x
 finer in the sim.
+
+**Warm steps.** patek1 with the fixes, 3090: 100 steps 1.65 ms, 50 steps 1.11 ms with nearly the
+same curves (wiggle frames 8.5 -> 11.3%, strays 2.5 -> 2.2%), 30 steps 0.85 ms and worse (strays
+4%). 50 is available if the frame budget needs it.
 
 **Speed.** The stage is ~3.1 ms a frame on a 3090 (100 Adam steps); ~1.7 ms of that is the
 single-thread descent / visibility / taut kernels, not the optimiser. Stopping Adam early
