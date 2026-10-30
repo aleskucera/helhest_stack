@@ -137,7 +137,9 @@ def metrics(curve, taut, d, i, half_width, rear, prev_world) -> dict:
     m.update(shape(curve))
     # against the taut string: wiggles it does not have, and how far the curve strays from it
     if len(taut) >= 2:
-        m["taut_dev"] = float(dist_to_polyline(q, taut).max())
+        dev = dist_to_polyline(q, taut)
+        m["taut_dev"] = float(dev.max())
+        m["taut_dev_mean"] = float(dev.mean())
         q25 = resample(curve, 0.25)
         dk = np.diff(np.unwrap(np.arctan2(*np.diff(q25, axis=0).T[::-1])))
         dk = np.convolve(dk, np.ones(4) / 4, mode="same") if len(dk) >= 4 else dk
@@ -153,7 +155,7 @@ def metrics(curve, taut, d, i, half_width, rear, prev_world) -> dict:
     return m
 
 
-def run(rec: Path, overrides: dict, check: bool = True) -> list[dict]:
+def run(rec: Path, overrides: dict, check: bool = True, keep: list | None = None) -> list[dict]:
     d = load(rec)
     base = json.loads(str(d["params"]))
     fields = {f.name for f in dataclasses.fields(ReferencePathParams)}
@@ -185,6 +187,8 @@ def run(rec: Path, overrides: dict, check: bool = True) -> list[dict]:
             rc = rec_curves[i]
             if len(rc) != len(curve) or (len(rc) and np.abs(rc - curve).max() > 1e-3):
                 mism += 1
+        if keep is not None:
+            keep.append(curve)
         m = metrics(curve, taut, d, i, hw, float(d["rear"]), prev_world)
         m.update(i=i, t=float(d["t"][i] - d["t"][0]), ms=ms, cold=int(rp.cold.numpy()[0]))
         st = d["state"][i]
@@ -243,8 +247,11 @@ def summarize(fr: list[dict]) -> dict:
         stray=frac(lambda f: f.get("taut_dev", 0) > 1.0),
         far_end=frac(lambda f: f.get("end_gap", 0) > 1.0),
         cold=frac(lambda f: f["cold"] == 1),
-        ms_p50=float(np.median([f["ms"] for f in fr])),
-        ms_max=float(np.max([f["ms"] for f in fr])),
+        dev_mean=pct("taut_dev_mean", 50),
+        dev_p95=pct("taut_dev_mean", 95),
+        ms_p50=float(np.median([f["ms"] for f in fr[1:]])),  # frame 0 builds the graph
+        ms_p95=float(np.percentile([f["ms"] for f in fr[1:]], 95)),
+        ms_max=float(np.max([f["ms"] for f in fr[1:]])),
     )
 
 
@@ -254,6 +261,7 @@ def main() -> None:
     p.add_argument("--set", nargs="*", default=[])
     p.add_argument("--out", default=None)
     p.add_argument("--recorded", action="store_true", help="score the recorded curves, no rerun")
+    p.add_argument("--curves", default=None, help="npz of the replayed curves (one recording)")
     a = p.parse_args()
     ov = {}
     for kv in a.set:
@@ -262,7 +270,14 @@ def main() -> None:
     wp.init()
     allfr = {}
     for r in a.rec:
-        fr = score_recorded(Path(r)) if a.recorded else run(Path(r), ov)
+        keep: list = []
+        fr = score_recorded(Path(r)) if a.recorded else run(Path(r), ov, keep=keep)
+        if a.curves and keep:
+            np.savez_compressed(
+                a.curves,
+                curve_n=np.array([len(c) for c in keep], np.int32),
+                curve=np.concatenate(keep).astype(np.float32),
+            )
         allfr[Path(r).stem] = fr
         s = summarize(fr)
         print(Path(r).stem, " ".join(f"{k}={v:.2f}" for k, v in s.items()))

@@ -39,7 +39,7 @@ def pick_worst(scored: list[dict], key: str, n: int) -> list[int]:
     return [f["i"] for f in out]
 
 
-def draw(ax, d: dict, i: int, rag: dict, title: str) -> None:
+def draw(ax, d: dict, i: int, rag: dict, title: str, alt: list | None = None) -> None:
     g = d["sgrid"][i]
     vmin = d["V"][i].min(2) if "V" in d else d["vmin"][i].astype(np.float32)
     forbid = d["blocked"][i].all(2) if "blocked" in d else d["forbid"][i] > 0
@@ -56,6 +56,8 @@ def draw(ax, d: dict, i: int, rag: dict, title: str) -> None:
         ax.plot(ta[:, 0], ta[:, 1], "-o", color="tab:blue", ms=3, lw=1.2)
     if len(cu):
         ax.plot(cu[:, 0], cu[:, 1], "-", color="tab:orange", lw=2.2)
+    if alt is not None and len(alt[i]):
+        ax.plot(alt[i][:, 0], alt[i][:, 1], "-", color="magenta", lw=1.6)
     st, go = d["state"][i], d["goal"][i]
     ax.arrow(st[0], st[1], 0.8 * np.cos(st[2]), 0.8 * np.sin(st[2]), color="lime", width=0.08)
     ax.plot(go[0], go[1], "r*", ms=12)
@@ -72,6 +74,11 @@ def draw(ax, d: dict, i: int, rag: dict, title: str) -> None:
 
 
 def main() -> None:
+    alt = None
+    if "--alt" in sys.argv:  # a variant's curves (replay_ref.py --curves), drawn in magenta
+        k = sys.argv.index("--alt")
+        alt = ragged(load(Path(sys.argv[k + 1])), "curve")
+        del sys.argv[k : k + 2]
     rec, out = Path(sys.argv[1]), Path(sys.argv[2])
     d = load(rec)
     if sys.argv[3] == "--worst":
@@ -100,6 +107,7 @@ def main() -> None:
             i,
             rag,
             f"#{i} t={t:.1f}s cold={int(d['cold'][i])} n={int(d['n_ref'][i])}\n{extra}",
+            alt,
         )
     for ax in axs.ravel()[n:]:
         ax.axis("off")
