@@ -127,6 +127,11 @@ class ReferencePathParams:
     # pivots outright past that angle, but a warm one never asks again: a robot facing away from
     # its route kept a curve swinging metres out and back instead of turning (patek1 t 41-45 s).
     cold_on_repivot: bool = False
+    # 0 = off. A cold start when last frame's curve was longer than this times the taut string
+    # plus 1 m: a warm start polishes whatever it was given, and a curve that wandered -- a loop
+    # under the 270 deg test, a swing out past the goal and back -- stays a local minimum
+    # (patek1 t 41-45 s: 4-5 m loops the loop test and the re-pivot test both let through).
+    cold_on_detour: float = 0.0
 
     @property
     def kappa_max(self) -> float:
@@ -756,6 +761,7 @@ def _mode_kernel(
     loop_check: int,  # 1: a curve turning 270 deg more than the string is a cold start
     start: wp.array(dtype=float),  # [3] the robot now
     repivot: float,  # [rad] > 0: the way on this far off the warm curve's heading is cold
+    detour: float,  # > 0: last frame's curve longer than this x the string + 1 m is cold
     last_end: wp.array(dtype=wp.vec2),  # [1] in/out: the taut string's end last frame
     cold: wp.array(dtype=int),  # [1] out: 1 cold, 0 warm, -1 no string (no curve this frame)
     limit: wp.array(dtype=int),  # [1] out: Adam steps this frame
@@ -793,6 +799,15 @@ def _mode_kernel(
                 h_prev = h
                 first = 0
         if turned > bends + 4.712389:
+            c = 1
+    if c == 0 and detour > 0.0:
+        lc = float(0.0)
+        for j in range(nv - 1):
+            lc += wp.length(pts[j + 1] - pts[j])
+        lt = float(0.0)
+        for i in range(n - 1):
+            lt += wp.length(taut[i + 1] - taut[i])
+        if lc > detour * lt + 1.0:
             c = 1
     if c == 0 and repivot > 0.0:
         jb = int(0)
@@ -1521,6 +1536,7 @@ class ReferencePath:
                 int(prm.cold_on_loop),
                 self.start,
                 prm.pivot_init_rad if prm.cold_on_repivot else 0.0,
+                prm.cold_on_detour,
             ],
             outputs=[self.last_end, self.cold, self.limit],
             device=self.device,
