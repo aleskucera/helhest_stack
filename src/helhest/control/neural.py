@@ -14,9 +14,9 @@ The plan loss is the cost-to-go at the end, its running mean, the footprint's wa
 effort and the command rate (BundleSim macro_terrain_worlds.plan_loss with the final config of graph_planner).
 
 Everything runs on the device as one captured CUDA graph: Warp kernels for the features, the mixture head and the
-loss with hand-written adjoints, and the MLP's GEMMs as Warp tile GEMMs (default) or through cuBLAS (torch).
+loss with hand-written adjoints, and the MLP's GEMMs through cuBLAS (torch, default) or as Warp tile GEMMs.
 The kernels are BundleSim's warp_planner.py, whose loss and gradient match the torch rollout to float32
-(cosine >= 0.9999999). The MLP runs in float32, the geometry and the loss in float64.
+(cosine >= 0.9999999). Everything runs in float32 (BundleSim keeps the geometry and the loss in float64).
 
 NeuralMppi subclasses MppiGpu so the node keeps every setter (set_lattice, set_reference, update_clearance, ...);
 only replan() changes. It reads the frame's maps from them, resampled onto the model's 0.125 m grid in the MPPI
@@ -78,26 +78,26 @@ DOP = (DO + _Q - 1) // _Q * _Q
 GEMM_BLOCK = 128
 BLOCK = 32
 
-F64 = wp.float64
-CELL = wp.constant(F64(MODEL_CELL))
-R_W = wp.constant(F64(WHEEL_RADIUS))
-V_MAX = wp.constant(F64(WHEEL_MAX))
+FL = wp.float32  # geometry and loss; float64 (as in BundleSim) gave the same plans at twice the cost
+CELL = wp.constant(FL(MODEL_CELL))
+R_W = wp.constant(FL(WHEEL_RADIUS))
+V_MAX = wp.constant(FL(WHEEL_MAX))
 LOGSIG3 = wp.constant(float(np.log(SIGMA) / 3.0))
-W_RUN6 = wp.constant(F64(CONFIG["w_run"] / N_SEG))
-W_C6 = wp.constant(F64(CONFIG["w_c"] / N_SEG))
-CMARGIN = wp.constant(F64(CONFIG["cmargin"]))
-W_TIP = wp.constant(F64(CONFIG["w_tip"]))
-W_TILT = wp.constant(F64(CONFIG["w_tilt"]))
-W_E = wp.constant(F64(CONFIG["w_e"]))
-W_S = wp.constant(F64(CONFIG["w_s"]))
-TSCALE = wp.constant(F64(CONFIG["tilt_scale"]))
+W_RUN6 = wp.constant(FL(CONFIG["w_run"] / N_SEG))
+W_C6 = wp.constant(FL(CONFIG["w_c"] / N_SEG))
+CMARGIN = wp.constant(FL(CONFIG["cmargin"]))
+W_TIP = wp.constant(FL(CONFIG["w_tip"]))
+W_TILT = wp.constant(FL(CONFIG["w_tilt"]))
+W_E = wp.constant(FL(CONFIG["w_e"]))
+W_S = wp.constant(FL(CONFIG["w_s"]))
+TSCALE = wp.constant(FL(CONFIG["tilt_scale"]))
 NSEG = wp.constant(N_SEG)
 PN = wp.constant(PATCH_N)
-FRONT_Y = wp.constant(F64(FRONT_WHEEL_Y))
+FRONT_Y = wp.constant(FL(FRONT_WHEEL_Y))
 MODEL_CELL_F = wp.constant(MODEL_CELL)
 SEG_T_F = wp.constant(SEG_T)
 (D0X, D0Y, D0R), (D1X, D1Y, D1R), (D2X, D2Y, D2R) = (
-    (wp.constant(F64(a)) for a in d) for d in DISCS
+    (wp.constant(FL(a)) for a in d) for d in DISCS
 )
 
 
@@ -165,73 +165,73 @@ GEMM = _gemm_kernels()
 
 
 @wp.func
-def lookup(A: wp.array2d[F64], gx0: F64, gy0: F64, x: F64, y: F64):
+def lookup(A: wp.array2d[FL], gx0: FL, gy0: FL, x: FL, y: FL):
     """Bilinear lookup of a model-grid field at (x, y) (clamped to the grid, nan -> 0)."""
     fx = (x - gx0) / CELL
     fy = (y - gy0) / CELL
-    fx = wp.where(wp.isnan(fx), F64(0.0), fx)
-    fy = wp.where(wp.isnan(fy), F64(0.0), fy)
-    fx = wp.clamp(fx, F64(0.0), F64(A.shape[1] - 1) - F64(1e-6))
-    fy = wp.clamp(fy, F64(0.0), F64(A.shape[0] - 1) - F64(1e-6))
+    fx = wp.where(wp.isnan(fx), FL(0.0), fx)
+    fy = wp.where(wp.isnan(fy), FL(0.0), fy)
+    fx = wp.clamp(fx, FL(0.0), FL(A.shape[1] - 1) - FL(1e-6))
+    fy = wp.clamp(fy, FL(0.0), FL(A.shape[0] - 1) - FL(1e-6))
     ix = int(wp.floor(fx))
     iy = int(wp.floor(fy))
-    tx = fx - F64(ix)
-    ty = fy - F64(iy)
-    one = F64(1.0)
+    tx = fx - FL(ix)
+    ty = fy - FL(iy)
+    one = FL(1.0)
     return (one - ty) * ((one - tx) * A[iy, ix] + tx * A[iy, ix + 1]) + ty * (
         (one - tx) * A[iy + 1, ix] + tx * A[iy + 1, ix + 1]
     )
 
 
 @wp.func
-def minrot_ez(a: wp.vec3d):
+def minrot_ez(a: wp.vec3f):
     """The smallest rotation taking the unit vector a to ez."""
-    one = F64(1.0)
-    v = wp.cross(a, wp.vec3d(F64(0.0), F64(0.0), one))
+    one = FL(1.0)
+    v = wp.cross(a, wp.vec3f(FL(0.0), FL(0.0), one))
     c = a[2]
     K = wp.skew(v)
-    I = wp.identity(n=3, dtype=F64)  # noqa: E741
-    R = I + K + (K * K) / wp.max(one + c, F64(1e-6))
-    if c < F64(-0.9999):
-        ax = wp.vec3d(one, F64(0.0), F64(0.0))
-        if wp.abs(a[0]) >= F64(0.9):
-            ax = wp.vec3d(F64(0.0), one, F64(0.0))
+    I = wp.identity(n=3, dtype=FL)  # noqa: E741
+    R = I + K + (K * K) / wp.max(one + c, FL(1e-6))
+    if c < FL(-0.9999):
+        ax = wp.vec3f(one, FL(0.0), FL(0.0))
+        if wp.abs(a[0]) >= FL(0.9):
+            ax = wp.vec3f(FL(0.0), one, FL(0.0))
         alt = wp.cross(a, ax)
-        alt = alt / wp.max(wp.length(alt), F64(1e-9))
-        R = F64(2.0) * wp.outer(alt, alt) - I
+        alt = alt / wp.max(wp.length(alt), FL(1e-9))
+        R = FL(2.0) * wp.outer(alt, alt) - I
     return R
 
 
 @wp.kernel(enable_backward=False)
 def init_state(
-    S: wp.array2d[F64],
+    S: wp.array2d[FL],
     ppe: int,
     M: int,
-    P: wp.array2d[wp.vec3d],
-    YAW: wp.array2d[F64],
-    XF: wp.array3d[F64],
+    P: wp.array2d[wp.vec3f],
+    YAW: wp.array2d[FL],
+    XF: wp.array3d[FL],
 ):
     """Step-0 state of every particle from its episode's state S (W, 16) (no gradient)."""
     i = wp.tid()
     e = (i // M) // ppe
-    q = wp.vec4d(S[e, 3], S[e, 4], S[e, 5], S[e, 6])
-    q = q / wp.max(wp.length(q), F64(1e-9))
+    q = wp.vec4f(S[e, 3], S[e, 4], S[e, 5], S[e, 6])
+    q = q / wp.max(wp.length(q), FL(1e-9))
     x = q[0]
     y = q[1]
     z = q[2]
     w = q[3]
-    one = F64(1.0)
-    two = F64(2.0)
-    R = wp.mat33d(
+    one = FL(1.0)
+    two = FL(2.0)
+    R = wp.mat33f(
         one - two * (y * y + z * z), two * (x * y - z * w), two * (x * z + y * w),
         two * (x * y + z * w), one - two * (x * x + z * z), two * (y * z - x * w),
         two * (x * z - y * w), two * (y * z + x * w), one - two * (x * x + y * y),
     )  # fmt: skip
-    u = wp.vec3d(R[2, 0], R[2, 1], R[2, 2])
+    u = wp.vec3f(R[2, 0], R[2, 1], R[2, 2])
     Rz = R * wp.transpose(minrot_ez(u))
-    vb = wp.transpose(R) * wp.vec3d(S[e, 7], S[e, 8], S[e, 9])
-    wb = wp.transpose(R) * wp.vec3d(S[e, 10], S[e, 11], S[e, 12])
-    P[0, i] = wp.vec3d(S[e, 0], S[e, 1], S[e, 2])
+    vb = wp.transpose(R) * wp.vec3f(S[e, 7], S[e, 8], S[e, 9])
+    wb = wp.transpose(R) * wp.vec3f(S[e, 10], S[e, 11], S[e, 12])
+    P[0, i] = wp.vec3f(S[e, 0], S[e, 1], S[e, 2])
     YAW[0, i] = wp.atan2(Rz[1, 0], Rz[0, 0])
     for j in range(3):
         XF[0, i, j] = u[j]
@@ -245,16 +245,16 @@ def feat(
     k: int,
     kb: int,
     M: int,
-    P: wp.array2d[wp.vec3d],
-    YAW: wp.array2d[F64],
-    XF: wp.array3d[F64],
+    P: wp.array2d[wp.vec3f],
+    YAW: wp.array2d[FL],
+    XF: wp.array3d[FL],
     U: wp.array3d[float],
-    H: wp.array2d[F64],
-    gx0: F64,
-    gy0: F64,
-    fmean: wp.array[F64],
-    fstd: wp.array[F64],
-    PXY: wp.array2d[F64],
+    H: wp.array2d[FL],
+    gx0: FL,
+    gy0: FL,
+    fmean: wp.array[FL],
+    fstd: wp.array[FL],
+    PXY: wp.array2d[FL],
     Z: wp.array3d[float],
 ):
     """MLP input of step k; thread (i, r): particle i, patch row r (r = 0 also writes the 15 leading inputs)."""
@@ -266,7 +266,7 @@ def feat(
         Z[kb, 2, i] = LOGSIG3
         for j in range(12):
             Z[kb, 3 + j, i] = float(
-                wp.clamp((XF[k, i, j] - fmean[j]) / fstd[j], F64(-8.0), F64(8.0))
+                wp.clamp((XF[k, i, j] - fmean[j]) / fstd[j], FL(-8.0), FL(8.0))
             )
     p = P[k, i]
     c = wp.cos(YAW[k, i])
@@ -277,27 +277,27 @@ def feat(
         qx = PXY[j, 0]
         qy = PXY[j, 1]
         h = lookup(H, gx0, gy0, p[0] + c * qx - s * qy, p[1] + s * qx + c * qy) - zr
-        Z[kb, 15 + j, i] = float(wp.clamp((h - fmean[12 + j]) / fstd[12 + j], F64(-8.0), F64(8.0)))
+        Z[kb, 15 + j, i] = float(wp.clamp((h - fmean[12 + j]) / fstd[12 + j], FL(-8.0), FL(8.0)))
 
 
 @wp.func
-def lookup_grad(A: wp.array2d[F64], gx0: F64, gy0: F64, x: F64, y: F64):
+def lookup_grad(A: wp.array2d[FL], gx0: FL, gy0: FL, x: FL, y: FL):
     """(value, d/dx, d/dy) of lookup (zero gradient where the query is clamped to the grid)."""
     fx = (x - gx0) / CELL
     fy = (y - gy0) / CELL
-    fx = wp.where(wp.isnan(fx), F64(0.0), fx)
-    fy = wp.where(wp.isnan(fy), F64(0.0), fy)
-    hx = F64(A.shape[1] - 1) - F64(1e-6)
-    hy = F64(A.shape[0] - 1) - F64(1e-6)
-    inx = wp.where((fx >= F64(0.0)) and (fx <= hx), F64(1.0), F64(0.0))
-    iny = wp.where((fy >= F64(0.0)) and (fy <= hy), F64(1.0), F64(0.0))
-    fx = wp.clamp(fx, F64(0.0), hx)
-    fy = wp.clamp(fy, F64(0.0), hy)
+    fx = wp.where(wp.isnan(fx), FL(0.0), fx)
+    fy = wp.where(wp.isnan(fy), FL(0.0), fy)
+    hx = FL(A.shape[1] - 1) - FL(1e-6)
+    hy = FL(A.shape[0] - 1) - FL(1e-6)
+    inx = wp.where((fx >= FL(0.0)) and (fx <= hx), FL(1.0), FL(0.0))
+    iny = wp.where((fy >= FL(0.0)) and (fy <= hy), FL(1.0), FL(0.0))
+    fx = wp.clamp(fx, FL(0.0), hx)
+    fy = wp.clamp(fy, FL(0.0), hy)
     ix = int(wp.floor(fx))
     iy = int(wp.floor(fy))
-    tx = fx - F64(ix)
-    ty = fy - F64(iy)
-    one = F64(1.0)
+    tx = fx - FL(ix)
+    ty = fy - FL(iy)
+    one = FL(1.0)
     a00 = A[iy, ix]
     a01 = A[iy, ix + 1]
     a10 = A[iy + 1, ix]
@@ -305,7 +305,7 @@ def lookup_grad(A: wp.array2d[F64], gx0: F64, gy0: F64, x: F64, y: F64):
     v = (one - ty) * ((one - tx) * a00 + tx * a01) + ty * ((one - tx) * a10 + tx * a11)
     gx = ((one - ty) * (a01 - a00) + ty * (a11 - a10)) * inx / CELL
     gy = ((one - tx) * (a10 - a00) + tx * (a11 - a01)) * iny / CELL
-    return wp.vec3d(v, gx, gy)
+    return wp.vec3f(v, gx, gy)
 
 
 @wp.kernel(enable_backward=False)
@@ -313,19 +313,19 @@ def feat_adj(
     k: int,
     kb: int,
     M: int,
-    P: wp.array2d[wp.vec3d],
-    YAW: wp.array2d[F64],
-    XF: wp.array3d[F64],
-    H: wp.array2d[F64],
-    gx0: F64,
-    gy0: F64,
-    fmean: wp.array[F64],
-    fstd: wp.array[F64],
-    PXY: wp.array2d[F64],
+    P: wp.array2d[wp.vec3f],
+    YAW: wp.array2d[FL],
+    XF: wp.array3d[FL],
+    H: wp.array2d[FL],
+    gx0: FL,
+    gy0: FL,
+    fmean: wp.array[FL],
+    fstd: wp.array[FL],
+    PXY: wp.array2d[FL],
     aZ: wp.array3d[float],
-    aP: wp.array2d[wp.vec3d],
-    aYAW: wp.array2d[F64],
-    aXF: wp.array3d[F64],
+    aP: wp.array2d[wp.vec3f],
+    aYAW: wp.array2d[FL],
+    aXF: wp.array3d[FL],
     aU: wp.array3d[float],
 ):
     """Hand-written adjoint of feat (same thread layout): aZ -> aU, aXF, aP, aYAW (accumulated)."""
@@ -336,23 +336,23 @@ def feat_adj(
         wp.atomic_add(aU, k, pl, 1, aZ[kb, 1, i])
         for j in range(12):
             zv = (XF[k, i, j] - fmean[j]) / fstd[j]
-            if zv >= F64(-8.0) and zv <= F64(8.0):
-                aXF[k, i, j] = aXF[k, i, j] + F64(aZ[kb, 3 + j, i]) / fstd[j]
+            if zv >= FL(-8.0) and zv <= FL(8.0):
+                aXF[k, i, j] = aXF[k, i, j] + FL(aZ[kb, 3 + j, i]) / fstd[j]
     p = P[k, i]
     c = wp.cos(YAW[k, i])
     s = wp.sin(YAW[k, i])
     zr = p[2] - R_W
-    gp = wp.vec3d(F64(0.0), F64(0.0), F64(0.0))
-    gyaw = F64(0.0)
+    gp = wp.vec3f(FL(0.0), FL(0.0), FL(0.0))
+    gyaw = FL(0.0)
     for b in range(PN):
         j = r * PN + b
         qx = PXY[j, 0]
         qy = PXY[j, 1]
         hg = lookup_grad(H, gx0, gy0, p[0] + c * qx - s * qy, p[1] + s * qx + c * qy)
         zv = (hg[0] - zr - fmean[12 + j]) / fstd[12 + j]
-        if zv >= F64(-8.0) and zv <= F64(8.0):
-            g = F64(aZ[kb, 15 + j, i]) / fstd[12 + j]
-            gp += wp.vec3d(g * hg[1], g * hg[2], -g)
+        if zv >= FL(-8.0) and zv <= FL(8.0):
+            g = FL(aZ[kb, 15 + j, i]) / fstd[12 + j]
+            gp += wp.vec3f(g * hg[1], g * hg[2], -g)
             gyaw += g * (hg[1] * (-s * qx - c * qy) + hg[2] * (c * qx - s * qy))
     wp.atomic_add(aP, k, i, gp)
     wp.atomic_add(aYAW, k, i, gyaw)
@@ -365,34 +365,34 @@ def nan_to_num30(x: float):
 
 
 @wp.func
-def tilt_cost(up: F64):
-    t = wp.acos(wp.clamp(up, F64(-0.999), F64(0.999))) * F64(57.29577951308232) / TSCALE
+def tilt_cost(up: FL):
+    t = wp.acos(wp.clamp(up, FL(-0.999), FL(0.999))) * FL(57.29577951308232) / TSCALE
     return t * t
 
 
 @wp.func
-def sample(O: wp.array3d[float], kb: int, i: int, comp: int, d: int, eps: float, xm: F64, xs: F64):
+def sample(O: wp.array3d[float], kb: int, i: int, comp: int, d: int, eps: float, xm: FL, xs: FL):
     """Outcome dimension d of component comp, reparameterized: clamp(mu + s eps, -8, 8) destandardized."""
     m = O[kb, 4 + comp * 17 + d, i]
     sd = wp.exp(wp.clamp(O[kb, 72 + comp * 17 + d, i], -4.0, 2.0))
-    return F64(wp.clamp(m + sd * eps, -8.0, 8.0)) * xs + xm
+    return FL(wp.clamp(m + sd * eps, -8.0, 8.0)) * xs + xm
 
 
 @wp.func
 def clearance(
-    D: wp.array2d[F64],
-    gx0: F64,
-    gy0: F64,
-    x: F64,
-    y: F64,
-    c: F64,
-    s: F64,
-    ox: F64,
-    oy: F64,
-    rad: F64,
+    D: wp.array2d[FL],
+    gx0: FL,
+    gy0: FL,
+    x: FL,
+    y: FL,
+    c: FL,
+    s: FL,
+    ox: FL,
+    oy: FL,
+    rad: FL,
 ):
     d = lookup(D, gx0, gy0, x + c * ox - s * oy, y + s * ox + c * oy)
-    t = wp.max((rad + CMARGIN - d) / CMARGIN, F64(0.0))
+    t = wp.max((rad + CMARGIN - d) / CMARGIN, FL(0.0))
     return t * t
 
 
@@ -401,22 +401,22 @@ def head(
     k: int,
     kb: int,
     O: wp.array3d[float],
-    xm: wp.array[F64],
-    xs: wp.array[F64],
-    m_u: F64,
-    s_u: F64,
+    xm: wp.array[FL],
+    xs: wp.array[FL],
+    m_u: FL,
+    s_u: FL,
     EPS: wp.array3d[float],
     RU: wp.array2d[float],
-    P: wp.array2d[wp.vec3d],
-    YAW: wp.array2d[F64],
-    XF: wp.array3d[F64],
-    VA: wp.array2d[F64],
-    DA: wp.array2d[F64],
-    gx0: F64,
-    gy0: F64,
-    PT: wp.array2d[F64],
-    TL: wp.array2d[F64],
-    LS: wp.array2d[F64],
+    P: wp.array2d[wp.vec3f],
+    YAW: wp.array2d[FL],
+    XF: wp.array3d[FL],
+    VA: wp.array2d[FL],
+    DA: wp.array2d[FL],
+    gx0: FL,
+    gy0: FL,
+    PT: wp.array2d[FL],
+    TL: wp.array2d[FL],
+    LS: wp.array2d[FL],
 ):
     """Mixture terms of step k, sampled outcome, next state, step loss."""
     i = wp.tid()
@@ -430,26 +430,26 @@ def head(
     e2 = wp.exp(l2 - mx)
     e3 = wp.exp(l3 - mx)
     se = e0 + e1 + e2 + e3
-    wv = wp.vec4d(F64(e0 / se), F64(e1 / se), F64(e2 / se), F64(e3 / se))
-    pt = F64(0.0)
-    tl = F64(0.0)
-    sq3 = F64(1.7320508075688772)
+    wv = wp.vec4f(FL(e0 / se), FL(e1 / se), FL(e2 / se), FL(e3 / se))
+    pt = FL(0.0)
+    tl = FL(0.0)
+    sq3 = FL(1.7320508075688772)
     # P(tip) and the tilt term (3-point Gauss-Hermite) from every component's smallest up_z
     for c in range(4):
-        mu = F64(O[kb, 4 + c * 17 + 16, i]) * s_u + m_u
-        sd = F64(wp.exp(wp.clamp(O[kb, 72 + c * 17 + 16, i], -4.0, 2.0))) * s_u + F64(1e-6)
-        pt += wv[c] * F64(0.5) * (F64(1.0) + wp.erf((F64(0.5) - mu) / sd / F64(1.4142135623730951)))
+        mu = FL(O[kb, 4 + c * 17 + 16, i]) * s_u + m_u
+        sd = FL(wp.exp(wp.clamp(O[kb, 72 + c * 17 + 16, i], -4.0, 2.0))) * s_u + FL(1e-6)
+        pt += wv[c] * FL(0.5) * (FL(1.0) + wp.erf((FL(0.5) - mu) / sd / FL(1.4142135623730951)))
         tl += wv[c] * (
-            tilt_cost(mu - sq3 * sd) / F64(6.0)
-            + F64(2.0) / F64(3.0) * tilt_cost(mu)
-            + tilt_cost(mu + sq3 * sd) / F64(6.0)
+            tilt_cost(mu - sq3 * sd) / FL(6.0)
+            + FL(2.0) / FL(3.0) * tilt_cost(mu)
+            + tilt_cost(mu + sq3 * sd) / FL(6.0)
         )
     PT[k, i] = pt
     TL[k, i] = tl
     # the component by inverse CDF of one uniform draw
-    r = F64(RU[k, i])
+    r = FL(RU[k, i])
     cnt = int(0)
-    cum = F64(0.0)
+    cum = FL(0.0)
     for c in range(4):
         cum += wv[c]
         if cum <= r:
@@ -458,7 +458,7 @@ def head(
     dx = sample(O, kb, i, comp, 0, EPS[k, i, 0], xm[0], xs[0])
     dy = sample(O, kb, i, comp, 1, EPS[k, i, 1], xm[1], xs[1])
     dz = sample(O, kb, i, comp, 2, EPS[k, i, 2], xm[2], xs[2])
-    u = wp.vec3d(
+    u = wp.vec3f(
         sample(O, kb, i, comp, 3, EPS[k, i, 3], xm[3], xs[3]),
         sample(O, kb, i, comp, 4, EPS[k, i, 4], xm[4], xs[4]),
         sample(O, kb, i, comp, 5, EPS[k, i, 5], xm[5], xs[5]),
@@ -467,9 +467,9 @@ def head(
     yaw0 = YAW[k, i]
     c0 = wp.cos(yaw0)
     s0 = wp.sin(yaw0)
-    p1 = P[k, i] + wp.vec3d(c0 * dx - s0 * dy, s0 * dx + c0 * dy, dz)
+    p1 = P[k, i] + wp.vec3f(c0 * dx - s0 * dy, s0 * dx + c0 * dy, dz)
     yaw1 = yaw0 + dyaw
-    u = u / wp.max(wp.length(u), F64(1e-9))
+    u = u / wp.max(wp.length(u), FL(1e-9))
     P[k + 1, i] = p1
     YAW[k + 1, i] = yaw1
     for j in range(3):
@@ -487,35 +487,35 @@ def head(
 
 
 @wp.func
-def tilt_cost_d(up: F64):
+def tilt_cost_d(up: FL):
     """d tilt_cost / d up (0 where the clamp is active)."""
-    if up < F64(-0.999) or up > F64(0.999):
-        return F64(0.0)
-    sc = F64(57.29577951308232) / TSCALE
-    return F64(-2.0) * wp.acos(up) * sc * sc / wp.sqrt(F64(1.0) - up * up)
+    if up < FL(-0.999) or up > FL(0.999):
+        return FL(0.0)
+    sc = FL(57.29577951308232) / TSCALE
+    return FL(-2.0) * wp.acos(up) * sc * sc / wp.sqrt(FL(1.0) - up * up)
 
 
 @wp.func
 def clearance_adj(
-    D: wp.array2d[F64],
-    gx0: F64,
-    gy0: F64,
-    x: F64,
-    y: F64,
-    c: F64,
-    s: F64,
-    ox: F64,
-    oy: F64,
-    rad: F64,
-    a: F64,
+    D: wp.array2d[FL],
+    gx0: FL,
+    gy0: FL,
+    x: FL,
+    y: FL,
+    c: FL,
+    s: FL,
+    ox: FL,
+    oy: FL,
+    rad: FL,
+    a: FL,
 ):
     """(d/dx, d/dy, d/dyaw) of a * clearance."""
     g = lookup_grad(D, gx0, gy0, x + c * ox - s * oy, y + s * ox + c * oy)
     t = (rad + CMARGIN - g[0]) / CMARGIN
-    out = wp.vec3d(F64(0.0), F64(0.0), F64(0.0))
-    if t > F64(0.0):
-        gd = a * F64(-2.0) * t / CMARGIN  # d (a t^2) / d dist
-        out = wp.vec3d(
+    out = wp.vec3f(FL(0.0), FL(0.0), FL(0.0))
+    if t > FL(0.0):
+        gd = a * FL(-2.0) * t / CMARGIN  # d (a t^2) / d dist
+        out = wp.vec3f(
             gd * g[1], gd * g[2], gd * (g[1] * (-s * ox - c * oy) + g[2] * (c * ox - s * oy))
         )
     return out
@@ -529,8 +529,8 @@ def sample_adj(
     comp: int,
     d: int,
     eps: float,
-    xs: F64,
-    a: F64,
+    xs: FL,
+    a: FL,
     aO: wp.array3d[float],
 ):
     """Adjoint of sample: a = d loss / d x_d into aO (the component's mean and log-scale entries)."""
@@ -550,25 +550,25 @@ def head_adj(
     k: int,
     kb: int,
     O: wp.array3d[float],
-    xm: wp.array[F64],
-    xs: wp.array[F64],
-    m_u: F64,
-    s_u: F64,
+    xm: wp.array[FL],
+    xs: wp.array[FL],
+    m_u: FL,
+    s_u: FL,
     EPS: wp.array3d[float],
     RU: wp.array2d[float],
-    P: wp.array2d[wp.vec3d],
-    YAW: wp.array2d[F64],
-    VA: wp.array2d[F64],
-    DA: wp.array2d[F64],
-    gx0: F64,
-    gy0: F64,
-    aPT: wp.array2d[F64],
-    aTL: wp.array2d[F64],
-    aLS: wp.array2d[F64],
+    P: wp.array2d[wp.vec3f],
+    YAW: wp.array2d[FL],
+    VA: wp.array2d[FL],
+    DA: wp.array2d[FL],
+    gx0: FL,
+    gy0: FL,
+    aPT: wp.array2d[FL],
+    aTL: wp.array2d[FL],
+    aLS: wp.array2d[FL],
     aO: wp.array3d[float],
-    aP: wp.array2d[wp.vec3d],
-    aYAW: wp.array2d[F64],
-    aXF: wp.array3d[F64],
+    aP: wp.array2d[wp.vec3f],
+    aYAW: wp.array2d[FL],
+    aXF: wp.array3d[FL],
 ):
     """Hand-written adjoint of head: (aPT, aTL, aLS of step k; aP, aYAW, aXF of step k + 1) -> aO of step k (the
     entries the step reads; aO is zeroed before, the rest stay zero) and aP, aYAW of step k (accumulated).
@@ -585,10 +585,10 @@ def head_adj(
     e2 = wp.exp(l2 - mx)
     e3 = wp.exp(l3 - mx)
     se = e0 + e1 + e2 + e3
-    wv = wp.vec4d(F64(e0 / se), F64(e1 / se), F64(e2 / se), F64(e3 / se))
-    r = F64(RU[k, i])
+    wv = wp.vec4f(FL(e0 / se), FL(e1 / se), FL(e2 / se), FL(e3 / se))
+    r = FL(RU[k, i])
     cnt = int(0)
-    cum = F64(0.0)
+    cum = FL(0.0)
     for c in range(4):
         cum += wv[c]
         if cum <= r:
@@ -596,7 +596,7 @@ def head_adj(
     comp = wp.min(cnt, 3)
     dx = sample(O, kb, i, comp, 0, EPS[k, i, 0], xm[0], xs[0])
     dy = sample(O, kb, i, comp, 1, EPS[k, i, 1], xm[1], xs[1])
-    u = wp.vec3d(
+    u = wp.vec3f(
         sample(O, kb, i, comp, 3, EPS[k, i, 3], xm[3], xs[3]),
         sample(O, kb, i, comp, 4, EPS[k, i, 4], xm[4], xs[4]),
         sample(O, kb, i, comp, 5, EPS[k, i, 5], xm[5], xs[5]),
@@ -617,8 +617,8 @@ def head_adj(
         + clearance_adj(DA, gx0, gy0, p1[0], p1[1], c1, s1, D1X, D1Y, D1R, ga)
         + clearance_adj(DA, gx0, gy0, p1[0], p1[1], c1, s1, D2X, D2Y, D2R, ga)
     )
-    ap1 = aP[k + 1, i] + wp.vec3d(
-        als * W_RUN6 * gv[1] + gs[0], als * W_RUN6 * gv[2] + gs[1], F64(0.0)
+    ap1 = aP[k + 1, i] + wp.vec3f(
+        als * W_RUN6 * gv[1] + gs[0], als * W_RUN6 * gv[2] + gs[1], FL(0.0)
     )
     ayaw1 = aYAW[k + 1, i] + gs[2]
     # compose: p1 = p0 + Rz(yaw0) (dx, dy, dz), yaw1 = yaw0 + dyaw, XF[k+1] = (u / |u|, x_7..15)
@@ -626,10 +626,10 @@ def head_adj(
     ady = -s0 * ap1[0] + c0 * ap1[1]
     aP[k, i] = aP[k, i] + ap1
     aYAW[k, i] = aYAW[k, i] + ayaw1 + ap1[0] * (-s0 * dx - c0 * dy) + ap1[1] * (c0 * dx - s0 * dy)
-    au_hat = wp.vec3d(aXF[k + 1, i, 0], aXF[k + 1, i, 1], aXF[k + 1, i, 2])
+    au_hat = wp.vec3f(aXF[k + 1, i, 0], aXF[k + 1, i, 1], aXF[k + 1, i, 2])
     nu = wp.length(u)
-    au = au_hat / F64(1e-9)
-    if nu > F64(1e-9):
+    au = au_hat / FL(1e-9)
+    if nu > FL(1e-9):
         uh = u / nu
         au = (au_hat - uh * wp.dot(uh, au_hat)) / nu
     sample_adj(O, kb, i, comp, 0, EPS[k, i, 0], xs[0], adx, aO)
@@ -644,30 +644,30 @@ def head_adj(
     # P(tip) and tilt of the step: through the weights and every component's min-up_z mean and scale
     apt = aPT[k, i]
     atl = aTL[k, i]
-    sq3 = F64(1.7320508075688772)
-    aw = wp.vec4d(F64(0.0), F64(0.0), F64(0.0), F64(0.0))
+    sq3 = FL(1.7320508075688772)
+    aw = wp.vec4f(FL(0.0), FL(0.0), FL(0.0), FL(0.0))
     for c in range(4):
         lsr = O[kb, 72 + c * 17 + 16, i]
         es = wp.exp(wp.clamp(lsr, -4.0, 2.0))
-        mu = F64(O[kb, 4 + c * 17 + 16, i]) * s_u + m_u
-        sd = F64(es) * s_u + F64(1e-6)
-        z = (F64(0.5) - mu) / sd
-        phi = wp.exp(F64(-0.5) * z * z) * F64(0.3989422804014327)
-        Phi = F64(0.5) * (F64(1.0) + wp.erf(z / F64(1.4142135623730951)))
+        mu = FL(O[kb, 4 + c * 17 + 16, i]) * s_u + m_u
+        sd = FL(es) * s_u + FL(1e-6)
+        z = (FL(0.5) - mu) / sd
+        phi = wp.exp(FL(-0.5) * z * z) * FL(0.3989422804014327)
+        Phi = FL(0.5) * (FL(1.0) + wp.erf(z / FL(1.4142135623730951)))
         T = (
-            tilt_cost(mu - sq3 * sd) / F64(6.0)
-            + F64(2.0) / F64(3.0) * tilt_cost(mu)
-            + tilt_cost(mu + sq3 * sd) / F64(6.0)
+            tilt_cost(mu - sq3 * sd) / FL(6.0)
+            + FL(2.0) / FL(3.0) * tilt_cost(mu)
+            + tilt_cost(mu + sq3 * sd) / FL(6.0)
         )
         tm = tilt_cost_d(mu - sq3 * sd)
         tp = tilt_cost_d(mu + sq3 * sd)
-        dT_dmu = tm / F64(6.0) + F64(2.0) / F64(3.0) * tilt_cost_d(mu) + tp / F64(6.0)
-        dT_dsd = sq3 * (tp - tm) / F64(6.0)
+        dT_dmu = tm / FL(6.0) + FL(2.0) / FL(3.0) * tilt_cost_d(mu) + tp / FL(6.0)
+        dT_dsd = sq3 * (tp - tm) / FL(6.0)
         amu = wv[c] * (apt * (-phi / sd) + atl * dT_dmu)
         asd = wv[c] * (apt * (-phi * z / sd) + atl * dT_dsd)
         aO[kb, 4 + c * 17 + 16, i] = float(amu * s_u)
         if lsr >= -4.0 and lsr <= 2.0:
-            aO[kb, 72 + c * 17 + 16, i] = float(asd * s_u * F64(es))
+            aO[kb, 72 + c * 17 + 16, i] = float(asd * s_u * FL(es))
         aw[c] = apt * Phi + atl * T
     sw = wp.dot(wv, aw)
     for c in range(4):
@@ -680,19 +680,19 @@ def loss(
     M: int,
     ppe: int,
     U: wp.array3d[float],
-    UP: wp.array2d[F64],
-    P: wp.array2d[wp.vec3d],
-    VA: wp.array2d[F64],
-    gx0: F64,
-    gy0: F64,
-    PT: wp.array2d[F64],
-    TL: wp.array2d[F64],
-    LS: wp.array2d[F64],
-    inv_n: F64,
+    UP: wp.array2d[FL],
+    P: wp.array2d[wp.vec3f],
+    VA: wp.array2d[FL],
+    gx0: FL,
+    gy0: FL,
+    PT: wp.array2d[FL],
+    TL: wp.array2d[FL],
+    LS: wp.array2d[FL],
+    inv_n: FL,
     mode: int,
-    LP: wp.array[F64],
-    TOT: wp.array[F64],
-    PL: wp.array[F64],
+    LP: wp.array[FL],
+    TOT: wp.array[FL],
+    PL: wp.array[FL],
 ):
     """Plan loss of particle i; mode 0: TOT += L / n (the gradient objective), 1: PL[plan] += L / M."""
     i = wp.tid()
@@ -700,29 +700,29 @@ def loss(
     e = pl // ppe
     pN = P[NSEG, i]
     L = lookup(VA, gx0, gy0, pN[0], pN[1])
-    surv = F64(1.0)
-    eff = F64(0.0)
+    surv = FL(1.0)
+    eff = FL(0.0)
     for k in range(NSEG):
         L += LS[k, i] + W_TILT * TL[k, i]
-        surv *= F64(1.0) - PT[k, i]
-        a = F64(U[k, pl, 0])
-        b = F64(U[k, pl, 1])
+        surv *= FL(1.0) - PT[k, i]
+        a = FL(U[k, pl, 0])
+        b = FL(U[k, pl, 1])
         eff += a * a + b * b
-    L += W_TIP * (F64(1.0) - surv) + W_E * eff / F64(2 * NSEG)
+    L += W_TIP * (FL(1.0) - surv) + W_E * eff / FL(2 * NSEG)
     # command rate, from the command last published (UP)
-    ra = F64(U[0, pl, 0]) - UP[e, 0]
-    rb = F64(U[0, pl, 1]) - UP[e, 1]
+    ra = FL(U[0, pl, 0]) - UP[e, 0]
+    rb = FL(U[0, pl, 1]) - UP[e, 1]
     rate = ra * ra + rb * rb
     for k in range(1, NSEG):
-        ra = F64(U[k, pl, 0] - U[k - 1, pl, 0])
-        rb = F64(U[k, pl, 1] - U[k - 1, pl, 1])
+        ra = FL(U[k, pl, 0] - U[k - 1, pl, 0])
+        rb = FL(U[k, pl, 1] - U[k - 1, pl, 1])
         rate += ra * ra + rb * rb
     L += W_S * rate
     LP[i] = L
     if mode == 0:
-        wp.atomic_add(TOT, 0, wp.where(wp.isfinite(L), L, F64(0.0)) * inv_n)
+        wp.atomic_add(TOT, 0, wp.where(wp.isfinite(L), L, FL(0.0)) * inv_n)
     else:
-        wp.atomic_add(PL, pl, wp.where(wp.isfinite(L), L / F64(M), F64(1e30)))
+        wp.atomic_add(PL, pl, wp.where(wp.isfinite(L), L / FL(M), FL(1e30)))
 
 
 # --- planner bookkeeping ---------------------------------------------------------------------------------------------
@@ -756,7 +756,7 @@ def shoot_cands(seed: wp.array[int], U0: wp.array3d[float], K: int, C: wp.array3
 
 @wp.kernel(enable_backward=False)
 def select_inits(
-    PL: wp.array[F64],
+    PL: wp.array[FL],
     K: int,
     n0: int,
     C: wp.array3d[float],
@@ -771,7 +771,7 @@ def select_inits(
             UPL[k, w * n0, d] = U0[k, w, d]
     for j in range(n0 - 1):
         best = int(0)
-        bv = F64(1e300)
+        bv = FL(1e300)
         for c in range(K):
             v = PL[w * K + c]
             if TAKEN[w * K + c] == 0 and v < bv:
@@ -811,19 +811,19 @@ def adam(
 
 @wp.kernel(enable_backward=False)
 def pick_best(
-    PL: wp.array[F64],
+    PL: wp.array[FL],
     n0: int,
     M: int,
     UPL: wp.array3d[float],
-    P: wp.array2d[wp.vec3d],
-    YAW: wp.array2d[F64],
+    P: wp.array2d[wp.vec3f],
+    YAW: wp.array2d[FL],
     OUT: wp.array3d[float],
-    KNOTS: wp.array2d[wp.vec3d],
+    KNOTS: wp.array2d[wp.vec3f],
 ):
     """The lowest-loss plan of episode w, and its mean path (x, y, yaw) over its M scoring particles."""
     w = wp.tid()
     best = int(0)
-    bv = F64(1e300)
+    bv = FL(1e300)
     for j in range(n0):
         if PL[w * n0 + j] < bv:
             bv = PL[w * n0 + j]
@@ -833,17 +833,17 @@ def pick_best(
             OUT[k, w, d] = UPL[k, w * n0 + best, d]
     i0 = (w * n0 + best) * M
     for k in range(NSEG + 1):
-        sx = F64(0.0)
-        sy = F64(0.0)
-        sc = F64(0.0)
-        ss = F64(0.0)
+        sx = FL(0.0)
+        sy = FL(0.0)
+        sc = FL(0.0)
+        ss = FL(0.0)
         for m in range(M):
             p = P[k, i0 + m]
             sx += p[0]
             sy += p[1]
             sc += wp.cos(YAW[k, i0 + m])
             ss += wp.sin(YAW[k, i0 + m])
-        KNOTS[k, w] = wp.vec3d(sx / F64(M), sy / F64(M), wp.atan2(ss, sc))
+        KNOTS[k, w] = wp.vec3f(sx / FL(M), sy / FL(M), wp.atan2(ss, sc))
 
 
 # --- the frame's maps onto the model grid ------------------------------------------------------------------------------
@@ -865,10 +865,10 @@ def bilinear_f32(A: wp.array2d[float], cell: float, ox: float, oy: float, x: flo
 
 @wp.kernel(enable_backward=False)
 def resample_kernel(
-    src: wp.array2d[float], cell: float, ox: float, oy: float, dst: wp.array2d[F64]
+    src: wp.array2d[float], cell: float, ox: float, oy: float, dst: wp.array2d[FL]
 ):
     r, c = wp.tid()
-    dst[r, c] = F64(
+    dst[r, c] = FL(
         bilinear_f32(src, cell, ox, oy, float(c) * MODEL_CELL_F, float(r) * MODEL_CELL_F)
     )
 
@@ -883,7 +883,7 @@ def value_kernel(
     ref_n: wp.array[wp.int32],
     use_ref: int,
     w_track: float,
-    dst: wp.array2d[F64],
+    dst: wp.array2d[FL],
 ):
     """min over heading of the cost-to-go at model node (r, c), + w_track min(d, 1)^2 to the reference curve."""
     r, c = wp.tid()
@@ -914,32 +914,32 @@ def value_kernel(
             d2 = wp.min(d2, (q[0] - x) * (q[0] - x) + (q[1] - y) * (q[1] - y))
         d = wp.min(wp.sqrt(d2), 1.0)
         v += w_track * d * d
-    dst[r, c] = F64(v)
+    dst[r, c] = FL(v)
 
 
 @wp.kernel(enable_backward=False)
-def ground_z_kernel(H: wp.array2d[F64], S: wp.array2d[F64]):
+def ground_z_kernel(H: wp.array2d[FL], S: wp.array2d[FL]):
     """The chassis height as the model saw it at rest: the mean ground under the two front wheels + R_W.
 
     The heightmap and the odometry share the map frame, but base_link sits at a robot-specific height above the
     axle; the model's patch is heights relative to (z - R_W), so read z off the map instead.
     """
-    q = wp.vec4d(S[0, 3], S[0, 4], S[0, 5], S[0, 6])
+    q = wp.vec4f(S[0, 3], S[0, 4], S[0, 5], S[0, 6])
     yaw = wp.atan2(
-        F64(2.0) * (q[3] * q[2] + q[0] * q[1]), F64(1.0) - F64(2.0) * (q[1] * q[1] + q[2] * q[2])
+        FL(2.0) * (q[3] * q[2] + q[0] * q[1]), FL(1.0) - FL(2.0) * (q[1] * q[1] + q[2] * q[2])
     )
     c = wp.cos(yaw)
     s = wp.sin(yaw)
     x = S[0, 0]
     y = S[0, 1]
-    hl = lookup(H, F64(0.0), F64(0.0), x - s * FRONT_Y, y + c * FRONT_Y)
-    hr = lookup(H, F64(0.0), F64(0.0), x + s * FRONT_Y, y - c * FRONT_Y)
-    S[0, 2] = F64(0.5) * (hl + hr) + R_W
+    hl = lookup(H, FL(0.0), FL(0.0), x - s * FRONT_Y, y + c * FRONT_Y)
+    hr = lookup(H, FL(0.0), FL(0.0), x + s * FRONT_Y, y - c * FRONT_Y)
+    S[0, 2] = FL(0.5) * (hl + hr) + R_W
 
 
 @wp.kernel(enable_backward=False)
 def path_kernel(
-    KNOTS: wp.array2d[wp.vec3d], yaw0: float, dt: float, controlled: wp.array2d[wp.vec3f]
+    KNOTS: wp.array2d[wp.vec3f], yaw0: float, dt: float, controlled: wp.array2d[wp.vec3f]
 ):
     """The model's mean path at the rollouts' dt into rollout 0 of plan_sim.controlled (x, y, yaw)."""
     t = wp.tid()
@@ -959,8 +959,8 @@ def path_kernel(
         )
     db = float(wp.atan2(wp.sin(b[2] - a[2]), wp.cos(b[2] - a[2])))
     controlled[t, 0] = wp.vec3f(
-        float((F64(1.0) - F64(f)) * a[0] + F64(f) * b[0]),
-        float((F64(1.0) - F64(f)) * a[1] + F64(f) * b[1]),
+        float((FL(1.0) - FL(f)) * a[0] + FL(f) * b[0]),
+        float((FL(1.0) - FL(f)) * a[1] + FL(f) * b[1]),
         ya + f * db,
     )
 
@@ -1005,23 +1005,23 @@ class Pass:
         self.Z, self.H1, self.H2, self.H3, self.O = (
             z(nb, DI, n), z(nb, HIDDEN, n), z(nb, HIDDEN, n), z(nb, HIDDEN, n), z(nb, DOP, n)
         )  # fmt: skip
-        self.P = z(N_SEG + 1, n, dt=wp.vec3d)
-        self.YAW = z(N_SEG + 1, n, dt=F64)
-        self.XF = z(N_SEG + 1, n, 12, dt=F64)
-        self.PT, self.TL, self.LS = z(N_SEG, n, dt=F64), z(N_SEG, n, dt=F64), z(N_SEG, n, dt=F64)
+        self.P = z(N_SEG + 1, n, dt=wp.vec3f)
+        self.YAW = z(N_SEG + 1, n, dt=FL)
+        self.XF = z(N_SEG + 1, n, 12, dt=FL)
+        self.PT, self.TL, self.LS = z(N_SEG, n, dt=FL), z(N_SEG, n, dt=FL), z(N_SEG, n, dt=FL)
         self.EPS, self.RU = z(N_SEG, n, D_X), z(N_SEG, n)
-        self.LP, self.TOT, self.PL = z(n, dt=F64), z(1, dt=F64), z(n // M, dt=F64)
+        self.LP, self.TOT, self.PL = z(n, dt=FL), z(1, dt=FL), z(n // M, dt=FL)
         if grad:  # adjoints
             self.aZ, self.aH1, self.aH2, self.aH3, self.aO = (
                 z(nb, DI, n), z(nb, HIDDEN, n), z(nb, HIDDEN, n), z(nb, HIDDEN, n), z(nb, DOP, n)
             )  # fmt: skip
-            self.aP = z(N_SEG + 1, n, dt=wp.vec3d)
-            self.aYAW = z(N_SEG + 1, n, dt=F64)
-            self.aXF = z(N_SEG + 1, n, 12, dt=F64)
-            self.aPT = z(N_SEG, n, dt=F64)
-            self.aTL = z(N_SEG, n, dt=F64)
-            self.aLS = z(N_SEG, n, dt=F64)
-            self.aLP, self.aTOT = z(n, dt=F64), wp.array([1.0], dtype=F64)
+            self.aP = z(N_SEG + 1, n, dt=wp.vec3f)
+            self.aYAW = z(N_SEG + 1, n, dt=FL)
+            self.aXF = z(N_SEG + 1, n, 12, dt=FL)
+            self.aPT = z(N_SEG, n, dt=FL)
+            self.aTL = z(N_SEG, n, dt=FL)
+            self.aLS = z(N_SEG, n, dt=FL)
+            self.aLP, self.aTOT = z(n, dt=FL), wp.array([1.0], dtype=FL)
             self.aU = wp.zeros(U.shape, dtype=float)
 
     def _feat_args(self, k: int, kb: int) -> list:
@@ -1036,10 +1036,10 @@ class Pass:
     def _loss_args(self, mode: int) -> list:
         p = self.p
         return [self.M, self.ppe, self.U, p.UP, self.P, p.VA, p.gx0, p.gy0, self.PT, self.TL, self.LS,
-                F64(1.0 / self.n), mode, self.LP, self.TOT, self.PL]  # fmt: skip
+                FL(1.0 / self.n), mode, self.LP, self.TOT, self.PL]  # fmt: skip
 
     def _loss_adj(self) -> list:
-        Z0 = F64(0.0)
+        Z0 = FL(0.0)
         return [0, 0, self.aU, None, self.aP, None, Z0, Z0, self.aPT, self.aTL, self.aLS, Z0, 0, self.aLP,
                 self.aTOT, None]  # fmt: skip
 
@@ -1149,7 +1149,7 @@ def _import_torch() -> bool:
 class NeuralPlanner:
     """The multistart gradient planner for one robot on fixed shapes, as one captured CUDA graph.
 
-    Maps (H, VA, DA) are (n, n) float64 on the model grid with node (0, 0) at the window origin; write them in
+    Maps (H, VA, DA) are (n, n) float32 on the model grid with node (0, 0) at the window origin; write them in
     place between calls (the graph reads these buffers). Plans are in units of WHEEL_MAX, (N_SEG, 1, 2) = (wL, wR).
     """
 
@@ -1164,7 +1164,7 @@ class NeuralPlanner:
         M_shoot: int = 4,
         M_final: int = 64,
         seed: int = 0,
-        gemm: str = "tile",
+        gemm: str = "cublas",
     ) -> None:
         z = np.load(weights)
         for k, v in CONFIG.items():
@@ -1177,18 +1177,18 @@ class NeuralPlanner:
         self.n0, self.M, self.steps, self.K = n_init, M, steps, K
         self.net = Net(z)
 
-        def f64(a: np.ndarray) -> wp.array:
-            return wp.array(np.asarray(a, dtype=np.float64), dtype=F64)
+        def fl(a: np.ndarray) -> wp.array:
+            return wp.array(np.asarray(a, dtype=np.float32), dtype=FL)
 
-        self.H = wp.zeros((n_cells, n_cells), dtype=F64)
-        self.VA = wp.zeros((n_cells, n_cells), dtype=F64)
-        self.DA = wp.full((n_cells, n_cells), 1.0e3, dtype=F64)
-        self.gx0, self.gy0 = F64(0.0), F64(0.0)
-        self.fmean, self.fstd = f64(z["f_mean"]), f64(z["f_std"])
-        self.xm, self.xs = f64(z["x_mean"]), f64(z["x_std"])
-        self.m_u, self.s_u = F64(z["x_mean"][I_UPMIN]), F64(z["x_std"][I_UPMIN])
-        self.PXY = f64(z["patch_xy"])
-        self.S, self.UP = wp.zeros((1, 16), dtype=F64), wp.zeros((1, 2), dtype=F64)
+        self.H = wp.zeros((n_cells, n_cells), dtype=FL)
+        self.VA = wp.zeros((n_cells, n_cells), dtype=FL)
+        self.DA = wp.full((n_cells, n_cells), 1.0e3, dtype=FL)
+        self.gx0, self.gy0 = FL(0.0), FL(0.0)
+        self.fmean, self.fstd = fl(z["f_mean"]), fl(z["f_std"])
+        self.xm, self.xs = fl(z["x_mean"]), fl(z["x_std"])
+        self.m_u, self.s_u = FL(z["x_mean"][I_UPMIN]), FL(z["x_std"][I_UPMIN])
+        self.PXY = fl(z["patch_xy"])
+        self.S, self.UP = wp.zeros((1, 16), dtype=FL), wp.zeros((1, 2), dtype=FL)
         self.U0 = wp.zeros((N_SEG, 1, 2), dtype=float)
         self.seed = wp.array([seed], dtype=int)
         self.C = wp.zeros((N_SEG, K, 2), dtype=float)
@@ -1197,7 +1197,7 @@ class NeuralPlanner:
         self.step = wp.zeros(1, dtype=int)
         self.TAKEN = wp.zeros(K, dtype=int)
         self.OUT = wp.zeros((N_SEG, 1, 2), dtype=float)
-        self.KNOTS = wp.zeros((N_SEG + 1, 1), dtype=wp.vec3d)
+        self.KNOTS = wp.zeros((N_SEG + 1, 1), dtype=wp.vec3f)
         self.shoot = Pass(self, K * M_shoot, M_shoot, K, self.C, grad=False)
         self.opt = Pass(self, n_init * M, M, n_init, self.UPL, grad=True)
         self.final = Pass(self, n_init * M_final, M_final, n_init, self.UPL, grad=False)
@@ -1316,7 +1316,7 @@ class NeuralMppi(MppiGpu):
         sampling: SamplingConfig | None = None,
         n_theta: int = 16,
         weights: str = "",
-        gemm: str = "tile",
+        gemm: str = "cublas",
         steps: int = 5,
         **kw,
     ) -> None:

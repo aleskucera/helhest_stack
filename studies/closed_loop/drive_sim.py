@@ -1006,7 +1006,7 @@ def main() -> None:
     p.add_argument(
         "--neural-gemm",
         choices=("tile", "cublas", "auto"),
-        default="tile",
+        default="cublas",
         help="the MLP's GEMMs: Warp tile, cuBLAS through torch, or cuBLAS if torch imports",
     )
     p.add_argument(
