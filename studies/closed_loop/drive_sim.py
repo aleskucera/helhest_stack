@@ -319,6 +319,7 @@ def drive(a: argparse.Namespace) -> dict:
                 weights=a.neural_weights,
                 gemm=a.neural_gemm,
                 steps=a.neural_steps,
+                particles=tuple(a.neural_particles),
             )
         else:
             planner = MppiGpu(
@@ -1003,6 +1004,14 @@ def main() -> None:
     )
     p.add_argument("--neural-weights", default="", help=".npz for --planner neural")
     p.add_argument("--neural-steps", type=int, default=5, help="Adam steps per re-plan")
+    p.add_argument(
+        "--neural-particles",
+        type=int,
+        nargs=4,
+        default=[256, 4, 16, 64],
+        metavar=("K", "M_SHOOT", "M_ADAM", "M_FINAL"),
+        help="shooting plans and particles per shooting, Adam and final-pick plan",
+    )
     p.add_argument(
         "--neural-gemm",
         choices=("tile", "cublas", "auto"),

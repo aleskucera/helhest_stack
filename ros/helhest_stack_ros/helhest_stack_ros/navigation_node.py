@@ -490,6 +490,14 @@ class NavigationNode(Node):
         # The study re-planned once per second with 20; re-planning every frame from the last
         # plan, 5 drove the six drive_sim worlds as well as 20 did.
         d("plan_neural_steps", 5)
+        # Particle counts: shooting plans, particles per shooting plan, per Adam plan, per final
+        # pick plan. The particles per plan are 2 x a power of two; the counts per pass (plans x
+        # particles, 8 plans after shooting) multiples of 32. 3090: Adam 8 + final 32 chose as
+        # good plans as 16 + 64 at 17% less time.
+        d("plan_neural_shoot_plans", 256)
+        d("plan_neural_shoot_particles", 4)
+        d("plan_neural_adam_particles", 16)
+        d("plan_neural_final_particles", 64)
         d("plan_friction", 0.8)  # uniform rollout friction
         # Wheel envelope half-width [m]. DEFAULT 0.10 = the measured tread, as a yaw-binned
         # CYLINDER: honest laterally, where the sphere reached 0.35 m sideways and refused gaps the
@@ -890,6 +898,12 @@ class NavigationNode(Node):
         self.plan_neural_weights: str = g("plan_neural_weights")
         self.plan_neural_gemm: str = g("plan_neural_gemm")
         self.plan_neural_steps: int = g("plan_neural_steps")
+        self.plan_neural_particles: tuple[int, int, int, int] = (
+            g("plan_neural_shoot_plans"),
+            g("plan_neural_shoot_particles"),
+            g("plan_neural_adam_particles"),
+            g("plan_neural_final_particles"),
+        )
         self.plan_friction: float = g("plan_friction")
         _ww = float(g("plan_wheel_width"))
         self.plan_wheel_width: float | None = _ww if _ww > 0.0 else None
@@ -1048,6 +1062,7 @@ class NavigationNode(Node):
                 weights=self.plan_neural_weights,
                 gemm=self.plan_neural_gemm,
                 steps=self.plan_neural_steps,
+                particles=self.plan_neural_particles,
             )
         else:
             self.planner = MppiGpu(

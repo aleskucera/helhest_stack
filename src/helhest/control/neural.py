@@ -7,8 +7,12 @@ A plan is 6 such commands (6 s). Each re-plan:
 
   shoot   256 random plans (half uniform, half the warm start + noise), scored with 4 model particles each
   init    the warm start and the 7 best shots
-  adam    20 Adam steps on each of the 8 plans, on the gradient of the mean plan loss over 16 particles
+  adam    5 Adam steps on each of the 8 plans, on the gradient of the mean plan loss over 16 particles (one noise
+          draw shared by all steps)
   pick    the plan with the lowest loss over 64 fresh particles
+
+(the counts are the defaults; NeuralMppi's particles). Particles come in antithetic pairs with stratified mixture
+component draws (the noise kernel).
 
 The plan loss is the cost-to-go at the end, its running mean, the footprint's wall clearance, P(tip), the tilt, the
 effort and the command rate (BundleSim macro_terrain_worlds.plan_loss with the final config of graph_planner).
@@ -729,12 +733,23 @@ def loss(
 
 
 @wp.kernel(enable_backward=False)
-def noise(seed: wp.array[int], EPS: wp.array3d[float], RU: wp.array2d[float]):
+def noise(seed: wp.array[int], M: int, EPS: wp.array3d[float], RU: wp.array2d[float]):
+    """Noise for M particles per plan (M even, M/2 a power of two), lower variance than i.i.d. draws: particles 2j
+    and 2j+1 are an antithetic pair (+eps, -eps, the same component draw), and the M/2 pairs' component draws are
+    stratified, RU = frac((a j) / (M/2) + s) with a random odd a and shift s per plan and step."""
     k, i = wp.tid()
-    st_ = wp.rand_init(seed[0], k * EPS.shape[1] + i)
+    m = i % M
+    h = M // 2
+    sp = wp.rand_init(seed[0], k * (EPS.shape[1] // M) + i // M)
+    s = wp.randf(sp)
+    a = 2 * (wp.randi(sp) % h) + 1
+    j = m // 2
+    st_ = wp.rand_init(seed[0], EPS.shape[0] * EPS.shape[1] + k * EPS.shape[1] + i - m % 2)
+    sgn = float(1 - 2 * (m % 2))
     for d in range(17):
-        EPS[k, i, d] = wp.randn(st_)
-    RU[k, i] = wp.randf(st_)
+        EPS[k, i, d] = sgn * wp.randn(st_)
+    u = float((a * j) % h) / float(h) + s
+    RU[k, i] = u - wp.floor(u)
 
 
 @wp.kernel(enable_backward=False)
@@ -1077,7 +1092,7 @@ class Pass:
         """Rollout + loss; draw: fresh noise from the planner's counter (else EPS / RU as set)."""
         p, n, net = self.p, self.n, self.p.net
         if draw:
-            wp.launch(noise, dim=(N_SEG, n), inputs=[p.seed, self.EPS, self.RU])
+            wp.launch(noise, dim=(N_SEG, n), inputs=[p.seed, self.M, self.EPS, self.RU])
             wp.launch(bump, dim=1, inputs=[p.seed])
         wp.launch(
             init_state,
@@ -1175,6 +1190,10 @@ class NeuralPlanner:
         self.cublas = gemm != "tile" and _import_torch()
         assert self.cublas or gemm != "cublas", "gemm='cublas' needs torch"
         self.n0, self.M, self.steps, self.K = n_init, M, steps, K
+        for m in (M_shoot, M, M_final):
+            assert m >= 2 and (m // 2) & (m // 2 - 1) == 0, (
+                f"{m} particles per plan: noise needs 2 x a power of two"
+            )
         self.net = Net(z)
 
         def fl(a: np.ndarray) -> wp.array:
@@ -1218,8 +1237,9 @@ class NeuralPlanner:
         self.m.zero_()
         self.v.zero_()
         self.step.zero_()
-        for _ in range(self.steps):
-            self.opt.forward(0)
+        for s in range(self.steps):
+            # one noise draw for all steps (common random numbers): they descend one fixed sample-average cost
+            self.opt.forward(0, draw=s == 0)
             self.opt.backward()
             wp.launch(bump, dim=1, inputs=[self.step])
             wp.launch(
@@ -1318,14 +1338,19 @@ class NeuralMppi(MppiGpu):
         weights: str = "",
         gemm: str = "cublas",
         steps: int = 5,
+        particles: tuple[int, int, int, int] = (256, 4, 16, 64),
         **kw,
     ) -> None:
+        """particles: (shooting plans, particles per shooting plan, per Adam plan, per final-pick plan)."""
         super().__init__(sim, cost, sampling=sampling, n_theta=n_theta, **kw)
         ny, nx = sim.elevation.shape
         cell = float(sim.grid.cell_size)
         self.n_cells = int(round(max(nx, ny) * cell / MODEL_CELL))
         with wp.ScopedDevice(self.device):
-            self.neural = NeuralPlanner(weights, self.n_cells, steps=steps, gemm=gemm)
+            K, M_shoot, M, M_final = particles
+            self.neural = NeuralPlanner(
+                weights, self.n_cells, steps=steps, gemm=gemm, K=K, M_shoot=M_shoot, M=M, M_final=M_final
+            )
         self.u = np.full((N_SEG, 1, 2), 0.5)  # the warm start, in units of WHEEL_MAX
         self.S = np.zeros(16)
         self.S[6] = 1.0
