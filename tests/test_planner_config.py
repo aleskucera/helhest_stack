@@ -62,6 +62,10 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         commit=p["plan_commit"],
         # added after the move: the clearance law, one object for MPPI, the route and the governor
         clearance=_clearance(p),
+        # added after the move: tracking the reference curve (control/reference_path.py)
+        track_lateral=p["plan_track_lateral"],
+        track_heading=p["plan_track_heading"],
+        track_progress=p["plan_track_progress"],
     )
     sampling = SamplingConfig(
         wmax=p["plan_wmax"],
@@ -96,6 +100,8 @@ def _deployed() -> dict:
     """The robot's params file, read without PyYAML (not a helhest dependency): it is flat."""
     vals = {}
     for m in re.finditer(r"^\s+(plan_\w+):\s*([^\s#]+)", PARAMS.read_text(), re.M):
+        if m.group(1) not in PLAN_DEFAULTS:  # node-only params, e.g. a path (plan_neural_weights)
+            continue
         raw = m.group(2)
         vals[m.group(1)] = {"true": True, "false": False}.get(raw.lower(), None)
         if vals[m.group(1)] is None:
