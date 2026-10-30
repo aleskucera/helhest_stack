@@ -1283,8 +1283,9 @@ def _finish_kernel(
             here = wp.min(here, sample_field(clear_field, sgrid, q[0], q[1]) - half_width)
         f = floor_m
         if taper > 0.0:
-            ease = wp.min(c0 + taper * s_out[i], c1 + taper * (s_out[jb] - s_out[i])) - 0.05
-            f = wp.min(reject_m, ease)
+            # eased toward the END too (a goal beside a wall), never made stricter than the
+            # start's rule: a robot pressed to a wall lost every curve to a tighter floor
+            f = wp.min(f, c1 + taper * (s_out[jb] - s_out[i]) - 0.05)
         if here < f:
             reject = 1
     if reject == 1:
