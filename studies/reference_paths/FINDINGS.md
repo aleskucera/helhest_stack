@@ -29,6 +29,14 @@ and never left (baseline fails 2 of 3 runs). cornerL24: the first frames route o
 over the unseen end of its wall, the robot turns into the wall, then the corridor route takes
 over and asks a 100 deg pivot the robot cannot make beside the wall (stuck 90 s).
 
+**P2b -- the descent ignores the robot's heading.** cornerL24 (fails in every C-campaign run):
+the robot starts facing east in a corridor whose north wall ends beside it. V's heading-minimum
+descent ignores the turn-around and routes back west round the wall end, over unseen ground the
+map later closes; the robot swings its nose into the wall end, its pose becomes vetoed (V capped
+at its cell), the descent finds nothing (no curve, MPPI on V_escape) and it stays wedged 90 s. The
+lattice-policy descent (`policy_descent`) prices the turn-around from the robot's own heading
+bin (pivot_cost 0.3/bin -> ~3.6 m for a half turn), keeps going east, and reached in 250 frames.
+
 **P3 -- clearance asked where the ends cannot have it.** Every knot is asked `offset` (clearance
 + half-width, ~1.2 m) of clearance. A goal 0.6 m from a wall cannot be reached at that, and the
 optimiser bent the curve into a U-hook that arrives along the wall (goal_at_wall, 39% of frames
@@ -64,6 +72,14 @@ finer in the sim.
 **Warm steps.** patek1 with the fixes, 3090: 100 steps 1.65 ms, 50 steps 1.11 ms with nearly the
 same curves (wiggle frames 8.5 -> 11.3%, strays 2.5 -> 2.2%), 30 steps 0.85 ms and worse (strays
 4%). 50 is available if the frame budget needs it.
+
+**P5's cause: the length term has no shape gradient.** `w_len` prices the KNOT COUNT to the
+arrival (an integer) times the spacing, so it moves only the spacing; once a curve reaches its
+target only `w_k` / `w_dk` (0.02, 0.2) shape it and a gentle bulge is nearly free. gap (C2): the
+curve bulged 1.3 m off a straight string, growing frame by frame while the robot crawled through
+the gap at 4 cm/s, held there by the clearance governor. `w_taut` (a pull to the nearest point of
+the taut string, up to the arrival) supplies the missing gradient: uturn mean deviation from the
+string 0.15 -> 0.03 m at w_taut 3, detour p95 1.05 -> 1.01, +0.06 ms.
 
 **Speed.** The stage is ~3.1 ms a frame on a 3090 (100 Adam steps); ~1.7 ms of that is the
 single-thread descent / visibility / taut kernels, not the optimiser. Stopping Adam early
