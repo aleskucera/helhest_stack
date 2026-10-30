@@ -1180,7 +1180,11 @@ def _optimise_kernel(
         if i == cut:
             gpx += 2.0 * w_end * (p_i[0] - tgt[0])
             gpy += 2.0 * w_end * (p_i[1] - tgt[1])
-        if w_taut > 0.0 and on and i >= 1 and i <= cut:
+        # only where the point already has the clearance it is asked: the taut string hugs what
+        # it bends round, and pulling to it there undid the clearance term (patek0 clearance p5
+        # 0.53 -> 0.37 m, trunks 0.09 m from a trunk); in free space it straightens the curve
+        free = sample_field(clear_field, sgrid, p_i[0], p_i[1]) >= ct
+        if w_taut > 0.0 and on and i >= 1 and i <= cut and free:
             # toward the nearest point of the taut string
             t_near = p_i
             t_best = float(1.0e30)
