@@ -56,6 +56,26 @@ finer in the sim.
 single-thread descent / visibility / taut kernels, not the optimiser. Stopping Adam early
 (`stop_tol`) saves ~1 ms but degrades the curve (single_on_line: detour 1.02 -> 1.09) -- rejected.
 
+## On the robot's own data
+
+Node replay of karlak_u_patek1 (robot config, the bag's own poses, 0.24 m routing) with
+`plan_ref_record`; the offline rerun matches 2816 of 2898 frames. Curve metrics: 4.3% loops,
+3% empty, 12.7% straying > 1 m from the taut string, detour p95 2.4x -- the same profile the robot
+published (`score.py` on the bag: 3.5% loops, 3.6% empty).
+
+The worst event is the end of the run (t 194-200 s, bag 171-200 s): 1-2.5 m from the goal, taut
+string a short straight to it, the curve a 5 m loop round a cluster of trees and back -- the robot
+FOLLOWED it (bag: up to 1.4 m off at 1.2 m/s, curve turning 200-320 deg). This is P1: the goal is
+in the window, its end never moves, so the curve's way round is never revisited. At t 45.6 s the
+curve runs ~5 m past the goal into unmapped ground and loops back (P6).
+
+## Speed (bit-exact)
+
+V's heading-minimum computed once a frame in parallel (the single-thread descent took 24 loads
+per neighbour) and the clearance-room test run one thread per sample: 2.91 -> 2.05 ms a frame on
+the A500, 0 of 127 replayed curves differ. The optimiser (1.87 ms, 100 Adam steps) is now nearly
+all of it.
+
 ## Changes under test (all opt-in, default off)
 
 | param | fixes |
