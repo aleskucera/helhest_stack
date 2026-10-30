@@ -35,6 +35,7 @@ Runs on dasenka, which is where the simulator lives -- see this directory's READ
 from __future__ import annotations
 
 import argparse
+import collections
 import dataclasses
 import json
 import math
@@ -453,6 +454,13 @@ def drive(a: argparse.Namespace) -> dict:
         )
     yaw_log: list = []  # per frame: [f, yaw_ref, yaw_meas, correction] while the loop runs
     yaw_meas = 0.0  # [rad/s] body yaw rate as the loop sees it, low-passed (see below)
+    # The robot's latencies, off by default. On the robot the plan starts from a pose ~0.22 s old
+    # (the cloud's stamp to the published command) and the body answers a turn command 0.2-0.4 s
+    # late at 0.65-0.9x (karlak bags, 2026-10-29/30): --obs-delay and --cmd-delay hold the pose and
+    # the command back by whole frames, --turn-scale scales the differential the wheels receive.
+    obs_hist: collections.deque = collections.deque(maxlen=a.obs_delay + 1)
+    cmd_hist: collections.deque = collections.deque(maxlen=a.cmd_delay + 1)
+    frame_log: list = []  # per frame: [f, x, y, yaw, commanded wL, wR, applied wL, wR]
     prev_pose = None
     prev_xy = None  # last frame's position: the brake stops before it spins while still moving
     for f in range(a.frames):
@@ -523,7 +531,9 @@ def drive(a: argparse.Namespace) -> dict:
         # CONTROL -- fine window, cropped from the same belief
         wx0 = belief.xmin + off_w * a.cell
         wy0 = belief.ymin + off_w * a.cell
-        state_l = np.array([rx - wx0, ry - wy0, yaw], np.float32)
+        obs_hist.append((rx, ry, yaw))
+        ox, oy, oyaw = obs_hist[0]  # the pose the plan starts from, --obs-delay frames old
+        state_l = np.array([ox - wx0, oy - wy0, oyaw], np.float32)
         goal_l = (goal[0] - wx0, goal[1] - wy0)
         gov_scale = 1.0  # the governor's speed scale this frame; the yaw loop idles under a hold
         if d < a.dock:
@@ -704,7 +714,12 @@ def drive(a: argparse.Namespace) -> dict:
             cmd = np.clip(cmd, -a.wmax, a.wmax)
         prev_pose = (rx, ry, yaw)
 
-        sim.set_wheel_command(cmd)
+        cmd_hist.append(np.asarray(cmd, np.float32).copy())
+        applied = cmd_hist[0].copy()  # engine order (wL, wR, w_rear), --cmd-delay frames old
+        mean, half = 0.5 * (applied[0] + applied[1]), 0.5 * (applied[1] - applied[0])
+        applied[0], applied[1] = mean - a.turn_scale * half, mean + a.turn_scale * half
+        frame_log.append([f, rx, ry, yaw, float(cmd[0]), float(cmd[1]), *map(float, applied[:2])])
+        sim.set_wheel_command(applied)
         prev_diff = float(cmd[1] - cmd[0])  # what the brake commits a spin's direction to
         if a.history and f % a.history == 0 and mppi and a.escape:
             # Was there a way out? Per sampled rollout, the worst envelope violation over the
@@ -825,6 +840,7 @@ def drive(a: argparse.Namespace) -> dict:
             **({"escape": np.asarray(esc)} if esc else {}),
             **({"governor": np.asarray(gov_log)} if gov_log else {}),
             **({"yaw_log": np.asarray(yaw_log)} if yaw_log else {}),
+            frame_log=np.asarray(frame_log, np.float64),
             **({"mppi_paths": np.asarray(mppi_paths)} if mppi_paths else {}),
             **({"ref_paths": np.asarray(ref_paths)} if ref_paths else {}),
         )
@@ -961,6 +977,24 @@ def main() -> None:
         help="also record every Nth frame into --out, for the scrub page; 0 = OFF",
     )
     p.add_argument("--controller", choices=("mppi", "carrot"), default="mppi")
+    p.add_argument(
+        "--obs-delay",
+        type=int,
+        default=0,
+        help="[frames] plan from the pose this many frames old (the robot: ~3, 0.22 s); 0 = off",
+    )
+    p.add_argument(
+        "--cmd-delay",
+        type=int,
+        default=0,
+        help="[frames] the wheels act on the command this many frames old; 0 = off",
+    )
+    p.add_argument(
+        "--turn-scale",
+        type=float,
+        default=1.0,
+        help="scale of the wheel differential the wheels receive, the LLC's turn gain; 1 = off",
+    )
     p.add_argument(
         "--turn-dead",
         type=float,
