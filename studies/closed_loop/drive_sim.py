@@ -280,8 +280,13 @@ def drive(a: argparse.Namespace) -> dict:
         raise SystemExit(f"need fine <= route <= window, got {a.fine} <= {a.route} <= {a.window}")
     off_w = n // 2 - nw // 2
     off_r = n // 2 - nr // 2
+    # the robot routes on the belief pooled kr x kr (plan_lat_coarsen; BeliefFrame.pool); 1 = the
+    # map's own cell, as this simulator always did
+    kr = max(1, int(a.route_coarsen))
+    rcell = a.cell * kr
+    nrc = nr // kr
     win_grid = GridParams(nw, nw, a.cell, 0.0, 0.0)
-    route_grid = GridParams(nr, nr, a.cell, 0.0, 0.0)
+    route_grid = GridParams(nrc, nrc, rcell, 0.0, 0.0)
     belief_grid = GridParams(n, n, a.cell, 0.0, 0.0)
     mppi = a.controller == "mppi"
     robot = dynamics.robot_params(a.wheel_width)
@@ -351,10 +356,10 @@ def drive(a: argparse.Namespace) -> dict:
         refpath = ReferencePath(a.n_theta, half_w, robot.rear_offset, rprm, device=a.device)
         # what it keeps clear of: the settle's every-heading veto on the routing grid, as a
         # distance (forbidden_distance) -- walls, slopes past the envelope and ditches alike
-        ref_mask = wp.zeros((nr, nr), dtype=wp.float32, device=a.device)
-        ref_clear = wp.zeros((nr, nr), dtype=wp.float32, device=a.device)
+        ref_mask = wp.zeros((nrc, nrc), dtype=wp.float32, device=a.device)
+        ref_clear = wp.zeros((nrc, nrc), dtype=wp.float32, device=a.device)
     # the routing field expressed in the MPPI window's frame: a constant cell offset apart
-    sgrid = GridParams(nr, nr, a.cell, (off_r - off_w) * a.cell, (off_r - off_w) * a.cell).build()
+    sgrid = GridParams(nrc, nrc, rcell, (off_r - off_w) * a.cell, (off_r - off_w) * a.cell).build()
 
     coarse = None
     if a.coarsen > 0:
@@ -388,7 +393,7 @@ def drive(a: argparse.Namespace) -> dict:
     # Preallocated so the per-frame path allocates nothing and touches no host memory.
     zeros2d = lambda k: wp.zeros((k, k), dtype=wp.float32, device=a.device)  # noqa: E731
     measured_d, sd_d = frame.measured, frame.sd
-    h_r, m_r, sd_r, drift_r = zeros2d(nr), zeros2d(nr), zeros2d(nr), zeros2d(nr)
+    h_r, m_r, sd_r, drift_r = zeros2d(nrc), zeros2d(nrc), zeros2d(nrc), zeros2d(nrc)
     fine_d = zeros2d(nw)
     fine_m = zeros2d(nw)  # the belief's measured mask on the MPPI crop, for the governor
     height_d = frame.height  # so a run that arrives before its first frame can still dump
@@ -526,19 +531,26 @@ def drive(a: argparse.Namespace) -> dict:
 
         # HOW -- the settle-based routing window, a crop, where the belief's uncertainty reaches
         # the planner and nowhere before
+        if kr > 1:  # pooled as the node pools it
+            frame.pool(off_r, off_r, kr, h_r, m_r, sd_r, drift_r)
+        else:
+            crop(height_d, off_r, h_r)
+            crop(measured_d, off_r, m_r)
+            crop(sd_d, off_r, sd_r)
+            crop(drift_d, off_r, drift_r)
         V = ctg.compute(
-            crop(height_d, off_r, h_r),
+            h_r,
             (goal[0] - r0, goal[1] - s0),
-            measured=crop(measured_d, off_r, m_r),
-            sigma=crop(sd_d, off_r, sd_r),
-            drift=crop(drift_d, off_r, drift_r),
+            measured=m_r,
+            sigma=sd_r,
+            drift=drift_r,
             coarse_value=vc,
             coarse_origin=None if coarse is None else (cx0 - r0, cy0 - s0),
         )
         if coarse is not None:
             # WHAT THE FINE LAYER DECIDED flows back: a block of the routing window it found no
             # feasible pose in is sealed in the coarse memory (CoarseRouter.apply_fine)
-            coarse.apply_fine(ctg.feasibility, m_r, (r0 - cx0, s0 - cy0), a.cell)
+            coarse.apply_fine(ctg.feasibility, m_r, (r0 - cx0, s0 - cy0), rcell)
 
         # CONTROL -- fine window, cropped from the same belief
         wx0 = belief.xmin + off_w * a.cell
@@ -600,7 +612,7 @@ def drive(a: argparse.Namespace) -> dict:
                 # becomes the distance to it
                 # V itself, not V_escape: the escape field gives every vetoed cell a finite way
                 # out so MPPI can leave a wall, and a descent of it walks through walls (slalom)
-                forbidden_distance(ctg.blocked, a.n_theta, a.cell, 1.6, ref_mask, ref_clear)
+                forbidden_distance(ctg.blocked, a.n_theta, rcell, 1.6, ref_mask, ref_clear)
                 n_ref = refpath.update(
                     ctg.V,
                     sgrid,
@@ -678,7 +690,7 @@ def drive(a: argparse.Namespace) -> dict:
         else:
             # the lattice's own policy, walked in the ROUTING window's frame, then followed
             local = (rx - r0, ry - s0, yaw)
-            path = trace_optimal(ctg, local, a.n_theta, nr, nr, 0.0, 0.0, a.cell)
+            path = trace_optimal(ctg, local, a.n_theta, nrc, nrc, 0.0, 0.0, rcell)
             # which way to turn when there is no plan: toward the goal, which is a direction the
             # robot can always name even when the lattice cannot reach it
             bearing = float(np.arctan2(goal[1] - ry, goal[0] - rx) - yaw)
@@ -812,7 +824,7 @@ def drive(a: argparse.Namespace) -> dict:
                     # actually offered, as against `v`'s best-over-all-headings. The two
                     # disagreeing is the signature worth seeing: on `pocket` the minimum read
                     # 5.2 m while the heading the robot held read the cap.
-                    _v_here(vh, rx - r0, ry - s0, yaw, a.cell, a.n_theta),
+                    _v_here(vh, rx - r0, ry - s0, yaw, rcell, a.n_theta),
                 ]
             )
         # Replayed as a captured CUDA graph, not launched from Python: the solver is launch-bound
@@ -1010,6 +1022,12 @@ def main() -> None:
         "--ref-record", default=None, help="npz of the reference stage's inputs, every frame"
     )
     p.add_argument("--set", nargs="*", default=None, help="plan_* overrides, key=value")
+    p.add_argument(
+        "--route-coarsen",
+        type=int,
+        default=1,
+        help="pool the belief k x k for routing, as the robot does (plan_lat_coarsen 3)",
+    )
     p.add_argument(
         "--ref-record-full",
         action="store_true",
