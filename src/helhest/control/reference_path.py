@@ -122,6 +122,11 @@ class ReferencePathParams:
     # whether to pivot, which way, or to arc round is what the cost-to-go itself decided. Needs
     # `update(policy=...)` (the solver's move costs); without them the old walk runs.
     policy_descent: bool = False
+    # A cold start when the way on (the taut string's first half metre) is more than
+    # `pivot_init_rad` off the warm curve's own heading where the robot stands. The cold start
+    # pivots outright past that angle, but a warm one never asks again: a robot facing away from
+    # its route kept a curve swinging metres out and back instead of turning (patek1 t 41-45 s).
+    cold_on_repivot: bool = False
 
     @property
     def kappa_max(self) -> float:
@@ -749,6 +754,8 @@ def _mode_kernel(
     any_end: int,  # 1: test the divergence every frame, not only when the end moved
     th: wp.array(dtype=float),  # [N] last frame's heading at each knot
     loop_check: int,  # 1: a curve turning 270 deg more than the string is a cold start
+    start: wp.array(dtype=float),  # [3] the robot now
+    repivot: float,  # [rad] > 0: the way on this far off the warm curve's heading is cold
     last_end: wp.array(dtype=wp.vec2),  # [1] in/out: the taut string's end last frame
     cold: wp.array(dtype=int),  # [1] out: 1 cold, 0 warm, -1 no string (no curve this frame)
     limit: wp.array(dtype=int),  # [1] out: Adam steps this frame
@@ -786,6 +793,18 @@ def _mode_kernel(
                 h_prev = h
                 first = 0
         if turned > bends + 4.712389:
+            c = 1
+    if c == 0 and repivot > 0.0:
+        jb = int(0)
+        bd = float(1.0e30)
+        for j in range(nv):
+            dd = wp.length(pts[j] - wp.vec2(start[0], start[1]))
+            if dd < bd:
+                bd = dd
+                jb = j
+        here = th[wp.min(jb, th.shape[0] - 1)]
+        way = _taut_heading_at(taut, n, here, 0.5)
+        if wp.abs(_wrap(way - here)) > repivot:
             c = 1
     if c == 1:
         pass
@@ -1500,6 +1519,8 @@ class ReferencePath:
                 int(prm.cold_on_divergence),
                 self.th,
                 int(prm.cold_on_loop),
+                self.start,
+                prm.pivot_init_rad if prm.cold_on_repivot else 0.0,
             ],
             outputs=[self.last_end, self.cold, self.limit],
             device=self.device,
