@@ -156,7 +156,9 @@ def metrics(curve, taut, d, i, half_width, rear, prev_world) -> dict:
     return m
 
 
-def run(rec: Path, overrides: dict, check: bool = True, keep: list | None = None) -> list[dict]:
+def run(
+    rec: Path, overrides: dict, check: bool = True, keep: list | None = None, warm: bool = True
+) -> list[dict]:
     d = load(rec)
     base = json.loads(str(d["params"]))
     fields = {f.name for f in dataclasses.fields(ReferencePathParams)}
@@ -180,7 +182,7 @@ def run(rec: Path, overrides: dict, check: bool = True, keep: list | None = None
         g = make_grid(d["sgrid"][i])
         wp.synchronize()
         t0 = time.perf_counter()
-        n = rp.update(V, g, C, g, d["state"][i], goal_xy=d["goal"][i], blocked=B)
+        n = rp.update(V, g, C, g, d["state"][i], warm=warm, goal_xy=d["goal"][i], blocked=B)
         ms = (time.perf_counter() - t0) * 1e3
         curve = rp.curve() if n >= 3 else np.zeros((0, 2), np.float32)
         taut = rp.taut.numpy()[: int(rp.n_taut.numpy()[0])]
@@ -267,6 +269,7 @@ def main() -> None:
     p.add_argument("--out", default=None)
     p.add_argument("--recorded", action="store_true", help="score the recorded curves, no rerun")
     p.add_argument("--curves", default=None, help="npz of the replayed curves (one recording)")
+    p.add_argument("--cold", action="store_true", help="no warm start: every frame cold")
     a = p.parse_args()
     ov = {}
     for kv in a.set:
@@ -276,7 +279,11 @@ def main() -> None:
     allfr = {}
     for r in a.rec:
         keep: list = []
-        fr = score_recorded(Path(r)) if a.recorded else run(Path(r), ov, keep=keep)
+        fr = (
+            score_recorded(Path(r))
+            if a.recorded
+            else run(Path(r), ov, check=not a.cold, keep=keep, warm=not a.cold)
+        )
         if a.curves and keep:
             np.savez_compressed(
                 a.curves,
