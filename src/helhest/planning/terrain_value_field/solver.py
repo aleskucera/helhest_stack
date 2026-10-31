@@ -16,6 +16,7 @@ A state from which the seeds are unreachable under the control set keeps cost +i
 forward-only robot that is not a failure but information: it is exactly the misaligned approach
 a 2-D geodesic cannot express.
 """
+
 from __future__ import annotations
 
 import math
@@ -69,8 +70,7 @@ def _keep_going_kernel(
 
 
 @wp.kernel
-def _relax_kernel(
-    dist_in: wp.array(dtype=wp.float32, ndim=3),
+def _edge_cost_kernel(
     pose_cost: wp.array(dtype=wp.float32, ndim=3),  # [rows, cols, headings]
     prim_dr: wp.array(dtype=wp.int32, ndim=2),  # [n_theta, n_prim] endpoint row offset
     prim_dc: wp.array(dtype=wp.int32, ndim=2),  # endpoint col offset
@@ -91,13 +91,15 @@ def _relax_kernel(
     turn_on: wp.int32,
     turn_lever: wp.float32,  # [m]
     bin_rad: wp.float32,  # [rad] one heading bin
-    dist_out: wp.array(dtype=wp.float32, ndim=3),
-    changed: wp.array(dtype=wp.int32),
+    edge_cost: wp.array(dtype=wp.float32, ndim=4),  # [rows, cols, headings, n_prim]
 ):
-    """One min-relaxation sweep of the (row, col, heading) value function:
+    """The cost of every move out of every state, `inf` where the move is not allowed:
 
-        V_out[s] = min( V_in[s], min over forward-arc primitives p
-                         of  cost(p) + V_in[ next(s, p) ]   if p's swept cells are all free )
+        edge_cost[s, p] = cost(p)   if p's swept cells are all free and it ends in the grid
+
+    None of it depends on V, so it is computed once per solve rather than in every sweep of
+    `_relax_kernel`, which then only adds the neighbour's value -- the swept-cell loads were
+    ~2/3 of each sweep, and a solve runs ~100 sweeps.
 
     cost(p) = arc_length * (1 + penalty_scale * mean penalty over the swept cells), so with
     penalty_scale > 0 the geodesic PREFERS flatter poses (not just avoids blocked ones). Feasibility and
@@ -105,17 +107,13 @@ def _relax_kernel(
     heading the arc is FACING there (`sweep_dt`), not the heading it started in -- the sharpest arc turns
     a full `bins` worth of bins over one step, so the two differ for most of the arc. A wall face, where
     a body tilts or high-centers, blocks the crossing arc while flat ground stays cheap. The whole swept arc must be
-    clear (not just the endpoint), so the robot can't jump a thin wall. Iterating to a fixed point gives
-    the forward-only cost-to-go; a misaligned pose from which the goal is unreachable stays +inf."""
+    clear (not just the endpoint), so the robot can't jump a thin wall."""
     r, c, t = wp.tid()
-    h = dist_in.shape[0]
-    w = dist_in.shape[1]
-    nt = dist_in.shape[2]
-    if pose_cost[r, c, t] < 0.0:
-        dist_out[r, c, t] = inf
-        return
-    best = dist_in[r, c, t]
+    h = pose_cost.shape[0]
+    w = pose_cost.shape[1]
+    nt = pose_cost.shape[2]
     for p in range(n_prim):
+        edge_cost[r, c, t, p] = inf
         ok = int(1)
         ns = sweep_n[t, p]
         tsum = float(0.0)
@@ -130,9 +128,7 @@ def _relax_kernel(
             scc = wp.clamp(sc, 0, w - 1)
             # ONE load carries both the veto (sign) and the graded cost (magnitude). Bailing on
             # the first vetoed cell skips the rest of the arc's loads; tsum is then short, which
-            # does not matter because ok = 0 discards it. Worth 4-6%, and flat in how much of
-            # the map is blocked -- the loop still runs until every thread in the warp has left,
-            # so only whole warps bailing together actually save anything.
+            # does not matter because ok = 0 discards it.
             # the heading the robot is FACING at this cell, not the one it started the arc in
             tt = (t + sweep_dt[t, p, s]) % nt
             pc = pose_cost[scr, scc, tt]
@@ -157,7 +153,40 @@ def _relax_kernel(
                         k = turn_lever * wp.abs(float(dh)) * bin_rad / wp.max(base, 1.0e-3)
                         tm = msum / float(ns)
                         arc = arc + base * (wp.max(1.0, tm * (1.0 + k)) - wp.max(1.0, tm))
-                best = wp.min(best, arc + dist_in[nr, nc, prim_heading[t, p]])
+                edge_cost[r, c, t, p] = arc
+
+
+@wp.kernel
+def _relax_kernel(
+    dist_in: wp.array(dtype=wp.float32, ndim=3),
+    pose_cost: wp.array(dtype=wp.float32, ndim=3),  # [rows, cols, headings]
+    edge_cost: wp.array(dtype=wp.float32, ndim=4),  # from _edge_cost_kernel
+    prim_dr: wp.array(dtype=wp.int32, ndim=2),  # [n_theta, n_prim] endpoint row offset
+    prim_dc: wp.array(dtype=wp.int32, ndim=2),  # endpoint col offset
+    prim_heading: wp.array(dtype=wp.int32, ndim=2),  # heading bin the arc ends at
+    n_prim: wp.int32,
+    inf: wp.float32,
+    dist_out: wp.array(dtype=wp.float32, ndim=3),
+    changed: wp.array(dtype=wp.int32),
+):
+    """One min-relaxation sweep of the (row, col, heading) value function:
+
+        V_out[s] = min( V_in[s], min over moves p of  edge_cost[s, p] + V_in[ next(s, p) ] )
+
+    Iterating to a fixed point gives the forward-only cost-to-go; a misaligned pose from which
+    the goal is unreachable stays +inf."""
+    r, c, t = wp.tid()
+    if pose_cost[r, c, t] < 0.0:
+        dist_out[r, c, t] = inf
+        return
+    best = dist_in[r, c, t]
+    for p in range(n_prim):
+        arc = edge_cost[r, c, t, p]
+        # an allowed move ends inside the grid (_edge_cost_kernel), so the index is safe
+        if arc < inf:
+            nr = r + prim_dr[t, p]
+            nc = c + prim_dc[t, p]
+            best = wp.min(best, arc + dist_in[nr, nc, prim_heading[t, p]])
     dist_out[r, c, t] = best
     if best < dist_in[r, c, t]:
         changed[0] = 1
@@ -239,6 +268,10 @@ class ValueSolver:
             # two value buffers, ping-ponged each sweep (read one, write the other, swap); +changed flag
             self._dist_a = wp.zeros((self.height, self.width, self.n_theta), dtype=wp.float32)
             self._dist_b = wp.zeros((self.height, self.width, self.n_theta), dtype=wp.float32)
+            # every move's cost out of every state, filled once per solve (_edge_cost_kernel)
+            self._edge_cost = wp.zeros(
+                (self.height, self.width, self.n_theta, self.n_prim), dtype=wp.float32
+            )
             # >0 if any cell improved this sweep (convergence)
             self._changed = wp.zeros(1, dtype=wp.int32)
             # the turn price is off until set_turn_price: a 1-cell stand-in keeps the launch valid
@@ -256,7 +289,7 @@ class ValueSolver:
         self._turn_lever = 0.0
 
     def set_turn_price(self, turn_field: wp.array | None, lever_m: float = 0.0) -> None:
-        """Charge turning arcs for their tail near walls (see `_relax_kernel`). `turn_field` is a
+        """Charge turning arcs for their tail near walls (see `_edge_cost_kernel`). `turn_field` is a
         per-pose time multiplier [rows, cols, headings] -- v_cruise / v_allowed, filled by the
         caller every frame in place (a graph bakes in the pointer); None switches it off."""
         if turn_field is None:
@@ -267,20 +300,12 @@ class ValueSolver:
             self._turn_field = turn_field
         self._graph = None  # the launch arguments changed
 
-    def _relax(
-        self,
-        dist_in: wp.array,
-        dist_out: wp.array,
-        pose_cost: wp.array,
-        penalty_scale: float,
-    ) -> None:
-        """One min-relaxation sweep dist_in -> dist_out (race-free pull); raises self._changed if any
-        cell improved."""
+    def _edge_costs(self, pose_cost: wp.array, penalty_scale: float) -> None:
+        """Every move's cost out of every state into `_edge_cost`, inf where it is not allowed."""
         wp.launch(
-            _relax_kernel,
+            _edge_cost_kernel,
             dim=(self.height, self.width, self.n_theta),
             inputs=[
-                dist_in,
                 pose_cost,
                 self._prim_dr,
                 self._prim_dc,
@@ -297,6 +322,26 @@ class ValueSolver:
                 self._turn_on,
                 self._turn_lever,
                 2.0 * math.pi / float(self.n_theta),
+            ],
+            outputs=[self._edge_cost],
+            device=self.device,
+        )
+
+    def _relax(self, dist_in: wp.array, dist_out: wp.array, pose_cost: wp.array) -> None:
+        """One min-relaxation sweep dist_in -> dist_out (race-free pull); raises self._changed if any
+        cell improved."""
+        wp.launch(
+            _relax_kernel,
+            dim=(self.height, self.width, self.n_theta),
+            inputs=[
+                dist_in,
+                pose_cost,
+                self._edge_cost,
+                self._prim_dr,
+                self._prim_dc,
+                self._prim_heading,
+                self.n_prim,
+                self._inf,
             ],
             outputs=[dist_out, self._changed],
             device=self.device,
@@ -407,6 +452,8 @@ class ValueSolver:
                 outputs=[pose_cost],
                 device=self.device,
             )
+        # after the seeds are freed: a freed seed's moves are priced from its restored cost
+        self._edge_costs(pose_cost, penalty_scale)
         # The seed field IS the initial value function: a state starts at the cost the seeds say
         # it already carries, and +inf means "not a seed". A plain goal mask is the special case
         # where that cost is 0; a boundary ring handed down from a coarser layer is not.
@@ -416,8 +463,8 @@ class ValueSolver:
 
         def body() -> None:
             self._changed.zero_()
-            self._relax(self._dist_a, self._dist_b, pose_cost, penalty_scale)
-            self._relax(self._dist_b, self._dist_a, pose_cost, penalty_scale)
+            self._relax(self._dist_a, self._dist_b, pose_cost)
+            self._relax(self._dist_b, self._dist_a, pose_cost)
             wp.launch(
                 _keep_going_kernel,
                 dim=1,
