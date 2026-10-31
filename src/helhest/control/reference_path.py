@@ -97,8 +97,8 @@ class ReferencePathParams:
     # curve, whether or not its end moved: with the end fixed (the goal in the window) a curve
     # warm-started on the other side of an obstacle was kept for good (forest, facing_wall).
     cold_on_divergence: bool = False
-    # [m of clearance per m of path] 0 = off. The clearance asked at a knot is capped at the start
-    # pose's own clearance plus this times the path length from it, and likewise from the end:
+    # [m of clearance per m of path] 0 = off. The clearance asked at a knot is capped at the END's
+    # own clearance plus this times the path length from it (not the start's: see _taper_kernel):
     # a goal 0.6 m from a wall cannot be reached at 1.2 m, and asking for it bent the curve into
     # a hook (goal_at_wall); a robot already beside a wall had every curve rejected (facing_wall).
     clear_taper: float = 0.0
@@ -645,16 +645,18 @@ def _taper_kernel(
     taper: float,
     clear_target: wp.array(dtype=float),  # [N] in/out
 ):
-    """ReferencePathParams.clear_taper: cap the clearance asked by each end's own plus the taper
-    times the distance from it."""
+    """ReferencePathParams.clear_taper: cap the clearance asked by the end's own plus the taper
+    times the distance from it -- toward the END only. A goal beside a wall must be reachable;
+    from the start the cap let the curve keep the robot against the wall it started beside,
+    which with w_taut (a pull to a string that starts there) halved the 2.6 m corridor (9/10 ->
+    5/10 reached, robot-faithful drive_sim)."""
     if n_taut[0] < 2:
         return
-    c0 = sample_field(clear_field, sgrid, taut[0][0], taut[0][1])
     end = target[0]
     c1 = sample_field(clear_field, sgrid, end[0], end[1])
     for q in range(n_knots):
         s_q = (float(q) + 0.5) * ds0
-        cap = wp.min(c0 + taper * s_q, c1 + taper * wp.max(t_len[0] - s_q, 0.0))
+        cap = c1 + taper * wp.max(t_len[0] - s_q, 0.0)
         clear_target[q] = wp.min(clear_target[q], cap)
 
 
