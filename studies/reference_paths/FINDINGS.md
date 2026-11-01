@@ -174,3 +174,67 @@ set with 4 runs (R8) and 4 baseline runs: running.
 | `sticky_tol_m` | P2: descent prefers last frame's side among near-equal ways |
 | `cold_on_loop` | P6: a curve turning 270 deg more than the string is a cold start |
 | `policy_descent` | the route from the robot's own heading: the lattice's policy rollout instead of the heading-minimum walk |
+
+## 2026-11-01 night: the band -- the curve as points on the taut string (`band`)
+
+The curvature profile is the root of P1, P4, P6 and P8: the curve is integrated from the robot,
+so a small change near the start swings the whole tail, a loop cannot be unwound by small steps,
+and every fix so far (cold-start triggers, taper, w_taut) patches a symptom of that. `band`
+replaces the optimiser: every frame the taut string is resampled from the robot to the target
+(<= 64 legs) and relaxed, one lane per point, by Jacobi steps on
+
+    w_smooth sum |p_j-1 - 2 p_j + p_j+1|^2 + w_tension sum |p_j+1 - p_j|^2
+    + w_clear (clearance deficit of the front disc, and of the rear disc past the first 0.75 m)^2
+    + w_veto (the settle's veto at the point's own heading)
+
+both ends held. The start heading is free (a robot facing away gets a pivot from MPPI's heading
+term, not a loop). Defaults 16 / 1 / 150 steps; 0.7-0.9 ms a frame (3090) against 1.8 ms.
+
+**Bugs on the way.** The rear axle disc 0.75 m behind each point along the curve's tangent is
+right for a profile whose first tangent is the robot's heading; a band starts along the route, so
+near the start the disc lay behind the robot in the kerb it had backed to: start hooks and 11 %
+of the Zviretice parking-lot frames rejected. Points nearer the start than `rear` carry no rear
+disc now (in the band's clearance term and its rejection). The scoring had the same blind spot
+for every variant with a start pivot: `wall_run_m` / `run_p5` / `run_neg` drop that disc.
+
+**Offline, the 7 real runs (robot's own frames), frame-weighted:**
+
+| | loop | > 1 m off string | detour p95 | clearance p5 | touches | no curve, goal > 1.5 m | jump > 0.3 m | flick p95 | s-bends |
+|---|---|---|---|---|---|---|---|---|---|
+| robot's stage | 3.40 % | 14.07 % | 1.87 | 0.65 m | 0 | 0.12 % | 1.54 % | 0.12 m | 12.1 % |
+| fix set | 0.35 | 0.92 | 1.06 | 0.59 | 0 | 0.21 | 1.83 | 0.13 | 8.8 |
+| band | 0.23 | 0 | 1.00 | 0.65 | 0 | 2.45 | 1.86 | 0.14 | 4.0 |
+| band + keep 0.75 | 0.22 | 0.01 | 1.03 | 0.63 | 0 | 2.60 | 1.86 | 0.06 | 3.5 |
+
+(The string-relative columns favour the band by construction; clearance, loops, empties, jumps
+and bends do not.) The band's empties are the parking lot (11 %): a goal ON a car or a kerb,
+the band held to it, its last points on forbidden ground -- see `band_end_trunc_m` and the goal
+region below.
+
+**Jumps are the string's, not the optimiser's.** new3: every one of the band's 46 jumps is a
+frame where the taut string's first 4 m moved > 0.3 m (34 of them 0.3-0.6 m: the 0.24 m
+descent staircase reshuffling). 600 steps instead of 150 or 4x the tension do not remove them
+(4.1 -> 4.0 %), so they are not under-convergence. `band_keep_m` (start each point from the
+nearest point of last frame's band when the new string lies within keep_m of it everywhere)
+halves the typical motion (flick p95 0.24 -> 0.10 m on new3) but not the count of big jumps.
+`v_tol_per_m` (a per-metre allowance in the visibility test, for the open-ground 1.5 m bulge
+flipping in and out at new3 t 49-57 s) did nothing (jump 3.9-4.7 %): rejected.
+
+**Closed loop, robot-faithful, 23 worlds x 4 runs (band before the rear-disc fix):**
+
+| | reached | frames |
+|---|---|---|
+| R0 robot's stage | 86/92 | 37761 |
+| R9 fix set | 81/92 | 38513 |
+| R10 band | 86/92 | 32559 (-14 %) |
+
+Band wins: goal_at_wall 720 -> 118 frames, facing_wall 3/4 -> 4/4 and 2.2x faster, gap 385 ->
+130, pocket 562 -> 331, ridge 349 -> 247, corridor26 3/4 -> 4/4; false_door 2/4 as the base
+(the fix set's 0/4 is gone). Losses: cornerL24 2/4 -> 0/4 (the case policy_descent fixed),
+slalom 332 -> 478 frames, trunks 502 -> 571, chicane 474 -> 514.
+
+**Goal region (`plan_goal_region_m`, CostToGo).** The parking-lot figure-eights are the ROUTE:
+a goal on the edge of a car is reachable as one cell only at the headings whose footprint fits,
+and V routed round to the far side to arrive at one (the taut string itself wraps the car).
+Seeding every cell within r of the goal at its straight distance lets the route stop at the
+nearest standable point on the near side (priced seeds: a blocked one stays blocked).

@@ -126,6 +126,13 @@ def metrics(curve, taut, d, i, half_width, rear, prev_world) -> dict:
     rear_pts = q[1:] - rear * np.stack([np.cos(th), np.sin(th)], 1)
     wall = np.concatenate([sample(clear, g, q[1:]), sample(clear, g, rear_pts)]) - half_width
     m["wall_m"] = float(wall.min())
+    # the same without the rear disc over the first `rear` metres: there it lies behind the
+    # robot along the curve's own start direction, which a pivot (any start heading but the
+    # robot's) swings into whatever the robot stands beside
+    s_q = np.cumsum(np.linalg.norm(dq, axis=1))
+    front = sample(clear, g, q[1:]) - half_width
+    back = sample(clear, g, rear_pts[s_q >= rear]) - half_width
+    m["wall_run_m"] = float(min(front.min(), back.min() if len(back) else np.inf))
     if full:
         m["veto"] = veto_count(d["blocked"][i], g, curve)
     else:  # a light recording keeps only the every-heading veto
@@ -251,6 +258,8 @@ def summarize(fr: list[dict]) -> dict:
         empty_far=100.0 * float(np.mean([f["empty"] and f.get("goal_dist", 9) > 1.5 for f in fr])),
         wall_neg=frac(lambda f: f["wall_m"] < 0.0),
         wall_p5=pct("wall_m", 5),
+        run_neg=frac(lambda f: f["wall_run_m"] < 0.0),
+        run_p5=pct("wall_run_m", 5),
         veto=frac(lambda f: f["veto"] > 0),
         detour_p95=pct("detour", 95),
         end_gap_p95=pct("end_gap", 95),

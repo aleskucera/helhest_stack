@@ -164,6 +164,11 @@ class ReferencePathParams:
     # of that band instead. The string comes off a 0.24 m staircase that reshuffles by 0.3-0.6 m
     # as V updates (new3: 34 of its 49 jumps), and a band started fresh each frame jumped with it.
     band_keep_m: float = 0.0
+    # [m] 0 = off. A GOAL ON STRUCTURE: the band is held to the goal, and when the goal stands on
+    # forbidden ground (a car, a kerb) its last points do too and the whole curve was rejected
+    # (Zviretice parking lot: 11 % of frames without a curve). Within this of the end, the curve
+    # is cut back to the last point the wheels can stand on; the dock controller has the rest.
+    band_end_trunc_m: float = 0.0
 
     @property
     def kappa_max(self) -> float:
@@ -1378,6 +1383,7 @@ def _finish_kernel(
         rgrid,
         n_theta,
         N,
+        0.0,
     ):
         n_valid[0] = 0
 
@@ -1399,6 +1405,10 @@ def _rejected(
     rgrid: Grid,
     n_theta: int,
     N: int,  # points past N - 1 carry no rear disc (the profile's end has no knot)
+    # [m] points nearer the start than this carry no rear disc: a band starts along the route,
+    # not the robot's heading, and the disc there lay behind the robot (the kerb it had backed
+    # to: 11 % of the Zviretice parking-lot frames rejected)
+    rear_from_s: float,
 ) -> bool:
     # REJECT a curve that takes the wheels through a wall (ReferencePathParams.reject_m): front
     # and rear axle discs along it, against the floor or what the start pose already has
@@ -1408,7 +1418,7 @@ def _rejected(
     reject = int(0)
     for i in range(1, jb + 1):
         here = sample_field(clear_field, sgrid, pts[i][0], pts[i][1]) - half_width
-        if i < N:
+        if i < N and s_out[i] >= rear_from_s:
             q = pts[i] - rear * tan[i]
             here = wp.min(here, sample_field(clear_field, sgrid, q[0], q[1]) - half_width)
         f = floor_m
@@ -1561,7 +1571,8 @@ def _band_kernel(
             tv = wp.normalize(pp - pm + wp.vec2(1.0e-9, 0.0))
             q = p - rear * tv
             cq = sample_field(clear_field, sgrid, q[0], q[1]) - ct
-            if cq < 0.0:
+            # nearer the start the disc would lie behind the robot, not on the curve
+            if cq < 0.0 and s_i >= rear:
                 gq = _field_grad(clear_field, sgrid, q, hs)
                 if wp.length_sq(gq) < 1.0e-6:
                     gq = wp.normalize(anchor - q + wp.vec2(1.0e-6, 0.0))
@@ -1612,6 +1623,7 @@ def _band_check_kernel(
     rgrid: Grid,
     n_theta: int,
     n_knots: int,
+    end_trunc: float,  # ReferencePathParams.band_end_trunc_m
     pts: wp.array(dtype=wp.vec2),
     tan: wp.array(dtype=wp.vec2),
     s_out: wp.array(dtype=float),
@@ -1620,11 +1632,24 @@ def _band_check_kernel(
     n = n_valid[0]
     if n < 2:
         return
+    jb = n - 1
+    if end_trunc > 0.0:
+        s_end = s_out[n - 1]
+        for _ in range(n):
+            if jb < 2 or s_end - s_out[jb] > end_trunc:
+                break
+            p = pts[jb]
+            here = sample_field(clear_field, sgrid, p[0], p[1]) - half_width
+            heading = wp.atan2(tan[jb][1], tan[jb][0])
+            if here >= 0.0 and _veto_at(blocked, rgrid, n_theta, p, heading) <= 0.5:
+                break
+            jb -= 1
+        n_valid[0] = jb + 1
     if _rejected(
         pts,
         tan,
         s_out,
-        n - 1,
+        jb,
         start,
         clear_field,
         sgrid,
@@ -1636,6 +1661,7 @@ def _band_check_kernel(
         rgrid,
         n_theta,
         n_knots + 1,
+        rear,
     ):
         n_valid[0] = 0
 
@@ -2053,6 +2079,7 @@ class ReferencePath:
                 route_grid,
                 self.n_theta,
                 prm.n_knots,
+                prm.band_end_trunc_m,
                 self.pts,
                 self.tan,
                 self.s,
