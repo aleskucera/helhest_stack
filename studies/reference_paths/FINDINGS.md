@@ -238,3 +238,52 @@ a goal on the edge of a car is reachable as one cell only at the headings whose 
 and V routed round to the far side to arrive at one (the taut string itself wraps the car).
 Seeding every cell within r of the goal at its straight distance lets the route stop at the
 nearest standable point on the near side (priced seeds: a blocked one stays blocked).
+
+**Closed loop, 8 runs, the 11 worlds that separate the variants** (band + taper 0.5 + end
+truncation 1.5 m; T0 = rear disc everywhere, T75 = none within 0.75 m of the start, KT0 = T0 +
+keep 0.75):
+
+| world | R0 robot's stage | T0 | KT0 | T75 |
+|---|---|---|---|---|
+| chicane | 7/8 509 | 8/8 500 | 8/8 438 | 7/8 535 |
+| cornerL24 | 2/8 | 2/8 | 1/8 | 1/8 |
+| corridor24 | 6/8 198 | 7/8 178 | 7/8 205 | 6/8 242 |
+| corridor26 | 7/8 251 | 8/8 163 | 8/8 200 | 7/8 178 |
+| facing_wall | 7/8 341 | 8/8 243 | 8/8 242 | 8/8 258 |
+| false_door | 5/8 1141 | 3/8 1334 | 2/8 1104 | 2/8 1272 |
+| gap | 8/8 275 | 8/8 159 | 8/8 151 | 8/8 243 |
+| pocket | 7/8 464 | 8/8 292 | 8/8 299 | 8/8 310 |
+| slalom | 8/8 364 | 8/8 411 | 8/8 376 | 8/8 451 |
+| trunks | 8/8 664 | 8/8 538 | 8/8 489 | 8/8 512 |
+| wall_on_line | 8/8 204 | 8/8 202 | 8/8 208 | 8/8 212 |
+| reached | 75/88 | 78/88 | 77/88 | 73/88 |
+
+The rear disc near the start stays (T0): without it the band's first points hug the wall the
+robot starts beside. Offline the skip made fewer bends (s-bend 4.5 vs 5.7 %), closed loop it
+lost. false_door is a time-limit race in every configuration (reached runs take 950-1460 of the
+1500 frames); the band loses it in the northern passage (north -> x 18: 548 frames against 326),
+at 0.35-0.56 m mean clearance against 0.8-2.3 m, where the clearance governor slows it.
+
+**The stage's clearance map misses most obstacles.** In that passage the field the stage keeps
+clear of (`forbidden_distance`) reads its 1.68 m cap across the whole width: the walls are not
+in it. It is the distance to cells the settle forbids at EVERY heading, and a wall or a car is
+straddled at some headings. Zviretice parking lot: 5-47 cells a frame forbidden at every heading,
+172-289 at half of them or more -- as many as V caps (173-289). The clearance term, in the
+deployed stage and the band alike, sees a few percent of the obstacles; the curves stay clear
+mostly because the taut string follows V. `forbid_frac` (plan_ref_forbid_frac) takes cells
+forbidden at a fraction of headings.
+
+Scored against the half-heading map (replay_ref.SCORE_FRAC 0.5, all variants), 7 real runs:
+
+| | crosses (run_neg) | loop | stray | s-bend | no curve, goal > 1.5 m |
+|---|---|---|---|---|---|
+| robot's stage | 3.87 % | 3.40 % | 14.1 % | 12.1 % | 0.12 % |
+| robot's stage, frac 0.5 | 0.04 | 5.83 | 18.9 | 17.2 | 1.44 |
+| fix set | 4.81 | 0.35 | 0.92 | 8.8 | 0.21 |
+| fix set, frac 0.5 | 2.99 | 0.32 | 0.57 | 13.7 | 3.97 |
+| band T0 | 3.31 | 0.30 | 0 | 5.7 | 0 |
+| band T0, frac 0.5 | 0.45 | 1.28 | 0.03 | 15.8 | 0.09 |
+
+On the parking lot 13.5 % of the robot's own curves cross the half-heading map. The denser map
+makes every stage safer and wigglier; whether that pays is a closed-loop question (S_bandT050,
+S_base50, S_bandT075 campaigns).
