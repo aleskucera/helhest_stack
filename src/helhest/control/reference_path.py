@@ -1681,16 +1681,17 @@ def _band_check_kernel(
         return
     jb = n - 1
     if end_trunc > 0.0:
+        # cut before the FIRST point within the window that the wheels cannot stand on: near a
+        # goal on structure the band can dip in and come out again at the goal itself
         s_end = s_out[n - 1]
-        for _ in range(n):
-            if jb < 2 or s_end - s_out[jb] > end_trunc:
-                break
-            p = pts[jb]
-            here = sample_field(clear_field, sgrid, p[0], p[1]) - half_width
-            heading = wp.atan2(tan[jb][1], tan[jb][0])
-            if here >= 0.0 and _veto_at(blocked, rgrid, n_theta, p, heading) <= 0.5:
-                break
-            jb -= 1
+        for k in range(2, n):
+            if s_end - s_out[k] <= end_trunc:
+                p = pts[k]
+                here = sample_field(clear_field, sgrid, p[0], p[1]) - half_width
+                heading = wp.atan2(tan[k][1], tan[k][0])
+                if here < 0.0 or _veto_at(blocked, rgrid, n_theta, p, heading) > 0.5:
+                    jb = k - 1
+                    break
         n_valid[0] = jb + 1
     if _rejected(
         pts,
