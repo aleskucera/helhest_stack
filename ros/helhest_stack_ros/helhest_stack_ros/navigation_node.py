@@ -131,6 +131,14 @@ _PLAN_BUILD = frozenset(
         "plan_ref_cold_on_repivot",
         "plan_ref_cold_on_detour",
         "plan_ref_w_taut",
+        "plan_ref_band",
+        "plan_goal_region_m",
+        "plan_ref_band_keep_m",
+        "plan_ref_v_tol_per_m",
+        "plan_ref_band_iterations",
+        "plan_ref_band_w_smooth",
+        "plan_ref_band_w_tension",
+        "plan_ref_band_start_taper",
         "plan_turn_brake_a_max",
         "plan_wmax",
         "plan_wmin",
@@ -583,6 +591,14 @@ class NavigationNode(Node):
         d("plan_ref_cold_on_repivot", PLAN_DEFAULTS["plan_ref_cold_on_repivot"])
         d("plan_ref_cold_on_detour", PLAN_DEFAULTS["plan_ref_cold_on_detour"])
         d("plan_ref_w_taut", PLAN_DEFAULTS["plan_ref_w_taut"])
+        d("plan_ref_band", PLAN_DEFAULTS["plan_ref_band"])
+        d("plan_ref_band_iterations", PLAN_DEFAULTS["plan_ref_band_iterations"])
+        d("plan_ref_band_w_smooth", PLAN_DEFAULTS["plan_ref_band_w_smooth"])
+        d("plan_ref_band_w_tension", PLAN_DEFAULTS["plan_ref_band_w_tension"])
+        d("plan_ref_band_start_taper", PLAN_DEFAULTS["plan_ref_band_start_taper"])
+        d("plan_goal_region_m", PLAN_DEFAULTS["plan_goal_region_m"])
+        d("plan_ref_band_keep_m", PLAN_DEFAULTS["plan_ref_band_keep_m"])
+        d("plan_ref_v_tol_per_m", PLAN_DEFAULTS["plan_ref_v_tol_per_m"])
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
         # NEVER commands above this regardless of the cost. This is the real top-speed knob.
         # ~1.4 m/s at 4.0; ~1.75 m/s at 5.0 (r=0.35). plan_wmax maps to the REAL wheel speed -- the
@@ -919,6 +935,14 @@ class NavigationNode(Node):
         self.plan_ref_cold_on_repivot: float = g("plan_ref_cold_on_repivot")
         self.plan_ref_cold_on_detour: float = g("plan_ref_cold_on_detour")
         self.plan_ref_w_taut: float = g("plan_ref_w_taut")
+        self.plan_ref_band: float = g("plan_ref_band")
+        self.plan_ref_band_iterations: float = g("plan_ref_band_iterations")
+        self.plan_ref_band_w_smooth: float = g("plan_ref_band_w_smooth")
+        self.plan_ref_band_w_tension: float = g("plan_ref_band_w_tension")
+        self.plan_ref_band_start_taper: float = g("plan_ref_band_start_taper")
+        self.plan_goal_region_m: float = g("plan_goal_region_m")
+        self.plan_ref_band_keep_m: float = g("plan_ref_band_keep_m")
+        self.plan_ref_v_tol_per_m: float = g("plan_ref_v_tol_per_m")
         self.plan_smooth: float = g("plan_smooth")
         self.plan_straight_frac: float = g("plan_straight_frac")
         self.plan_debug_cmd: int = int(g("plan_debug_cmd"))
@@ -1951,6 +1975,7 @@ class NavigationNode(Node):
                     goal_xy=np.asarray(goal_l, np.float32),
                     blocked=self.ctg.blocked,
                     policy=self.ctg.solver,
+                    origin_xy=np.array([mf.lxmin, mf.lymin], np.float32),
                 )
                 if self._ref_rec is not None:
                     self._ref_record(state_l, goal_l, n_ref, mf, stamp)

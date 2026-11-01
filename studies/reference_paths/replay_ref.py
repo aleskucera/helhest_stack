@@ -182,7 +182,17 @@ def run(
         g = make_grid(d["sgrid"][i])
         wp.synchronize()
         t0 = time.perf_counter()
-        n = rp.update(V, g, C, g, d["state"][i], warm=warm, goal_xy=d["goal"][i], blocked=B)
+        n = rp.update(
+            V,
+            g,
+            C,
+            g,
+            d["state"][i],
+            warm=warm,
+            goal_xy=d["goal"][i],
+            blocked=B,
+            origin_xy=d["origin"][i],
+        )
         ms = (time.perf_counter() - t0) * 1e3
         curve = rp.curve() if n >= 3 else np.zeros((0, 2), np.float32)
         taut = rp.taut.numpy()[: int(rp.n_taut.numpy()[0])]

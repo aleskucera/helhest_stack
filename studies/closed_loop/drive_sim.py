@@ -622,6 +622,7 @@ def drive(a: argparse.Namespace) -> dict:
                     goal_xy=goal_l,
                     blocked=ctg.blocked,
                     policy=ctg.solver,
+                    origin_xy=np.array([wx0, wy0], np.float32),
                 )
                 if ref_rec is not None:
                     ref_rec.add(

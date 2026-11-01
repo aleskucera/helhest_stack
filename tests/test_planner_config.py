@@ -88,6 +88,7 @@ def _golden(p: dict) -> tuple[CostParams, SamplingConfig, dict]:
         robust_margin_deg=p["plan_robust_margin_deg"],
         obstacle_step_m=p["plan_obstacle_step_m"],
         pivot_cost=p["plan_pivot_cost"],
+        goal_region_m=p["plan_goal_region_m"],
         z_veto=p["plan_z_veto"],
         charge_per_sigma=p["plan_charge_per_sigma"],
     )

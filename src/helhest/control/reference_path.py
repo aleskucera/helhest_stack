@@ -86,6 +86,11 @@ class ReferencePathParams:
     n_taut: int = 96  # visibility-graph vertices at most
     rebase_m: float = 1.5  # [m] the taut string's end moving more than this = a cold start
     v_tol: float = 0.3  # [m of V] a straight may rise this far above V's descent (_taut_kernel)
+    # STUDY. [m of V per m of straight] added to v_tol. V on the lattice is not linear along a
+    # straight off its headings, and the excess grows with the straight's length: a 7 m straight
+    # to an open-ground goal flipped in and out of the 0.3 m test for 4 s, the string a 1.5 m
+    # bulge one frame and straight the next (new3 t 49-57 s).
+    v_tol_per_m: float = 0.0
     w_veto: float = 20.0  # per unit of the settle's veto at the curve's own heading (_veto_at)
     # [m] how far the settle's every-heading veto reaches past a real face on flat ground: the
     # wheels and belly cannot stand that close at any heading, so part of the body is already in
@@ -138,6 +143,27 @@ class ReferencePathParams:
     # gentle bulge drifts freely -- 1.3 m off a straight string through a gap, growing frame by
     # frame while the robot crawled (gap), the sag after a turn (uturn). 0 = off.
     w_taut: float = 0.0
+    # STUDY. THE CURVE AS POINTS ON THE TAUT STRING, not a curvature profile: every frame the
+    # string is resampled from the robot to the target and relaxed -- a stiffness (second
+    # difference) and a tension (first difference) against the clearance deficit and the veto,
+    # both ends held. A profile integrates from the robot, so a small change near the start swings
+    # the whole tail and a loop cannot be unwound by small steps (P1, P4, P6, P8); points move
+    # locally and start from the string each frame, so the curve keeps the string's way round and
+    # turns no more than it does. The start heading is free: a robot facing away pivots (MPPI's
+    # heading term), it does not loop.
+    band: bool = False
+    band_iterations: int = 150
+    band_w_smooth: float = 16.0  # per m^2 of each second difference
+    band_w_tension: float = 1.0  # per m^2 of each first difference
+    band_step: float = 0.5  # the Jacobi step, a fraction of the diagonal's
+    # [m of clearance per m of path] the clearance asked near the START is capped at the start's
+    # own plus this per metre, so a robot beside a wall leaves it gradually (0 = no cap)
+    band_start_taper: float = 0.5
+    # [m] 0 = off. MEMORY: when every point of this frame's string (as far as last frame's band
+    # reached) lies within this of last frame's band, each point starts from the nearest point
+    # of that band instead. The string comes off a 0.24 m staircase that reshuffles by 0.3-0.6 m
+    # as V updates (new3: 34 of its 49 jumps), and a band started fresh each frame jumped with it.
+    band_keep_m: float = 0.0
 
     @property
     def kappa_max(self) -> float:
@@ -508,6 +534,7 @@ def _visible_kernel(
     rgrid: Grid,
     n_theta: int,
     v_tol: float,  # [m of V] how far a straight may run above V's own descent
+    v_tol_per_m: float,  # [m of V per m] and this much more per metre of the straight
     offset: float,  # [m] clearance + half-width
     vis: wp.array2d(dtype=int),  # [max_v, max_v] out: 1 = the straight u-j may be taken
 ):
@@ -522,7 +549,8 @@ def _visible_kernel(
         if j == u + 1:
             ok = 1
         elif _clear_along(clear_field, sgrid, verts[u], verts[j], 0.05) >= offset:
-            if _v_excess(V, rgrid, n_theta, verts[u], verts[j], 0.08) <= v_tol:
+            tol = v_tol + v_tol_per_m * wp.length(verts[j] - verts[u])
+            if _v_excess(V, rgrid, n_theta, verts[u], verts[j], 0.08) <= tol:
                 ok = 1
     vis[u, j] = ok
 
@@ -1334,6 +1362,44 @@ def _finish_kernel(
             bd = dd
             jb = i
     n_valid[0] = jb + 1
+    if _rejected(
+        pts,
+        tan,
+        s_out,
+        jb,
+        start,
+        clear_field,
+        sgrid,
+        half_width,
+        rear,
+        reject_m,
+        taper,
+        blocked,
+        rgrid,
+        n_theta,
+        N,
+    ):
+        n_valid[0] = 0
+
+
+@wp.func
+def _rejected(
+    pts: wp.array(dtype=wp.vec2),
+    tan: wp.array(dtype=wp.vec2),
+    s_out: wp.array(dtype=float),
+    jb: int,  # the curve's last point
+    start: wp.array(dtype=float),
+    clear_field: wp.array2d(dtype=float),
+    sgrid: Grid,
+    half_width: float,
+    rear: float,
+    reject_m: float,
+    taper: float,
+    blocked: wp.array3d(dtype=float),
+    rgrid: Grid,
+    n_theta: int,
+    N: int,  # points past N - 1 carry no rear disc (the profile's end has no knot)
+) -> bool:
     # REJECT a curve that takes the wheels through a wall (ReferencePathParams.reject_m): front
     # and rear axle discs along it, against the floor or what the start pose already has
     c0 = sample_field(clear_field, sgrid, start[0], start[1]) - half_width
@@ -1352,14 +1418,226 @@ def _finish_kernel(
             f = wp.min(f, c1 + taper * (s_out[jb] - s_out[i]) - 0.05)
         if here < f:
             reject = 1
-    if reject == 1:
-        n_valid[0] = 0
     # and a pose the settle forbids at the curve's own heading (past the first two: the robot may
     # already stand on one)
     for i in range(2, wp.min(jb + 1, N)):
         heading_i = wp.atan2(tan[i][1], tan[i][0])
         if _veto_at(blocked, rgrid, n_theta, pts[i], heading_i) > 0.5:
-            n_valid[0] = 0
+            reject = 1
+    return reject == 1
+
+
+@wp.func
+def _along(taut: wp.array(dtype=wp.vec2), n: int, end: wp.vec2, s: float) -> wp.vec2:
+    """The point at arc length `s` on the taut string extended by a last leg to `end` (the target,
+    which `_targets_kernel` may have walked off the string's end)."""
+    acc = float(0.0)
+    for k in range(n - 1):
+        a = taut[k]
+        ab = taut[k + 1] - a
+        length = wp.length(ab)
+        if s <= acc + length and length > 1.0e-9:
+            return a + ab * ((s - acc) / length)
+        acc += length
+    a = taut[n - 1]
+    length = wp.length(end - a)
+    if s <= acc + length and length > 1.0e-9:
+        return a + (end - a) * ((s - acc) / length)
+    return end
+
+
+@wp.kernel
+def _band_kernel(
+    start: wp.array(dtype=float),  # [3]
+    target: wp.array(dtype=wp.vec2),  # [1]
+    taut: wp.array(dtype=wp.vec2),
+    n_taut: wp.array(dtype=int),
+    t_len: wp.array(dtype=float),  # [1] the taut string's length
+    clear_target: wp.array(dtype=float),  # [N] the clearance asked, by arc length on the string
+    clear_field: wp.array2d(dtype=float),
+    sgrid: Grid,
+    blocked: wp.array3d(dtype=float),
+    rgrid: Grid,
+    n_theta: int,
+    ds0: float,
+    n_knots: int,
+    iterations: int,
+    w_smooth: float,
+    w_tension: float,
+    w_clear: float,
+    w_veto: float,
+    rear: float,
+    step: float,
+    start_taper: float,
+    keep_m: float,  # ReferencePathParams.band_keep_m
+    shift: wp.array(dtype=wp.vec2),  # [1] last frame's window origin less this frame's
+    prev_n: wp.array(dtype=int),  # [1] in/out: last frame's band points, before the rejection
+    pts: wp.array(dtype=wp.vec2),  # [N+1] in: last frame's band; out
+    tan: wp.array(dtype=wp.vec2),  # [N+1] out
+    s_out: wp.array(dtype=float),  # [N+1] out
+    n_pts: wp.array(dtype=int),  # [1] out: the curve's points (0 = none)
+    used: wp.array(dtype=int),  # [1] out
+):
+    """ReferencePathParams.band: the taut string resampled to at most `n_knots` legs and relaxed,
+    one lane per point, every step in one launch. A Jacobi step (each point by its own diagonal),
+    so the stiff fourth-order smoothing stays stable at any spacing."""
+    _b, i = wp.tid()
+    N = n_knots
+    n = n_taut[0]
+    if n < 2:
+        if i == 0:
+            n_pts[0] = 0
+            prev_n[0] = 0
+            used[0] = 0
+        return
+    end = target[0]
+    length = t_len[0] + wp.length(end - taut[n - 1])
+    M = wp.clamp(int(wp.ceil(length / ds0)), 2, N)
+    h = length / float(M)
+    on = i <= M
+    free_pt = i >= 1 and i < M
+    s_i = float(wp.min(i, M)) * h
+    p = _along(taut, n, end, s_i)
+    if i == 0:
+        p = wp.vec2(start[0], start[1])
+    if i >= M:
+        p = end
+    if keep_m > 0.0:
+        # the nearest point of last frame's band, and whether this point lies within its reach
+        n_prev = prev_n[0]
+        sh = shift[0]
+        near = p
+        best = float(1.0e30)
+        reach = float(0.0)
+        s_near = float(0.0)
+        for k in range(n_prev - 1):
+            a = pts[k] + sh
+            ab = pts[k + 1] - pts[k]
+            f = wp.clamp(wp.dot(p - a, ab) / wp.max(wp.dot(ab, ab), 1.0e-12), 0.0, 1.0)
+            qk = a + f * ab
+            dk = wp.length_sq(p - qk)
+            if dk < best:
+                best = dk
+                near = qk
+                s_near = reach + f * wp.length(ab)
+            reach += wp.length(ab)
+        covered = free_pt and n_prev >= 3 and s_i <= reach
+        off = wp.where(covered, wp.sqrt(best), 0.0)
+        worst = wp.tile_max(wp.tile(off))[0]
+        if n_prev >= 3 and worst <= keep_m and covered and s_near < reach - 1.0e-4:
+            p = near
+    anchor = p  # where the point started: the way out of a wall where the distance map is flat
+    ct = clear_target[wp.clamp(int(s_i / ds0), 0, N - 1)]
+    if start_taper > 0.0:
+        c0 = sample_field(clear_field, sgrid, start[0], start[1])
+        ct = wp.min(ct, c0 + start_taper * s_i)
+    hs = 0.5 * sgrid.cell_size
+    hx = 0.5 * rgrid.cell_size
+    lo = wp.max(i - 1, 0)
+    hi = wp.min(i + 1, BLOCK - 1)
+    for _ in range(iterations):
+        tx = wp.tile(p[0])
+        ty = wp.tile(p[1])
+        pm = wp.vec2(tx[lo], ty[lo])
+        pp = wp.vec2(tx[hi], ty[hi])
+        dv = wp.vec2(0.0, 0.0)
+        if free_pt:
+            dv = pm - 2.0 * p + pp
+        dx = wp.tile(dv[0])
+        dy = wp.tile(dv[1])
+        # d/dp_i of w_s sum |D_j|^2 (D_j = p_j-1 - 2 p_j + p_j+1, zero at the held ends) and of
+        # w_t sum |p_j+1 - p_j|^2
+        g = 2.0 * w_smooth * (wp.vec2(dx[lo], dy[lo]) - 2.0 * dv + wp.vec2(dx[hi], dy[hi]))
+        g = g - 2.0 * w_tension * dv
+        diag = 12.0 * w_smooth + 4.0 * w_tension
+        if free_pt:
+            c = sample_field(clear_field, sgrid, p[0], p[1]) - ct
+            if c < 0.0:
+                gr = _field_grad(clear_field, sgrid, p, hs)
+                if wp.length_sq(gr) < 1.0e-6:
+                    gr = wp.normalize(anchor - p + wp.vec2(1.0e-6, 0.0))
+                g = g + (2.0 * w_clear * c) * gr
+                diag += 2.0 * w_clear
+            tv = wp.normalize(pp - pm + wp.vec2(1.0e-9, 0.0))
+            q = p - rear * tv
+            cq = sample_field(clear_field, sgrid, q[0], q[1]) - ct
+            if cq < 0.0:
+                gq = _field_grad(clear_field, sgrid, q, hs)
+                if wp.length_sq(gq) < 1.0e-6:
+                    gq = wp.normalize(anchor - q + wp.vec2(1.0e-6, 0.0))
+                g = g + (2.0 * w_clear * cq) * gq
+                diag += 2.0 * w_clear
+            if w_veto > 0.0:
+                th = wp.atan2(tv[1], tv[0])
+                bx = _veto_at(blocked, rgrid, n_theta, p + wp.vec2(hx, 0.0), th)
+                bx -= _veto_at(blocked, rgrid, n_theta, p - wp.vec2(hx, 0.0), th)
+                by = _veto_at(blocked, rgrid, n_theta, p + wp.vec2(0.0, hx), th)
+                by -= _veto_at(blocked, rgrid, n_theta, p - wp.vec2(0.0, hx), th)
+                g = g + w_veto * wp.vec2(bx / (2.0 * hx), by / (2.0 * hx))
+            p = p - (step / diag) * g
+    tx = wp.tile(p[0])
+    ty = wp.tile(p[1])
+    pm = wp.vec2(tx[lo], ty[lo])
+    pp = wp.vec2(tx[hi], ty[hi])
+    seg = float(0.0)
+    if i >= 1 and on:
+        seg = wp.length(p - pm)
+    s_cum = wp.tile_scan_inclusive(wp.tile(seg))
+    if on:
+        a = pm
+        b = pp
+        if i == 0:
+            a = p
+        if i == M:
+            b = p
+        pts[i] = p
+        tan[i] = wp.normalize(b - a + wp.vec2(1.0e-9, 0.0))
+        s_out[i] = s_cum[i]
+    if i == 0:
+        n_pts[0] = M + 1
+        prev_n[0] = M + 1
+        used[0] = iterations
+
+
+@wp.kernel
+def _band_check_kernel(
+    start: wp.array(dtype=float),
+    clear_field: wp.array2d(dtype=float),
+    sgrid: Grid,
+    half_width: float,
+    rear: float,
+    reject_m: float,
+    taper: float,
+    blocked: wp.array3d(dtype=float),
+    rgrid: Grid,
+    n_theta: int,
+    n_knots: int,
+    pts: wp.array(dtype=wp.vec2),
+    tan: wp.array(dtype=wp.vec2),
+    s_out: wp.array(dtype=float),
+    n_valid: wp.array(dtype=int),  # [1] in/out: 0 when the band is rejected
+):
+    n = n_valid[0]
+    if n < 2:
+        return
+    if _rejected(
+        pts,
+        tan,
+        s_out,
+        n - 1,
+        start,
+        clear_field,
+        sgrid,
+        half_width,
+        rear,
+        reject_m,
+        taper,
+        blocked,
+        rgrid,
+        n_theta,
+        n_knots + 1,
+    ):
+        n_valid[0] = 0
 
 
 def _grid_key(g: Grid) -> tuple:
@@ -1436,6 +1714,8 @@ class ReferencePath:
             self.limit = wp.zeros(1, dtype=wp.int32)
             self.scratch = wp.zeros(BLOCK, dtype=wp.float32)
             self.used = wp.zeros(1, dtype=wp.int32)
+            self.shift = wp.zeros(1, dtype=wp.vec2)
+            self.band_n = wp.zeros(1, dtype=wp.int32)
         # The frame is ~300-1200 tiny single-thread launches, so on CUDA it runs as one captured
         # graph: launched eagerly it cost 17.6 ms median and 54 ms on a cold start (false_door on
         # dasenka, 2026-10-29), as much as the whole cost-to-go solve. The graph bakes in the
@@ -1536,6 +1816,7 @@ class ReferencePath:
                 route_grid,
                 1,
                 prm.v_tol,
+                prm.v_tol_per_m,
                 self.offset,
             ],
             outputs=[self.vis],
@@ -1620,6 +1901,9 @@ class ReferencePath:
                 outputs=[self.clear_target],
                 device=self.device,
             )
+        if prm.band:
+            self._record_band(clear_field, sim_grid, blocked, route_grid)
+            return
         wp.launch(
             _init_kernel,
             1,
@@ -1717,6 +2001,66 @@ class ReferencePath:
             device=self.device,
         )
 
+    def _record_band(
+        self, clear_field: wp.array, sim_grid: Grid, blocked: wp.array, route_grid: Grid
+    ) -> None:
+        prm = self.params
+        wp.launch_tiled(
+            _band_kernel,
+            dim=[1],
+            inputs=[
+                self.start,
+                self.target,
+                self.taut,
+                self.n_taut,
+                self.t_len,
+                self.clear_target,
+                clear_field,
+                sim_grid,
+                blocked,
+                route_grid,
+                self.n_theta,
+                prm.spacing_m,
+                prm.n_knots,
+                prm.band_iterations,
+                prm.band_w_smooth,
+                prm.band_w_tension,
+                prm.w_clear,
+                prm.w_veto,
+                self.rear,
+                prm.band_step,
+                prm.band_start_taper,
+                prm.band_keep_m,
+                self.shift,
+                self.band_n,
+            ],
+            outputs=[self.pts, self.tan, self.s, self.n_valid, self.used],
+            block_dim=BLOCK,
+            device=self.device,
+        )
+        wp.launch(
+            _band_check_kernel,
+            1,
+            inputs=[
+                self.start,
+                clear_field,
+                sim_grid,
+                self.half_width,
+                self.rear,
+                prm.reject_m,
+                prm.clear_taper,
+                blocked,
+                route_grid,
+                self.n_theta,
+                prm.n_knots,
+                self.pts,
+                self.tan,
+                self.s,
+            ],
+            outputs=[self.n_valid],
+            device=self.device,
+        )
+
     def update(
         self,
         V: wp.array,
@@ -1728,6 +2072,7 @@ class ReferencePath:
         goal_xy: np.ndarray | None = None,
         blocked: wp.array | None = None,
         policy=None,
+        origin_xy: np.ndarray | None = None,
     ) -> int:
         """One frame: descend `V` (on `route_grid`, both in the MPPI window's frame) from
         `start_xyz`, pull taut against `clear_field` (on `sim_grid`), then refine the curvature
@@ -1772,6 +2117,16 @@ class ReferencePath:
             )
         self.goal.assign(g)
         self.warm.assign(np.array([int(warm)], np.int32))
+        # the window's origin in the world: last frame's curve is moved into this frame's window
+        sh = np.zeros(2, np.float32)
+        if origin_xy is not None:
+            o = np.asarray(origin_xy[:2], np.float32)
+            if getattr(self, "_origin", None) is not None:
+                sh = self._origin - o
+            self._origin = o
+        self.shift.assign(sh[None])
+        if not warm:
+            self.band_n.zero_()
         key = (V.ptr, clear_field.ptr, blocked.ptr, _grid_key(route_grid), _grid_key(sim_grid))
         if self.params.sticky_tol_m > 0.0 and self.prev_dist.shape != (
             route_grid.cells_y,

@@ -55,6 +55,7 @@ from .terrain_value_field import TerrainValueField
 from .terrain_value_field.hierarchical import goal_cell_kernel
 from .terrain_value_field.hierarchical import seed_goal_and_ring_kernel
 from .terrain_value_field.hierarchical import seed_goal_kernel
+from .terrain_value_field.hierarchical import seed_goal_region_kernel
 from .terrain_value_field.margin import pack_pose_cost_kernel
 
 if TYPE_CHECKING:
@@ -375,6 +376,9 @@ class CostToGo:
         clearance: ClearanceParams | None = None,
         obstacle_step_m: float = 0.0,  # hard-block cells with a local step taller than this [m];
         # 0 = OFF. Catches thin vertical obstacles (sticks/poles) the settle straddles.
+        # [m] 0 = OFF. Seed every cell this close to an in-window goal at its distance to it
+        # (seed_goal_region_kernel): a goal on an obstacle's edge is arrived at on the near side.
+        goal_region_m: float = 0.0,
         pivot_cost: float = 0.0,  # [m-equiv] per heading bin; > 0 adds point-turn primitives so
         # a goal behind the robot routes as pivot-then-drive instead of a wide loop. 0 = OFF.
         # --- probabilistic feasibility (z-margin). z_veto = 0 is EXACTLY the old behaviour:
@@ -422,6 +426,7 @@ class CostToGo:
         self.robot = robot_params.build(self.device)
         self.grid = grid_params.build()
         self.bounds = grid_params.bounds  # (xmin, xmax, ymin, ymax) the solver takes
+        self.goal_region_m = float(goal_region_m)
         # robust-feasibility tube in lattice cells / theta-bins (0 -> no erosion = plain feasibility)
         self._mr = int(round(robust_margin_m / self.grid.cell_size))
         self._mc = self._mr
@@ -819,6 +824,20 @@ class CostToGo:
                     self.grid.cell_size,
                     self._band,
                     self.solver._inf,
+                ],
+                outputs=[self._seeds],
+                device=self.device,
+            )
+        if self.goal_region_m > 0.0:
+            wp.launch(
+                seed_goal_region_kernel,
+                dim=self.V.shape,
+                inputs=[
+                    self._goal_xy,
+                    self.bounds[0],
+                    self.bounds[2],
+                    self.grid.cell_size,
+                    self.goal_region_m,
                 ],
                 outputs=[self._seeds],
                 device=self.device,

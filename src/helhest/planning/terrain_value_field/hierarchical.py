@@ -70,6 +70,36 @@ def seed_goal_kernel(
 
 
 @wp.kernel
+def seed_goal_region_kernel(
+    goal_xy: wp.array(dtype=wp.float32),  # [2], this window's frame
+    origin_x: wp.float32,  # this window's min corner
+    origin_y: wp.float32,
+    cell_size: wp.float32,
+    region_m: wp.float32,
+    seeds: wp.array3d(dtype=wp.float32),  # [row, col, heading] in/out
+):
+    """A GOAL REGION: every cell within `region_m` of an in-window goal is a seed at its straight
+    distance to the goal, a priced seed (an exit), so a blocked one stays blocked. A goal on the
+    edge of a car or a kerb is reachable as one cell only at the headings whose footprint fits,
+    and the route went round to the far side of the obstacle to arrive at one of them (Zviretice
+    parking lot, 2026-10-31: the taut string wrapped the obstacle, the curve drew figure-eights).
+    The dock controller takes over inside its radius anyway; this lets the route stop at the
+    nearest standable point on the near side."""
+    r, c, t = wp.tid()
+    rows = seeds.shape[0]
+    cols = seeds.shape[1]
+    gc = int((goal_xy[0] - origin_x) / cell_size)
+    gr = int((goal_xy[1] - origin_y) / cell_size)
+    if gr < 0 or gr >= rows or gc < 0 or gc >= cols:
+        return
+    x = origin_x + (float(c) + 0.5) * cell_size
+    y = origin_y + (float(r) + 0.5) * cell_size
+    d = wp.sqrt((x - goal_xy[0]) * (x - goal_xy[0]) + (y - goal_xy[1]) * (y - goal_xy[1]))
+    if d <= region_m and d > 0.0:
+        seeds[r, c, t] = wp.min(seeds[r, c, t], d)
+
+
+@wp.kernel
 def seed_goal_and_ring_kernel(
     goal_xy: wp.array(dtype=wp.float32),  # [2], this window's frame -- UNCLAMPED on purpose
     coarse_value: wp.array3d(dtype=wp.float32),  # [cy, cx, 1], the coarse layer's cost-to-go

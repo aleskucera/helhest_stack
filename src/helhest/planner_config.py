@@ -60,6 +60,14 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_ref_cold_on_repivot": 0.0,
     "plan_ref_cold_on_detour": 0.0,
     "plan_ref_w_taut": 0.0,
+    "plan_goal_region_m": 0.0,
+    "plan_ref_band": 0.0,
+    "plan_ref_band_iterations": 150.0,
+    "plan_ref_band_w_smooth": 16.0,
+    "plan_ref_band_w_tension": 1.0,
+    "plan_ref_band_start_taper": 0.5,
+    "plan_ref_band_keep_m": 0.0,
+    "plan_ref_v_tol_per_m": 0.0,
     "plan_smooth": 0.04,
     "plan_saturation": 300.0,
     # MPPI's hard veto on the cost-to-go's HAZARD field: actual wall contact, without the router's
@@ -228,6 +236,7 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
             robust_margin_deg=float(p["plan_robust_margin_deg"]),
             obstacle_step_m=float(p["plan_obstacle_step_m"]),
             pivot_cost=float(p["plan_pivot_cost"]),
+            goal_region_m=float(p["plan_goal_region_m"]),
             z_veto=float(p["plan_z_veto"]),
             charge_per_sigma=float(p["plan_charge_per_sigma"]),
             **({"clearance": clearance} if clearance is not None else {}),
@@ -262,6 +271,13 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
                 cold_on_repivot=bool(float(p["plan_ref_cold_on_repivot"])),
                 cold_on_detour=float(p["plan_ref_cold_on_detour"]),
                 w_taut=float(p["plan_ref_w_taut"]),
+                band=bool(float(p["plan_ref_band"])),
+                band_iterations=int(float(p["plan_ref_band_iterations"])),
+                band_w_smooth=float(p["plan_ref_band_w_smooth"]),
+                band_w_tension=float(p["plan_ref_band_w_tension"]),
+                band_start_taper=float(p["plan_ref_band_start_taper"]),
+                band_keep_m=float(p["plan_ref_band_keep_m"]),
+                v_tol_per_m=float(p["plan_ref_v_tol_per_m"]),
             )
             if float(p["plan_track_lateral"]) > 0.0
             else None
