@@ -612,7 +612,9 @@ def drive(a: argparse.Namespace) -> dict:
                 # becomes the distance to it
                 # V itself, not V_escape: the escape field gives every vetoed cell a finite way
                 # out so MPPI can leave a wall, and a descent of it walks through walls (slalom)
-                forbidden_distance(ctg.blocked, a.n_theta, rcell, 1.6, ref_mask, ref_clear)
+                forbidden_distance(
+                    ctg.blocked, a.n_theta, rcell, 1.6, ref_mask, ref_clear, rprm.forbid_frac
+                )
                 n_ref = refpath.update(
                     ctg.V,
                     sgrid,

@@ -32,6 +32,7 @@ from pathlib import Path
 import numpy as np
 import warp as wp
 
+from helhest.control.reference_path import forbidden_distance
 from helhest.control.reference_path import ReferencePath
 from helhest.control.reference_path import ReferencePathParams
 from helhest.grid import Grid
@@ -109,6 +110,27 @@ def veto_count(blocked: np.ndarray, g: np.ndarray, p: np.ndarray) -> int:
     return int(blocked[r, c, t].sum())
 
 
+# Scored against cells forbidden at at least this fraction of headings, whatever the variant keeps
+# clear of: at 1.0 (every heading) a straddled wall or car is not there at all (see
+# ReferencePathParams.forbid_frac). Light recordings carry only the stage's own field.
+SCORE_FRAC = 0.5
+
+
+def score_clear(d: dict, i: int) -> np.ndarray:
+    """The wall-distance map a frame is scored on: [m] to the nearest cell forbidden at at least
+    SCORE_FRAC of the headings, capped at the stage's 1.6 m reach, as `forbidden_distance`."""
+    if "blocked" not in d:
+        return d["clear"][i].astype(np.float32)
+    from scipy.ndimage import distance_transform_edt
+
+    cell = float(d["sgrid"][i][2])
+    blocked = (d["blocked"][i] >= 0.5).mean(2) >= SCORE_FRAC - 1e-4
+    reach = max(1, int(np.ceil(1.6 / cell)))
+    if not blocked.any():
+        return np.full(blocked.shape, reach * cell, np.float32)
+    return np.minimum(distance_transform_edt(~blocked), reach).astype(np.float32) * cell
+
+
 def metrics(curve, taut, d, i, half_width, rear, prev_world) -> dict:
     """The map-aware score of one frame's curve."""
     m: dict = {"empty": len(curve) < 3}
@@ -117,7 +139,7 @@ def metrics(curve, taut, d, i, half_width, rear, prev_world) -> dict:
     if m["empty"]:
         return m
     g = d["sgrid"][i]
-    clear = d["clear"][i].astype(np.float32)
+    clear = score_clear(d, i)
     full = "V" in d
     vmin = d["V"][i].min(2) if full else d["vmin"][i].astype(np.float32)
     q = resample(curve, 0.1)
@@ -180,6 +202,7 @@ def run(
     V = wp.zeros(shp, dtype=wp.float32)
     B = wp.zeros(shp, dtype=wp.float32)
     C = wp.zeros(d["clear"].shape[1:], dtype=wp.float32)
+    mask = wp.zeros(d["clear"].shape[1:], dtype=wp.float32)
     rec_curves = ragged(d, "curve")
     out, prev_world, mism = [], None, 0
     for i in range(len(d["t"])):
@@ -187,6 +210,8 @@ def run(
         wp.copy(B, wp.array(d["blocked"][i].astype(np.float32), dtype=wp.float32))
         wp.copy(C, wp.array(d["clear"][i], dtype=wp.float32))
         g = make_grid(d["sgrid"][i])
+        if prm.forbid_frac != base.get("forbid_frac", 1.0):
+            forbidden_distance(B, nt, g.cell_size, 1.6, mask, C, prm.forbid_frac)
         wp.synchronize()
         t0 = time.perf_counter()
         n = rp.update(

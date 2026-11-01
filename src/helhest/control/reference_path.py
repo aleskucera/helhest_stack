@@ -169,6 +169,18 @@ class ReferencePathParams:
     # (Zviretice parking lot: 11 % of frames without a curve). Within this of the end, the curve
     # is cut back to the last point the wheels can stand on; the dock controller has the rest.
     band_end_trunc_m: float = 0.0
+    # [m] points nearer the start than this carry no rear axle disc (in the band's clearance
+    # term and its rejection). The disc lies `rear` behind each point along the curve, which near
+    # the start of a band that turns off the robot's heading is behind the robot, in what it
+    # backed to (Zviretice: start hooks, rejected frames); but in a corridor the same disc kept
+    # the first points off the wall the robot started beside (corridor24 4/4 -> 2/4 without it).
+    band_rear_skip_m: float = 0.0
+    # STUDY. What the stage keeps clear of: cells the settle forbids at at least this fraction of
+    # headings (`forbidden_distance`). 1.0 = every heading, as before -- and a wall or a car is
+    # straddled at some headings, so on the Zviretice parking lot 5-47 cells a frame were
+    # forbidden at every heading against 172-289 forbidden at half of them or more (as many as
+    # V caps): the clearance term saw a few percent of the obstacles.
+    forbid_frac: float = 1.0
 
     @property
     def kappa_max(self) -> float:
@@ -183,14 +195,15 @@ class ReferencePathParams:
 def _forbidden_mask_kernel(
     blocked: wp.array3d(dtype=float),  # [ny, nx, n_theta] the settle's veto, 1 = forbidden
     n_theta: int,
-    mask: wp.array2d(dtype=float),  # [ny, nx] out: 1 = forbidden at every heading
+    frac: float,  # forbidden at at least this fraction of the headings
+    mask: wp.array2d(dtype=float),  # [ny, nx] out: 1 = forbidden
 ):
     r, c = wp.tid()
-    allb = float(1.0)
+    n = int(0)
     for t in range(n_theta):
-        if blocked[r, c, t] < 0.5:
-            allb = 0.0
-    mask[r, c] = allb
+        if blocked[r, c, t] >= 0.5:
+            n += 1
+    mask[r, c] = wp.where(float(n) >= frac * float(n_theta) - 1.0e-4, 1.0, 0.0)
 
 
 @wp.kernel
@@ -216,15 +229,22 @@ def _forbidden_distance_kernel(
 
 
 def forbidden_distance(
-    blocked: wp.array, n_theta: int, cell: float, reach_m: float, mask: wp.array, out: wp.array
+    blocked: wp.array,
+    n_theta: int,
+    cell: float,
+    reach_m: float,
+    mask: wp.array,
+    out: wp.array,
+    frac: float = 1.0,
 ) -> wp.array:
-    """[m] from every routing cell to the nearest cell the settle forbids at every heading, on
-    device; `mask` and `out` [ny, nx] are the caller's buffers. The stage's clearance is
-    measured to these cells: a wall's, a slope's past the envelope, a ditch's alike."""
+    """[m] from every routing cell to the nearest cell the settle forbids at every heading (at
+    `frac` of them: ReferencePathParams.forbid_frac), on device; `mask` and `out` [ny, nx] are
+    the caller's buffers. The stage's clearance is measured to these cells: a wall's, a slope's
+    past the envelope, a ditch's alike."""
     wp.launch(
         _forbidden_mask_kernel,
         dim=out.shape,
-        inputs=[blocked, int(n_theta)],
+        inputs=[blocked, int(n_theta), float(frac)],
         outputs=[mask],
         device=out.device,
     )
@@ -1479,6 +1499,7 @@ def _band_kernel(
     rear: float,
     step: float,
     start_taper: float,
+    rear_skip: float,  # ReferencePathParams.band_rear_skip_m
     keep_m: float,  # ReferencePathParams.band_keep_m
     shift: wp.array(dtype=wp.vec2),  # [1] last frame's window origin less this frame's
     prev_n: wp.array(dtype=int),  # [1] in/out: last frame's band points, before the rejection
@@ -1572,7 +1593,7 @@ def _band_kernel(
             q = p - rear * tv
             cq = sample_field(clear_field, sgrid, q[0], q[1]) - ct
             # nearer the start the disc would lie behind the robot, not on the curve
-            if cq < 0.0 and s_i >= rear:
+            if cq < 0.0 and s_i >= rear_skip:
                 gq = _field_grad(clear_field, sgrid, q, hs)
                 if wp.length_sq(gq) < 1.0e-6:
                     gq = wp.normalize(anchor - q + wp.vec2(1.0e-6, 0.0))
@@ -1624,6 +1645,7 @@ def _band_check_kernel(
     n_theta: int,
     n_knots: int,
     end_trunc: float,  # ReferencePathParams.band_end_trunc_m
+    rear_skip: float,  # ReferencePathParams.band_rear_skip_m
     pts: wp.array(dtype=wp.vec2),
     tan: wp.array(dtype=wp.vec2),
     s_out: wp.array(dtype=float),
@@ -1661,7 +1683,7 @@ def _band_check_kernel(
         rgrid,
         n_theta,
         n_knots + 1,
-        rear,
+        rear_skip,
     ):
         n_valid[0] = 0
 
@@ -2056,6 +2078,7 @@ class ReferencePath:
                 self.rear,
                 prm.band_step,
                 prm.band_start_taper,
+                prm.band_rear_skip_m,
                 prm.band_keep_m,
                 self.shift,
                 self.band_n,
@@ -2080,6 +2103,7 @@ class ReferencePath:
                 self.n_theta,
                 prm.n_knots,
                 prm.band_end_trunc_m,
+                prm.band_rear_skip_m,
                 self.pts,
                 self.tan,
                 self.s,

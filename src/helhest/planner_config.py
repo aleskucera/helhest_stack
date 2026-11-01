@@ -68,6 +68,8 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_ref_band_start_taper": 0.5,
     "plan_ref_band_keep_m": 0.0,
     "plan_ref_band_end_trunc_m": 0.0,
+    "plan_ref_band_rear_skip_m": 0.0,
+    "plan_ref_forbid_frac": 1.0,
     "plan_ref_v_tol_per_m": 0.0,
     "plan_smooth": 0.04,
     "plan_saturation": 300.0,
@@ -279,6 +281,8 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
                 band_start_taper=float(p["plan_ref_band_start_taper"]),
                 band_keep_m=float(p["plan_ref_band_keep_m"]),
                 band_end_trunc_m=float(p["plan_ref_band_end_trunc_m"]),
+                band_rear_skip_m=float(p["plan_ref_band_rear_skip_m"]),
+                forbid_frac=float(p["plan_ref_forbid_frac"]),
                 v_tol_per_m=float(p["plan_ref_v_tol_per_m"]),
             )
             if float(p["plan_track_lateral"]) > 0.0
