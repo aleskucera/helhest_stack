@@ -287,3 +287,46 @@ Scored against the half-heading map (replay_ref.SCORE_FRAC 0.5, all variants), 7
 On the parking lot 13.5 % of the robot's own curves cross the half-heading map. The denser map
 makes every stage safer and wigglier; whether that pays is a closed-loop question (S_bandT050,
 S_base50, S_bandT075 campaigns).
+
+**What the denser map needs: a smaller clearance ask.** The asked clearance (0.8 m + half-width)
+was calibrated against the every-heading map; the half-heading map already reaches past the
+faces, so with it every gap read too narrow and the band centred itself between blobs (s-bends
+5.7 -> 15.8 %). Asking 0.2 m (`plan_ref_clearance_m`) instead, 7 real runs, half-heading scoring:
+
+| | loop | crosses | clearance p5 | s-bend | no curve, goal > 1.5 m |
+|---|---|---|---|---|---|
+| robot's stage | 3.40 % | 3.87 % | 0.18 m | 12.1 % | 0.12 % |
+| band T0 | 0.30 | 3.31 | 0.24 | 5.7 | 0 |
+| band, frac 0.5, ask 0.8 | 1.28 | 0.45 | 0.35 | 15.8 | 0.09 |
+| band, frac 0.5, ask 0.4 | 0.26 | 0.39 | 0.31 | 6.3 | 0.14 |
+| **band, frac 0.5, ask 0.2 (b50c2)** | **0.09** | **0.25** | **0.30** | **4.7** | 0.29 |
+
+frac 0.75 is no middle ground (crosses 2.3 %, s-bend 14.3 %). The live node with b50c2 on the
+parking-lot bag matches the offline rerun (loop 0.25 %, crosses 1.07 %, empties 1.24 % live vs
+0.25 / 1.04 / 1.24 offline).
+
+**Closed loop, 23 worlds x 8 runs:**
+
+| | reached | frames |
+|---|---|---|
+| robot's stage | 167/184 | 80283 |
+| band T0 | 172/184 | 64543 |
+| **b50c2** | **174/184** | **63606** |
+| b50c2 + policy_descent | 174/184 | 66324 |
+| robot's stage, frac 0.5 (11 worlds) | 75/88 vs 75/88 | |
+
+b50c2 fixes the band's slalom slowdown (343 frames, base 364) and lifts cornerL24 to 4/8 and
+false_door to 4/8. Policy descent on top: cornerL24 7/8 and false_door 8/8 (933 frames, faster
+than base), but corridor26 4/8, facing_wall 6/8, forest and pillars 7/8, narrow_s +50 %; and on
+the parking lot its same-goal frame jumps are 5.1 % against 3.2 % (robot 2.0 %; patek1 0.63 vs
+0.82). `policy_sticky_m` (hysteresis among near-tie moves) changes nothing (5.0 %): the flips are
+not ties, the walk starts from a different heading bin as the robot manoeuvres. Not recommended
+until the route is consistent.
+
+Jump metric note: `jump` counts goal switches and newly seen obstacles too; `jump2.py` recounts
+excluding frames whose goal changed.
+
+**Recommended (opt-in), b50c2:**
+
+    -p plan_ref_band:=1.0 -p plan_ref_clear_taper:=0.5 -p plan_ref_band_end_trunc_m:=1.5 \
+    -p plan_ref_forbid_frac:=0.5 -p plan_ref_clearance_m:=0.2

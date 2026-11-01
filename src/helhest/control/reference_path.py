@@ -181,6 +181,11 @@ class ReferencePathParams:
     # forbidden at every heading against 172-289 forbidden at half of them or more (as many as
     # V caps): the clearance term saw a few percent of the obstacles.
     forbid_frac: float = 1.0
+    # STUDY. [m of V] 0 = off. HYSTERESIS FOR THE POLICY WALK (policy_descent): among the moves
+    # within this of the best, take the one whose cell lies nearest last frame's taut string
+    # (scored move + V + sticky_w x distance). From the robot's own heading bin the walk's way
+    # round flipped as the bin and V changed: Zviretice parking lot, frame jumps 3.5 -> 5.4 %.
+    policy_sticky_m: float = 0.0
 
     @property
     def kappa_max(self) -> float:
@@ -294,6 +299,7 @@ def _prev_dist_kernel(
     n_taut: wp.array(dtype=int),
     rgrid: Grid,
     cap: float,
+    shift: wp.array(dtype=wp.vec2),  # [1] last frame's window origin less this frame's
     out: wp.array2d(dtype=float),  # [ny, nx] distance of each cell centre to it, capped
 ):
     r, c = wp.tid()
@@ -305,8 +311,8 @@ def _prev_dist_kernel(
     if n < 2:
         best = 0.0  # nothing to stick to
     for i in range(n - 1):
-        a = taut[i]
-        ab = taut[i + 1] - a
+        a = taut[i] + shift[0]
+        ab = taut[i + 1] - taut[i]
         L2 = wp.max(wp.dot(ab, ab), 1.0e-12)
         t = wp.clamp(wp.dot(p - a, ab) / L2, 0.0, 1.0)
         best = wp.min(best, wp.length(p - (a + t * ab)))
@@ -448,6 +454,9 @@ def _policy_kernel(
     cgrid: Grid,
     half_width: float,
     max_pts: int,
+    prev_dist: wp.array2d(dtype=float),  # [ny, nx] off last frame's string (_prev_dist_kernel)
+    sticky_tol: float,  # 0 = off (ReferencePathParams.policy_sticky_m)
+    sticky_w: float,
     out: wp.array(dtype=wp.vec2),  # [max_pts] in/out: kept as the greedy walk left it on failure
     n_out: wp.array(dtype=int),  # [1] in/out
 ):
@@ -479,6 +488,22 @@ def _policy_kernel(
                     bp = p
         if bp < 0 or best > cur + 1.0e-4 or best >= 80.0:
             break  # a seed: nothing beats standing here
+        if sticky_tol > 0.0:
+            # among the moves that still descend and cost within sticky_tol of the best, the
+            # one nearest last frame's string; strictly descending, so the walk cannot cycle
+            lim = wp.min(best + sticky_tol, cur - 1.0e-5)
+            score = float(1.0e30)
+            for p in range(n_prim):
+                e = edge_cost[r, c, t, p]
+                if e < 1.0e29:
+                    pr = r + prim_dr[t, p]
+                    pc = c + prim_dc[t, p]
+                    val = e + V[pr, pc, prim_heading[t, p]]
+                    if val <= lim:
+                        sc = val + sticky_w * prev_dist[pr, pc]
+                        if sc < score:
+                            score = sc
+                            bp = p
         nr = r + prim_dr[t, bp]
         nc = c + prim_dc[t, bp]
         t = prim_heading[t, bp]
@@ -1794,11 +1819,11 @@ class ReferencePath:
             outputs=[self.vmin],
             device=self.device,
         )
-        if prm.sticky_tol_m > 0.0:
+        if prm.sticky_tol_m > 0.0 or prm.policy_sticky_m > 0.0:
             wp.launch(
                 _prev_dist_kernel,
                 (route_grid.cells_y, route_grid.cells_x),
-                inputs=[self.taut, self.n_taut, route_grid, 5.0],
+                inputs=[self.taut, self.n_taut, route_grid, 5.0, self.shift],
                 outputs=[self.prev_dist],
                 device=self.device,
             )
@@ -1841,6 +1866,9 @@ class ReferencePath:
                     sim_grid,
                     self.half_width,
                     256,
+                    self.prev_dist,
+                    prm.policy_sticky_m,
+                    prm.sticky_w,
                 ],
                 outputs=[self.desc, self.n_desc],
                 device=self.device,
@@ -2179,7 +2207,8 @@ class ReferencePath:
         if not warm:
             self.band_n.zero_()
         key = (V.ptr, clear_field.ptr, blocked.ptr, _grid_key(route_grid), _grid_key(sim_grid))
-        if self.params.sticky_tol_m > 0.0 and self.prev_dist.shape != (
+        sticky = self.params.sticky_tol_m > 0.0 or self.params.policy_sticky_m > 0.0
+        if sticky and self.prev_dist.shape != (
             route_grid.cells_y,
             route_grid.cells_x,
         ):
