@@ -385,3 +385,8 @@ wrong one. Opt-in, off; the remaining jumps are the price of following V.
 
 **Band smoothness sweep** (8 runs, 11 separating worlds, recommended set): band_w_smooth 8 ->
 77/88, 16 (default, from its 16-run rate) ~75/88, 32 -> 75/88. Within noise; default kept.
+
+**Speed on the laptop's A500** (new3, 1111 frames): the deployed stage 1.80 ms median, 2.42 p95,
+7.59 max (its 400-step cold starts); the recommended band 0.97 / 1.14 / 1.39 ms -- it has no
+cold starts, so the worst frame is 5x better. (17 of 1111 deployed-stage frames differ from the
+dasenka recording: cross-GPU FMA fusion, see warp_codegen_order_nondeterminism.)
