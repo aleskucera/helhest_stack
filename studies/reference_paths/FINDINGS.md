@@ -390,3 +390,28 @@ wrong one. Opt-in, off; the remaining jumps are the price of following V.
 7.59 max (its 400-step cold starts); the recommended band 0.97 / 1.14 / 1.39 ms -- it has no
 cold starts, so the worst frame is 5x better. (17 of 1111 deployed-stage frames differ from the
 dasenka recording: cross-GPU FMA fusion, see warp_codegen_order_nondeterminism.)
+
+## 2 Nov: the policy walk, gated on the robot facing away
+
+`plan_ref_policy_gate_rad` (f5d9fe6): take the lattice policy walk (`plan_ref_policy_descent 1`)
+only when the robot faces more than the gate off the heading-free descent's way out (its point
+0.75 m on); otherwise keep the heading-free descent. On top of the recommended set.
+
+Closed loop, robot-faithful drive_sim, 16 runs on the 11 hardest worlds and 8 on the rest:
+
+| config | reached | cornerL24 | false_door | corridor24 | corridor26 |
+|---|---|---|---|---|---|
+| robot's stage (R0_base) | 235/272 | 2/16 | 8/16 | 11/16 | 13/16 |
+| recommended (S_fin_goal) | 246/272 | 4/16 | 8/16 | 12/16 (346 fr) | 15/16 |
+| + policy, gate 90 deg (P_g90) | **264/272** | 16/16 (248 fr) | 12/16 (903 fr) | 13/16 (436 fr) | 16/16 |
+| + policy, gate 45 deg (P_g45) | 259/272 | 16/16 | 15/16 | 11/16 | 15/16 |
+| + policy, ungated (P_all, 8 runs, hard 11) | 76/88 | 8/8 | 5/8 | 5/8 | 3/8 |
+
+Cost gates (V at own heading minus min over headings > 0.3 / 1.0 m): 80/88 and 78/88 on the hard
+11, 8 runs; rejected. Gate 90 is slower on corridor24 (436 frames against 346), slalom (404
+against 329) and forest (429 against 378); faster on cornerL24 and false_door.
+
+Live node replays (same-goal frame jumps, jump2.py): parking lot 3.22 % (recommended) -> 3.95 %
+(gate 90), 4.30 % (gate 45), 5.09 % (ungated); patek1 0.31 % -> 0.45 %, 0.56 %, 0.63 %. Loops
+unchanged (park0 0.25 %, patek1 0.21 %). Gate 90 adopted into the recommended set:
+`plan_ref_policy_descent 1, plan_ref_policy_gate_rad 1.57`.
