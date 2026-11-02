@@ -372,3 +372,13 @@ real runs: loop 0.09 % (robot 3.40), crosses 0.31 % (3.87), s-bends 4.7 % (12.1)
 Live node: patek1 loop 0.21 % (4.34), crosses 0.17 % (1.71), no empties (0.17), same-goal jumps
 0.31 % (0.82); castle run (hrad0) no loops, no crossings, 0.42 % empties (0.07), s-bends
 11.9 % (0.5: a 0.2-0.3 m swing off an obstacle beside the robot as it leaves).
+
+**`band_hold` (route hysteresis) -- calmer on real data, rejected in closed loop.** Keeping last
+frame's band (from the robot on, extended to the new target) while it clears every forbidden
+cell and is <= hold x the new string + 0.5 m: 7 real runs, same-goal jumps 1.89 -> 1.44 % at
+1.05 and 1.35 % at 1.2 (robot's stage 1.54), parking lot 3.42 -> 2.49 %, flick p95 0.14 ->
+0.06 m, loops and crossings unchanged. But closed loop, 8 runs on the 11 separating worlds,
+hold 1.05 reaches 70/88 against ~75 for the recommended set: cornerL24 0/8, corridor24 5/8,
+corridor26 6/8, false_door 3/8 -- the worlds where the first way round must be given up as the
+map fills in. A way that still clears and is nearly as short in the window can still be the
+wrong one. Opt-in, off; the remaining jumps are the price of following V.
