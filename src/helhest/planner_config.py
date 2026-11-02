@@ -72,6 +72,8 @@ PLAN_DEFAULTS: dict[str, Any] = {
     "plan_ref_forbid_frac": 1.0,
     "plan_ref_clearance_m": 0.8,
     "plan_ref_policy_sticky_m": 0.0,
+    "plan_ref_policy_gate_rad": 0.0,
+    "plan_ref_policy_gate_m": 0.0,
     "plan_ref_band_hold": 0.0,
     "plan_ref_v_tol_per_m": 0.0,
     "plan_smooth": 0.04,
@@ -288,6 +290,8 @@ def planner_config(params: Mapping[str, Any]) -> PlannerConfig:
                 forbid_frac=float(p["plan_ref_forbid_frac"]),
                 clearance_m=float(p["plan_ref_clearance_m"]),
                 policy_sticky_m=float(p["plan_ref_policy_sticky_m"]),
+                policy_gate_rad=float(p["plan_ref_policy_gate_rad"]),
+                policy_gate_m=float(p["plan_ref_policy_gate_m"]),
                 band_hold=float(p["plan_ref_band_hold"]),
                 v_tol_per_m=float(p["plan_ref_v_tol_per_m"]),
             )

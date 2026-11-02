@@ -193,6 +193,15 @@ class ReferencePathParams:
     # (scored move + V + sticky_w x distance). From the robot's own heading bin the walk's way
     # round flipped as the bin and V changed: Zviretice parking lot, frame jumps 3.5 -> 5.4 %.
     policy_sticky_m: float = 0.0
+    # STUDY. [rad] 0 = off. A GATE ON THE POLICY WALK (policy_descent): take the walk from the
+    # robot's own heading only when the robot faces more than this off the heading-free descent's
+    # way out (its point 0.75 m on). Facing the route, both walks agree and the heading-free one
+    # follows the string more steadily; the policy walk won cornerL24 and false_door, where the
+    # robot faces away, and lost corridors where it did not.
+    policy_gate_rad: float = 0.0
+    # STUDY. [m of V] 0 = off. The same gate by cost: the policy walk only when V at the robot's
+    # own heading exceeds V's minimum over headings at its cell by more than this.
+    policy_gate_m: float = 0.0
 
     @property
     def kappa_max(self) -> float:
@@ -464,6 +473,9 @@ def _policy_kernel(
     prev_dist: wp.array2d(dtype=float),  # [ny, nx] off last frame's string (_prev_dist_kernel)
     sticky_tol: float,  # 0 = off (ReferencePathParams.policy_sticky_m)
     sticky_w: float,
+    vmin: wp.array3d(dtype=float),  # [ny, nx, 1] V's minimum over headings (_vmin_kernel)
+    gate_rad: float,  # 0 = off (ReferencePathParams.policy_gate_rad)
+    gate_m: float,  # 0 = off (ReferencePathParams.policy_gate_m)
     out: wp.array(dtype=wp.vec2),  # [max_pts] in/out: kept as the greedy walk left it on failure
     n_out: wp.array(dtype=int),  # [1] in/out
 ):
@@ -480,6 +492,23 @@ def _policy_kernel(
     t = int(wp.floor(yaw / (6.2831853 / float(nt)) + 0.5)) % nt
     if V[r, c, t] >= 80.0:
         return
+    if gate_m > 0.0 and V[r, c, t] - vmin[r, c, 0] < gate_m:
+        return
+    if gate_rad > 0.0:
+        # the heading-free descent's way out, as the descent kernel left it in `out`
+        s0 = wp.vec2(start[0], start[1])
+        m = n_out[0]
+        way = out[wp.max(m - 1, 0)]
+        for i in range(m):
+            if wp.length(out[i] - s0) >= 0.75:
+                way = out[i]
+                break
+        d = way - s0
+        if wp.length(d) > 1.0e-3:
+            off = wp.atan2(d[1], d[0]) - start[2]
+            off = off - wp.floor((off + 3.14159265) / 6.2831853) * 6.2831853
+            if wp.abs(off) < gate_rad:
+                return
     out[0] = wp.vec2(start[0], start[1])
     n = int(1)
     for _ in range(4 * max_pts):
@@ -1932,6 +1961,9 @@ class ReferencePath:
                     self.prev_dist,
                     prm.policy_sticky_m,
                     prm.sticky_w,
+                    self.vmin,
+                    prm.policy_gate_rad,
+                    prm.policy_gate_m,
                 ],
                 outputs=[self.desc, self.n_desc],
                 device=self.device,
