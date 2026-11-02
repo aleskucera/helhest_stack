@@ -382,3 +382,6 @@ hold 1.05 reaches 70/88 against ~75 for the recommended set: cornerL24 0/8, corr
 corridor26 6/8, false_door 3/8 -- the worlds where the first way round must be given up as the
 map fills in. A way that still clears and is nearly as short in the window can still be the
 wrong one. Opt-in, off; the remaining jumps are the price of following V.
+
+**Band smoothness sweep** (8 runs, 11 separating worlds, recommended set): band_w_smooth 8 ->
+77/88, 16 (default, from its 16-run rate) ~75/88, 32 -> 75/88. Within noise; default kept.
