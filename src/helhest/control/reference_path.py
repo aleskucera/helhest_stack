@@ -1669,6 +1669,7 @@ def _band_check_kernel(
     rgrid: Grid,
     n_theta: int,
     n_knots: int,
+    goal: wp.array(dtype=float),  # [3] x, y, 1 when it is in the window
     end_trunc: float,  # ReferencePathParams.band_end_trunc_m
     rear_skip: float,  # ReferencePathParams.band_rear_skip_m
     pts: wp.array(dtype=wp.vec2),
@@ -1680,7 +1681,9 @@ def _band_check_kernel(
     if n < 2:
         return
     jb = n - 1
-    if end_trunc > 0.0:
+    # only at the goal: a curve that ends at the window's edge goes on next frame, and cutting it
+    # there short of a crowded edge lost the corridors (corridor26 16/16 -> 6/8)
+    if end_trunc > 0.0 and goal[2] > 0.5:
         # cut before the FIRST point within the window that the wheels cannot stand on: near a
         # goal on structure the band can dip in and come out again at the goal itself
         s_end = s_out[n - 1]
@@ -2131,6 +2134,7 @@ class ReferencePath:
                 route_grid,
                 self.n_theta,
                 prm.n_knots,
+                self.goal,
                 prm.band_end_trunc_m,
                 prm.band_rear_skip_m,
                 self.pts,
