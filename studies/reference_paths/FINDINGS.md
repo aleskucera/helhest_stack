@@ -358,3 +358,17 @@ All runs together (these at 16, the other 12 worlds at 8): 249/272 against 235/2
 frames. The one slalom failure is a wedge: nose against the second gate's slab end, facing away
 from the route; the string and the band go back round the slab end first, which a forward-only
 robot pressed to it cannot start (1300 frames there).
+
+**Truncation, third pass: only at the goal.** The second pass (cut before the first failing
+point in the last 1.5 m) also cut curves that end at the window's edge, short of a crowded edge:
+closed loop corridor26 6/8 and trunks 6/8 (165/184 over 23 worlds x 8). Gated on the goal being
+in the window (87e18e2) both are 8/8 again.
+
+**Final validation of the recommended code (87e18e2)**, 16 runs on the 11 separating worlds, 8
+on the other 12: **246/272 reached against 235/272 for the robot's stage, 16 % fewer frames**
+(114011 vs 135647); b50c2 with the first-pass truncation 249/272 (within noise). Offline, 7
+real runs: loop 0.09 % (robot 3.40), crosses 0.31 % (3.87), s-bends 4.7 % (12.1), stray 0
+(14.1), no curve with the goal > 1.5 m 0.15 % (0.12), same-goal frame jumps 1.89 % (1.54).
+Live node: patek1 loop 0.21 % (4.34), crosses 0.17 % (1.71), no empties (0.17), same-goal jumps
+0.31 % (0.82); castle run (hrad0) no loops, no crossings, 0.42 % empties (0.07), s-bends
+11.9 % (0.5: a 0.2-0.3 m swing off an obstacle beside the robot as it leaves).
