@@ -139,6 +139,7 @@ _PLAN_BUILD = frozenset(
         "plan_ref_forbid_frac",
         "plan_ref_clearance_m",
         "plan_ref_policy_sticky_m",
+        "plan_ref_band_hold",
         "plan_ref_v_tol_per_m",
         "plan_ref_band_iterations",
         "plan_ref_band_w_smooth",
@@ -608,6 +609,7 @@ class NavigationNode(Node):
         d("plan_ref_forbid_frac", PLAN_DEFAULTS["plan_ref_forbid_frac"])
         d("plan_ref_clearance_m", PLAN_DEFAULTS["plan_ref_clearance_m"])
         d("plan_ref_policy_sticky_m", PLAN_DEFAULTS["plan_ref_policy_sticky_m"])
+        d("plan_ref_band_hold", PLAN_DEFAULTS["plan_ref_band_hold"])
         d("plan_ref_v_tol_per_m", PLAN_DEFAULTS["plan_ref_v_tol_per_m"])
         # HARD speed ceiling: the MPPI wheel-speed sampling box [0, plan_wmax] rad/s. The planner
         # NEVER commands above this regardless of the cost. This is the real top-speed knob.
@@ -957,6 +959,7 @@ class NavigationNode(Node):
         self.plan_ref_forbid_frac: float = g("plan_ref_forbid_frac")
         self.plan_ref_clearance_m: float = g("plan_ref_clearance_m")
         self.plan_ref_policy_sticky_m: float = g("plan_ref_policy_sticky_m")
+        self.plan_ref_band_hold: float = g("plan_ref_band_hold")
         self.plan_ref_v_tol_per_m: float = g("plan_ref_v_tol_per_m")
         self.plan_smooth: float = g("plan_smooth")
         self.plan_straight_frac: float = g("plan_straight_frac")

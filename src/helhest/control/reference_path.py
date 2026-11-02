@@ -175,6 +175,13 @@ class ReferencePathParams:
     # backed to (Zviretice: start hooks, rejected frames); but in a corridor the same disc kept
     # the first points off the wall the robot started beside (corridor24 4/4 -> 2/4 without it).
     band_rear_skip_m: float = 0.0
+    # 0 = off. HYSTERESIS ON THE WAY ROUND: last frame's band, from the robot on and extended to
+    # this frame's target, is kept (relaxed again) instead of the new string while it still
+    # clears every forbidden cell and is no longer than this times the new string + 0.5 m. V's
+    # descent flips between ways round an obstacle that cost nearly the same, and the band,
+    # started from the string, flipped with it (Zviretice parking lot: same-goal jumps 3.7 %,
+    # the robot's warm-started curve 2.0 %). A way the map has closed is dropped at once.
+    band_hold: float = 0.0
     # STUDY. What the stage keeps clear of: cells the settle forbids at at least this fraction of
     # headings (`forbidden_distance`). 1.0 = every heading, as before -- and a wall or a car is
     # straddled at some headings, so on the Zviretice parking lot 5-47 cells a frame were
@@ -1525,6 +1532,8 @@ def _band_kernel(
     step: float,
     start_taper: float,
     rear_skip: float,  # ReferencePathParams.band_rear_skip_m
+    hold: float,  # ReferencePathParams.band_hold
+    half_width: float,
     keep_m: float,  # ReferencePathParams.band_keep_m
     shift: wp.array(dtype=wp.vec2),  # [1] last frame's window origin less this frame's
     prev_n: wp.array(dtype=int),  # [1] in/out: last frame's band points, before the rejection
@@ -1558,7 +1567,57 @@ def _band_kernel(
         p = wp.vec2(start[0], start[1])
     if i >= M:
         p = end
-    if keep_m > 0.0:
+    held = int(0)
+    n_prev = prev_n[0]
+    # last frame's band, only if it was used: one the rejection threw out is no way to keep
+    if hold > 0.0 and n_prev >= 3 and n_pts[0] >= 3:
+        # last frame's band in this frame's window, from its point nearest the robot on, then a
+        # last leg to this frame's target: every lane walks the same chain
+        sh = shift[0]
+        here0 = wp.vec2(start[0], start[1])
+        jb0 = int(0)
+        bd = float(1.0e30)
+        for k in range(n_prev):
+            dk = wp.length_sq(pts[k] + sh - here0)
+            if dk < bd:
+                bd = dk
+                jb0 = k
+        old_end = pts[n_prev - 1] + sh
+        chain = wp.length(pts[wp.min(jb0 + 1, n_prev - 1)] + sh - here0)
+        for k in range(jb0 + 1, n_prev - 1):
+            chain += wp.length(pts[k + 1] - pts[k])
+        join = wp.length(end - old_end)
+        chain += join
+        # the point at this lane's share of the chain
+        want = float(wp.min(i, M)) * chain / float(M)
+        q = end
+        acc = float(0.0)
+        prv = here0
+        found = int(0)
+        for k in range(jb0 + 1, n_prev + 1):
+            nxt = end
+            if k < n_prev:
+                nxt = pts[k] + sh
+            seg = wp.length(nxt - prv)
+            if found == 0 and want <= acc + seg and seg > 1.0e-9:
+                q = prv + (nxt - prv) * ((want - acc) / seg)
+                found = 1
+            acc += seg
+            prv = nxt
+        if i == 0:
+            q = here0
+        # the chain must clear every forbidden cell as the rejection asks, and be about as short
+        c0h = sample_field(clear_field, sgrid, start[0], start[1]) - half_width
+        floor_m = wp.min(0.0, c0h - 0.05)
+        bad = float(0.0)
+        if on and i >= 1:
+            if sample_field(clear_field, sgrid, q[0], q[1]) - half_width < floor_m:
+                bad = 1.0
+        any_bad = wp.tile_max(wp.tile(bad))[0]
+        if any_bad < 0.5 and join < 1.0 and chain <= hold * length + 0.5:
+            p = q
+            held = 1
+    if keep_m > 0.0 and held == 0:
         # the nearest point of last frame's band, and whether this point lies within its reach
         n_prev = prev_n[0]
         sh = shift[0]
@@ -2111,6 +2170,8 @@ class ReferencePath:
                 prm.band_step,
                 prm.band_start_taper,
                 prm.band_rear_skip_m,
+                prm.band_hold,
+                self.half_width,
                 prm.band_keep_m,
                 self.shift,
                 self.band_n,
