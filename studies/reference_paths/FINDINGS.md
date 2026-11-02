@@ -330,3 +330,31 @@ excluding frames whose goal changed.
 
     -p plan_ref_band:=1.0 -p plan_ref_clear_taper:=0.5 -p plan_ref_band_end_trunc_m:=1.5 \
     -p plan_ref_forbid_frac:=0.5 -p plan_ref_clearance_m:=0.2
+
+**End truncation, second pass.** Near a goal on structure the band can dip onto forbidden ground
+0.2-1 m before the goal and come out again at the goal itself; truncation walked back only over
+a failing TAIL, so those frames were still rejected (park0: 21 of 35 empties a front-disc
+failure in the last metre). It now cuts before the first failing point anywhere in the last
+1.5 m: frames without a curve, goal > 1.5 m, 0.29 -> 0.10 % over the 7 runs (park0 1.24 ->
+0.32 %), robot's stage 0.12 %.
+
+**16 runs a world on the 11 worlds that separate the variants** (b50c2 vs the robot's stage):
+
+| world | robot's stage | b50c2 |
+|---|---|---|
+| chicane | 14/16 | 16/16 |
+| cornerL24 | 2/16 | 7/16 |
+| corridor24 | 11/16 | 11/16 |
+| corridor26 | 13/16 | 16/16 |
+| facing_wall | 14/16 | 16/16 |
+| false_door | 8/16 | 8/16 |
+| gap | 16/16 (239 f) | 16/16 (142 f) |
+| pocket | 15/16 | 16/16 |
+| slalom | 16/16 (419 f) | 15/16 (340 f) |
+| trunks | 16/16 (592 f) | 16/16 (528 f) |
+| wall_on_line | 16/16 | 16/16 |
+
+All runs together (these at 16, the other 12 worlds at 8): 249/272 against 235/272, 18 % fewer
+frames. The one slalom failure is a wedge: nose against the second gate's slab end, facing away
+from the route; the string and the band go back round the slab end first, which a forward-only
+robot pressed to it cannot start (1300 frames there).
